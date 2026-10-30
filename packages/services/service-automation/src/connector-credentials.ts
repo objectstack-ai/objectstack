@@ -41,6 +41,38 @@ export const CONNECTOR_CREDENTIAL_REF_MAX_LENGTH = 255;
 /** The bound on a value the door accepts. A PEM key or a service-account JSON fits several times over. */
 export const CONNECTOR_CREDENTIAL_VALUE_MAX_LENGTH = 16_384;
 
+/**
+ * [#27428] The cluster channel a credential door write fans out on — lane 4
+ * of the cluster-invalidation family (`content/docs/kernel/cluster.mdx`
+ * §6.2), attached by `MetadataClusterBridgePlugin` in
+ * `@objectstack/service-cluster` beside `metadata.changed`,
+ * `metadata.mutated` and `datasource.mutated`.
+ *
+ * The door reconciles the replica that took the request; every other replica
+ * holds its own materialized instances, and one whose stored value its
+ * upstream refused is held with no retry timer — so before this channel a
+ * corrected credential took effect on one replica at once and on the others
+ * only after a metadata reload or a restart.
+ */
+export const CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL = 'connector-credential.mutated';
+
+/**
+ * [#27428] Payload for {@link CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL}.
+ *
+ * ⭐ A SIGNAL, never trusted content — the family's contract: only the
+ * reference rides the channel, never a value, a fingerprint or a revision.
+ * The receiving replica runs its own reconcile, which re-reads the shared
+ * `sys_connector_credential` rows (revision, then fingerprint), so a
+ * duplicate or re-ordered delivery converges to the same instances as a
+ * single one. Symmetric: a set and a clear publish this one shape.
+ */
+export interface ClusterConnectorCredentialMutationPayload {
+    /** Origin nodeId — used for loopback suppression. */
+    originNode?: string;
+    /** The reference whose stored row was just written or cleared. */
+    ref: string;
+}
+
 /** Where a reference resolved from — never what it resolved to. */
 export type ConnectorCredentialSource = 'env' | 'object' | 'vault';
 

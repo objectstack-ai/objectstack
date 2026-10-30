@@ -59,6 +59,16 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'New Project + Tasks' })).toBeVisible();
 });
 
+test('the status select offers only the state the server admits on create', async ({ page }) => {
+  // `project_status_flow` declares `initialStates: ['planned']`; every other
+  // option would be refused 400 `invalid_initial_state` (#27763).
+  await page.getByTestId('select-trigger-status').first().click();
+  await expect(page.getByTestId('select-option-planned').first()).toBeVisible();
+  for (const refused of ['active', 'on_hold', 'completed', 'cancelled']) {
+    await expect(page.getByTestId(`select-option-${refused}`)).toHaveCount(0);
+  }
+});
+
 test('Create stores the populated parent through one atomic batch', async ({ page, request }) => {
   const name = `E2E Project ${Date.now()}`;
   await page.locator('input[name="name"]').fill(name);
@@ -87,8 +97,8 @@ test('Create with a task line stores the child referencing the parent', async ({
   const name = `E2E MD ${Date.now()}`;
   await page.locator('input[name="name"]').fill(name);
   await fillLookup(page, 'account', 'North');
-  // `planned` is the only status `project_status_flow` admits on create; any
-  // other pick is refused 400 `invalid_initial_state`.
+  // `planned` is the only status `project_status_flow` admits on create, and
+  // the only one the select offers.
   await selectOption(page, 'status', 'planned');
   await expect(page.getByText('Northwind', { exact: false })).toBeVisible();
 

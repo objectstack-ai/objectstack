@@ -28,7 +28,9 @@
  *     refusal carries none; (#27743) a `try_catch` with no catch region
  *     carries its last failed attempt's refusal, and a `subflow` child that
  *     paused and fails on resume carries it to a caller holding either the
- *     parent's run id or the child's (the leg a `map` item takes);
+ *     parent's run id or the child's (the leg a `map` item takes); (#27876) a
+ *     `try_catch` whose catch region fails carries the refusal the catch
+ *     region met, never the try region's it handled;
  *  4. ⛔ `error` is byte-identical to the composition it always had — the
  *     diagnostic channel does not move.
  *
@@ -584,6 +586,80 @@ describe('#27743 — a `try_catch` with no catch region carries the guarded refu
         const result = await engine.execute('guarded', { userId: 'u1' });
 
         expect(calls).toBe(2);
+        expect(result.status).toBe('failed');
+        expect('innerRefusal' in result).toBe(false);
+        expect('userMessage' in result).toBe(false);
+    });
+});
+
+describe('#27876 — a `try_catch` whose CATCH region fails carries the refusal the catch region met', () => {
+    /** start → guard (try_catch, try = [a], catch = [b], both `create_record`) → end. */
+    function caughtFlow(): any {
+        const create = (id: string) => ({
+            id, type: 'create_record', label: 'Create', config: { objectName: 'crm_account', fields: { name: 'Acme' } },
+        });
+        return {
+            name: 'caught', label: 'Caught', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                {
+                    id: 'guard', type: 'try_catch', label: 'Guard',
+                    config: { try: { nodes: [create('a')], edges: [] }, catch: { nodes: [create('b')], edges: [] } },
+                },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'guard' },
+                { id: 'e2', source: 'guard', target: 'end' },
+            ],
+        };
+    }
+
+    /** Each insert throws the next error in `errs` — the try region's `a` first, then the catch region's `b`. */
+    function caughtEngine(...errs: unknown[]): { engine: AutomationEngine; calls: () => number } {
+        let calls = 0;
+        const data = refusingData(undefined);
+        data.insert = async () => { throw errs[Math.min(calls++, errs.length - 1)]; };
+        const engine = new AutomationEngine(makeLogger());
+        const ctx = ctxWith(data);
+        registerCrudNodes(engine, ctx);
+        registerTryCatchNode(engine, ctx);
+        engine.registerFlow('caught', caughtFlow());
+        return { engine, calls: () => calls };
+    }
+
+    it('both regions refused by a validation rule (the measured case): the refusal reaches the run, the text keeps its chain', async () => {
+        const { engine, calls } = caughtEngine(validation(), validation());
+
+        const result = await engine.execute('caught', { userId: 'u1' });
+
+        expect(calls()).toBe(2);
+        expect(result.status).toBe('failed');
+        expect(result.innerRefusal).toEqual({ code: 'VALIDATION_FAILED', message: 'Amount must be positive' });
+        expect('userMessage' in result).toBe(false);
+        expect(result.error).toBe(
+            `Node 'guard' failed: try_catch 'guard': catch region failed — `
+            + `Node 'b' failed: create_record(crm_account) failed: Amount must be positive`,
+        );
+    });
+
+    it('the CATCH region\'s refusal is the one carried — code and userMessage — never the try region\'s it handled', async () => {
+        const hook = markedHook();
+        const { engine } = caughtEngine(permission(), hook);
+
+        const result = await engine.execute('caught', { userId: 'u1' });
+
+        expect(result.status).toBe('failed');
+        expect(result.innerRefusal).toEqual({ code: 'RESOURCE_CONFLICT', message: hook.message });
+        expect(result.userMessage).toBe(HOOK_USER_TEXT);
+    });
+
+    it('control: a catch region that meets a FAULT carries neither member, even though the try region met a refusal', async () => {
+        const { engine, calls } = caughtEngine(markedHook(), new Error('ECONNREFUSED: could not reach the store'));
+
+        const result = await engine.execute('caught', { userId: 'u1' });
+
+        expect(calls()).toBe(2);
         expect(result.status).toBe('failed');
         expect('innerRefusal' in result).toBe(false);
         expect('userMessage' in result).toBe(false);

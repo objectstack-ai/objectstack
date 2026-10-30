@@ -1123,6 +1123,17 @@ export interface SchemaFormProps {
   createMode?: boolean;
   /** Out-of-band data widgets need (object list, etc). */
   widgetContext?: WidgetContext;
+  /**
+   * Show every field's issues now, touched or not: the host's Save was
+   * attempted, so the deferral below has run its course (objectstack#27865).
+   */
+  revealIssues?: boolean;
+  /**
+   * Told which TOP-LEVEL fields of this form currently draw their issues
+   * inline: mounted and not deferred. The host's summary banner leaves those
+   * out, so one mistake is one message (objectstack#27865).
+   */
+  onInlineIssueFieldsChange?: (fields: ReadonlySet<string>) => void;
 }
 
 function SchemaFormBody({
@@ -1373,6 +1384,45 @@ const SchemaFormNestingContext = React.createContext(false);
  */
 const DeferIssueDisplayContext = React.createContext(false);
 
+/**
+ * The outermost form's register of the top-level fields that draw their
+ * issues inline (objectstack#27865). A row registers while it is mounted and
+ * shows its issue line; a nested form provides `null`, so only the host
+ * form's own rows count. The value is held in state, never memoised: rows key
+ * their effect on it (AGENTS.md #10).
+ */
+interface InlineIssueFieldRegister {
+  /** The id path of the form's own top-level rows. */
+  rootIdPath: string | undefined;
+  register: (field: string) => () => void;
+}
+const InlineIssueFieldsContext = React.createContext<InlineIssueFieldRegister | null>(null);
+
+function useInlineIssueFieldRegister(
+  rootIdPath: string | undefined,
+  onChange: SchemaFormProps['onInlineIssueFieldsChange'],
+): InlineIssueFieldRegister {
+  const onChangeRef = React.useRef(onChange);
+  React.useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  const [counts] = React.useState(() => new Map<string, number>());
+  const [register] = React.useState(() => (field: string) => {
+    const publish = () => onChangeRef.current?.(new Set(counts.keys()));
+    counts.set(field, (counts.get(field) ?? 0) + 1);
+    publish();
+    return () => {
+      const n = (counts.get(field) ?? 1) - 1;
+      if (n > 0) counts.set(field, n);
+      else counts.delete(field);
+      publish();
+    };
+  });
+  const [value, setValue] = React.useState<InlineIssueFieldRegister>(() => ({ rootIdPath, register }));
+  if (value.rootIdPath !== rootIdPath) setValue({ rootIdPath, register });
+  return value;
+}
+
 const isDevBuild = (): boolean =>
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
     ?.NODE_ENV !== 'production';
@@ -1428,12 +1478,16 @@ export function SchemaForm(props: SchemaFormProps) {
   const inheritedDefer = React.useContext(DeferIssueDisplayContext);
   useDuplicateFieldHostIdCheck(!nested);
   // `add10d8f9` — a create form defers issue DISPLAY to first touch; a
-  // nested form inherits whatever the form hosting it decided.
-  const deferIssues = props.createMode === true || inheritedDefer;
+  // nested form inherits whatever the form hosting it decided. A Save attempt
+  // ends the deferral (objectstack#27865).
+  const deferIssues = !props.revealIssues && (props.createMode === true || inheritedDefer);
+  const inlineRegister = useInlineIssueFieldRegister(props.idPath, props.onInlineIssueFieldsChange);
   return (
     <SchemaFormNestingContext.Provider value={true}>
       <DeferIssueDisplayContext.Provider value={deferIssues}>
-        <SchemaFormBody {...props} />
+        <InlineIssueFieldsContext.Provider value={nested ? null : inlineRegister}>
+          <SchemaFormBody {...props} />
+        </InlineIssueFieldsContext.Provider>
       </DeferIssueDisplayContext.Provider>
     </SchemaFormNestingContext.Provider>
   );
@@ -1808,6 +1862,14 @@ function FieldRow({
   const [touched, setTouched] = React.useState(false);
   const markTouched = React.useCallback(() => setTouched(true), []);
   const visibleIssues = !deferIssues || touched ? issues : undefined;
+  // objectstack#27865 — a host-level row that shows its issue line tells the
+  // host, whose summary banner then leaves that field out.
+  const inlineRegister = React.useContext(InlineIssueFieldsContext);
+  const showsIssues = !deferIssues || touched;
+  React.useEffect(() => {
+    if (!inlineRegister || idPath !== inlineRegister.rootIdPath || !showsIssues) return;
+    return inlineRegister.register(name);
+  }, [inlineRegister, idPath, name, showsIssues]);
   const handleChange = React.useCallback(
     (v: unknown) => {
       setTouched(true);

@@ -22,7 +22,9 @@ import type { VariableMap } from './template.js';
  *    and an object form's `recordId`);
  *  - `notify` `templateData` (#19939) — handed to the messaging service (and,
  *    through {@link resolveValueSlot}, each `recipients` value or list entry,
- *    and `sourceId`).
+ *    and `sourceId`);
+ *  - `connector_action` `connectorConfig.input` (#27327) — handed to the
+ *    registered connector's action handler as its input.
  *
  * A `loop`'s and a `map`'s `collection` (#19939) is a value slot too, whose
  * literal is a list: {@link resolveCollectionSlot}.

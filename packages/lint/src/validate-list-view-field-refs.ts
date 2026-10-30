@@ -398,6 +398,7 @@ import { ListViewSchema } from '@objectstack/spec/ui';
 import { walkFilterFieldKeys } from './filter-walk.js';
 import { retiredKeyRemedy } from './validate-retired-permission-residue.js';
 import {
+  closureDependencyRemedy,
   describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
@@ -990,9 +991,8 @@ export function validateListViewFieldRefs(
         `the packages its manifest declares in \`dependencies\`, and platform objects), so none of the view's ` +
         `field references are checked.` +
         suggestName(object, graph.keys()),
-      hint:
-        `Declare a dependency on the package that defines "${object}" in the \`dependencies\` of "${pkg}"'s ` +
-        `manifest, or bind the view to an object inside that closure`,
+      // [#27827] The one closure prescription the flow and dataset doors print too.
+      hint: closureDependencyRemedy(object, pkg, 'bind the view to an object inside that closure'),
     });
   };
 

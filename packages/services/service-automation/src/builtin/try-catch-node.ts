@@ -343,9 +343,17 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
           // with this error text, already produced a `NODE_FAILURE` step and
           // was already routable by a `fault` edge. No engine change — the
           // #14184 fold on `if (!result.success)` is already the reader.
+          //
+          // #27876 — and the CATCH region's refusal rides out the way the
+          // no-catch return's does (#27743, below): this return re-words the
+          // handler's failure, the brand on the handler's throw does not cross
+          // that, so it is spread here (`inner-refusal.ts`). It is the refusal
+          // the HANDLER met, never the try region's it handled; `{}` when the
+          // handler met none. The `error` text does not move.
           return {
             success: false,
             error: `try_catch '${node.id}': catch region failed — ${catchMsg}`,
+            ...readCarriedRefusal(catchErr),
             childSteps: [...failedAttemptSteps, ...catchAttemptSteps],
           };
         }

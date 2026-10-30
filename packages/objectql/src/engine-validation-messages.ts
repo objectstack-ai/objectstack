@@ -93,25 +93,32 @@ const MAX_VALIDATION_DEPTH = 10;
  * [ADR-0029 D9.2a] The packaged (code-shipped) rule of a name on `objectName`,
  * for the rule evaluator's divergence test.
  *
- * The declaration is the packaged OWNER's (`getPackagedObjectOwner`, pre-fold),
- * the same body `/meta` hands `translateObject` as `packagedBase` through
- * `getPackagedObjectBase`, so both readers compare a served message against one
- * packaged rule. Rules are keyed by `name`, each `conditional` branch under its
- * own name; the first rule of a name wins, as on `/meta`.
+ * The rules are the registry's packaged rule set (`getPackagedObjectBase`: the
+ * packaged owner's declaration with its code extenders' rules appended, #27559),
+ * the same body `/meta` hands `translateObject` as `packagedBase` through the
+ * protocol's `getPackagedObjectBase`, so both readers compare a served message
+ * against one packaged rule. Rules are keyed by `name`, each `conditional`
+ * branch under its own name; the first rule of a name wins, as on `/meta`.
  *
  * `undefined` — nothing inferred, the catalog applies — when no packaged owner
  * is registered for the object, or the registry cannot answer (a partial
- * double). The index is built on the first lookup, which a write that refuses
- * nothing never makes.
+ * double; one that predates `getPackagedObjectBase` is read through
+ * `getPackagedObjectOwner`, the owner alone). The index is built on the first
+ * lookup, which a write that refuses nothing never makes.
  */
 function packagedRuleLookup(
   registry: ValidationMessageHost['registry'] | undefined,
   objectName: string,
 ): ((ruleName: string) => unknown) | undefined {
-  if (typeof registry?.getPackagedObjectOwner !== 'function') return undefined;
   let definition: unknown;
   try {
-    definition = registry.getPackagedObjectOwner(objectName)?.definition;
+    if (typeof registry?.getPackagedObjectBase === 'function') {
+      definition = registry.getPackagedObjectBase(objectName);
+    } else if (typeof registry?.getPackagedObjectOwner === 'function') {
+      definition = registry.getPackagedObjectOwner(objectName)?.definition;
+    } else {
+      return undefined;
+    }
   } catch {
     // A read over in-memory contributors must not turn a 400 into a 500.
     return undefined;

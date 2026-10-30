@@ -2832,7 +2832,7 @@
       "title": "A summary (roll-up) field authored in Studio is held until it names its child object and function, offers only numeric child fields for sum and avg, and once published computes and recomputes from the children",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2868,9 +2868,9 @@
           "evidence": "the picker DOM"
         },
         {
-          "clause": "the configured summary is saved spec-valid: summaryOperations { object, field, function }",
+          "clause": "the configured summaries are saved spec-valid: the count's summaryOperations is { object, function } with no field (count counts the child rows and reads no field), the sum's is { object, field, function }",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/object/PARENT carries both summaries with the authored object, field and function",
+          "verify": "GET /api/v1/meta/object/PARENT carries both summaries: the count with the authored object and function and no field key, the sum with the authored object, field and function (author the count as count from the start: Studio offers no field control for count but keeps a field already stored when a summary is switched to count, which the spec accepts and ignores)",
           "evidence": "the meta read"
         },
         {
@@ -2906,6 +2906,12 @@
           "date": "2026-10-28",
           "change": "fixtures.knownGaps[0], negative[0] and source[2] re-read against main 3230bdbf: #26707 is closed by 57820085, which makes the draft read's _diagnostics report the publish verdict, but the Data pillar still saves an unconfigured summary rather than holding it, and the sum/avg picker still offers non-numeric fields — acceptance[0] and [1] still fail, now cited to the run alone. No clause changed",
           "ref": "#26848"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-30",
+          "change": "acceptance[2] re-pointed after #27533 (fbb8bec3e7), which lets a count roll-up save without summaryOperations.field and stops Studio offering the field control for count: the count summary now carries object and function with no field, the sum summary still carries object, field and function. The old clause and verify (both summaries carry \"the authored object, field and function\") would score a correct run as a failure",
+          "ref": "#27608"
         }
       ]
     },

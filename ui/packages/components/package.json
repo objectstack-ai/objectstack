@@ -97,7 +97,6 @@
     "autoprefixer": "^10.5.4",
     "jsonc-parser": "^3.3.1",
     "postcss": "^8.5.26",
-    "shadcn": "^4.22.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",

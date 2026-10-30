@@ -22,7 +22,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { getCellRenderer, resolveCellRendererType, useBooleanValueLabel } from '@object-ui/fields';
 import { useSafeFieldLabel, useInlineEdit, usePredicateScope } from '@object-ui/react';
 import { useObjectTranslation, pickLocalized } from '@object-ui/i18n';
-import { Check, X, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { InlineFieldInput } from './InlineFieldInput';
 import {
   enrichDetailField,
@@ -402,17 +402,16 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                   >
                     <div className="min-w-0 flex-1">
                       {isBoolean ? (
-                        value ? (
-                          <span className="inline-flex items-center gap-1 self-start rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-400">
-                            <Check className="h-3 w-3" aria-hidden />
-                            {booleanLabel(true)}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 self-start rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:text-amber-400">
-                            <X className="h-3 w-3" aria-hidden />
-                            {booleanLabel(false)}
-                          </span>
-                        )
+                        // One neutral chip for both values, as the details body
+                        // draws the same field (a plain word): the metadata does
+                        // not say which value is the good one, so neither may
+                        // wear a success or a warning colour.
+                        <span
+                          className="inline-flex items-center self-start rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border"
+                          data-boolean-chip=""
+                        >
+                          {booleanLabel(!!value)}
+                        </span>
                       ) : isEmpty ? (
                         // The SHARED placeholder (objectui#8506). This span
                         // spelled its own em-dash and resolved its own

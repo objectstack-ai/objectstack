@@ -7,8 +7,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { stateMachineNextValues } from '../validators/state-machine-next-values';
-import { stateMachineNextValues as fromPackageRoot } from '../../index';
+import { stateMachineInitialValues, stateMachineNextValues } from '../validators/state-machine-next-values';
+import {
+  stateMachineInitialValues as fromPackageRootInitial,
+  stateMachineNextValues as fromPackageRoot,
+} from '../../index';
 
 // The showcase task's machine (examples/app-showcase task.object.ts).
 const transitions = {
@@ -115,5 +118,59 @@ describe('stateMachineNextValues', () => {
       ],
     };
     expect(stateMachineNextValues(schema, 'status', 'backlog')).toBeNull();
+  });
+});
+
+// The showcase project's machine (examples/app-showcase project.object.ts):
+// `initialStates` is the insert entry point (#27763).
+const withInitial = (rule: Record<string, unknown>) => ({
+  validations: [
+    {
+      type: 'state_machine',
+      field: 'status',
+      events: ['insert', 'update'],
+      initialStates: ['planned'],
+      transitions: { planned: ['active', 'cancelled'] },
+      ...rule,
+    },
+  ],
+});
+
+describe('stateMachineInitialValues', () => {
+  it('is published from the package root', () => {
+    expect(fromPackageRootInitial).toBe(stateMachineInitialValues);
+  });
+
+  it('offers the declared initialStates', () => {
+    expect(sorted(stateMachineInitialValues(withInitial({}), 'status'))).toEqual(['planned']);
+  });
+
+  it('reads absent events as the spec default, which covers insert', () => {
+    expect(sorted(stateMachineInitialValues(withInitial({ events: undefined }), 'status'))).toEqual(['planned']);
+  });
+
+  it('does not narrow when the rule declares no initialStates — the server does not police that insert', () => {
+    expect(stateMachineInitialValues(withInitial({ initialStates: undefined }), 'status')).toBeNull();
+    expect(stateMachineInitialValues(withInitial({ initialStates: [] }), 'status')).toBeNull();
+  });
+
+  it('does not narrow on a warning, inactive or update-only machine', () => {
+    expect(stateMachineInitialValues(withInitial({ severity: 'warning' }), 'status')).toBeNull();
+    expect(stateMachineInitialValues(withInitial({ active: false }), 'status')).toBeNull();
+    expect(stateMachineInitialValues(withInitial({ events: ['update'] }), 'status')).toBeNull();
+  });
+
+  it('does not narrow another field', () => {
+    expect(stateMachineInitialValues(withInitial({}), 'health')).toBeNull();
+  });
+
+  it('intersects several blocking rules on the same field', () => {
+    const schema = {
+      validations: [
+        { type: 'state_machine', field: 'status', initialStates: ['planned', 'active'], transitions: {} },
+        { type: 'state_machine', field: 'status', initialStates: ['active', 'on_hold'], transitions: {} },
+      ],
+    };
+    expect(sorted(stateMachineInitialValues(schema, 'status'))).toEqual(['active']);
   });
 });
