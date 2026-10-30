@@ -1015,6 +1015,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordCount': '{{count}} records',
   'list.recordCount_one': '{{count}} record',
   'list.recordCount_other': '{{count}} records',
+  'list.calendarRecordCount': '{{count}} records loaded for these dates',
+  'list.calendarRecordCount_one': '{{count}} record loaded for these dates',
+  'list.calendarRecordCount_other': '{{count}} records loaded for these dates',
   'list.noItems': 'No items found',
   'list.noItemsMessage': 'There are no records to display. Try adjusting your filters or adding new data.',
   // First-run (truly empty, no filter/search) vs filtered-to-empty. Showing
@@ -6767,7 +6770,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 whole result set is in memory, serverTotal is null and data.length
                 already IS the total. */}
             {/* One count family (objectui#11445): i18next picks the CLDR slot. */}
-            {t('list.recordCount', { count: serverTotal ?? data.length })}
+            {/* A windowed calendar's rows are the dates it draws, not the view
+                (objectstack#27355): its count says so rather than read as the
+                view's total. */}
+            {calendarWindowed
+              ? t('list.calendarRecordCount', { count: data.length })
+              : t('list.recordCount', { count: serverTotal ?? data.length })}
           </span>
           )}
           {/* The cap warning is about rows the user CANNOT REACH. A paged grid
