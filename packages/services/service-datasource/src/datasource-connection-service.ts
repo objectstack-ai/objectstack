@@ -879,8 +879,9 @@ export class DatasourceConnectionService {
     if (typeof opts?.previous?.driver !== 'string' || opts.previous.driver === '') {
       throw new Error(
         `datasource '${name}': reconnect needs \`previous\`, the record the live pool was built from, ` +
-          'with its `driver` id — without it a kept pool would be restored under a definition that names ' +
-          'no driver, and a plugin driver would be served without the engine\'s correctness floor. ' +
+          'with its `driver` id — without it, when a pool is live, a failed rebuild would restore that pool ' +
+          'under a definition that names no driver, and a plugin driver would be served without the engine\'s ' +
+          'correctness floor. ' +
           'Pass the stored record as it was before this update.',
       );
     }
