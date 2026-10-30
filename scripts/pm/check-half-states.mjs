@@ -12687,8 +12687,16 @@ export const CONTRACT_REVIEW_HEAD_SHA_LINE = new RegExp(
  * open fence (a nested ``` inside a ```` block, a ~~~ inside a ``` block), and
  * reading past either would read fenced content as the record's line. An
  * unclosed fence runs to the end of the body, as it renders.
+ *
+ * An OPENING fence may carry an info string after the run (```md); a CLOSING
+ * fence may not — a run followed by anything but whitespace is content of the
+ * open fence, not its close (`FENCE_CLOSE_LINE`), as CommonMark renders it.
+ * Measured in the delta review of the fence-tracking reader (2026-10-30): a
+ * ``` followed by prose closed the fence here while the renderer kept it open,
+ * so a `Head-sha:` line after it was read; 0 of 713 live records carry one.
  */
 const FENCE_LINE = /^[ ]{0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE_LINE = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/;
 
 /**
  * The head a contract-review record names — the span on the first `Head-sha:`
@@ -12702,14 +12710,17 @@ const FENCE_LINE = /^[ ]{0,3}(`{3,}|~{3,})/;
  * ABOVE the record's own line — read as the head, so the record was found at
  * the cited head and absent at the real one. None is prose to a first-line
  * reader, and all four shapes are what a quotation looks like. So: lines
- * before the first UNQUOTED heading-marker line are skipped — the heading is
- * read with `CONTRACT_REVIEW_HEADING_MARKER`, but a blockquoted heading opens
- * nothing here, because a fully quoted record (heading, head line and
- * signature all under `>`) followed by a plain line opening `Head-sha:` would
- * otherwise hand the quoted record's signature to the plain line's head; the
- * locator still finds such a comment as a record, and it then names no head.
- * A fenced line is skipped, fence boundaries included, with the fence closed
- * only by its own character and length (`FENCE_LINE`); and
+ * before the first UNQUOTED, UNINDENTED heading-marker line are skipped — the
+ * heading is read with `CONTRACT_REVIEW_HEADING_MARKER`, but a blockquoted
+ * heading opens nothing here, because a fully quoted record (heading, head
+ * line and signature all under `>`) followed by a plain line opening
+ * `Head-sha:` would otherwise hand the quoted record's signature to the plain
+ * line's head; nor does a heading indented four spaces or a tab, which is an
+ * indented code block to the renderer, held to the same three-space bound as
+ * the key line itself; the locator still finds such a comment as a record,
+ * and it then names no head. A fenced line is skipped, fence boundaries
+ * included, with the fence closed only by its own character and length on a
+ * line of its own (`FENCE_LINE`, `FENCE_CLOSE_LINE`); and
  * `CONTRACT_REVIEW_HEAD_SHA_LINE` itself refuses the blockquote, the bullet
  * and an indented-code line. Among the lines that remain, the FIRST wins, as
  * `readServedTier` reads its key: a record is one comment and names one head,
@@ -12729,15 +12740,18 @@ export function contractReviewHeadSha(body) {
   let fence = null; // the OPEN fence — its character and run length — or null outside one
   let belowHeading = false;
   for (const line of String(body ?? '').split(/\r?\n/)) {
-    const f = FENCE_LINE.exec(line);
-    if (f !== null) {
-      if (fence === null) fence = { ch: f[1][0], len: f[1].length };
-      else if (f[1][0] === fence.ch && f[1].length >= fence.len) fence = null;
+    if (fence !== null) {
+      const c = FENCE_CLOSE_LINE.exec(line);
+      if (c !== null && c[1][0] === fence.ch && c[1].length >= fence.len) fence = null;
       continue;
     }
-    if (fence !== null) continue;
+    const f = FENCE_LINE.exec(line);
+    if (f !== null) {
+      fence = { ch: f[1][0], len: f[1].length };
+      continue;
+    }
     if (!belowHeading) {
-      belowHeading = CONTRACT_REVIEW_HEADING_MARKER.test(line) && !/^\s*>/.test(line);
+      belowHeading = CONTRACT_REVIEW_HEADING_MARKER.test(line) && /^[ ]{0,3}#/.test(line);
       continue;
     }
     const m = CONTRACT_REVIEW_HEAD_SHA_LINE.exec(line);
@@ -33545,6 +33559,12 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // ⛔ A fence closes only on its OWN character and a run at least as long: a nested ``` inside ````, a ~~~ inside ```,
   // are content, and a `Head-sha:` line between them stays fenced; a longer closing run closes; a never-closed one runs out.
   t('⛔ record reader: a nested or mismatched fence does not close the open one — the `Head-sha:` line inside stays fenced; a longer run closes; an unmatched run leaves it open to the end', [contractReviewHeadSha(UNDER51('````', '```', `Head-sha: \`${HEAD51}\``, '```', '````', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', '~~~', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', `Head-sha: \`${HEAD51}\``, '`````', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', '~~~', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``))].join('|'), [OLDHEAD51, OLDHEAD51, OLDHEAD51, ''].join('|'));
+  // ⛔ A closing run with TRAILING TEXT is fence content, not a close (CommonMark): the fence stays open past it, so a
+  // `Head-sha:` line after such a line is still fenced; a bare run later closes it; whitespace after the run still closes.
+  t('⛔ record reader: a fence is closed only by a run on a line of its OWN — a run with trailing text is content, so the line after it stays fenced; a bare run later closes; trailing whitespace still closes', [contractReviewHeadSha(UNDER51('```', '``` not a close', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```', '``` not a close', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('~~~', '~~~ tail', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``, '```  ', `Head-sha: \`${OLDHEAD51}\``))].join('|'), ['', OLDHEAD51, OLDHEAD51, OLDHEAD51].join('|'));
+  // ⛔ A heading indented as CODE (four spaces or a tab) opens no scope — the same three-space bound the key line is held
+  // to — while one indented up to three spaces does; the marker itself keeps its tolerance for the locator.
+  t('⛔ record reader: a `## Contract review` heading indented four spaces or a tab opens no scope, one indented three does; the marker still finds the indented one', [contractReviewHeadSha(['    ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), contractReviewHeadSha(['\t## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), contractReviewHeadSha(['   ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), latestContractReviewOnHead([cm51(1, ['    ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n'), T51)], HEAD51), CONTRACT_REVIEW_HEADING_MARKER.test('    ## Contract review')].join('|'), ['', '', HEAD51, '', 'true'].join('|'));
   t('⛔ record reader: the key folded INTO the span, a bare hex value, a lowercase key and a sub-floor span name no head', [contractReviewHeadSha(UNDER51(`\`Head-sha: ${HEAD51}\``)), contractReviewHeadSha(UNDER51(`Head-sha: ${HEAD51}`)), contractReviewHeadSha(UNDER51(`head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('Head-sha: `ba3d95`'))].join('|'), '|||');
   // ⛔ The shapes the review of the line-form reader probed (2026-10-30): a `Head-sha:` line naming ANOTHER head above the
   // record's own — placed before the heading, blockquoted, bulleted or fenced. Each is a citation, not the record's line,
