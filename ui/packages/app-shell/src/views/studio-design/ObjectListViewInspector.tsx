@@ -1288,7 +1288,9 @@ export function ObjectListViewInspector({
                 {views.map((choice) => (
                   <SelectItem key={choice.target.viewId} value={choice.target.viewId}>
                     <span className="flex items-center gap-2">
-                      <span>{listViewTitle(choice.target, { label: choice.label }, objectText, locale)}</span>
+                      <span data-testid="list-view-switcher-label">
+                        {listViewTitle(choice.target, { label: choice.label }, objectText, locale)}
+                      </span>
                       {choice.draft && (
                         <span className="text-[10px] text-muted-foreground" data-testid="list-view-switcher-draft">
                           {t('engine.studio.inspector.listView.switchViewDraft', locale)}

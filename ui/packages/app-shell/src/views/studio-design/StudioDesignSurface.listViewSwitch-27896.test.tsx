@@ -153,9 +153,13 @@ beforeEach(() => {
   mockClient.save.mockClear();
   previewClient.list.mockClear();
 });
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
+afterEach(cleanup);
+
+// This jsdom environment ships no window.confirm — install a mock outright.
+let confirm: ReturnType<typeof vi.fn>;
+beforeEach(() => {
+  confirm = vi.fn(() => false);
+  window.confirm = confirm as unknown as typeof window.confirm;
 });
 
 async function openObjectLeaf() {
@@ -193,7 +197,7 @@ async function pickerOptions(): Promise<HTMLElement[]> {
 
 /** Pick the view labelled `label` in the panel's view picker. */
 async function pickView(label: string) {
-  const hit = (await pickerOptions()).find((o) => o.querySelector('span > span')?.textContent === label);
+  const hit = (await pickerOptions()).find((o) => within(o).queryByTestId('list-view-switcher-label')?.textContent === label);
   if (!hit) throw new Error(`the view picker lists no "${label}"`);
   fireEvent.click(hit);
 }
@@ -221,7 +225,7 @@ describe('the list-view panel switches between the object’s list views (object
     await openObjectLeaf();
     await draftsRead();
     const options = await pickerOptions();
-    expect(options.map((o) => o.querySelector('span > span')?.textContent)).toEqual(['All tasks', 'Due dates', 'My calendar']);
+    expect(options.map((o) => within(o).queryByTestId('list-view-switcher-label')?.textContent)).toEqual(['All tasks', 'Due dates', 'My calendar']);
     const draftMarks = options.map((o) => within(o).queryByTestId('list-view-switcher-draft')?.textContent ?? null);
     expect(draftMarks).toEqual([null, null, t('engine.studio.inspector.listView.switchViewDraft', 'en')]);
     expect(screen.getByTestId('list-view-switcher-trigger')).toHaveTextContent('All tasks');
@@ -243,7 +247,6 @@ describe('the list-view panel switches between the object’s list views (object
   });
 
   it('a pending edit is sent to its own view before the switch, and nothing asks', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await openObjectLeaf();
     await waitFor(() => expect(screen.getByTestId('list-view-switcher-trigger')).toBeInTheDocument(), { timeout: 4000 });
     await pickView('Due dates');
@@ -258,7 +261,7 @@ describe('the list-view panel switches between the object’s list views (object
   });
 
   it('a held edit asks first: declined, the panel stays and writes nothing; accepted, the other view opens', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const question = t('engine.edit.unsavedLeaveConfirm', 'en');
     await openObjectLeaf();
     await waitFor(() => expect(screen.getByTestId('list-view-switcher-trigger')).toBeInTheDocument(), { timeout: 4000 });
     await pickView('Due dates');
@@ -268,6 +271,7 @@ describe('the list-view panel switches between the object’s list views (object
 
     await pickView('All tasks');
     expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(question);
     expect(shownView()).toBe('showcase_task.due');
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
 
