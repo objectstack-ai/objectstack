@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { lazySchema } from './lazy-schema';
 import { strictObject } from './strict-object';
+import { dependentRequired } from './refinement-projection';
 
 /**
  * SHARED CONNECTOR AUTHENTICATION SCHEMAS
@@ -220,26 +221,104 @@ export const ConnectorOAuth2GrantSchema = z.enum(['authorization_code', 'client_
   .describe('OAuth2 grant (RFC 6749): `authorization_code` (an administrator connects once; PKCE S256 always) or `client_credentials` (no user step).');
 export type ConnectorOAuth2Grant = z.infer<typeof ConnectorOAuth2GrantSchema>;
 
+/** The `oauth2` instance keys both grants share (ADR-0143 D2.1). */
+function oauth2SharedShape() {
+  return {
+    type: z.literal('oauth2'),
+    tokenUrl: z.string().url().optional().describe(
+      'Token endpoint. Required (except `provider: \'mcp\'` over http, which discovers it).',
+    ),
+    scopes: z.array(z.string().min(1)).optional().describe('Scopes to request; sent space-separated.'),
+    resource: z.string().url().optional().describe(
+      'Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience).',
+    ),
+    clientId: z.string().min(1).optional().describe(
+      'OAuth2 client id (not a secret). Required (except `provider: \'mcp\'` over http, where the provider may register a client dynamically).',
+    ),
+  };
+}
+
+/** The strict-shape guidance both `oauth2` grants share. */
+const OAUTH2_GUIDANCE: Readonly<Record<string, string>> = {
+  clientSecret: inlineSecretGuidance('oauth2', 'client secret'),
+  secret: inlineSecretGuidance('oauth2', 'client secret'),
+  accessToken: runtimeTokenGuidance('oauth2'),
+  refreshToken: runtimeTokenGuidance('oauth2'),
+  token: runtimeTokenGuidance('oauth2'),
+  pkce: 'Not authorable. `authorization_code` always uses PKCE with S256 (ADR-0143 D2.1); there is no switch. Delete the key.',
+};
+
 /**
- * OAuth2 auth for a provider-bound instance (ADR-0143 D2.1).
+ * `oauth2` with `grant: 'authorization_code'` — an administrator connects the
+ * instance once from the Console; the platform keeps the refresh token in the
+ * connection record and refreshes per dispatch (ADR-0143 D3, D4). PKCE with
+ * `S256` always, with no switch to turn it off. `credentialRef` (the client
+ * secret) is optional: a public client has none.
+ */
+export const ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = lazySchema(() => strictObject({
+  surface: "this `oauth2` connector auth (`grant: 'authorization_code'`)",
+  history: 'This shape is strict from birth — the `oauth2` instance kind had no earlier spelling, so an unknown key here was never accepted.',
+  guidance: OAUTH2_GUIDANCE,
+  // A different word for the same intent, out of reach of edit distance.
+  aliases: { audience: 'resource' },
+}, {
+  ...oauth2SharedShape(),
+  grant: z.literal('authorization_code').describe('An administrator connects once; the platform refreshes the grant per dispatch.'),
+  authorizationUrl: z.string().url().optional().describe(
+    'Authorization endpoint. Required (except `provider: \'mcp\'` over http, which discovers it).',
+  ),
+  credentialRef: z.string().min(1).optional().describe(
+    'Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a public client. Never an inline secret.',
+  ),
+}).refine(dependentRequired({ credentialRef: ['clientId'] }), {
+  message: 'A client secret belongs to a pre-registered client: declare its `clientId` beside `credentialRef`, or omit both on `provider: \'mcp\'` over http to let the provider register a client.',
+  path: ['credentialRef'],
+}));
+export type ConnectorInstanceOAuth2AuthorizationCodeAuth = z.input<typeof ConnectorInstanceOAuth2AuthorizationCodeAuthSchema>;
+
+/**
+ * `oauth2` with `grant: 'client_credentials'` — no user step and no
+ * authorization endpoint; the platform exchanges the client's credentials at
+ * `tokenUrl` and re-derives the token whenever it expires (ADR-0143 D3, D4).
+ * The grant is for a confidential client only (RFC 6749 §4.4), so a declared
+ * `clientId` and its `credentialRef` come together.
+ */
+export const ConnectorInstanceOAuth2ClientCredentialsAuthSchema = lazySchema(() => strictObject({
+  surface: "this `oauth2` connector auth (`grant: 'client_credentials'`)",
+  history: 'This shape is strict from birth — the `oauth2` instance kind had no earlier spelling, so an unknown key here was never accepted.',
+  guidance: {
+    ...OAUTH2_GUIDANCE,
+    authorizationUrl: "Not authorable on `grant: 'client_credentials'` — that grant has no authorization step; the client "
+      + "exchanges its credentials at `tokenUrl` directly. Delete the key, or use `grant: 'authorization_code'` if an "
+      + 'administrator should connect the instance.',
+  },
+  aliases: { audience: 'resource' },
+}, {
+  ...oauth2SharedShape(),
+  grant: z.literal('client_credentials').describe('No user step: the client exchanges its own credentials for a token.'),
+  credentialRef: z.string().min(1).optional().describe(
+    'Secrets-layer reference resolved to the client secret; declared together with `clientId` (a `client_credentials` client is confidential). Never an inline secret.',
+  ),
+}).refine(dependentRequired({ credentialRef: ['clientId'], clientId: ['credentialRef'] }), {
+  message: "`grant: 'client_credentials'` is only for a confidential client (RFC 6749 §4.4): declare `clientId` and the `credentialRef` naming its secret together, or omit both on `provider: 'mcp'` over http to let the provider register a client.",
+}));
+export type ConnectorInstanceOAuth2ClientCredentialsAuth = z.input<typeof ConnectorInstanceOAuth2ClientCredentialsAuthSchema>;
+
+/**
+ * OAuth2 auth for a provider-bound instance (ADR-0143 D2.1), one shape per
+ * RFC 6749 grant — {@link ConnectorOAuth2GrantSchema} is the closed list.
  *
  * Carries what the grant needs and no secret: the client secret is a
  * `credentialRef`; the access token, a refresh token and a dynamically
  * registered client are runtime state in the instance's connection record
- * (D3), obtained and refreshed per dispatch (D4). `authorization_code` always
- * uses PKCE with `S256` — there is deliberately no switch to turn it off.
+ * (D3), obtained and refreshed per dispatch (D4).
  *
- * Which keys are required depends on where the instance points, so two rules
- * live elsewhere:
- *  - Here, the rules that hold for every instance: `client_credentials` has no
- *    authorization step (no `authorizationUrl`) and is only for a confidential
- *    client (RFC 6749 §4.4, so `credentialRef` is required beside `clientId`);
- *    and a client secret belongs to a pre-registered `clientId`.
- *  - On `DeclarativeConnectorEntrySchema`, the rule that needs the instance's
- *    provider: `tokenUrl`, `clientId` and (for `authorization_code`)
- *    `authorizationUrl` are required, except on `provider: 'mcp'` over an http
- *    transport, where the provider discovers the endpoints and registers a
- *    client through the MCP authorization flow.
+ * Which endpoints and client keys are required depends on where the instance
+ * points, so that rule lives on `DeclarativeConnectorEntrySchema`, which sees
+ * the provider: `tokenUrl`, `clientId` and (for `authorization_code`)
+ * `authorizationUrl` are required, except on `provider: 'mcp'` over an http
+ * transport, where the provider discovers the endpoints and registers a client
+ * through the MCP authorization flow.
  *
  * How a pre-registered client authenticates at the token endpoint
  * (`client_secret_basic` or `client_secret_post`) is not a key here: D2.1
@@ -247,61 +326,10 @@ export type ConnectorOAuth2Grant = z.infer<typeof ConnectorOAuth2GrantSchema>;
  * assigned its method by the registration. The server slice that runs the
  * grant owns that choice.
  */
-export const ConnectorInstanceOAuth2AuthSchema = lazySchema(() => strictObject({
-  surface: "this `oauth2` connector auth",
-  history: 'This shape is strict from birth — the `oauth2` instance kind had no earlier spelling, so an unknown key here was never accepted.',
-  guidance: {
-    clientSecret: inlineSecretGuidance('oauth2', 'client secret'),
-    secret: inlineSecretGuidance('oauth2', 'client secret'),
-    accessToken: runtimeTokenGuidance('oauth2'),
-    refreshToken: runtimeTokenGuidance('oauth2'),
-    token: runtimeTokenGuidance('oauth2'),
-    pkce: 'Not authorable. `authorization_code` always uses PKCE with S256 (ADR-0143 D2.1); there is no switch. Delete the key.',
-  },
-  // A different word for the same intent, out of reach of edit distance.
-  aliases: { audience: 'resource' },
-}, {
-  type: z.literal('oauth2'),
-  grant: ConnectorOAuth2GrantSchema,
-  authorizationUrl: z.string().url().optional().describe(
-    'Authorization endpoint. Required for `authorization_code` (except `provider: \'mcp\'` over http, which discovers it); refused on `client_credentials`.',
-  ),
-  tokenUrl: z.string().url().optional().describe(
-    'Token endpoint. Required (except `provider: \'mcp\'` over http, which discovers it).',
-  ),
-  scopes: z.array(z.string().min(1)).optional().describe('Scopes to request; sent space-separated.'),
-  resource: z.string().url().optional().describe(
-    'Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience).',
-  ),
-  clientId: z.string().min(1).optional().describe(
-    'OAuth2 client id (not a secret). Required (except `provider: \'mcp\'` over http, where the provider may register a client dynamically).',
-  ),
-  credentialRef: z.string().min(1).optional().describe(
-    'Secrets-layer reference resolved to the client secret. Omit only for a public client; required for `client_credentials`. Never an inline secret.',
-  ),
-}).superRefine((auth, ctx) => {
-  if (auth.grant === 'client_credentials' && auth.authorizationUrl !== undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['authorizationUrl'],
-      message: '`authorizationUrl` is refused on `grant: \'client_credentials\'` — that grant has no authorization step; the client exchanges its credentials at `tokenUrl` directly. Delete the key, or use `grant: \'authorization_code\'` if an administrator should connect the instance.',
-    });
-  }
-  if (auth.credentialRef !== undefined && auth.clientId === undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['credentialRef'],
-      message: 'A client secret belongs to a pre-registered client: declare its `clientId` beside `credentialRef`, or omit both on `provider: \'mcp\'` over http to let the provider register a client.',
-    });
-  }
-  if (auth.grant === 'client_credentials' && auth.clientId !== undefined && auth.credentialRef === undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['credentialRef'],
-      message: '`grant: \'client_credentials\'` is only for a confidential client (RFC 6749 §4.4): name the client secret with `credentialRef`.',
-    });
-  }
-}));
+export const ConnectorInstanceOAuth2AuthSchema = lazySchema(() => z.discriminatedUnion('grant', [
+  ConnectorInstanceOAuth2AuthorizationCodeAuthSchema,
+  ConnectorInstanceOAuth2ClientCredentialsAuthSchema,
+]));
 export type ConnectorInstanceOAuth2Auth = z.input<typeof ConnectorInstanceOAuth2AuthSchema>;
 
 /**
