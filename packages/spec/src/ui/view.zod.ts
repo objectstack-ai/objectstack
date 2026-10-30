@@ -2228,8 +2228,8 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
    * platform also reads as "fallback value" (`defaultValue`). Two console
    * facts were in view: the `calendar-view` node reads an authored, FIXED
    * `currentDate` (`ui/packages/types/src/zod/complex.zod.ts`,
-   * `calendar-view-renderer.tsx#resolveAuthoredCurrentDate`), the one producer
-   * of a fixed opening date, deliberately not admitted here because a date
+   * `ui/packages/plugin-calendar/src/calendar-view-renderer.tsx#resolveAuthoredCurrentDate`),
+   * the one producer of a fixed opening date, deliberately not admitted here because a date
    * stored on a view goes stale; and the same node retired `defaultDate` as
    * inert, which is a second reason not to spell this key `defaultDate`.
    *
