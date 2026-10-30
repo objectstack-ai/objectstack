@@ -5186,18 +5186,28 @@ export interface StoredMetadataSearchSchema {
  *   string or an array) — naming one is refused, `INVALID_FIELD` / 400, the
  *   evaluate refusals' envelope, under the caller's wire spelling of the slot
  *   (`wireSpelling`, the door's; the bare canonical name when absent);
+ * - [#28120] an explicit list that names NO field — an empty array, a blank or
+ *   comma-only string, an array with no string entry — is not "names none": it
+ *   is passed through untouched, for the engine's own refusal to answer
+ *   (`400 VALIDATION_ERROR` for an empty one, #27732; `400 INVALID_FIELD` for
+ *   one naming no searchable field). Narrowing it here wrote a non-empty set
+ *   back over the caller's list, so an override the door and the engine both
+ *   refuse was served. The door never reaches this with one: its ingress gate
+ *   refuses it first;
  * - a search that names none is NARROWED: the object's resolved searchable set
  *   ({@link resolveSearchFieldResolution}) minus those columns is returned, for
  *   the caller to run as `searchFields` — the engine intersects an override
  *   with that set and never widens it;
  * - a set that narrows to nothing is refused rather than returned empty: an
- *   empty override is ABSENT to the engine, which would then scan the whole
- *   default set, these columns included.
+ *   empty override is refused by the engine as one naming no field, a
+ *   caller's mistake this caller did not make, so the family's own refusal
+ *   names the cause instead.
  *
  * Returns `undefined` when the query runs as it is — an object outside the
- * family, no search, an explicit list that passes, or no readable field map
- * (the engine has none to expand a search over either; the same rule the door's
- * field gates apply: a non-object, array or empty `fields`). Throws the refusal.
+ * family, no search, an explicit list that passes or names no field, or no
+ * readable field map (the engine has none to expand a search over either; the
+ * same rule the door's field gates apply: a non-object, array or empty
+ * `fields`). Throws the refusal.
  */
 export function narrowStoredMetadataSearch(
     object: string,
@@ -5222,6 +5232,8 @@ export function narrowStoredMetadataSearch(
         if (refusal) throw refusal;
         return undefined;
     }
+    // [#28120] A list naming no field is the engine's to refuse, never narrowed.
+    if (typeof explicit === 'string' || Array.isArray(explicit)) return undefined;
     if (search == null) return undefined;
     const fields = schema?.fields;
     if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
