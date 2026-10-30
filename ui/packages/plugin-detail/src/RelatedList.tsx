@@ -47,7 +47,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
-import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer } from '@object-ui/fields';
+import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard } from '@object-ui/fields';
 import {
   buildExpandFields,
   collectPredicateFieldRefs,
@@ -2899,17 +2899,28 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 className="flex h-8 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
                 data-related-card-row=""
               >
-                {handleRowClick ? (
-                  <button
-                    type="button"
-                    className="min-w-0 truncate text-left text-primary hover:underline"
-                    onClick={(e) => handleRowClick(row, e)}
-                  >
-                    {name}
-                  </button>
-                ) : (
-                  <span className="min-w-0 truncate">{name}</span>
-                )}
+                {/* objectstack#27604 — hovering the name (or Space on it)
+                    shows the record's card; its title opens the record the
+                    way this name does. */}
+                <RecordHoverCard
+                  objectName={api}
+                  recordId={row?.id}
+                  objectSchema={objectSchema}
+                  label={name}
+                  onOpen={handleRowClick ? (e) => handleRowClick(row, e) : undefined}
+                >
+                  {handleRowClick ? (
+                    <button
+                      type="button"
+                      className="min-w-0 truncate text-left text-primary hover:underline"
+                      onClick={(e) => handleRowClick(row, e)}
+                    >
+                      {name}
+                    </button>
+                  ) : (
+                    <span className="min-w-0 truncate">{name}</span>
+                  )}
+                </RecordHoverCard>
                 {chipOf(row)}
               </div>
             );

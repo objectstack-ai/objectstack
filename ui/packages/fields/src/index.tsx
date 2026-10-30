@@ -32,6 +32,7 @@ import { formatAddress, type AddressValue } from './widgets/address-format.js';
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
+import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
 // only trigger one network call. Keyed by `${objectName}:${id}`. It holds the
@@ -2535,11 +2536,14 @@ function referencedRecordId(item: unknown): string | number | undefined {
 function ReferencedRecordLink({
   objectName,
   recordId,
+  objectSchema,
   className,
   children,
 }: {
   objectName?: string;
   recordId?: string | number;
+  /** The referenced object's definition, for the link's hover card. */
+  objectSchema?: RecordHoverCardObjectDef | null;
   className?: string;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -2552,26 +2556,30 @@ function ReferencedRecordLink({
 
   if (!href) return <>{children}</>;
 
+  // Hovering the link (or Space on it) shows the referenced record's card
+  // (objectstack#27604): the same reference, a glance instead of a visit.
   return (
-    <a
-      href={href}
-      className={cn('text-primary underline-offset-4 hover:underline', className)}
-      onClick={(e) => {
-        // The rows this cell sits in carry their own click handlers — the
-        // detail row copies the field value, a related-list row opens ITS own
-        // record. Following the reference must not also fire those.
-        e.stopPropagation();
-        // Modifier and non-primary clicks belong to the browser (new tab, new
-        // window) — that is the point of rendering a real href.
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-        // No SPA handler: let the anchor navigate on its own.
-        if (!host?.openRecord) return;
-        e.preventDefault();
-        host.openRecord(objectName as string, recordId as string | number);
-      }}
-    >
-      {children}
-    </a>
+    <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema}>
+      <a
+        href={href}
+        className={cn('text-primary underline-offset-4 hover:underline', className)}
+        onClick={(e) => {
+          // The rows this cell sits in carry their own click handlers — the
+          // detail row copies the field value, a related-list row opens ITS own
+          // record. Following the reference must not also fire those.
+          e.stopPropagation();
+          // Modifier and non-primary clicks belong to the browser (new tab, new
+          // window) — that is the point of rendering a real href.
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          // No SPA handler: let the anchor navigate on its own.
+          if (!host?.openRecord) return;
+          e.preventDefault();
+          host.openRecord(objectName as string, recordId as string | number);
+        }}
+      >
+        {children}
+      </a>
+    </RecordHoverCard>
   );
 }
 
@@ -2689,7 +2697,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       } catch { /* not JSON — fall through to normal resolution */ }
       if (parsedDisplay) {
         return (
-          <ReferencedRecordLink objectName={referenceTo} recordId={parsedId}>
+          <ReferencedRecordLink objectName={referenceTo} recordId={parsedId} objectSchema={refSchema}>
             <TruncatedText text={parsedDisplay} />
           </ReferencedRecordLink>
         );
@@ -2705,7 +2713,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       resolveLookupRecordName(obj, refSchema, displayField, perms, referenceTo) || String(obj.id || obj._id || '');
     if (display) {
       return (
-        <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(obj)}>
+        <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(obj)} objectSchema={refSchema}>
           <TruncatedText text={display} />
         </ReferencedRecordLink>
       );
@@ -2803,6 +2811,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
               key={idx}
               objectName={referenceTo}
               recordId={referencedRecordId(item)}
+              objectSchema={refSchema}
               className="text-inherit"
             >
               <span
@@ -2841,7 +2850,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
       resolveLookupRecordName(value as Record<string, unknown>, refSchema, displayField, perms, referenceTo) ||
       String((value as any).id || (value as any)._id || '[Object]');
     return (
-      <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)}>
+      <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)} objectSchema={refSchema}>
         <TruncatedText text={label} />
       </ReferencedRecordLink>
     );
@@ -2857,7 +2866,7 @@ export function LookupCellRenderer({ value, field }: CellRendererProps): React.R
   // (objectui#13335): the label, no id, and no link to a page that would 404.
   if (restricted) return <RestrictedLookupReference label={restrictedLabel} />;
   return (
-    <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)}>
+    <ReferencedRecordLink objectName={referenceTo} recordId={referencedRecordId(value)} objectSchema={refSchema}>
       {unresolved ? (
         <UnresolvedLookupReference value={text} />
       ) : (
@@ -4764,6 +4773,10 @@ export type {
  * this package's own `resolveActionParam`. See the module.
  */
 export { fieldHelpText } from './fieldHelpText.js';
+// The hover card every record reference shows (objectstack#27604): lookup
+// links here, and the hosts that draw a reference of their own (the record
+// page's compact related rows).
+export { RecordHoverCard, type RecordHoverCardProps, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 /** Cache so each widget type creates one lazy component (and one chunk request). */
 const lazyFieldWidgets = new Map<string, React.ComponentType<any>>();
