@@ -159,14 +159,16 @@ describe('SettingsField — `select` follows the specifier\'s valueDomain declar
       const input = container.querySelector('input');
       expect(input, 'a domain-bearing select must render an editable control').not.toBeNull();
 
-      // The curated table survives — as SUGGESTIONS, not as the boundary.
+      // The curated table survives — as SUGGESTIONS, not as the boundary. They
+      // are offered by name; the name maps back to its code on pick
+      // (`SettingsField.domainOptionName-28068.test.tsx`).
       const listId = input!.getAttribute('list');
       const datalist = container.querySelector('datalist');
       expect(datalist).not.toBeNull();
       expect(datalist!.id).toBe(listId);
       expect(
         Array.from(datalist!.querySelectorAll('option')).map((o) => o.getAttribute('value')),
-      ).toEqual(optionValues(spec));
+      ).toEqual((spec.options ?? []).map((o) => o.label));
 
       // …and free text outside them is committed verbatim, not swallowed.
       fireEvent.change(input!, { target: { value: probe } });
