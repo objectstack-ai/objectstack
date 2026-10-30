@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { ActionSchema, InlineActionSchema } from './action.zod';
 import { ObjectTranslationDataSchema, TranslationDataSchema, type TranslationBundle } from '../system/translation.zod';
-import { translateAction } from '../system/i18n-resolver';
+import { translateAction, type ActionLike } from '../system/i18n-resolver';
 
 /** Minimum legal registered action that collects params (HotCRM's `send_email` shape). */
 const base = {
@@ -183,7 +183,8 @@ describe('the translation slot and its overlay', () => {
 
   it('resolves the translated label for an action that collects params but authors none', () => {
     const { submitText: _authored, ...unlabelled } = action;
-    expect(translateAction(unlabelled, bundle, { locale: 'zh-CN' }).submitText).toBe('发送');
+    const translated: ActionLike = translateAction<ActionLike>(unlabelled, bundle, { locale: 'zh-CN' });
+    expect(translated.submitText).toBe('发送');
   });
 
   it('gives no button to an action without params, whatever the bundle carries', () => {

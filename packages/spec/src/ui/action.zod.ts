@@ -1099,12 +1099,6 @@ const actionObject = () => strictObject({
    */
   description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing `ai.description`.'),
 
-  /**
-   * The param dialog's submit button label — the contract is on
-   * {@link actionSubmitText}.
-   */
-  submitText: actionSubmitText().optional().describe('Label of the submit button in the action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"), in place of the default "Confirm" (declared ahead of its console reader: no renderer shows it yet) — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action). Only on an action with a non-empty `params`: without one no param dialog opens, so it is refused. Not `confirmText`, which is the message of a param-less action\'s confirm dialog. A blank label is refused.'),
-
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),
   
@@ -1417,6 +1411,12 @@ const actionObject = () => strictObject({
         : undefined
     ),
   }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
+
+  /**
+   * The submit button label of the dialog `params` opens — the contract is
+   * on {@link actionSubmitText}.
+   */
+  submitText: actionSubmitText().optional().describe('Label of the submit button in the action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"), in place of the default "Confirm" (declared ahead of its console reader: no renderer shows it yet) — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action). Only on an action with a non-empty `params`: without one no param dialog opens, so it is refused. Not `confirmText`, which is the message of a param-less action\'s confirm dialog. A blank label is refused.'),
   
   /** Visual Style */
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'link']).optional().describe('Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent)'),
