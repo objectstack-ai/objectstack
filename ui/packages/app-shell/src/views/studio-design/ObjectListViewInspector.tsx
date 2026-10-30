@@ -34,6 +34,19 @@
  * yet is created by the first edit, seeded with the columns the running app
  * shows an object that has no view (`defaultListColumnsFromObject`).
  *
+ * ## Adding a view
+ *
+ * "Add view" (objectstack#27836) opens the console's Create View dialog
+ * (`CreateViewDialog`): the type first, from the spec's list-view types, then
+ * the fields that type requires, picked by label, then a label and a key. The
+ * view is born complete, as the console's add-view door builds it
+ * (`buildNewViewSpec`, `viewEnvelope`), so the draft never holds a half-made
+ * view. It is saved to the package draft at once, under a name no view holds
+ * yet, and the panel and the canvas then show it until the author goes back to
+ * the view the nav entry opens, or opens another leaf. The new view is never
+ * the object's default, and the nav entry is not changed: the running app
+ * lists it in the object's view switcher.
+ *
  * ⛔ No new endpoint and no new client: the pillar's `MetadataClient` is the
  * only door. ⛔ Nothing here edits the object definition — fields belong to the
  * Data pillar. A read-only package shows the view and writes nothing: every
@@ -41,7 +54,8 @@
  */
 
 import * as React from 'react';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { ChevronDown, Loader2, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Badge,
   Button,
@@ -73,6 +87,9 @@ import { failed, loaded, type LoadState } from '../metadata-admin/loadState.js';
 import { readDraftForSave, useDraftSaveGuard } from '../metadata-admin/DraftConflictDialog.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import { defaultListColumnsFromObject } from '../ObjectView.js';
+import { CreateViewDialog, type CreateViewDialogProps } from '../CreateViewDialog.js';
+import { buildNewViewSpec } from '../newViewSpec.js';
+import { viewEnvelope } from '../runtime-metadata-persistence.js';
 import { findByName, useNavTargetLabel } from '../../hooks/useNavTargetLabel.js';
 import {
   listViewsOf,
@@ -219,6 +236,11 @@ export interface DraftOnlyObjects {
 export interface ObjectListViewDraft {
   /** The view the open leaf's panel edits; `null` on a leaf that is not an `object`. */
   target: ListViewTarget | null;
+  /**
+   * objectstack#27836 — the view the leaf's nav entry opens, while the panel
+   * shows a view "Add view" created instead; `null` otherwise.
+   */
+  entryTarget: ListViewTarget | null;
   /** The autosave's `target`: the buffer key of the view ({@link listViewBufferKey}), `''` with no target. */
   targetKey: string;
   /** The autosave's `loadedFor`: the target the buffer was loaded for. */
@@ -254,6 +276,14 @@ export interface ObjectListViewDraft {
   failure: { during: 'load' | 'save'; error: unknown } | null;
   /** Replace the view item with an edited one. */
   edit: (row: Row) => void;
+  /**
+   * objectstack#27836 — create a list view of the leaf's object in the
+   * package draft, from the Create View dialog's payload, and show it here.
+   * Resolves `null` once it is saved, else why it was not.
+   */
+  createView: (config: NewViewPayload) => Promise<ViewCreateRefusal | null>;
+  /** objectstack#27836 — show the view the nav entry opens again. */
+  showEntryView: () => void;
   /** Send the buffer to the package draft — the autosave's `save`. */
   save: (sent: DraftSendClaim) => Promise<void>;
   /** The version-conflict dialog of this buffer's guard; render it once. */
@@ -261,6 +291,12 @@ export interface ObjectListViewDraft {
   /** What the canvas shows (`StudioCanvasListViewContext`); `null` with nothing to show. */
   canvas: StudioCanvasListView | null;
 }
+
+/** What the Create View dialog hands its door (`CreateViewDialogProps['onCreate']`). */
+export type NewViewPayload = Parameters<CreateViewDialogProps['onCreate']>[0];
+
+/** Why "Add view" saved nothing: a view already holds the name, or the save failed. */
+export type ViewCreateRefusal = { taken: string } | { error: unknown };
 
 /**
  * The open leaf's list-view buffer, held by the Interfaces pillar so the
@@ -304,7 +340,14 @@ export function useObjectListViewDraft({
       .viewName;
   }, [objectName, navId, filtersKey, entryViewName, currentUserId, currentOrgId]);
   const objectDef = objectName ? findByName(metadata.objects, objectName) : undefined;
-  const target = objectName ? listViewTargetOf(objectName, landingViewName, listViewsOf(objectDef)) : null;
+  const entryTarget = objectName ? listViewTargetOf(objectName, landingViewName, listViewsOf(objectDef)) : null;
+  // objectstack#27836 — a view "Add view" created, stamped with the nav entry
+  // it was created on, so it expires by construction when another opens.
+  const entryKey = objectName ? JSON.stringify([objectName, navId ?? null, filtersKey, entryViewName ?? null]) : '';
+  const [created, setCreated] = React.useState<{ for: string; viewId: string } | null>(null);
+  const createdViewId = created && created.for === entryKey ? created.viewId : null;
+  const target: ListViewTarget | null =
+    objectName && createdViewId ? { objectName, viewId: createdViewId, isDefault: false } : entryTarget;
   const viewId = target?.viewId ?? '';
   const targetKey = viewId ? listViewBufferKey(viewId) : '';
   const seedColumns = React.useMemo(() => defaultListColumnsFromObject(objectDef, 5), [objectDef]);
@@ -421,6 +464,31 @@ export function useObjectListViewDraft({
     setBuffer((b) => ({ ...b, row, dirty: true }));
   }, []);
 
+  const createView = React.useCallback(
+    async (config: NewViewPayload): Promise<ViewCreateRefusal | null> => {
+      if (!objectName) return { error: new Error('No object is open.') };
+      const env = viewEnvelope(objectName, buildNewViewSpec(config, { fallbackColumns: seedColumns }), {
+        name: config.name,
+        label: config.label,
+      });
+      try {
+        // A name a view already holds, published or drafted in any package,
+        // is refused and nothing is written: the draft door is a PUT by name.
+        const [published, drafts] = await Promise.all([client.list<Row>('view'), client.listDrafts({ type: 'view' })]);
+        if ([...(published ?? []), ...(drafts ?? [])].some((r) => r?.name === env.name)) return { taken: env.name };
+        // And the door refuses one drafted between that read and this save.
+        await client.save('view', env.name, env, { mode: 'draft', packageId, ifNoneMatch: '*', surface: 'studio' });
+      } catch (e) {
+        return { error: e };
+      }
+      onDraftSaved?.();
+      setCreated({ for: entryKey, viewId: env.name });
+      return null;
+    },
+    [client, packageId, objectName, seedColumns, entryKey, onDraftSaved],
+  );
+  const showEntryView = React.useCallback(() => setCreated(null), []);
+
   const row = buffer.row;
   const notList = !!row && !isListViewRow(row);
   const save = React.useCallback(
@@ -465,6 +533,7 @@ export function useObjectListViewDraft({
 
   return {
     target,
+    entryTarget: createdViewId ? entryTarget : null,
     targetKey,
     loadedFor: buffer.for,
     row: current ? row : null,
@@ -477,6 +546,8 @@ export function useObjectListViewDraft({
     saving,
     failure,
     edit,
+    createView,
+    showEntryView,
     save,
     conflictDialog,
     canvas,
@@ -839,10 +910,17 @@ export function ObjectListViewInspector({
   locale,
   selection,
   onSelectionChange,
+  onAddViewOpen,
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
   locale: string;
+  /**
+   * objectstack#27836 — called as "Add view" opens its dialog: the host sends
+   * the panel's pending edit now, since the view the panel shows changes once
+   * the new one is created.
+   */
+  onAddViewOpen?: () => void;
   /**
    * objectui#12725 — the column selection, held by the host so a click on a
    * canvas header can make it. With `onSelectionChange` the panel's list
@@ -853,6 +931,7 @@ export function ObjectListViewInspector({
 }): React.ReactElement | null {
   const { target, row, notList, seedColumns, failure, saving, hasDraft, edit, loadedFor, targetKey, draftChanges, published } =
     listView;
+  const { entryTarget, createView, showEntryView } = listView;
   const objectName = target?.objectName;
   const fieldState = useObjectFields(objectName);
   // objectui#13152 — the fields every picker in this panel offers (the
@@ -876,6 +955,23 @@ export function ObjectListViewInspector({
   // label-less entry that opens it: the published label, else its pending
   // draft's, through the app's bundle. No read of its own.
   const navTargetLabel = useNavTargetLabel();
+  const metadata = useMetadata();
+  const objectDef = objectName ? findByName(metadata.objects, objectName) : undefined;
+  const [addOpen, setAddOpen] = React.useState(false);
+  // objectstack#27836 — the dialog's required-field pickers read the fields
+  // this panel's own pickers offer, by label.
+  const dialogObject = React.useMemo<CreateViewDialogProps['objectDef']>(
+    () =>
+      objectName
+        ? {
+            name: objectName,
+            fields: Object.fromEntries(
+              fields.map((f) => [f.name, { name: f.name, label: f.label, type: f.type, hidden: f.hidden, options: f.options }]),
+            ),
+          }
+        : undefined,
+    [objectName, fields],
+  );
   if (!target) return null;
   const hostHeld = !!onSelectionChange;
   const selectColumn = (sel: ListViewColumnSelection | null) => {
@@ -889,12 +985,26 @@ export function ObjectListViewInspector({
       ? issueRefusal(failure.error, locale)
       : plainRefusal(failure.error);
   const working = row ?? newListViewItem(target, seedColumns);
-  const title = listViewTitle(
-    target,
-    working,
-    navTargetLabel({ kind: 'object', objectName: target.objectName }) ?? target.objectName,
-    locale,
-  );
+  const objectText = navTargetLabel({ kind: 'object', objectName: target.objectName }) ?? target.objectName;
+  const title = listViewTitle(target, working, objectText, locale);
+  const addView = async (config: NewViewPayload): Promise<boolean> => {
+    const refusal = await createView(config);
+    if (!refusal) {
+      // The selection named a column of the view the panel showed before.
+      selectColumn(null);
+      return true;
+    }
+    // The dialog stays open with the author's input; this says why.
+    toast.error(
+      'taken' in refusal
+        ? tFormat('engine.studio.inspector.listView.addViewTaken', locale, { name: refusal.taken })
+        : issueRefusal(refusal.error, locale).message,
+    );
+    return false;
+  };
+  const existingViewLabels = Object.values(listViewsOf(objectDef))
+    .map((v) => (isPlainObject(v) ? resolveI18nLabel(v.label as I18nLabel | undefined, locale) : ''))
+    .filter((l): l is string => !!l);
   const body = listBodyOf(working);
   const columns = Array.isArray(body.columns) ? (body.columns as unknown[]) : [];
   const allStrings = columns.length > 0 && columns.every((c) => typeof c === 'string');
@@ -1000,6 +1110,48 @@ export function ObjectListViewInspector({
           <p className="text-[11px] leading-snug text-muted-foreground">
             {t('engine.studio.inspector.listView.intro', locale)}
           </p>
+        )}
+        {/* objectstack#27836 — another view of this object: its type first, then what that type requires. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            disabled={readOnly || fieldState.loading || !!fieldState.error}
+            onClick={() => {
+              onAddViewOpen?.();
+              setAddOpen(true);
+            }}
+            data-testid="list-view-add-view"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t('engine.studio.inspector.listView.addView', locale)}
+          </Button>
+          {entryTarget && (
+            <Button
+              variant="link"
+              size="sm"
+              className="h-7 px-0 text-xs"
+              onClick={() => {
+                selectColumn(null);
+                showEntryView();
+              }}
+              data-testid="list-view-back-to-entry"
+            >
+              {tFormat('engine.studio.inspector.listView.backToEntry', locale, {
+                view: listViewTitle(entryTarget, {}, objectText, locale),
+              })}
+            </Button>
+          )}
+        </div>
+        {addOpen && (
+          <CreateViewDialog
+            open
+            onOpenChange={setAddOpen}
+            onCreate={addView}
+            objectDef={dialogObject}
+            existingLabels={existingViewLabels}
+          />
         )}
         {refusal && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive" role="alert" data-testid="list-view-refusal">

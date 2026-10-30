@@ -4876,7 +4876,7 @@ export function InterfacesPillar({
   // the Properties panel and shown on the canvas, autosaved to the package
   // draft like the other two. Blocked on `readOnly` like them.
   const listView = useObjectListViewDraft({ client, packageId, leaf: current, publishNonce, draftOnlyObjects, onDraftSaved });
-  useDraftAutoSave({
+  const { flush: flushListView } = useDraftAutoSave({
     target: listView.targetKey,
     loadedFor: listView.loadedFor,
     dirty: listView.dirty,
@@ -5764,6 +5764,8 @@ export function InterfacesPillar({
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
             onSelectionChange={setSelection}
+            // objectstack#27836 — "Add view" opens another view here: the pending edit goes first.
+            onAddViewOpen={flushListView}
           />
         </div>
       ) : (
