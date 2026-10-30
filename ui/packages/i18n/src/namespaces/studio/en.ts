@@ -651,6 +651,7 @@ const STUDIO_EN: Record<string, string> = {
   // map (the assignment node's `assignments`); see `flow-value-envelope.ts`.
   'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -659,6 +660,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.branch.fromEdges': 'This decision routes on its connections’ conditions. Each card is one connection; edit its condition on the connection.',
   'engine.inspector.flowNode.branch.openEdge': 'Edit connection',
   'engine.inspector.flowNode.branch.noCondition': 'No condition',
+  'engine.inspector.flowNode.help.learnMore': 'Learn more',
+  'engine.inspector.flowNode.help.showLess': 'Show less',
   'engine.inspector.flowNode.remove': 'Remove node',
   // App nav inspector
   'engine.inspector.appNav.kind': 'Nav Item',
@@ -3015,6 +3018,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27459 — an item of a dashboard list property (Global Filters,
   // the header's Actions) held until it is filled in; `n` is the `#n` its row shows.
   'engine.studio.held.listItemNeedsInput': '{input} on item #{n} of “{list}” needs a value',
+  // objectstack#27785 — a report's chart held until its axes are picked; `input`
+  // is the chart panel's own label for the axis it still needs.
+  'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
   // objectstack#27461 — a roll-up held until it is set up; `input` is the field
   // inspector's own label for the roll-up input it still needs.
   'engine.studio.held.fieldNeedsInput': '{input} on the field “{field}” needs a value',

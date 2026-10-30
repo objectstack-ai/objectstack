@@ -557,6 +557,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.kv.empty': '暂无条目。',
   'engine.inspector.flowNode.kv.asExpression': '写成 CEL 表达式',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL 表达式，例如 joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个表达式。请填写表达式，或把这个值切回文本。',
   'engine.inspector.flowNode.list.add': '添加项',
   'engine.inspector.flowNode.list.item': '值',
   'engine.inspector.flowNode.list.remove': '删除项',
@@ -565,6 +566,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.branch.fromEdges': '此决策按其连线上的条件路由。每张卡片是一条连线，请在连线上编辑它的条件。',
   'engine.inspector.flowNode.branch.openEdge': '编辑连线',
   'engine.inspector.flowNode.branch.noCondition': '无条件',
+  'engine.inspector.flowNode.help.learnMore': '了解更多',
+  'engine.inspector.flowNode.help.showLess': '收起',
   'engine.inspector.flowNode.remove': '删除节点',
   // App nav inspector
   'engine.inspector.appNav.kind': '导航项',
@@ -2683,6 +2686,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.widgetNeedsInput': '组件「{widget}」的「{input}」需要填写',
   // objectstack#27459 — a dashboard list property's item held until it is filled in.
   'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
+  // objectstack#27785 — a report's chart held until its axes are picked.
+  'engine.studio.held.reportChartNeedsInput': '报表图表的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',
   // objectstack#27464 — a navigation rename typed but not committed yet.
   'engine.studio.held.navRename': '导航项「{item}」的重命名尚未完成',

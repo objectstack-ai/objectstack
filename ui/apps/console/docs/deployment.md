@@ -125,7 +125,6 @@ The console build produces 17+ named chunks via `manualChunks`:
 | `vendor-ui-utils` | cva, clsx, tailwind-merge | Rare |
 | `vendor-objectstack` | @objectstack/spec, client | Moderate |
 | `vendor-zod` | Zod validation | Rare |
-| `vendor-msw` | MSW (demo mode only) | Rare |
 | `vendor-charts` | Recharts, D3 | Rare |
 | `vendor-dndkit` | @dnd-kit | Rare |
 | `vendor-i18n` | i18next | Rare |

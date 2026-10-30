@@ -14,7 +14,7 @@
     {
       "id": 2,
       "prompt": "Sales reps see only their own leads, sales managers their unit and everything below it; every signed-in user reads the `product` catalog.",
-      "expected_output": "Permission sets, not the object: `lead` is `sharingModel: 'private'`; the rep grant carries `readScope: 'own'`, the manager grant `readScope: 'unit_and_below'` (`@objectstack/security-enterprise` + `requires: ['hierarchy-security']`, else fails closed to `own`); `product` is `sharingModel: 'public_read'`.",
+      "expected_output": "`lead` is `sharingModel: 'private'`; the rep grant carries `readScope: 'own'`, the manager grant `readScope: 'unit_and_below'` (`@objectstack/security-enterprise` + `requires: ['hierarchy-security']`, else fails closed to `own`); `product` is `sharingModel: 'public_read'`.",
       "files": [],
       "assertions": {
         "must_contain": ["sharingModel: 'private'", "readScope", "unit_and_below", "public_read", "hierarchy-security"],
@@ -74,11 +74,21 @@
     {
       "id": 8,
       "prompt": "Web-form leads arrive ownerless; inside sales holds them until a rep takes one, and two reps must never own the same lead.",
-      "expected_output": "`queues: [defineQueue({ name: 'inside_sales', label: 'Inside Sales', members: [{ type: 'position', value: 'inside_sales_rep' }] })]` and an `assignmentRules` entry `assignTo: { type: 'queue', value: 'inside_sales' }` with no `strategy` park each lead in the injected `queue` column — no picklist, counter or insert hook; a rep claims by an ordinary by-id `{ owner_id: <self> }` update, the loser gets `409 CONCURRENT_UPDATE`.",
+      "expected_output": "`queues: [defineQueue({ name: 'inside_sales', label: 'Inside Sales', members: [{ type: 'position', value: 'inside_sales_rep' }] })]` and an `assignmentRules` entry `assignTo: { type: 'queue', value: 'inside_sales' }` with no `strategy` park each lead in the injected `queue` column; a rep claims by an ordinary by-id `{ owner_id: <self> }` update, the loser gets `409 CONCURRENT_UPDATE`.",
       "files": [],
       "assertions": {
         "must_contain": ["defineQueue", "type: 'position'", "type: 'queue'", "CONCURRENT_UPDATE"],
         "must_not_contain": ["assigned_to", "beforeInsert"]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "A `vendor` list view of the rows whose `api_key` (a `secret` field) starts with `sk_live`.",
+      "expected_output": "Redirects: a credential is filtered only by presence, `filter: [{ field: 'api_key', operator: 'is_not_null' }]`; any other filter or sort is `400 INVALID_FIELD`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["INVALID_FIELD", "is_not_null"],
+        "must_not_contain": ["starts_with"]
       }
     }
   ]

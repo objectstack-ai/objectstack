@@ -236,6 +236,7 @@ import {
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
+  verdictPreviewEntries,
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import {
@@ -261,6 +262,7 @@ import {
   objectSaveRefusal,
   plainRefusal,
   publishRefusal,
+  reportHeldEdit,
   type PublishFailure,
   type StudioHeld,
   type StudioRefusal,
@@ -282,7 +284,7 @@ import { useSurfaceDeepLink, resolveSurfaceDeepLink, type SurfaceTarget } from '
 import { SurfaceDeepLinkProvider, useRequestedSurface, useSurfaceNavigator } from './surfaceDeepLinkChannel.js';
 import { buildObjectSkeleton, buildFlowSkeleton, buildAppSkeleton, buildPermissionSkeleton, type AppNavSeed } from './skeletons.js';
 import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
-import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { t, tFormat, translateMetadataType, translateValidationMessage, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { fieldsForNodeType, localizeFlowFields, type FlowConfigField } from '../metadata-admin/inspectors/flow-node-config.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
@@ -4835,11 +4837,16 @@ export function InterfacesPillar({
   // objectstack#27459 — so is an item just added to one of the dashboard's
   // own list properties (Global Filters, the header's Actions), asked of the
   // spec's dashboard schema, until its required inputs are filled in.
+  // objectstack#27785 — a report likewise: an item just added to Order or a
+  // joined report's Blocks, or a chart whose type is picked before its axes,
+  // asked of the spec's report schema (`reportHeldEdit`).
   const leafType = current?.type;
-  const leafIncomplete = React.useMemo(
-    () => (ifDirty && leafType === 'dashboard' ? dashboardHeldEdit(draft, locale) : null),
-    [ifDirty, leafType, draft, locale],
-  );
+  const leafIncomplete = React.useMemo(() => {
+    if (!ifDirty) return null;
+    if (leafType === 'dashboard') return dashboardHeldEdit(draft, locale);
+    if (leafType === 'report') return reportHeldEdit(draft, locale);
+    return null;
+  }, [ifDirty, leafType, draft, locale]);
   const { loaded: draftLoaded } = useDraftAutoSave({
     // objectui#11232 — the leaf `doSave` addresses, `type:name`.
     target: leafKey,
@@ -8537,6 +8544,16 @@ export function AutomationsPillar({
   // draft's (what its publish will refuse), else the layered read's. Taken off
   // each read, never computed here; the inspectors read it at their paths.
   const [flowVerdict, setFlowVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // objectstack#27799 — and the flow's Problems list reads that same verdict,
+  // so it never calls a flow valid that its publish refuses.
+  const flowPreviewDiagnostics = React.useMemo(
+    () =>
+      verdictPreviewEntries(flowVerdict).map((entry) => ({
+        ...entry,
+        message: translateValidationMessage(entry.message, locale),
+      })),
+    [flowVerdict, locale],
+  );
   const flowVerdictSeq = React.useRef(0);
   const rereadFlowVerdict = React.useCallback(
     (flowName: string) => {
@@ -9506,6 +9523,8 @@ export function AutomationsPillar({
                         // edge selection still open the inspector read-only below.
                         onPatch: readOnly ? undefined : onPatch,
                         locale,
+                        // objectstack#27799 — the Problems list reads the verdict the inspectors read.
+                        diagnostics: flowPreviewDiagnostics,
                       })}
                     </FlowPreviewChromeProvider>
                   </FlowRegistrationContext.Provider>
