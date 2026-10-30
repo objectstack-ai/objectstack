@@ -452,7 +452,7 @@ After the write-through, the peer replays the event into its own
 re-arms or disarms that flow from its stored row (#21725). A `connector`
 mutation that is not a draft (saved active, published or deleted) queues the
 soft connector reconcile that `metadata:reloaded` runs, on the reconcile queue
-lane 4's credential writes also use (#28002). That reconcile re-reads the
+that also serializes the credential door's writes (#28002). That reconcile re-reads the
 connector declaration from the replica's own protocol view
 (`getMetaItemsForExecution`, the registry with the `sys_metadata` overlay rows
 over it) and materializes, replaces or tears down instances from that read.
