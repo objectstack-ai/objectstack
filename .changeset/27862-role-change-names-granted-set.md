@@ -5,7 +5,7 @@
 
 fix(plugin-auth): a role change that grants an org-admin permission set says which set it granted (#27862)
 
-Clause-②: no
+Clause-②: yes (widening: update-member-role's success answer gains outcome 'permission_set_granted' and grantedPermissionSet; the two sys_member actions gain outcomeMessages)
 Metadata-protocol: none
 
 Raising a member to `admin` or `owner` grants an org-admin permission set as a side effect (`organization_admin`, or `organization_admin_no_bypass` on a wall-less posture). The role change used to answer the member row alone, so the console toasted "Member role updated" and the administrator later found a set on the user that nobody visibly assigned.
