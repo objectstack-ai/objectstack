@@ -47,8 +47,8 @@
  * canonically with its number (`triage#1`). Its SLUG is that key as one ref
  * segment, because a ref cannot carry `:` or `#`: the default `domain:` kind
  * dropped, every other `:` and the `#` turned into `-` (`ui-4`,
- * `repo-cloud-1`, `triage-1`). No `domain:` lane is named `triage`,
- * `director` or `repo-…`, which is what keeps the slug one-to-one.
+ * `repo-cloud-1`, `triage-1`). No `domain:` lane may be named `triage`,
+ * `director` or `repo-…` — `seatKey` refuses one — which keeps the slug one-to-one.
  *
  * ## What it does, in order (open)
  *
@@ -159,8 +159,18 @@ const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const BRANCH_SHAPE = /^(?!\/|.*\/\/|.*\.\.|.*[\s~^:?*[\\]|.*\.lock$|.*\/$)[A-Za-z0-9._/-]+$/;
 const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
 // A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, the four a seat post's title names — then `#N`;
-// absent = seat 1. Read lower-cased. The bare lanes are a closed pair, so a login is never read as a seat.
-const SEAT_SHAPE = /^((?:domain|repo):[a-z0-9._-]+|triage|director)(?:#([1-9][0-9]*))?$/;
+// absent = seat 1. Read lower-cased. The bare lanes are a closed pair, so a login is never read as a seat. The
+// two lists below are the ONE spelling of those lane words: the shape is built from them, and so is the
+// reserved set a `domain:` lane may not be named after (`seatKey`).
+/** The lane kinds that carry a name after the colon: `domain:<x>`, `repo:<x>`. `domain` is the default kind the slug drops. */
+export const SEAT_LANE_KINDS = Object.freeze(['domain', 'repo']);
+/** The bare lanes, a closed pair: `triage`, `director`. */
+export const SEAT_BARE_LANES = Object.freeze(['triage', 'director']);
+const SEAT_SHAPE = new RegExp(`^((?:${SEAT_LANE_KINDS.join('|')}):[a-z0-9._-]+|${SEAT_BARE_LANES.join('|')})(?:#([1-9][0-9]*))?$`);
+// What a `domain:` lane may NOT be named, so the slug stays one-to-one (header): a bare lane word (`domain:triage`
+// would slug to `triage-1`, the triage seat's), or another kind's name with its colon turned into the hyphen the slug
+// uses (`domain:repo-cloud` would slug to `repo-cloud-1`, `repo:cloud#1`'s).
+const RESERVED_DOMAIN_LANE = new RegExp(`^(?:(?:${SEAT_BARE_LANES.join('|')})$|(?:${SEAT_LANE_KINDS.filter((k) => k !== 'domain').join('|')})-)`);
 /** A per-seat mailbox body's first line, `Mailbox-of: <seat> · <login>`. */
 const MAILBOX_OF_LINE = /^Mailbox-of:[ \t]*(\S+)[ \t]*·[ \t]*(\S+)$/;
 /** The first lines a legacy per-login mailbox opened with: `To: <login>` (this file's), `Mailbox-of: <login>`. */
@@ -168,11 +178,15 @@ const LEGACY_OWNER_LINE = /^(?:To|Mailbox-of):[ \t]*(\S+)$/;
 
 /**
  * A seat spelled `LANE#N` → `{ key, slug }`, or null when it is not one. `key` is canonical — lower case, the
- * number always spelled (`triage` → `triage#1`); `slug` is the key as one ref segment (header). Pure.
+ * number always spelled (`triage` → `triage#1`); `slug` is the key as one ref segment (header). A `domain:` lane
+ * named after a reserved lane word (`domain:triage`, `domain:repo-cloud`) is not a seat either: its slug would be
+ * another seat's, and the header's one-to-one promise is kept here, not assumed. This is the fleet's ONE seat
+ * grammar — the mailbox `To:` line and the doorbell keys' `LANE#N` fields read with it, never a second shape. Pure.
  */
 export function seatKey(text) {
   const m = SEAT_SHAPE.exec(String(text ?? '').trim().toLowerCase());
   if (!m) return null;
+  if (m[1].startsWith('domain:') && RESERVED_DOMAIN_LANE.test(m[1].slice('domain:'.length))) return null;
   const n = m[2] ?? '1';
   return { key: `${m[1]}#${n}`, slug: `${m[1].replace(/^domain:/, '').replace(/:/g, '-')}-${n}` };
 }
@@ -519,6 +533,10 @@ async function selfTest() {
   t('another kind keeps its name, its colon turned into a hyphen', [seatKey('repo:cloud#1').slug, seatKey('repo:www.objectos.ai#2').slug], ['repo-cloud-1', 'repo-www.objectos.ai-2']);
   t('read lower-cased, so one seat has one key', [seatKey('Domain:UI#4').key, seatKey(' domain:ui#4 ').key], ['domain:ui#4', 'domain:ui#4']);
   t('not a seat ⇒ null — ⛔ a login above all, the confusion a per-login mailbox made', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null, 'os-bill', 'marchtian', 'epic:#12'].map(seatKey), [null, null, null, null, null, null, null, null, null]);
+  t('⛔ a short form is not a seat — `skills#2` names no lane, so it is refused as a login is', ['skills#2', 'ui#4', 'server', 'skills'].map(seatKey), [null, null, null, null]);
+  t('⛔ a `domain:` lane named after a reserved lane word is refused — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1', 'Domain:Triage#1'].map(seatKey), [null, null, null, null]);
+  t('…while a `domain:` lane that merely CONTAINS a reserved word, and the reserved words as their own lanes, still read', [seatKey('domain:triage-tools#1').slug, seatKey('domain:directory').slug, seatKey('domain:repository').slug, seatKey('triage#2').slug, seatKey('repo:cloud').slug], ['triage-tools-1', 'directory-1', 'repository-1', 'triage-2', 'repo-cloud-1']);
+  t('the shape and the reserved set are built from the ONE pair of lane-word lists', SEAT_LANE_KINDS.join() === 'domain,repo' && SEAT_BARE_LANES.join() === 'triage,director' && SEAT_BARE_LANES.every((w) => seatKey(w)?.key === `${w}#1` && seatKey(`domain:${w}`) === null), true);
   t('the branch is mailbox/<login>/<slug> — no `:` and no `#` in a ref', mailboxBranch('os-bill', seatKey('domain:ui#4')), 'mailbox/os-bill/ui-4');
   t('⭐ two seats under ONE login get two branches', [mailboxBranch('os-sales', seatKey('domain:server#1')), mailboxBranch('os-sales', seatKey('domain:ui#1'))], ['mailbox/os-sales/server-1', 'mailbox/os-sales/ui-1']);
 
