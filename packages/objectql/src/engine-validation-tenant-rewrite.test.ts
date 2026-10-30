@@ -15,6 +15,13 @@
  *    from the owner's declaration by construction — must still answer its own
  *    package's translation: it has no packaged message to diverge from.
  *
+ * #27559 — the same holds for a rule the second package contributes: when the
+ * tenant's overlay carries that rule reworded (the Studio GET → edit → PUT of
+ * the folded object), the packaged message to compare with is the EXTENSION
+ * package's, so the tenant's sentence is served as written; and the fold lets
+ * the overlay's copy stand for the extender's rule rather than appending the
+ * original beside it, so the refusal answers that one sentence.
+ *
  * Both readers are driven off ONE real registry: the refusal of a real write
  * (the engine's validator), and the served object as `/meta` translates it —
  * `translateObject` over the resolved object, with the packaged base the
@@ -148,7 +155,7 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
   let protocol: any;
 
   /** Boot the packaged object, then (optionally) the tenant's overlay layer. */
-  async function boot(overlay: boolean) {
+  async function boot(overlay: boolean, extensionMessage?: string) {
     engine = new ObjectQL();
     engine.registerDriver(makeDriver(), true);
     await engine.init();
@@ -156,7 +163,13 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
     engine.registry.registerObject(body(PACKAGED.returned_needs_note) as any, PKG);
     engine.registry.registerObject(EXTENSION as any, EXT_PKG, undefined, 'extend');
     if (overlay) {
-      engine.registry.registerObject({ ...body(REWRITE), _provenance: 'org' } as any, PKG, undefined, 'overlay');
+      const overlayBody = body(REWRITE);
+      // The overlay as a Studio round-trip of the FOLDED object stores it: the
+      // extension's rule rides along, here with its message reworded.
+      if (extensionMessage !== undefined) {
+        overlayBody.validations.push({ ...EXTENSION.validations[0], message: extensionMessage });
+      }
+      engine.registry.registerObject({ ...overlayBody, _provenance: 'org' } as any, PKG, undefined, 'overlay');
     }
     protocol = new ObjectStackProtocolImplementation(engine as any);
   }
@@ -169,7 +182,9 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
     try {
       await engine.insert(OBJ, data, { context: { locale: preferredLocaleFromHeader(header) } } as any);
     } catch (e: any) {
-      return String(e?.fields?.[0]?.message ?? e?.message);
+      // Every violation, so a rule folded in twice shows as two sentences.
+      const fields: Array<{ message?: unknown }> = Array.isArray(e?.fields) ? e.fields : [];
+      return fields.length > 0 ? fields.map((f) => String(f.message)).join(' | ') : String(e?.message);
     }
     throw new Error('expected the write to be rejected');
   }
@@ -205,12 +220,61 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
       const served = (engine.registry.getObject(OBJ) as any).validations.map((r: any) => r.name);
       expect(served).toEqual(['returned_needs_note', 'done_needs_owner', 'ext_blocked_needs_reason']);
       expect((engine.registry.getObject(OBJ) as any).validations[0].message).toBe(REWRITE);
+      // [#27559] The packaged rule set is the owner's rules plus the code
+      // extender's — every rule a code layer ships, each with its shipped message.
       const packaged = protocol.getPackagedObjectBase(OBJ) as any;
-      expect(packaged.validations.map((r: any) => r.name)).toEqual(['returned_needs_note', 'done_needs_owner']);
+      expect(packaged.validations.map((r: any) => r.name))
+        .toEqual(['returned_needs_note', 'done_needs_owner', 'ext_blocked_needs_reason']);
       expect(packaged.validations[0].message).toBe(PACKAGED.returned_needs_note);
+      expect(packaged.validations[2].message).toBe(PACKAGED.ext_blocked_needs_reason);
     });
 
     it('serves and refuses with the rewrite as written, and still translates the untouched and extension rules', async () => {
+      const rows = (t: typeof ZH) => ({
+        returned_needs_note: REWRITE,
+        done_needs_owner: t.done_needs_owner,
+        ext_blocked_needs_reason: t.ext_blocked_needs_reason,
+      });
+      expect(await table()).toEqual({
+        'zh-CN': { served: rows(ZH), refusal: rows(ZH) },
+        zh: { served: rows(ZH), refusal: rows(ZH) },
+        en: { served: rows(PACKAGED), refusal: rows(PACKAGED) },
+      });
+    });
+  });
+
+  describe('[#27559] with the tenant overlay rewording the extension rule', () => {
+    const EXT_REWRITE = 'Tell us what blocks this duty.';
+    beforeEach(async () => { await boot(true, EXT_REWRITE); });
+
+    it('folds the overlay copy in place of the extender rule, not beside it', () => {
+      const served = (engine.registry.getObject(OBJ) as any).validations;
+      expect(served.map((r: any) => r.name))
+        .toEqual(['returned_needs_note', 'done_needs_owner', 'ext_blocked_needs_reason']);
+      expect(served[2].message).toBe(EXT_REWRITE);
+    });
+
+    it('serves and refuses with both rewrites as written, and still translates the untouched rule', async () => {
+      const rows = (t: typeof ZH) => ({
+        returned_needs_note: REWRITE,
+        done_needs_owner: t.done_needs_owner,
+        ext_blocked_needs_reason: EXT_REWRITE,
+      });
+      expect(await table()).toEqual({
+        'zh-CN': { served: rows(ZH), refusal: rows(ZH) },
+        zh: { served: rows(ZH), refusal: rows(ZH) },
+        en: { served: rows(PACKAGED), refusal: rows(PACKAGED) },
+      });
+    });
+  });
+
+  describe('[#27559] with the tenant overlay carrying the extension rule untouched', () => {
+    beforeEach(async () => { await boot(true, PACKAGED.ext_blocked_needs_reason); });
+
+    it('serves the extension rule once and translates it on both readers', async () => {
+      const served = (engine.registry.getObject(OBJ) as any).validations;
+      expect(served.map((r: any) => r.name))
+        .toEqual(['returned_needs_note', 'done_needs_owner', 'ext_blocked_needs_reason']);
       const rows = (t: typeof ZH) => ({
         returned_needs_note: REWRITE,
         done_needs_owner: t.done_needs_owner,

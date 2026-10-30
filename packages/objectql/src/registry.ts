@@ -600,6 +600,29 @@ function stableStringify(value: unknown): string {
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
 }
 
+/** The `name` of each top-level rule in a `validations` list that has one. */
+function topLevelRuleNames(validations: unknown): string[] {
+  if (!Array.isArray(validations)) return [];
+  const names: string[] = [];
+  for (const rule of validations) {
+    const name = (rule as { name?: unknown } | null)?.name;
+    if (typeof name === 'string' && name.length > 0) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * [#27559] An extension body without its top-level rules of the given names —
+ * see {@link SchemaRegistry.tenantCarriedRuleNames}. By reference when none
+ * matched.
+ */
+function withoutRulesNamed(extension: ServiceObject, names: ReadonlySet<string>): ServiceObject {
+  const list = extension.validations;
+  if (!Array.isArray(list)) return extension;
+  const kept = list.filter((rule) => !names.has((rule as { name?: unknown } | null)?.name as string));
+  return kept.length === list.length ? extension : { ...extension, validations: kept };
+}
+
 /**
  * Global Schema Registry
  * Unified storage for all metadata types (Objects, Apps, Flows, Layouts, etc.)
@@ -3944,11 +3967,14 @@ export class SchemaRegistry {
     // access path, the claim and the assignment seam off on this object, while
     // the gate kept judging the extender's business column.
     const governQueue = resolveInjectedSystemColumns(baseDefinition).queue;
+    // [#27559] Computed once over the base, like `tenantAuthored` above.
+    const tenantRules = this.tenantCarriedRuleNames(contributors, baseDefinition);
     let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         let extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
         if (governQueue) extension = this.withoutExtensionQueueField(extension, contrib.packageId);
+        if (tenantRules) extension = withoutRulesNamed(extension, tenantRules);
         merged = mergeObjectDefinitions(merged, extension, tenantAuthored);
       }
     }
@@ -4202,6 +4228,35 @@ export class SchemaRegistry {
    * yields and the value stays exactly what the first fold produced — the same
    * answer, reached by yielding instead of by re-applying.
    */
+  /**
+   * [#27559] The names of the rules the fold's BASE carries that the `own`
+   * contributor does not declare — on an overlay base, the tenant's copies of
+   * the extenders' rules. A Studio GET → edit → PUT stores the FOLDED object,
+   * so an overlay row carries every extender rule it was served, reworded or
+   * not; an extender's rule of such a name yields to the copy, and the fold
+   * serves the rule once, as the tenant last wrote it.
+   *
+   * The scalar rule ({@link tenantAuthoredScalars}) says the same for `label` /
+   * `description`, keyed by attribute instead of by rule name, and is
+   * conservative in the same ways: no `own` contributor, or a base that IS the
+   * owner, answers `undefined` and the fold concatenates exactly as before. A
+   * name the owner declares itself is not counted, so an owner rule and an
+   * extender rule sharing a name stay two rules, as they were.
+   */
+  private tenantCarriedRuleNames(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ReadonlySet<string> | undefined {
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    if (!owner || owner === baseDefinition || !Array.isArray(baseDefinition.validations)) return undefined;
+    const ownerNames = new Set(topLevelRuleNames(owner.validations));
+    let names: Set<string> | undefined;
+    for (const name of topLevelRuleNames(baseDefinition.validations)) {
+      if (!ownerNames.has(name)) (names ??= new Set()).add(name);
+    }
+    return names;
+  }
+
   private tenantAuthoredScalars(
     contributors: ObjectContributor[],
     baseDefinition: ServiceObject,
@@ -5072,6 +5127,44 @@ export class SchemaRegistry {
     if (fqn === undefined) return undefined;
     const owner = this.objectContributors.get(fqn)?.find(c => c.ownership === 'own');
     return owner && isCodeArtifactBody(owner.definition) ? owner : undefined;
+  }
+
+  /**
+   * [ADR-0029 D9.2a, #27559] The packaged base a served object is compared
+   * against: the {@link getPackagedObjectOwner} declaration, with the
+   * `validations` of every CODE `extend` contributor appended in fold order.
+   *
+   * The packaged message of a rule is the message of whichever code layer
+   * ships that rule name — the owner or a code extender — because the catalog
+   * translates exactly what those layers ship. Reading the owner alone left an
+   * extender's rule with nothing to compare a tenant's rewrite with, so the
+   * catalog won over it on `/meta` and on the refusal alike. Both readers take
+   * their packaged rules from here (`getPackagedObjectBase` in
+   * `@objectstack/metadata-protocol`, `packagedRuleLookup` in this package),
+   * so they cannot split again.
+   *
+   * ⛔ ONLY `validations` widens. The scalars stay the owner's: an extension's
+   * `label` / `description` must keep reading as diverged from the packaged
+   * one, or the catalog takes back the case #8037 filed.
+   *
+   * Returns the owner's definition BY REFERENCE when no code extender ships a
+   * rule, and `undefined` exactly where {@link getPackagedObjectOwner} does.
+   */
+  getPackagedObjectBase(name: string): ServiceObject | undefined {
+    const owner = this.getPackagedObjectOwner(name);
+    if (!owner) return undefined;
+    const fqn = this.resolveObjectKey(name);
+    let rules: unknown[] | undefined;
+    for (const contrib of (fqn === undefined ? undefined : this.objectContributors.get(fqn)) ?? []) {
+      if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+      const list = contrib.definition.validations;
+      if (!Array.isArray(list) || list.length === 0) continue;
+      rules ??= [...(owner.definition.validations ?? [])];
+      rules.push(...list);
+    }
+    return rules === undefined
+      ? owner.definition
+      : { ...owner.definition, validations: rules as ServiceObject['validations'] };
   }
 
   /**
