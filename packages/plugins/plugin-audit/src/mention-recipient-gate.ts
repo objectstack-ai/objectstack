@@ -36,8 +36,9 @@
  * as they decide when that user opens the record or lists its comments.
  *
  * The comment is read from inside the author's write: the mention writer runs
- * on the comment's `afterInsert`, where the engine binds every read to the
- * write's own unit of work. A read that cannot see the row withholds — the
+ * on the comment's `afterInsert` (and, for a mention an edit added, its
+ * `afterUpdate`), where the engine binds every read to the write's own unit of
+ * work. A read that cannot see the row withholds — the
  * fail-closed direction.
  *
  * ⛔ Not a row filter on `sys_notification`: a recipient reads their OWN
@@ -81,7 +82,10 @@ export interface MentionRecipientGateDeps {
   logger?: { warn?: (message: string, meta?: Record<string, unknown>) => void };
 }
 
-/** Why a mentioned user was not notified. Logged; never shown to the author. */
+/**
+ * Why a mentioned user was not notified. Logged; never shown to the author —
+ * the author is told only THAT a named user will not be notified (`onWithheld`).
+ */
 export type MentionWithheldReason =
   | 'not_a_user'
   | 'unknown_email'
@@ -108,6 +112,14 @@ export interface MentionGateInput {
    * be readable.
    */
   commentId?: string | null;
+  /**
+   * [#27703] Told the id of each mentioned USER this gate withholds, once per
+   * withholding, whatever the reason — the user the author named who will not
+   * be notified. The reason is never passed: it stays in the log line. An
+   * entry that names no user (an unknown email, an audience expansion) has no
+   * id to pass. A callback that throws never changes the verdict.
+   */
+  onWithheld?: (userId: string) => void;
 }
 
 const SYSTEM_CONTEXT = { isSystem: true } as const;
@@ -133,6 +145,13 @@ export async function admitMentionRecipients(
       });
     } catch {
       /* logging must never fail the comment write */
+    }
+    if (userId) {
+      try {
+        input.onWithheld?.(userId);
+      } catch {
+        /* a listener must never change the verdict or fail the comment write */
+      }
     }
   };
 

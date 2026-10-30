@@ -163,7 +163,9 @@ other adapter.
 | GET | `/storage/files/:fileId` | — | Stable browser URL; 302s to the same signed URL (what file fields carry) |
 
 `storage.upload(file)` runs steps 1–3 for you, including the direct-to-storage
-`PUT` in step 2.
+`PUT` in step 2. Step 1 refuses an empty `mimeType` with `400 INVALID_REQUEST`,
+so for a file whose type the browser does not know (`file.type === ''`) the
+helper sends `application/octet-stream`; a typed file keeps its own type.
 
 A file field takes the `fileId` only after step 3. A signed-in record write
 that names a file whose upload was never completed is refused with `400

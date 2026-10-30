@@ -5186,18 +5186,28 @@ export interface StoredMetadataSearchSchema {
  *   string or an array) — naming one is refused, `INVALID_FIELD` / 400, the
  *   evaluate refusals' envelope, under the caller's wire spelling of the slot
  *   (`wireSpelling`, the door's; the bare canonical name when absent);
+ * - [#28120] an explicit list that names NO field — an empty array, a blank or
+ *   comma-only string, an array with no string entry — is not "names none": it
+ *   is passed through untouched, for the engine's own refusal to answer
+ *   (`400 VALIDATION_ERROR` for an empty one, #27732; `400 INVALID_FIELD` for
+ *   one naming no searchable field). Narrowing it here wrote a non-empty set
+ *   back over the caller's list, so an override the door and the engine both
+ *   refuse was served. The door never reaches this with one: its ingress gate
+ *   refuses it first;
  * - a search that names none is NARROWED: the object's resolved searchable set
  *   ({@link resolveSearchFieldResolution}) minus those columns is returned, for
  *   the caller to run as `searchFields` — the engine intersects an override
  *   with that set and never widens it;
  * - a set that narrows to nothing is refused rather than returned empty: an
- *   empty override is ABSENT to the engine, which would then scan the whole
- *   default set, these columns included.
+ *   empty override is refused by the engine as one naming no field, a
+ *   caller's mistake this caller did not make, so the family's own refusal
+ *   names the cause instead.
  *
  * Returns `undefined` when the query runs as it is — an object outside the
- * family, no search, an explicit list that passes, or no readable field map
- * (the engine has none to expand a search over either; the same rule the door's
- * field gates apply: a non-object, array or empty `fields`). Throws the refusal.
+ * family, no search, an explicit list that passes or names no field, or no
+ * readable field map (the engine has none to expand a search over either; the
+ * same rule the door's field gates apply: a non-object, array or empty
+ * `fields`). Throws the refusal.
  */
 export function narrowStoredMetadataSearch(
     object: string,
@@ -5222,6 +5232,8 @@ export function narrowStoredMetadataSearch(
         if (refusal) throw refusal;
         return undefined;
     }
+    // [#28120] A list naming no field is the engine's to refuse, never narrowed.
+    if (typeof explicit === 'string' || Array.isArray(explicit)) return undefined;
     if (search == null) return undefined;
     const fields = schema?.fields;
     if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
@@ -13724,9 +13736,17 @@ export class ObjectStackProtocolImplementation implements
         // — the engine reports them through the write's own options, so a
         // nested write a hook makes inside this one never adds to them.
         const warnings: ValidationAdvisoryEvent[] = [];
+        // [#27703] The mentioned users the mention recipient gate withheld on
+        // THIS write, answered as `withheldMentions` to this request alone: the
+        // mention writer reads the listener off its `after*` hook's
+        // `ctx.input.options`, which is this bag, so neither a nested write
+        // nor any other request's answer ever carries them, and nothing is
+        // stored on the comment.
+        const withheldMentions = new Set<string>();
         const opts: any = {
             onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
             onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
+            onMentionsWithheld: (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); },
         };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.insert(request.object, request.data, opts);
@@ -13744,6 +13764,7 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
         };
     }
 
@@ -13892,6 +13913,10 @@ export class ObjectStackProtocolImplementation implements
         // (see `createData`).
         const warnings: ValidationAdvisoryEvent[] = [];
         opts.onValidationAdvisory = (e: ValidationAdvisoryEvent) => { warnings.push(e); };
+        // [#27703] The mentions this update ADDED that the gate withheld,
+        // answered as `withheldMentions` (see `createData`).
+        const withheldMentions = new Set<string>();
+        opts.onMentionsWithheld = (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); };
         // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
         // the path `:id` — and nothing in the payload gets to move it.
         //
@@ -13968,6 +13993,7 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
         };
     }
 

@@ -54,6 +54,11 @@ describe('canonicalizeSqlType (ADR-0015 §4.6)', () => {
     expect(canonicalizeSqlType('Edm.Guid', 'odata')).toBe('uuid');
     expect(canonicalizeSqlType('Edm.Binary', 'odata')).toBe('binary');
     expect(canonicalizeSqlType('Collection(Edm.String)', 'odata')).toBe('array');
+    // The two primitives only OData v2's CSDL declares (#28125).
+    expect(canonicalizeSqlType('Edm.DateTime', 'odata')).toBe('datetime');
+    expect(canonicalizeSqlType('Edm.Time', 'odata')).toBe('time');
+    expect(suggestFieldTypeForSqlType('Edm.DateTime', 'odata')).toBe('datetime');
+    expect(suggestFieldTypeForSqlType('Edm.Time', 'odata')).toBe('time');
     // The vocabulary is the dialect's own: no other dialect reads an EDM name.
     expect(canonicalizeSqlType('Edm.Int32')).toBe('unknown');
     expect(canonicalizeSqlType('Edm.Int32', 'postgres')).toBe('unknown');

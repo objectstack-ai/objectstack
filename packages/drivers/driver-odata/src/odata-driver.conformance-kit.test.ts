@@ -7,9 +7,10 @@
  * in-repo plugin driver, so a kit change that a real driver cannot pass fails
  * in this repository first.
  *
- * Each fixture is served by the in-process OData v4 service
+ * Each fixture is served by the in-process OData service
  * (`__fixtures__/odata-service.ts`), which evaluates the `$filter` the driver
- * writes, over both collations. The floor tier only: the driver pushes down a
+ * writes, over both collations, speaking v4 and then v2 (with the driver's
+ * `version: '2.0'`). The floor tier only: the driver pushes down a
  * superset when a `where` does not translate whole, which the floor needs and
  * the direct tier (a driver that skips the floor) refuses by design.
  */
@@ -23,42 +24,50 @@ import {
 import { parseODataDriverConfig } from './config.js';
 import { ODataDriver } from './odata-driver.js';
 import type { FetchLike } from './transport.js';
-import { CONFORMANCE_ROOT, odataService, type EdmType, type ServiceProperty } from './__fixtures__/odata-service.js';
+import {
+  CONFORMANCE_ROOT,
+  odataService,
+  type EdmType,
+  type ODataVersion,
+  type ServiceProperty,
+} from './__fixtures__/odata-service.js';
 
 const ENTITY_SET = 'Rows';
-const EDM: Record<PluginDriverConformanceFixture['fields'][string]['type'], EdmType> = {
-  text: 'Edm.String',
-  number: 'Edm.Double',
-  datetime: 'Edm.DateTimeOffset',
-  date: 'Edm.Date',
+type FieldType = PluginDriverConformanceFixture['fields'][string]['type'];
+const EDM: Record<ODataVersion, Record<FieldType, EdmType>> = {
+  '4.0': { text: 'Edm.String', number: 'Edm.Double', datetime: 'Edm.DateTimeOffset', date: 'Edm.Date' },
+  // v2's CSDL has neither Edm.Date nor a usual DateTimeOffset column: both are Edm.DateTime.
+  '2.0': { text: 'Edm.String', number: 'Edm.Double', datetime: 'Edm.DateTime', date: 'Edm.DateTime' },
 };
 
 /** The driver over `fetch`, bound to the fixture's object as an external object on the service's one entity set. */
-function driverOver(fixture: PluginDriverConformanceFixture, fetch: FetchLike): PluginDriverConformanceTarget {
-  const driver = new ODataDriver(parseODataDriverConfig({ name: 'conformance', serviceRoot: CONFORMANCE_ROOT }), { fetch });
-  driver.registerExternalObject({ name: fixture.object, external: { remoteName: ENTITY_SET } });
+function driverOver(fixture: PluginDriverConformanceFixture, fetch: FetchLike, version: ODataVersion): PluginDriverConformanceTarget {
+  const driver = new ODataDriver(parseODataDriverConfig({ name: 'conformance', serviceRoot: CONFORMANCE_ROOT, version }), { fetch });
+  // The object as the engine registers it: with its declared fields (a `date` field over v2's Edm.DateTime reads its date).
+  driver.registerExternalObject({ name: fixture.object, fields: fixture.fields, external: { remoteName: ENTITY_SET } });
   return { driver };
 }
 
-for (const collation of ['ordinal', 'case-insensitive'] as const) {
+for (const version of ['4.0', '2.0'] as const) for (const collation of ['ordinal', 'case-insensitive'] as const) {
   definePluginDriverConformanceSuite(
     { describe, it, afterAll },
     {
       setup: (fixture) => {
         const properties: ServiceProperty[] = [
           { name: 'id', type: 'Edm.String', nullable: false },
-          ...Object.entries(fixture.fields).map(([name, f]) => ({ name, type: EDM[f.type] })),
+          ...Object.entries(fixture.fields).map(([name, f]) => ({ name, type: EDM[version][f.type] })),
         ];
-        const service = odataService({ entitySet: ENTITY_SET, properties, rows: fixture.rows, collation, serverPageSize: 5 });
-        return driverOver(fixture, service.fetch);
+        const service = odataService({ entitySet: ENTITY_SET, properties, rows: fixture.rows, collation, serverPageSize: 5, version });
+        return driverOver(fixture, service.fetch, version);
       },
-      setupUnavailable: (fixture) => driverOver(fixture, async () => { throw new TypeError('fetch failed: connect ECONNREFUSED'); }),
+      setupUnavailable: (fixture) =>
+        driverOver(fixture, async () => { throw new TypeError('fetch failed: connect ECONNREFUSED'); }, version),
       writeProbes: [
         // The service answers 409 to a second entity under an existing key.
         { name: 'a create under a key the service already holds', operation: 'create', args: [{ id: '1', a: 'x' }], expect: 'refused' },
         { name: 'an update by key the service accepts', operation: 'update', args: ['1', { a: 'changed' }], expect: 'accepted' },
       ],
     },
-    `driver-odata through the plugin-driver conformance kit, over a ${collation} service`,
+    `driver-odata through the plugin-driver conformance kit, over a ${collation} service${version === '2.0' ? ' — OData v2' : ''}`,
   );
 }

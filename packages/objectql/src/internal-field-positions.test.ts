@@ -141,12 +141,18 @@ describe('[#22646] a $search never scans an `internal: true` column', () => {
         expect(blob).not.toContain('token');
     });
 
-    it('an explicit searchFields naming the flagged column is intersected away at the engine (withheld)', async () => {
+    it('an explicit searchFields naming only the flagged column is refused at the engine, never scanned', async () => {
         await ctx.engine.insert('itest_vault', { name: 'alpha', prefix: 'osk_', rank: 1, token: 'h1' }, SYSTEM as any);
-        await ctx.engine.find('itest_vault', { search: 'h1', searchFields: ['token'] }, SYSTEM);
+        const reads = ctx.seenWhere.length;
+        // [#28120] The override names nothing scannable (the flagged column is
+        // withheld), so it is refused rather than widened to the default set.
+        await expect(ctx.engine.find('itest_vault', { search: 'h1', searchFields: ['token'] }, SYSTEM))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'searchFields' });
+        expect(ctx.seenWhere.length).toBe(reads);
+        // Named beside a scannable field, it is still intersected away: never a clause on `token`.
+        await ctx.engine.find('itest_vault', { search: 'h1', searchFields: ['name', 'token'] }, SYSTEM);
         const blob = JSON.stringify(lastSearchWhere() ?? null);
-        // The override narrowed to nothing scannable, so the engine falls back
-        // to the (internal-free) default set — never a clause on `token`.
+        expect(blob).toContain('name');
         expect(blob).not.toContain('token');
     });
 
