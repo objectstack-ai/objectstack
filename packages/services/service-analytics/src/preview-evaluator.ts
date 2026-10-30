@@ -44,6 +44,7 @@ import { explicitDateRangeWindow } from './date-range-array-arm.js';
 import { dateRangeWindowBounds } from './dataset-executor.js';
 import { DATASET_DURATION_UNIT_SECONDS } from '@objectstack/spec/ui';
 import { durationMeasureIn } from './duration-measure-sql.js';
+import { invalidMemberError } from './dataset-refusal.js';
 import type { DurationMeasureSpec } from './strategies/types.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
 // EXPORTED by `filter-normalizer` precisely so a sibling in this package cannot
@@ -752,6 +753,21 @@ function durationOf(row: Row, duration: DurationMeasureSpec): number | null {
 }
 
 /**
+ * [#28172] The refusal for a measure {@link evaluateAnalyticsQueryOverRows}
+ * is handed but the cube does not carry — the `INVALID_FIELD` / 400 envelope
+ * the live faces answer a measure they cannot aggregate with, through this
+ * package's one constructor for it.
+ */
+function undeclaredPreviewMeasureError(member: string, cube: Cube): Error {
+  const declared = Object.keys(cube.measures ?? {});
+  return invalidMemberError(
+    `[Analytics] Measure '${member}' on cube '${cube.name}' is not one the cube carries, so the ` +
+      `draft preview has nothing to aggregate for it. Valid measures: ${declared.join(', ') || '(none)'}.`,
+    { member, param: 'measures', cube: cube.name },
+  );
+}
+
+/**
  * Evaluate `query` over `rows` using the cube's measure/dimension specs.
  * Mirrors the engine strategies' output contract: rows keyed by bare
  * measure/dimension names, `fields` describing each output column.
@@ -875,8 +891,16 @@ export function evaluateAnalyticsQueryOverRows(
         row[m] = aggregate(g.rows.map((r) => ({ [DURATION_OPERAND]: durationOf(r, duration) })), duration.aggregate, DURATION_OPERAND);
         continue;
       }
+      // [#28172] Every other measure is one the cube carries. The service
+      // hands this function the cube WITH the measures the published path
+      // would mint for this query (`amount_sum` → `SUM(amount)`), having
+      // refused the spellings it refuses, so a measure missing here is a
+      // caller that skipped that step. It is refused, never read as
+      // `count(*)`: that fallback answered a misspelled measure with a
+      // plausible row count while both live strategies refused it.
       const metric = cube.measures?.[m];
-      row[m] = aggregate(g.rows, String(metric?.type ?? 'count'), String(metric?.sql ?? '*'));
+      if (!metric) throw undeclaredPreviewMeasureError(m, cube);
+      row[m] = aggregate(g.rows, String(metric.type ?? 'count'), String(metric.sql ?? '*'));
     }
     out.push(row);
   }

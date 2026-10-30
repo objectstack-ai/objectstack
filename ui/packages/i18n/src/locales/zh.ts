@@ -1946,6 +1946,7 @@ const zh = {
       title: '报表',
       emptyTitle: '暂无报表',
       emptyDescription: '此应用没有你可以打开的报表。',
+      otherApps: '你的其它应用中的报表：',
       viewsLabel: '报表视图',
       viewAll: '全部',
       viewRecent: '最近',

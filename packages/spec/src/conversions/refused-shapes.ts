@@ -38,7 +38,9 @@
  *   component-props gate parses at the CLI doors and at the runtime save
  *   door — and the value-slot judge
  *   `AutomationEngine.registerFlow` and `objectstack validate` run
- *   ({@link flowNodeValueTemplateRefusals}), and the `external` binding judge
+ *   ({@link flowNodeValueTemplateRefusals}), handed the whole node as those
+ *   doors hand it, so a sibling block's slot is judged too, and the
+ *   `external` binding judge
  *   the object refinement and `defineStack` share
  *   ({@link externalBindingDatasourceRefusal}), and the one-name-per-action
  *   judge of the object refinement ({@link duplicateActionNames}). A site is listed here exactly
@@ -54,7 +56,10 @@
  * The TODO notices it produces are the published shape.
  */
 
-import { flowNodeValueTemplateRefusals } from '../automation/flow-value-slot-template.js';
+import {
+  flowNodeValueTemplateRefusals,
+  type FlowNodeValueTemplateRefusal,
+} from '../automation/flow-value-slot-template.js';
 import {
   controlledByParentMasterRefusal,
   isControlledByParentMasterField,
@@ -391,30 +396,75 @@ const viewDataApiProvider: RefusedStoredShape = {
 
 // ── #23269: a flow value slot carrying a `{…}` token, a CRUD filter operand among them ──
 
+/**
+ * Hand every value-slot refusal of every node of every stored flow to `visit`,
+ * with the flow's listed name and the node's own path. The judge is handed the
+ * node itself (#28163), as `registerFlow` and `objectstack validate` hand it,
+ * so a slot the ledger roots in a sibling block — a `connector_action` node's
+ * `connectorConfig.input` — is judged here exactly when those doors judge it.
+ * Each refusal names its block, and the two detectors below split the blocks
+ * by the D3 entry that refuses each: `config` and `connectorConfig`, which
+ * `refused-shapes.test.ts` holds equal to the blocks the ledger declares, so a
+ * new sibling block cannot go unlisted.
+ */
+function forEachFlowValueSlotRefusal(
+  stack: Dict,
+  visit: (flowName: string, node: Dict & { type: string }, path: string, refusal: FlowNodeValueTemplateRefusal) => void,
+): void {
+  const flows = stack.flows;
+  if (!Array.isArray(flows)) return;
+  flows.forEach((flow, fi) => {
+    if (!isDict(flow) || !Array.isArray(flow.nodes)) return;
+    const flowName = typeof flow.name === 'string' ? flow.name : `flows[${fi}]`;
+    mapFlowNodeList(flow.nodes, `flows[${fi}].nodes`, (node, path) => {
+      if (typeof node.type !== 'string') return node;
+      const typed = node as Dict & { type: string };
+      for (const refusal of flowNodeValueTemplateRefusals(typed.type, node.config, node)) {
+        visit(flowName, typed, path, refusal);
+      }
+      return node;
+    });
+  });
+}
+
 const flowValueSlotTemplateToken: RefusedStoredShape = {
   id: 'flow-value-slot-template-dialect-refused',
   toMajor: 18,
   surface: 'flows[].nodes[].config — a value slot (a get_record, update_record or delete_record filter operand among them)',
   detect(stack, report) {
-    const flows = stack.flows;
-    if (!Array.isArray(flows)) return;
-    flows.forEach((flow, fi) => {
-      if (!isDict(flow) || !Array.isArray(flow.nodes)) return;
-      const flowName = typeof flow.name === 'string' ? flow.name : `flows[${fi}]`;
-      mapFlowNodeList(flow.nodes, `flows[${fi}].nodes`, (node, path) => {
-        if (typeof node.type !== 'string') return node;
-        for (const refusal of flowNodeValueTemplateRefusals(node.type, node.config)) {
-          report({
-            path: `${path}.config.${refusal.path}`,
-            from: JSON.stringify(refusal.source),
-            reason: `Flow \`${flowName}\`, node '${String(node.id)}' (${node.type}), ${refusal.label} at `
-              + `config.${refusal.path}. No lossless rewrite: the template resolved a token CEL reads `
-              + 'differently, so the upgrade does not convert it. Left as stored, registerFlow refuses the flow: '
-              + 'it is not registered at boot and never runs. '
-              + refusal.message,
-          });
-        }
-        return node;
+    forEachFlowValueSlotRefusal(stack, (flowName, node, path, refusal) => {
+      if (refusal.block !== 'config') return;
+      report({
+        path: `${path}.config.${refusal.path}`,
+        from: JSON.stringify(refusal.source),
+        reason: `Flow \`${flowName}\`, node '${String(node.id)}' (${node.type}), ${refusal.label} at `
+          + `config.${refusal.path}. No lossless rewrite: the template resolved a token CEL reads `
+          + 'differently, so the upgrade does not convert it. Left as stored, registerFlow refuses the flow: '
+          + 'it is not registered at boot and never runs. '
+          + refusal.message,
+      });
+    });
+  },
+};
+
+// ── #27968: a connector_action node's connectorConfig.input value carrying a `{…}` token ──
+
+const connectorActionInputTemplateToken: RefusedStoredShape = {
+  id: 'connector-action-input-value-slot-judged',
+  toMajor: 18,
+  surface: 'flows[].nodes[].connectorConfig.input — a value of a connector_action node\'s input map',
+  detect(stack, report) {
+    forEachFlowValueSlotRefusal(stack, (flowName, node, path, refusal) => {
+      if (refusal.block !== 'connectorConfig') return;
+      const at = `${refusal.block}.${refusal.path}`;
+      report({
+        path: `${path}.${at}`,
+        from: JSON.stringify(refusal.source),
+        reason: `Flow \`${flowName}\`, node '${String(node.id)}' (${node.type}), ${refusal.label} at ${at}. `
+          + 'No lossless rewrite: the action was handed the token\'s text as written, and no token has a '
+          + 'lossless CEL spelling, so the upgrade does not convert it. Left as stored, registerFlow refuses the '
+          + 'flow: it is not registered at boot and never runs. '
+          + refusal.message,
       });
     });
   },
@@ -513,6 +563,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   controlledByParentWithoutOneMaster,
   viewDataApiProvider,
   flowValueSlotTemplateToken,
+  connectorActionInputTemplateToken,
   externalBindingOnManagedDatasource,
   visibilityHasArgument,
   objectDuplicateActionName,

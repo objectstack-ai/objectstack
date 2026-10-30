@@ -2656,6 +2656,21 @@ const WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION =
   'was withheld; otherwise the key is omitted.';
 
 /**
+ * The `notice` member the create and update answers declare (#28000) — one
+ * sentence, so the two answers cannot drift apart. Response-only: it is no
+ * field of any object, it is never stored, and a request never sends it.
+ */
+const WRITE_ANSWER_NOTICE_DESCRIPTION =
+  'One author-written message telling the person who made THIS write what the save set in motion (for example ' +
+  '"Sent to your manager for approval"), set by a hook running on the write through the write\'s own `onNotice` ' +
+  'listener (`WriteObservabilityOptions`). Info severity: it reports an outcome, never a problem, so it is distinct ' +
+  'from `warnings` (the advisory validation-rule hits) and a client shows it with, or in place of, its own ' +
+  'success message. One message: when more than one call sets it, the LAST one wins. Present ONLY when a hook set ' +
+  'a non-empty message on a write that succeeded; otherwise the key is omitted. A nested write a hook or a flow ' +
+  'made inside this one carries its own options, so its notice never reaches this answer. Response-only: never ' +
+  'stored on the record.';
+
+/**
  * Create Data Response
  */
 export const CreateDataResponseSchema = lazySchema(() => z.object({
@@ -2674,6 +2689,7 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
   ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
   withheldMentions: z.array(z.string()).optional().describe(WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION),
+  notice: z.string().min(1).optional().describe(WRITE_ANSWER_NOTICE_DESCRIPTION),
 }));
 
 /**
@@ -2856,6 +2872,7 @@ export const UpdateDataResponseSchema = lazySchema(() => z.object({
   ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
   withheldMentions: z.array(z.string()).optional().describe(WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION),
+  notice: z.string().min(1).optional().describe(WRITE_ANSWER_NOTICE_DESCRIPTION),
 }));
 
 /**

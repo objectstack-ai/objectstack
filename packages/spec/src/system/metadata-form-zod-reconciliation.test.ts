@@ -376,6 +376,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'submitText',
     why: "planned, not yet rendered — the param dialog's submit button label is validated at parse (an I18nLabel, never blank, only beside a non-empty `params`) and translated by `translateAction`, but the console's param dialog still draws its default \"Confirm\" until it reads the key. A form control offered today would let an author set a button label nothing shows",
   },
+  // #27973 — the same declared-not-enforced shape: `percentDisplay` is the spec
+  // half of a percent field's read-only face, `planned` in `liveness/field.json`
+  // until the console's percent face reads it.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'percentDisplay',
+    why: "planned, not yet rendered — a percent field's read-only face (`bar` or `plain`) parses, but the console's percent face draws the progress bar for every value until it reads the key, after the spec publishes. A form control offered today would let an author pick `plain` and still see the bar; the field form gains the row with the renderer half, as `useGrouping` did once it was enforced",
+  },
   {
     kind: 'omit',
     type: 'view',

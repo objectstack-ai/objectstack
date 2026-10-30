@@ -58,7 +58,6 @@ import {
 // Import shared auth schemas from canonical source
 import {
   ConnectorAPIKeySchema as APIKeySchema,
-  ConnectorOAuth2Schema as OAuth2Schema,
   ConnectorBasicAuthSchema as BasicAuthSchema,
   ConnectorBearerAuthSchema as BearerAuthSchema,
   ConnectorNoAuthSchema as NoAuthSchema,
@@ -71,7 +70,6 @@ import {
 } from '../../scripts/lib/export-origins-testkit';
 // Deriving types from schemas
 type APIKey = z.infer<typeof APIKeySchema>;
-type OAuth2 = z.infer<typeof OAuth2Schema>;
 
 // ============================================================================
 // Authentication Schemas Tests (from shared/connector-auth.zod.ts)
@@ -111,65 +109,20 @@ describe('APIKeySchema', () => {
   });
 });
 
-describe('OAuth2Schema', () => {
-  it('should accept valid OAuth2 configuration', () => {
-    const auth: OAuth2 = {
-      type: 'oauth2',
-      clientId: 'client-id',
-      clientSecret: 'client-secret',
-      authorizationUrl: 'https://auth.example.com/authorize',
-      tokenUrl: 'https://auth.example.com/token',
-    };
-    
-    expect(() => OAuth2Schema.parse(auth)).not.toThrow();
-  });
-  
-  it('should accept OAuth2 with scopes and refresh token', () => {
-    const auth = {
-      type: 'oauth2' as const,
-      clientId: 'client-id',
-      clientSecret: 'client-secret',
-      authorizationUrl: 'https://auth.example.com/authorize',
-      tokenUrl: 'https://auth.example.com/token',
-      scopes: ['read', 'write'],
-      refreshToken: 'refresh-token-xyz',
-    };
-    
-    const parsed = OAuth2Schema.parse(auth);
-    expect(parsed.scopes).toHaveLength(2);
-    expect(parsed.refreshToken).toBe('refresh-token-xyz');
-  });
-  
-  it('should accept OAuth2 without optional fields', () => {
-    const auth = {
-      type: 'oauth2' as const,
-      clientId: 'client-id',
-      clientSecret: 'client-secret',
-      authorizationUrl: 'https://auth.example.com/authorize',
-      tokenUrl: 'https://auth.example.com/token',
-    };
-    
-    const parsed = OAuth2Schema.parse(auth);
-    expect(parsed.type).toBe('oauth2');
-    expect(parsed.clientId).toBe('client-id');
-  });
-});
+// (`OAuth2Schema` tests lived here until ADR-0143 D7 retired the runtime
+// `oauth2` variant — it inlined a client secret and a refresh token and no
+// provider read it. The retirement is pinned in `shared/connector-auth.test.ts`;
+// OAuth2 is now declared on a provider-bound instance's `auth`.)
 
 describe('ConnectorAuthConfigSchema (Authentication)', () => {
   it('should accept all authentication types via discriminated union', () => {
     const keyAuth = { type: 'api-key' as const, key: 'key' };
-    const oauth2Auth = { 
-      type: 'oauth2' as const, 
-      clientId: 'id', 
-      clientSecret: 'secret',
-      authorizationUrl: 'https://auth.example.com/authorize',
-      tokenUrl: 'https://auth.example.com/token',
-    };
+    const bearerAuth = { type: 'bearer' as const, token: 'tok' };
     const basicAuth = { type: 'basic' as const, username: 'user', password: 'pass' };
     const noAuth = { type: 'none' as const };
     
     expect(() => AuthConfigSchema.parse(keyAuth)).not.toThrow();
-    expect(() => AuthConfigSchema.parse(oauth2Auth)).not.toThrow();
+    expect(() => AuthConfigSchema.parse(bearerAuth)).not.toThrow();
     expect(() => AuthConfigSchema.parse(basicAuth)).not.toThrow();
     expect(() => AuthConfigSchema.parse(noAuth)).not.toThrow();
   });
@@ -326,11 +279,8 @@ describe('ConnectorSchema', () => {
       description: 'A comprehensive connector',
       icon: 'cloud',
       authentication: {
-        type: 'oauth2' as const,
-        clientId: 'client',
-        clientSecret: 'secret',
-        authorizationUrl: 'https://auth.example.com/authorize',
-        tokenUrl: 'https://auth.example.com/token',
+        type: 'bearer' as const,
+        token: 'secret',
       },
       // `syncConfig` and `fieldMappings` were authored here until ADR-0049
       // retired them (`connector-sync-retirement.test.ts`).

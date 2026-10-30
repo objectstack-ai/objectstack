@@ -2216,6 +2216,7 @@ const es = {
       title: "Informes",
       emptyTitle: "No hay informes",
       emptyDescription: "Esta aplicación no tiene informes que puedas abrir.",
+      otherApps: "Informes en tus otras aplicaciones:",
       viewsLabel: "Vistas de informes",
       viewAll: "Todos los informes",
       viewRecent: "Recientes",

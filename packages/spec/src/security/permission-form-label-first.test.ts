@@ -49,9 +49,16 @@ describe('permission-set form — Label first and required, Name after it', () =
     expect(row('description')?.required).toBeUndefined();
   });
 
-  it("the name's help says it comes from the label", () => {
-    expect(row('name')?.helpText).toMatch(/derived from the label/i);
-    expect(row('name')?.helpText).toMatch(/snake_case/);
+  // The create form fills `name` from the label's Latin letters and digits
+  // only, so a label written all in Chinese or Japanese fills nothing. The help
+  // names both outcomes rather than promising a fill those labels never get.
+  it("the name's help says when it comes from the label, and when to type it", () => {
+    const help = row('name')?.helpText ?? '';
+    expect(help).toMatch(/from the label/i);
+    expect(help).toMatch(/type it/i);
+    expect(help).toMatch(/snake_case/);
+    // CONTROL: the unconditional promise is gone.
+    expect(help).not.toMatch(/derived from the label/i);
   });
 
   it('moves no accept set: the schema still parses a set with no label', () => {
