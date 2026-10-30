@@ -373,6 +373,30 @@
       "verifiedAt": "2026-10-16",
       "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text). Read camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#explicitAllowCreate (objectui#12157 retired the `allow_create` read)."
     },
+    "lookupAutofill": {
+      "status": "planned",
+      "verifiedAt": "2026-10-30",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/spec/src/data/field.zod.ts#lookupAutofill (the parse-time door, field half: the FieldSchema superRefine refuses the key off a single-value `lookup` / `master_detail`); packages/spec/src/data/object.zod.ts#refuseDishonestLookupAutofill (the parse-time door, target half: each target a declared, author-written field of the same object, not the lookup itself, named once); packages/spec/src/stack.zod.ts#collectLookupAutofillErrors (the `os validate` / `os build` door, source half: a declared, non-`internal` field of the referenced object whose value the target holds); packages/spec/src/data/field-lookup-autofill.test.ts (the accept and refuse pins)",
+      "note": "PLANNED — declared ahead of its one reader by the card's own sequencing (#27945 is the spec half; the ui half, the record form's lookup widget and the line-item grid writing the declared targets on pick, is a separate domain:ui card). PRODUCER: HotCRM's quote line item (product lookup, `unit_price` from the product's `list_price`), today filled only after save by a server hook. CONSUMER: ui/packages/fields LookupField (the form) and ui/packages/fields/src/widgets/GridField.tsx#lookupAutofillPatch (the grid), which today copies only same-named fields under the column key `autofill`. Measured in this repo at 3a2f4c00: no reader of `lookupAutofill` anywhere outside packages/spec, ui/ included (the key is new). No `authorWarn`, on the `referenceDeletedWhen` precedent: the authoring half (parse, target and source checks) is enforced now, an author who sets it today re-authors nothing when the reader lands, and a warned field row would reopen the lint's field walk for one key. Flip to `live` when the ui card lands, citing both read points.",
+      "children": {
+        "target": {
+          "status": "planned",
+          "verifiedAt": "2026-10-30",
+          "note": "The field of the declaring object a pick fills. Judged at parse by the container's evidence (snake_case; declared on the same object, not the lookup itself, not readonly, not computed, named once); written by nothing until the ui card's form and grid read the pairs. Shares the container's verdict and its flip."
+        },
+        "source": {
+          "status": "planned",
+          "verifiedAt": "2026-10-30",
+          "note": "The field of the picked record whose value is copied. Judged at `os validate` / `os build` by the container's evidence (declared on the referenced object, not internal, a value the target holds); read by nothing until the ui card lands. Shares the container's verdict and its flip."
+        },
+        "overwrite": {
+          "status": "planned",
+          "verifiedAt": "2026-10-30",
+          "note": "Opt-in to replace a value the target already holds on every pick; absent, a pick fills only an empty target or one an earlier pick filled. Read by nothing until the ui card lands. Shares the container's verdict and its flip."
+        }
+      }
+    },
     "searchable": {
       "status": "live",
       "evidence": "ui/packages/plugin-dashboard/src/WidgetConfigPanel.tsx (:458 in objectui, commit not pinned)",

@@ -365,6 +365,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
+  // in the liveness ledger, read by no form or grid until the ui card's lookup
+  // widget writes the declared targets on pick.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'lookupAutofill',
+    why: "planned, not yet read — a lookup's pick autofill pairs (`[{ target, source, overwrite? }]`) are validated at parse (a single-value relationship; each target a writable field of the same object, named once) and their sources at `os validate` / `os build`, but no form or grid fills a field from them until the ui card's lookup widget writes the declared targets on pick. A form control offered today would let an author declare a fill nothing performs",
+  },
   {
     kind: 'omit',
     type: 'view',
