@@ -5366,9 +5366,14 @@ export class ObjectStackClient {
   storage = {
     upload: async (file: any, scope: UploadScope = 'user'): Promise<FileUploadResponse> => {
         // 1. Get Presigned URL
+        // A browser `File` of unknown type carries `type === ''`, and the
+        // presigned door refuses an empty `mimeType` (its published contract,
+        // `GetPresignedUrlRequestSchema.mimeType` is `min(1)`). An unknown type
+        // is therefore sent as `application/octet-stream`; a typed file keeps
+        // its own type.
         const presignedReq: GetPresignedUrlRequest = {
             filename: file.name,
-            mimeType: file.type,
+            mimeType: file.type || 'application/octet-stream',
             size: file.size,
             scope
         };

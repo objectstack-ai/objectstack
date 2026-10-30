@@ -71,11 +71,14 @@ describe('isValueEnvelopeSlot — read off the spec expression ledger (objectui#
     // The ledger's whole `value`-role list at 18.0.0-next.0. The six `KEY.*`
     // maps above are the ones a key/value cell serves; the rest are single
     // values (a filter, a collection, a recipient list, a record id) or a
-    // nested path, which this editor does not render per entry.
+    // nested path, which this editor does not render per entry. The list grew
+    // at #27968 / #28150 with the one entry rooted in `connectorConfig`
+    // (`connector_action:input.*`), which `isValueEnvelopeSlot` does not offer.
     expect(
       FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value').map((e) => `${e.nodeType}:${e.path}`).sort(),
     ).toEqual([
       'assignment:assignments.*',
+      'connector_action:input.*',
       'create_record:fields.*',
       'delete_record:filter',
       'get_record:filter',
