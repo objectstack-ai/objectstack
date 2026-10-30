@@ -103,8 +103,9 @@ export const Invoice = ObjectSchema.create({
     // permission set scopes invoice SELECT to `owner = current_user.email` (email
     // is the unique, seedable identifier), so a contributor sees only their own
     // invoices; because `showcase_invoice_line` is `controlled_by_parent`, the
-    // lines follow automatically (ADR-0055). Mirror of `project.owner`.
-    owner: Field.text({ label: 'Owner', maxLength: 200 }),
+    // lines follow automatically (ADR-0055). Mirror of `project.owner`, and
+    // labelled apart from the platform-injected `owner_id` lookup ("Owner").
+    owner: Field.text({ label: 'Owner Email', maxLength: 200 }),
     // Region the sale was booked in — the invoice-side target of the Revenue
     // Pulse dashboard's shared "region" filter (framework#2501): accounts map
     // the same filter to their own `sales_region` via `filterBindings`.

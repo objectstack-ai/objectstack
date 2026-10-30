@@ -26,7 +26,7 @@ export const ShowcaseTranslationBundle = {
         fields: {
           name: { label: 'Project Name' },
           account: { label: 'Account' },
-          owner: { label: 'Owner' },
+          owner: { label: 'Owner Email' },
           status: { label: 'Status' },
           health: { label: 'Health' },
           budget: { label: 'Budget' },
@@ -226,7 +226,7 @@ export const ShowcaseTranslationBundle = {
           name: { label: 'Invoice Number' },
           account: { label: 'Account' },
           contact: { label: 'Contact' },
-          owner: { label: 'Owner' },
+          owner: { label: 'Owner Email' },
           status: { label: 'Status' },
           issued_on: { label: 'Issued On' },
           tax_rate: { label: 'Tax Rate (%)' },
@@ -383,7 +383,7 @@ export const ShowcaseTranslationBundle = {
         fields: {
           name: { label: '项目名称' },
           account: { label: '客户' },
-          owner: { label: '负责人' },
+          owner: { label: '负责人邮箱' },
           status: {
             label: '状态',
             options: { planned: '计划中', active: '进行中', on_hold: '已暂停', completed: '已完成', cancelled: '已取消' },
@@ -723,7 +723,7 @@ export const ShowcaseTranslationBundle = {
           name: { label: '发票号' },
           account: { label: '客户' },
           contact: { label: '联系人' },
-          owner: { label: '负责人' },
+          owner: { label: '负责人邮箱' },
           status: { label: '状态' },
           issued_on: { label: '开具日期' },
           tax_rate: { label: '税率 (%)' },
