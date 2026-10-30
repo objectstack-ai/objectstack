@@ -8,6 +8,7 @@ import {
   MEMBERSHIP_ROLE_MEMBER,
 } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
+import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
 /**
  * sys_member — System Member Object
@@ -127,7 +128,7 @@ export const SysMember = ObjectSchema.create({
         // (`INVITATION_ROLE_GRANTORS`), so a delegated_admin is offered
         // `member` alone. Declared on the param, not inherited from the
         // field, so the gate narrows this dialog and no other picker.
-        { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+        { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
     },
     {
@@ -196,13 +197,17 @@ export const SysMember = ObjectSchema.create({
       refreshAfter: true,
       params: [
         { name: 'userId', field: 'user_id', required: true },
-        { field: 'role', required: true },
+        { field: 'role', required: true, helpText: MEMBERSHIP_ROLE_PARAM_HELP },
         { name: 'organizationId', field: 'organization_id' },
       ],
     },
     {
       name: 'update_member_role',
       label: 'Change Role',
+      // Names the member: a list row carries `user_id` expanded to the user
+      // record wherever the list shows that column (the organization page's
+      // Members list); a row without it reads "this member".
+      description: "Choose the new organization role for ${record.user_id?.name ?? 'this member'}.",
       icon: 'shield',
       mode: 'edit',
       locations: ['list_item'],
@@ -222,7 +227,7 @@ export const SysMember = ObjectSchema.create({
       },
       refreshAfter: true,
       params: [
-        { field: 'role', required: true, defaultFromRow: true },
+        { field: 'role', required: true, defaultFromRow: true, helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
     },
     {

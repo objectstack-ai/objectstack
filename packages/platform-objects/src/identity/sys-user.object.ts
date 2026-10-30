@@ -3,6 +3,7 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
+import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
 /**
  * The BCP-47 shape `sys_user.locale` accepts — a 2–3 letter language subtag
@@ -138,7 +139,7 @@ export const SysUser = ObjectSchema.create({
         // (`INVITATION_ROLE_GRANTORS`), so a delegated_admin is offered
         // `member` alone. Declared on the param, not inherited from the
         // field, so the gate narrows this dialog and no other picker.
-        { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+        { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
     },
 
