@@ -1,0 +1,38 @@
+{
+  "number": 28049,
+  "kind": "issue",
+  "title": "analytics: a derived sum over one `fixed`-currency code reaches the wire with no currency code, though the docs say it carries that code",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:41:45Z",
+  "updated_at": "2026-10-30T14:18:01Z",
+  "closed_at": "2026-10-30T14:17:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28049",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① read beside a ruled card by the contract review of PR #28043 (#28019, record 6520682484), which asked for it as its own card. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What the code does (read, not run)\n\n- `service-analytics/src/measure-currency-coherence.ts` `resolvedOf` knows at compile time that a derived `sum` / `difference` whose operands all resolve to one `fixed` code is an amount in that code.\n- `enrichResultColumns` (`service-analytics/src/analytics-service.ts` ~L3194–3209) reads a measure's metadata through `m.field`. A derived measure has no `field`, so `meta` is `undefined`, and `monetary = !!mc.currency || meta?.type === 'currency'` is false unless the measure restates `currency`.\n- The derived column is minted as a bare `type: 'number'` field (`dataset-executor.ts` ~L1335).\n\nSo a derived sum of two EUR-fixed measures with no `currency` of its own reaches the wire as an unlabelled number. Only restating `currency: 'EUR'` labels it.\n\n## Where the docs say otherwise\n\n`content/docs/data-modeling/currency.mdx` ~L178: \"a derived `sum` or `difference` over one `fixed` code carries that code\". True of the compile-time resolution, not of the response.\n\n## Wanted (route is triage's)\n\nEither the column chain labels a derived sum or difference with the one `fixed` code its operands resolve to (so the page is true), or the page says the author restates `currency` to label it. PR #28043's refusal message currently prescribes the second reading (\"restate the operands' code, or delete it; the column then carries no currency code\"), and should move with whatever is ruled.\n\n## Dedupe\n\nRead open titles for `derived` + `currency`, `fixed` code, `enrichResultColumns`: #28019 only (the compile-time refusal, PR #28043). **New.**\n\nBlocked-by: #28043\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 28106,
+  "kind": "issue",
+  "title": "ai chat: update a record from chat — record pages send {objectName, recordId} to ask, and the edit form shows AI-proposed values as before/after",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p2",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:57:13Z",
+  "updated_at": "2026-10-30T14:03:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28106",
+  "body": "Filing gate ③: a task on the maintainer's word. Sam, on the objectstack#27286 re-evaluation (doc https://claude.ai/artifact/DLzVUSyDabAxTDuwAp7a97, §5 phase 1): 「同意开发 S1 粘贴即建单」 (2026-10-30 12:53Z), then 「其实不只是粘贴吧，任何内容我都可以让他创建和更新记录是吗？通过聊天的方式。」 (12:54Z), choosing to fold in update (phase 1b). Scope: AI drafts in chat, a person saves; no spec contract; no in-form button (phase 2), no S2, no S3. Filed by `repo:cloud` seat 2. ⛔ Not a claim.\n\n## 维护者速读\n\n要让用户在记录详情页对 AI 说「把电话改成……」「根据这封邮件更新一下」，界面需要做两件事。第一，告诉 AI 当前是哪条记录：现在只有 Studio 会把页面上下文传给 AI。第二，cloud 返回修改建议后（cloud#3383：`open_record` 带 `proposedValues`），编辑表单要显示改前和改后的对照，标「AI 建议」，由用户确认保存，绝不自动提交。\n\n## Facts (objectstack main)\n\n- Only `ui/packages/app-shell/src/views/studio-design/StudioAiCopilot.tsx` sends a surface context today.\n- The runtime already reads `context.objectName` / `recordId` (cloud `service-ai/src/agent-runtime.ts:729`).\n- plugin-chatbot already renders the `open_record` hand-off.\n\n## Work\n\n1. The record detail page (and the record drawer, if it hosts the assistant) sends `{objectName, recordId}` as the ask conversation's context while that record is open.\n2. plugin-chatbot: when an `open_record` result carries `proposedValues`, the card reads 「修改 X（N 个字段）→」. It navigates to the record's edit form with the values in **router state**, never the query string.\n3. The edit form shows each proposed field as before → after, marked 「AI 建议」, with per-field revert. It never auto-submits.\n4. Tests: the context is sent from the record page, the card variant, state navigation with no query string, the before/after display, revert, no auto-submit. Include an ablation.\n\n## Done when\n\nOn a record page, asking the AI to change fields opens the edit form with marked, unsaved proposed values.\n\nDepends on: objectstack-ai/cloud#3383."
+}

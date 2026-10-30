@@ -1,0 +1,38 @@
+{
+  "number": 28032,
+  "kind": "issue",
+  "title": "A connector a mixed composed input declares only at its top level beside package bodies is invisible to the lender at boot, yet the composed check accepts a borrow of it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:spec",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T09:24:46Z",
+  "updated_at": "2026-10-30T13:02:41Z",
+  "closed_at": "2026-10-30T11:18:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28032",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ escalation in the contract review of PR #28026 (record 6519281283 ③ item 3, VERDICT PASS), confirming the dev's out-of-scope note in os-dev-report 6518764127. It is outside that PR's surface, and that card forbids it to change an accept set.\nRuling-ref: D7 ruling 6486136301 (connector-credential borrowing)\nDedupe (open AND closed): \"registerUnclaimedTopLevel connector lender readDeclaredConnectorItems residual\" → none this work.\nReader: the epic PM (#27261) dispatches it in the epic subtree.\ntype: Bug\n\n## 维护者速读\n\n- **问题：** 合成栈（`composeStacks`）里，如果某个输入既带 `packages[]` 包体，又只在顶层声明了一个连接器实例（没有包体声明同名），那么开机时这个实例只注册进元数据服务，而凭据出借方读的是 ObjectQL 注册表，看不到它。结果数据源 `external.connector` 借用它时，开机借不到凭据；要等一次开发态重载后才能借到。但构建期的合成检查认为它可借、放行了，构建和运行结论不一致。\n- **影响：** 只有手工构造的嵌套或混合输入（多包项目的 `preserve` 合成）会遇到，常规单栈和 `last` 扁平合成不受影响。属于边缘形状，p3。\n- **需要您做的：** 无。修法有两个方向（运行时把残留顶层连接器注册进出借方能看到的地方，或者合成检查拒收这种借用），先实测再定；会改变作者能写什么的，回报 epic PM 再定。\n\n## Measured by reading (record 6519281283 ③ item 3, at `origin/main` 3f02da10f8)\n\n- `MetadataPlugin.registerUnclaimedTopLevel` (metadata/plugin.ts :1475-1497) registers a residual top-level item through the door's sink. On the artifact door that is `memLoader.save` + `this.manager.register` (:1385-1391). On the config door it is `metadata.registerInMemory` (runtime/app-plugin.ts :1127-1148). Both go into the metadata service's registry.\n- The ObjectQL `manifest` service registers the bodies via `ql.registerApp`, and of the residual it registers OBJECTS only (`unclaimedTopLevelObjects`, objectql/plugin.ts :143-153, :773-848).\n- The lender reads `readDeclaredConnectorItems` (service-automation/plugin.ts :1104-1109, :1938-1972), that is `protocol.getMetaItemsForExecution({ type: 'connector' })`, which is `engine.registry.listItems` plus the `sys_metadata` overlay (metadata-protocol/protocol.ts :9469-9500). It never reads the metadata service's list.\n- A dev reload makes the entry visible (`captureReloadedConnectors` :1890-1905).\n- Accepted at build today: `composeStacks([mixed(instance), looseBorrower], { manifest: 'preserve' })`. The only declaration is the mixed input's top-level instance, in slot `package:<mixed id>`, so it is kept, can lend, and is accepted.\n\n## Task\n\n- [ ] Measure first. Boot an artifact of the accepted shape above, then borrow through the datasource. Confirm it refuses at boot and lends after a reload. If it lends at boot, close this card with the measurement.\n- [ ] If it reproduces, choose the fix from the measurement and say why in the PR. Option (a): the residual top-level connector (unclaimed by any body) registers where the lender reads, for example the ObjectQL registry under the composed `manifest.id`, the way residual objects already do. Option (b): the composed check refuses a borrow whose only lending declaration is a top-level entry beside package bodies. (b) narrows what an author can declare. Stop and report to the epic PM before taking it.\n- [ ] A test pins the boot-time borrow on that shape, both directions.\n\n`Clause-②:` decided from the diff · `Metadata-protocol: none`. A spec edit (option b) owes a contract review at `CONTRACT_REVIEW_TIER`."
+}

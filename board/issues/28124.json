@@ -1,0 +1,31 @@
+{
+  "number": 28124,
+  "kind": "issue",
+  "title": "console: localize the organization-limit refusal (YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS) in the create-workspace dialog",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p3",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:17:34Z",
+  "updated_at": "2026-10-30T14:04:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28124",
+  "body": "Filing gate ②: a gap measured while landing objectstack-ai/cloud#3382, Sam's 「D 也做」 (2026-10-30 12:51Z), which lowers the hosted org cap to 2. Filed by `repo:cloud` seat 2. ⛔ Not a claim.\n\n## 维护者速读\n\ncloud 把每人可建组织数降到了 2。用户建第 3 个组织时，服务端会拒绝（403 `YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS`）。但控制台的「新建工作空间」对话框没有为这个错误码准备文案，只显示 better-auth 的英文原句，中文用户看到的是英文，也不知道上限是多少。这张卡给这个错误码加上各语言文案。\n\n## Facts (objectstack main)\n\n- `ui/packages/app-shell/src/console/organizations/orgErrorMessage.ts`: `ORG_ERROR_MESSAGE_KEYS` has no row for `YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS`, so the dialog falls back to better-auth's English \"You have reached the maximum number of organizations\".\n- Measured by cloud#3382's test `org-limit-flow.test.ts` (PR cloud#3384): a third owned org is refused with 403 and that code.\n\n## Work\n\n1. Map the code to a localized key in every i18n pack, e.g. 「你自己创建的组织已达上限。被邀请加入的组织不计入。」\n2. If the refusal body or the public config exposes the limit, name the number. Otherwise do not invent one.\n3. Tests: the code renders the localized string in zh and en. Include an ablation.\n\n## Done when\n\nA zh session that hits the org cap sees a Chinese message that explains it."
+}

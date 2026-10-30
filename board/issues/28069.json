@@ -1,0 +1,37 @@
+{
+  "number": 28069,
+  "kind": "issue",
+  "title": "settings: AI & Embedder and Knowledge help still name env vars, `sys_ai_trace` and code calls (#27521 row 2 remainder)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:28:08Z",
+  "updated_at": "2026-10-30T14:28:28Z",
+  "closed_at": "2026-10-30T14:26:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28069",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ② a wrong state shown to the user, found by the #27853 card thread (PR #28063, os-dev report 6521433006). #27853 took Authentication, Feature Flags and Mail (and the Webhooks subtitle); the parent row (#27521 row 2) also covers these two pages. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What is shown\n\nSetup → Settings → AI & Embedder and Knowledge: the help names env vars (`AI_GATEWAY_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`), `sys_ai_trace`, `embed()` and `KnowledgeSource.adapterConfig`, in en, zh-CN, ja-JP and es-ES.\n\n## Mechanism (read)\n\n`packages/services/service-settings/src/translations/*.ts`, the `ai` and `knowledge` namespaces (grep at `5aee2065`), and the manifests they translate.\n\n## Wanted\n\nThe same treatment PR #28063 gives Authentication / Feature Flags / Mail: business words in the sentence, technical detail on a \"for developers\" line or behind a docs link.\n\n## Dedupe\n\nRead open titles for `settings help` + `env var`, `AI & Embedder`, `Knowledge` help: #27853 only (its other pages). **New.**"
+}

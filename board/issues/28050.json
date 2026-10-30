@@ -1,0 +1,34 @@
+{
+  "number": 28050,
+  "kind": "pull_request",
+  "title": "docs(cluster, connectors): lane 2 also converges connector definitions on every replica",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:41:54Z",
+  "updated_at": "2026-10-30T11:24:01Z",
+  "closed_at": "2026-10-30T11:23:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T11:23:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28050",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYmTYfaPbLQD4BJfomW\n\nFixes #28030\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`cluster.mdx` §6.2 的 lane 2 表格行与「Lane 2」小节补写：同一次 `metadata.mutated` 回放还会让自动化服务在每个副本上重新物化连接器（非草稿的 `connector` 变更），直接的 active 保存也会让写入副本自己生效；`connectors.mdx` 故障表的 runtime reload 行补全触发路径（发布、直接 active 保存、删除，任一副本）；§6.2 家族规则「`originNode` 回环抑制」一条改正：连接器 reconcile 在写入副本上是排队执行的，不是在门处同步跑完。\n- 为什么改：PR #28028 合入后运行时已经这样工作，这两处文档仍写着 lane 2 只收敛 ObjectQL 对象注册表、reload 只来自 Studio 发布或 dev 重载，读文档的 AI 会得出错误结论。\n- 风险与回滚：纯文档，两个 `.mdx` 文件、不发布任何包；回滚即还原本 PR。\n- 先看：`content/docs/kernel/cluster.mdx`（Lane 2 小节新增的两段，逐句对照 `packages/services/service-automation/src/plugin.ts` 的 `subscribeFlowMutations` 与 `queueConnectorMutationReconcile`）；`content/docs/automation/connectors.mdx` 第 458 行。\n- 两分钟验证：`pnpm check:doc-authoring && pnpm check:doc-anchors`，预期两者均 exit 0；或打开文档站 /docs/kernel/cluster 的 6.2 节，看到 lane 2 小节新增「The same replay converges…」一段。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nDocs only. Every sentence is written from the code on `main` after PR #28028 (`cc5586da8c`).\n\n- `content/docs/kernel/cluster.mdx` §6.2, lanes table, lane 2 row, \"Converges\" column: after ObjectQL's OBJECT registry, the same replay also converges the automation service's armed flows and its materialized connectors (a `connector` mutation that is not a draft), each from the replica's own re-read.\n- `content/docs/kernel/cluster.mdx` §6.2, \"Lane 2 — `metadata.mutated`\" subsection: two new paragraphs.\n  - On a peer, `applyRemoteMetadataMutation` replays the event into its local `onMetadataMutation` listeners after the write-through, and never re-publishes it. `AutomationServicePlugin`'s listener re-arms a `flow`. For a `connector` mutation that is not a draft (active or deleted), it queues the soft reconcile that `metadata:reloaded` runs. That reconcile re-reads the declaration through `getMetaItemsForExecution` (the registry with the `sys_metadata` overlay rows over it). One signal and no second channel; lane 4 stays the credential channel. A draft is dropped twice: the publisher does not publish it, and the listener returns on `state === 'draft'`.\n  - On the writer, a direct active save (`PUT /api/v1/meta/connector/:name`) raises no `metadata:reloaded`, so the local half of the same signal is what re-materializes it. A publish raises both signals, and the second reconcile is a no-op on unchanged signatures. Mutation-queued reconciles coalesce, and a failure is logged at `warn`.\n- `content/docs/kernel/cluster.mdx` §6.2, family bullet \"`originNode` loopback suppression\" (file-surface extension the seat authorised at review): it said the connector reconcile \"already ran, synchronously, at the door\". It now says the write-through and the pool rebuild run synchronously at the door, and a connector reconcile is queued on the writer's reconcile queue. On lane 2 the local half of the same signal queues it (`emitMetadataMutation` notifies local listeners before it publishes), and the save does not wait for it. On lane 4 the credential door queues one job that writes the row, publishes, then runs the reconcile, and answers only after that reconcile finishes.\n- `content/docs/automation/connectors.mdx:458`, the failure-modes row \"A bad entry arrives via runtime reload\": its trigger list now names a Studio publish, a direct active save, or a delete, on any replica (linking §6.2), or a dev reload.\n\n## Tests\n\nProse only, so there is no package test. The docs gate families are under Verification.\n\n## Acceptance notes\n\n- In-place fix, declared: the lane 2 row and subsection also name **flows**, not only connectors. The listener that carries connectors on the peer's replay is the flow listener of #21725. #28028 extended it, and its pin `connector-definition-cluster.test.ts` asserts \"the flow save still arms the flow on both replicas\". Without the flow clause, the edited row would list the listener's connector half as if it were the whole of it. Same row, same subsection, same claimed file surface.\n- The dispatch named #28016 as a possible edit to the same table. It had not landed on `main` at merge time; `main` was merged at `5aee206543`, and `origin/main` had not moved when the final gates ran.\n\n## Verification\n\nDerived-family readings are at head `16f6a55a5f`, after the merge of `main` `5aee206543`. The follow-up commit `e3ce3a96cc` changes only the loopback bullet, and its readings are listed separately below.\n\n<details><summary>Derived docs gate families</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 43 commands over the 2 changed paths. All 43 were run, with each exit code captured before any pipe. `--ran` reconciliation (exit 0): `✓ dispatch-gates --ran: 43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero — all 43 recorded an exit code and none of them is 3).`\n\n- `pnpm check:doc-authoring` exit 0, `pnpm check:doc-anchors` exit 0 (the new `#62-the-cluster-invalidation-family` link), `pnpm check:nul-bytes` exit 0.\n- All 43 exited 0 on the final run at `16f6a55a5f`. On an earlier pass, before any build, `check:doc-formula-expressions`, `check:doc-security-posture`, `check:docs-transcript-drift` and `check:skill-examples` refused with exit 3 (prerequisite not met, nothing measured), and `check:docs` exited 1 because `gen:schema` output was missing. After `@objectstack/lint...` and `@objectstack/client-react...` were built under `os-verify-lock.sh` (`VERDICT command-exit 0` both), every family measured and passed.\n\n</details>\n\n<details><summary>Follow-up commit e3ce3a96cc (loopback bullet)</summary>\n\n- `pnpm check:doc-authoring` exit 0.\n- `pnpm check:doc-anchors` exit 0: `832 internal #fragment link(s) across 478 source file(s) all resolve to a real heading`.\n- `pnpm check:nul-bytes` exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n"
+}

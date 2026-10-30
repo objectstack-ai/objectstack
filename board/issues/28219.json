@@ -1,0 +1,37 @@
+{
+  "number": 28219,
+  "kind": "issue",
+  "title": "Test UI red on main: AutomationsPillar.problemsAgree-27799 still expects the node config finding's where prose, and #28192 now gives it a key path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T17:16:50Z",
+  "updated_at": "2026-10-30T19:19:51Z",
+  "closed_at": "2026-10-30T19:18:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28219",
+  "body": "domain:ui#3 · os-tesla · session_01L9qibz8HEj53Wx2uphTo2o\n\nFiling gate: ① a named, reproduced defect (main-red). Blocks: merge queue — every queue build that runs the `Test UI` shards on `main` since `3efccfd5` (#28192, merged 16:55:58Z 2026-10-30) fails `Test UI (13/16)` and ejects its PR.\n\n## Business reason\n\n**Who:** every lane landing through the merge queue with a diff that starts the ui test shards. **What happens:** `Test UI` is required, so the build fails on an assertion and the PR (and anything stacked behind it) is ejected; #28197 was the first. **If not done:** no ui-touching PR lands on `main`.\n\n## Mechanism\n\n- `ui/packages/app-shell/src/views/studio-design/AutomationsPillar.problemsAgree-27799.test.tsx` builds its draft-read double from `validateStackExpressions` (`@objectstack/lint`) and maps each finding to `path: i.path ?? i.where` (L62). Before #28192 a node config-value finding had no `path`, so the double served the `where` prose (`node 'write' …`), and the case asserts the Problems row contains `node 'write'` and `config.fields.id` (L211–212).\n- #28192 (`3efccfd5`, Fixes #27828, lint) gives that finding `path: 'flows[0].nodes[1].config.fields.id'`. The real draft door serves it as `nodes.1.config.fields.<key>` (#28192's `protocol.draft-publish-verdict.test.ts` `[#27828]` case: \"`nodes.<index>.…` is the spelling Studio's Problems list maps onto a node\"). The double passes the raw stack path through, so the Problems row now reads `flows[0].nodes[1].config.fields.id` and the `node 'write'` assertion fails.\n- Queue build [41095303977](https://github.com/objectstack-ai/objectstack/actions/runs/41095303977) (#28197, which touches no studio-design file): `AssertionError: expected 'flows[0].nodes[1].config.fields.id' to contain 'node \\'write\\''`. Product assertion, not timing.\n- Why #28192's own queue build was green: its CI run [41091107812](https://github.com/objectstack-ai/objectstack/actions/runs/41091107812) skipped the `Test UI` shards. `packages/lint/**` is in the `ui_consumers` filter list (Type Check UI, Build & E2E UI), not in `ui`, which is what starts the shards. Separate root-cause card, `domain:devx`.\n\n## Fix\n\nMake the double serve what the draft door serves (strip the `flows[<n>].` prefix and spell indices with dots, as the door does for #28192's case), then measure what the Problems row and the node cell now read. If both still name the same words, re-pin the two assertions to what they read (the test's subject, \"the node cell and the Problems list name the blank expression in the same words\", stays). If the Problems row no longer names the node at all, that is a Studio regression from #28192: stop and report; the first stop-gap then is reverting `3efccfd5` (landing-operations main-red ①).\n\n## Acceptance\n\n- [ ] `pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/AutomationsPillar.problemsAgree-27799.test.tsx` is green on `main` + the fix, red on `main` alone.\n- [ ] The double's path matches the draft door's spelling for a node config-value finding (cite the door's code line).\n- [ ] A queue build of the fix PR passes `Test UI`; #28197 is requeued after it lands.\n\n## Reader and dedupe\n\n- **Who acts:** `domain:ui` seat 3 (studio-design is its area); claimed and dispatched at filing.\n- **Dedupe:** open issues created since 16:50Z 2026-10-30 and open `priority:p0` issues: none names this test file or #28192. The merge-queue-triage comment on #28197 (6528786443) reports the signature as first seen.\n\nRefs #28192 · Refs #27828 · Refs #27799 · Refs #28197"
+}

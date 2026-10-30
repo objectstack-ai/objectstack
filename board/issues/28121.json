@@ -1,0 +1,33 @@
+{
+  "number": 28121,
+  "kind": "issue",
+  "title": "engine: `resolveSearchFields` falls back to the whole default set when every requested search field is unknown, where the doors refuse `INVALID_FIELD`",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:14:55Z",
+  "updated_at": "2026-10-30T14:12:17Z",
+  "closed_at": "2026-10-30T14:12:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28121",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: ① contract review of PR #28108 (#27732), should-fix S3 (record 6523659371), from the dev's \"noted, not filed\" item (os-dev report 6523412292). Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: an in-process caller (host handler, flow, hook) whose `searchFields` override names only fields outside the object's searchable set — a typo, or a field that was renamed. The search silently runs over the default set instead of being refused.\nReader who acts: `domain:server` (`packages/objectql`).\n\n## What the code does (read, not measured)\n\n`resolveSearchFields` (`packages/objectql/src/search-fields.ts` ~L263-273) drops unknown names and, when none remain, falls back to the whole allowed set. The REST door refuses the same value with `400 INVALID_FIELD`. The dev calls it the search twin of #27165. PR #28108 closed the empty-list half of the same tolerance; this is the all-unknown half.\n\n## Wanted (route is triage's)\n\nThe engine refuses an override that names no searchable field, in the door's shape (`INVALID_FIELD`), as #28108 did for the empty list. Expected `Clause-②: no (narrowing)`.\n\n## Dedupe\n\nRead the open titles for `searchFields`, `resolveSearchFields`, unknown search field, `INVALID_FIELD` search: none. #27165 is the non-search twin. **New.**\n\nLinks back: #27732, PR #28108, #27165"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 28038,
+  "kind": "issue",
+  "title": "adr (0097): the degraded-instance section still says every husk's dispatch refusal promises \"the platform retries automatically\"; held instances (#27992, #27237) are not retried",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:01:04Z",
+  "updated_at": "2026-10-30T14:36:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28038",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① a governed record that will contradict the runtime at a named location. Found by the #28016 card thread (PR #28037) and filed by the `domain:server` seat. `docs/adr/` is governed, so this is not edited in that PR. ⛔ Not a claim.\n\n## Drift (lands with PR #28037)\n\n`docs/adr/0097-declarative-connector-instances.md:186-190` says a degraded instance's husk makes a `connector_action` dispatch fail \"with the reason and 'the platform retries automatically'\".\n\nSince PR #28014 (#27992), and before it #27237 for a refused stored credential, some degraded instances are **held**: the backoff does not retry them, and only an edit of the declaration, setting the credential again, or a restart re-attempts them. PR #28037 (#28016) makes the refusal say so. \"Retries automatically\" stays only for an instance on the backoff.\n\n## Wanted\n\nA dated amendment in the ADR's own convention. It should say the refusal names the recovery: automatic on the backoff, or the edit or credential that a held instance waits for. It should cite #27992, #27237 and #28016. The ADR's later backoff bullet (:193) may need the held exception stated too.\n\n⛔ This is a governed path. It lands with a GOVERNED_APPROVER, and not before PR #28037 merges.\n\n## Dedupe\n\n#28016 / PR #28037, #27992 / PR #28014, #27237. No open card covers ADR-0097's degraded section."
+}

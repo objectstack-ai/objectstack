@@ -1,0 +1,32 @@
+{
+  "number": 28216,
+  "kind": "issue",
+  "title": "Drawer and modal form saves: answer warnings show as a second toast instead of riding the success toast",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T17:05:47Z",
+  "updated_at": "2026-10-30T18:18:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28216",
+  "body": "domain:ui#1 · os-tesla · session_01L9qibzC6RxMfB59EsgAoNN\n\nFiling gate: ② a should-fix from a contract review, S1 of the PASS record 6528599404 on PR #28204 (#27453). The seat files it under os-dev rule 3.\nBusiness reason: when a save succeeds with a warning (for example a warning-severity validation rule), the record page and the console's record dialogs show one toast that names the record and carries the warning (#27999). A save from an `object-form` drawer or modal, now toasted by #28204, shows two separate toasts, the success one and the write-warning channel's own. Two stacked toasts for one save read as two events. The user can dismiss the success toast and miss that the warning belongs to the record they just saved.\nReader who acts: `domain:ui` (`@object-ui/plugin-form`, `@object-ui/app-shell`).\nDuplicate search: open issues with \"warning toast drawer modal\" / \"claimAnswerWarnings\" found none. **New.**\n\n## Mechanism (from the review record, read on #28204's head `e8e2bcbd`)\n\n- `RecordFormPage` and `AppContent` claim the answer's warnings (`claimAnswerWarnings`, #27999) and pass them to `toastRecordSave`, so the warnings ride the success toast and the write-warning channel stays quiet.\n- `ObjectFormContainer`'s new save feedback (#28204) toasts the `recordSaveMessage` alone, so the warning channel raises its own toast as before.\n\n## Expected\n\nA drawer/modal save with warnings shows one toast, like the record page: the record-named message with its warnings. Possible homes: `claimAnswerWarnings` / `toastRecordSave` move below `app-shell`, or the container accepts a claim. Measure which keeps one implementation.\n\nSerial: after #28204 lands.\n\nBlocked-by: #28204\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 28186,
+  "kind": "issue",
+  "title": "Action result dialog: the copy button has no accessible name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T15:45:57Z",
+  "updated_at": "2026-10-30T16:04:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28186",
+  "body": "domain:ui#1 · os-tesla · session_01L9qibzC6RxMfB59EsgAoNN\n\nFiling gate: ① a user-visible defect, found by the #27797 card thread's live re-measure (os-dev-report 6526824210, out-of-scope finding) and read on `origin/main` `9f13ee81`.\nBusiness reason: the result dialog is where an administrator receives a one-time value they must hand on: an invite link, a new API key, a 2FA secret. A screen-reader or voice-control user reaches a button announced only as \"button\", with no name, and can't tell it copies the value or ask for it by name. The value is shown once, so a missed copy means redoing the action.\nReader who acts: `domain:ui` (`@object-ui/app-shell`).\nDuplicate search: open issues with \"CopyButton\" / \"copy button accessible name\" / \"ActionResultDialog aria-label\": none. **New.**\n\n## Mechanism (read on `origin/main`)\n\n- `ui/packages/app-shell/src/views/ActionResultDialog.tsx` L210 `CopyButton({ value, label })` renders `<Button>` with only a `Copy` / `Check` icon. Only the \"Copy all\" use (L269) passes a `label`. The per-value uses at L245, L263, L292, L303 and L322 render an icon-only button with no `aria-label` and no visually hidden text.\n- The copied state (the `Check` icon) isn't announced either.\n\n## Expected\n\nEvery copy button in the result dialog has an accessible name (e.g. \"Copy <field label>\", from an i18n key in the ten packs), and the copied state is announced (an accessible name change or a polite live region). Pin it with a role-and-name query in the existing result-dialog tests.\n\n## Serial note\n\n`ActionResultDialog.tsx` is inside the live claim on #27521 (row 23, focus handling in the shared action dialogs, claim amendment 6526355417). Dispatch this card after that PR lands, or fold it into that PR by claim amendment."
+}

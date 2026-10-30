@@ -1,7 +1,7 @@
 {
   "number": 6017,
   "kind": "issue",
-  "title": "[PM seat] domain:spec — ⏳ vacant",
+  "title": "[PM seat] domain:spec — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-support-ai"
+    "os-tesla"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:12Z",
-  "updated_at": "2026-10-29T15:30:59Z",
+  "updated_at": "2026-10-30T11:30:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 454,
+  "comments": 455,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6017",
-  "body": "## Current PM\n\n⏳ vacant. `os-support-ai` · session `session_01WGufzfhobWEgUUrjz4rrbh` stood down at 2026-10-29T15:29Z on the maintainer's word (「1号座位任务处理完，合并后下班」). That session sat from 2026-10-27T00:26Z (the seat-taken audit is the newest comment below). The stand-down brief is the final comment on this post.\n\n- **Next holder:** `/pm-dispatch 接手`, after reading this post and the brief. The brief is the release marker, so a successor may sit at once.\n- **Routine:** none. **Charter:** `.claude/skills/pm-dispatch/references/lanes/spec.md`.\n- **Other seats in the lane:** seat 2 #18549, seat 3 #18883 (running, first claim wins), seat 4 #18917, seat 5 #19357.\n- **Stay-behind:** none. Every card this seat claimed has landed or has been released.\n\n## Handover ledger\n\n- **In flight from this seat:** none. `check-handover` was clear at stand-down: no unreleased claim, no decision outside the inbox.\n- **Released unstarted at stand-down** (`Release:` comments on the cards, `pm:queue`): #27532 (upgrade-guide code spans, p3) and #27334 (plugin-auth IdP locale export, p3; `Clause-②: yes (widening)`, lane moved here by triage `6496297039`).\n- **Queue snapshot at stand-down** (`domain:spec` + `pm:queue`): #27627 #27597 #27589 #27583 #27569 #27532 #27505 #27334. The epic card #27472 is held by its epic PM.\n- **Older pointers:** the previous body revision (`os-tesla`'s tenure) still carries its inherited tails; a successor weighs them on the next touch of each file.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- **`packages/spec/src/migrations/registry.ts`** is generated and out of git. Writers edit `entries/`, plus `registry.ts.template` for the skeleton. Resolve a conflict there with `scripts/pm/os-regen-merge.sh`.\n- **`.objectui-sha`:** the one `SINGLE_CLAIM_PATHS` entry (`scripts/check-single-claim-paths.mjs`).\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write channel:** the `fleet-write` relay (`dispatch`), read back on every write.\n- **Maintainer's standing words for the project seats** (2026-10-28): fable quota is nearly spent, so contract reviews wait for triage (「后续契约复审要等分诊」). The concurrency cap counts active dev cards only.\n"
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\n## Current PM\n\n🟢 `os-tesla` · session `session_01L9qibwb6hBqszPTYJobitm` · seated 2026-10-30T11:27Z on the maintainer's summons in the project thread (「开一个 spec 车道」). The previous holder's stand-down brief (comment `6500991131`, `os-support-ai`, 2026-10-29T15:30Z) was the newest event on this post, so the seat was taken at once.\n\n- **Project:** the `os-tesla` account's Claude project \"Objectstack UI 合并\". Posture, round reports and ledger live in that project's seat thread; per-card state lives on each card and PR.\n- **Routine:** none (a session-made Routine carries no repo sources). Wake = the maintainer's project thread and PR subscriptions.\n- **Charter:** `.claude/skills/pm-dispatch/references/lanes/spec.md`.\n- **Other seats in the lane:** seat 2 #18549 (vacant), seat 3 #18883 (`os-support-ai`, running), seat 4 #18917 (`marchtian`), seat 5 #19357. A card not in another seat's hands goes to the first claim, after a re-read of the other seats' live `Claim:` comments and open-PR file lists.\n\n## Handover ledger\n\nInherited by pointer: the previous body revision (the `os-support-ai` tenure) and its stand-down brief `6500991131`. Nothing was in flight; #27532 and #27334 were released to `pm:queue` and are read on their own cards.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet.\n⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- **`packages/spec/src/migrations/registry.ts`** is generated and out of git. Writers edit `entries/`, plus `registry.ts.template` for the skeleton. Resolve a conflict there with `scripts/pm/os-regen-merge.sh`.\n- **`.objectui-sha`:** the one `SINGLE_CLAIM_PATHS` entry (`scripts/check-single-claim-paths.mjs`).\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write channel:** the `fleet-write` relay (`dispatch`), read back on every write.\n- **Concurrency:** this project runs at most 6 card threads in total; this seat's `batch` is 5.\n- **Standing words for the project seats:** contract reviews wait for the triage seat (the seat adds `needs:contract-review`); a PR that needs the maintainer's approval gets `os-zhuang` requested as reviewer.\n"
 }

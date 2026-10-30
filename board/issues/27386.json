@@ -2,8 +2,8 @@
   "number": 27386,
   "kind": "issue",
   "title": "console views and app shell: a kanban cannot hide an always-empty lane or OR its filters, the gantt column title and the calendar start date are fixed, the launcher tile ignores branding, and an app cannot choose a landing per persona",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T04:41:59Z",
-  "updated_at": "2026-10-30T08:12:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T09:02:59Z",
+  "closed_at": "2026-10-30T09:02:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27386",
   "body": "## Source\n\nMeasured by HotCRM on platform **18.2.0** while implementing hotcrm#2367 (UX card \"each persona's own work first in navigation and default views\", from the #2320 browser pass). The implementer's report is [hotcrm#2367 comment 6488113139](https://github.com/objectstack-ai/hotcrm/issues/2367#issuecomment-6488113139), and the HotCRM side is hotcrm#2377. Each row is what HotCRM could not author in metadata.\n\n| # | Observed on 18.2.0 | Evidence | Suggestion |\n|---|---|---|---|\n| 1 | The Task Board kanban has a Completed lane that is always empty. A view cannot say \"open, or completed in the last 7 days\". | `KanbanConfigSchema` has no lane list or hide-empty key, and view filters are AND-only. | A lane list (or `hideEmptyLanes`) on kanban config, and OR groups in view filters (the filter builder already has groups). |\n| 2 | Every gantt view's left column is headed \"Task Name\" (a campaign gantt, a contract gantt). | A fixed i18n key `gantt.column.taskName` in the gantt plugin; `GanttConfigSchema` has no key for it. | A column title on gantt config, defaulting to the object's label. |\n| 3 | A calendar view opens on the current month even when that month is empty (renewals fall months ahead). | The calendar starts at `new Date()`; `CalendarConfigSchema` has no initial-date key. | An initial-date key (for example `initialDate: 'first_record' \\| 'today' \\| <expr>`). |\n| 4 | The console home tile for HotCRM is pink, while the app's branding is orange. | The tile's class comes from a hash of `app.name` into a ten-gradient palette; `branding.primaryColor` is not read. | Use `branding.primaryColor` (and `branding.logo`) on the launcher tile when set. Related, closed: #24766. |\n| 5 | An app cannot give each persona its own landing page. Putting Sales above Service would move service staff's landing to Leads. | The landing is the first shown nav entry (#23610), `homePageId` is retired, and `navigationContributions` only append. | A landing per audience (for example a `landing` key with `visible` predicates, first match wins), or contributions that can declare their position. |\n\n## Acceptance\n\nEach row is either taken, as a card of its own where it needs one, or answered \"will not do\" with the reason.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2367's report. Dedupe: searched objectstack issues for kanban lanes and OR filters, gantt column title, calendar initial date, launcher tile colour and per-persona landing. Related, closed: #23610, #24766. No open card.</sub>"

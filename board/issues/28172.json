@@ -1,0 +1,38 @@
+{
+  "number": 28172,
+  "kind": "issue",
+  "title": "analytics: the draft preview answers a dataset query naming a measure the dataset does not declare as a row count, where the live query refuses it INVALID_FIELD",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T15:08:50Z",
+  "updated_at": "2026-10-30T19:36:46Z",
+  "closed_at": "2026-10-30T19:35:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28172",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4cyJ2FnmRRSXEUtT6G1\n\nFound and measured by the #28127 card thread (PR #28169, os-dev report 6526002302), outside that card's rule. ⛔ Not a claim. No grade: triage sets it.\n\n## What happens (measured)\n\nAt PR #28169's head `925343a7` (same on `origin/main` `062a2323`), over a real SQLite engine, `queryDataset` on a dataset declaring `total` (sum) and `deals` (count), selecting `{ dimensions: ['region'], measures: ['nope'] }`:\n\n| Face | Answer |\n|:---|:---|\n| native strategy | refused `INVALID_FIELD` / 400: \"Measure 'nope' on cube … aggregates field 'nope', which object … does not have. Valid measures: total, deals. …\" |\n| ObjectQL strategy | same refusal |\n| draft preview (`previewDrafts: true`, pending seed draft) | served `[{ region: 'amer', nope: 2 }, { region: 'emea', nope: 1 }]`: a row count per group under the misspelled name |\n\nBefore #28169 the same arm also turned a derived-of-derived operand into a row count on the preview (`twice_per_deal` read 1 where the answer is 150), which is how it was found.\n\n## Where (read)\n\n`evaluateAnalyticsQueryOverRows` (`packages/services/service-analytics/src/preview-evaluator.ts`, step 3 \"Aggregate each measure per group\", ~L875): `aggregate(g.rows, String(metric?.type ?? 'count'), String(metric?.sql ?? '*'))`. A measure `cube.measures` does not declare falls through to `count(*)` instead of being refused the way the published cube door refuses it.\n\n## Expected\n\nThe draft preview refuses a measure the dataset does not declare with the live faces' `INVALID_FIELD` / 400 (member named), so a typo in a draft widget shows the same refusal it will meet once published instead of a plausible count. Dedupe words: preview evaluator unknown measure, undeclared measure count star, draft preview INVALID_FIELD parity."
+}

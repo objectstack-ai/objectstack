@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui — ⏳ vacant",
+  "title": "[PM seat] domain:ui — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-10-29T20:32:31Z",
+  "updated_at": "2026-10-30T12:31:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · os-sales · session_01L6bhgXU26UBEjd1KKHgNEx\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 1**, the lane's first post on this board (objectui became this repository's `ui/` workspace, #25825). Seat 2 is #25995, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n⏳ **vacant** since 2026-10-29T20:29Z.\n\n- Previous PM: `os-sales` · Claude Code project \"Objectstack server ui\", seat thread \"ui 席 1\" · `session_01L6bhgXU26UBEjd1KKHgNEx` · seated 2026-10-29T11:12Z, stood down on the maintainer's 「ui seat 1 处理完当前任务，合并后就下班」. Sign-off brief: the comment written with this revision.\n- `check-handover --session=session_01L6bhgXU26UBEjd1KKHgNEx --account=os-sales` exit 0. In flight: none. Stay-behind: none.\n- Successor: `/pm-dispatch 接手`, read this body first.\n\n## Queue snapshot (`domain:ui`, open, at sign-off)\n\n- `pm:queue` (37): p1 #27626 #27604 #27594 #27593 #27545 #27524 #27059 #27058 · p2 #27703 #27640 #27605 #27585 #27552 #27551 #27459 #27449 #26998 #25943 · p3 #27704 #27554 #27521 #27520 #27504 #27479 #27456 #27446 #27434 #27433 #27430 #27398 #27386 #27380 #27375 #27356 #27355 #25918 #25921.\n- `pm:blocked` (9): #27644 #27611 #27563 #27555 #27491 #27487 #27150 · `pm:epic` #27238 #27196. `pm:on-hold`: #25946 #25949. `needs-user-decision`: none. Findings open: #27605 #27585 #27563 #27544.\n- Serial order: record-page chain #27524 → #27058 → #27059 (docs last). #27459 was held behind #27464, which has landed (PR #27557), so it is free.\n- Cross-lane: #27587 (`domain:skills`, `pm:blocked`) is the skills follow-up for the narrowing landed in PR #27584 (#27457); it should land next.\n\n## Seat stub\n\n- **File area:** seats 2 (#25995) and 5 (#26945) are ⏳ vacant; seat 4 (#26620) is held by `os-bill` and took #27461 #27480 #27483 #27498 #27502 during this shift. A seat that sits sends `split`; the areas of the earlier stub apply (seat 2: plugin-list / grid / detail / form / view / kanban / calendar / gantt / map / timeline / tree / charts / dashboard / report, `fields`, auth pages, app-shell Setup / admin pages, marketplace, console sidebar; seat 1: everything else). Cards on one file stay with one seat and land in order. Claims carry `Seat: domain:ui#1`.\n- **Hot-file serial queue:** `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards (the ui-merge `pm:epic` subtree under #25677). No sdui records since #26367: CI regenerates `sdui.manifest.json` and compares bytes. `ui/packages/plugin-grid/src/ObjectGrid.tsx` and its `objectGrid*.ts` siblings → #25994 slices 7–8. Record-page epic #26676 subtree (`pm:epic`) is not taken by this seat.\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository.\n- **Mailbox:** #27357 (`pm:mailbox`, one per login, shared with this account's `domain:server` seats).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n- **Wall:** none.\n"
+  "body": "domain:ui#1 · os-tesla · session_01L9qibzC6RxMfB59EsgAoNN\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 `os-tesla` · session `session_01L9qibzC6RxMfB59EsgAoNN` · seated 2026-10-30T12:27Z on the maintainer's summons in the `os-tesla` account's Claude project, seat thread \"PM dispatch ui lane\" (「开一个 ui seat 1」). The previous holder's sign-off brief (comment `6507659777`, `os-sales`, in flight none, stay-behind none) was the newest event on this post, so the seat was taken at once.\n\n- Posture, round reports and ledger live in that project's seat thread; per-card state lives on each card and PR.\n- **Routine:** none (a session-made Routine carries no repo sources). Wake = the maintainer's project thread, the project coordinator, and PR subscriptions.\n\n## Handover ledger\n\nInherited by pointer: the previous body revision (the `os-sales` tenure, vacant write) and its sign-off brief `6507659777`. Nothing was in flight.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n- **File area:** the splits recorded on seats 2 (#25995), 3 (#27561) and 4 (#26620) stand; seat 1 = every other `domain:ui` path. Cards on one file stay with one seat and land in order. Claims carry `Seat: domain:ui#1`.\n- **Excluded:** the `pm:epic` subtrees (#26676 record page, #8345 multi-currency). `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. PRs carry no seat-account assignee or review request; a PR that needs the maintainer's approval gets `os-zhuang` requested as reviewer after the seat ACCEPT and a same-head contract PASS. Contract reviews wait for the triage seat. Low-priority (p3) cards are held: 「低优先级的先不考虑」.\n- **Concurrency:** this project runs at most 6 card threads in total, shared with its `domain:spec#1` seat.\n- **Mailbox:** #28092 (`pm:mailbox`, subscribed).\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n- **Wall:** none.\n"
 }

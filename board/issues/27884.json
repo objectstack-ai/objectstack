@@ -13,7 +13,7 @@
   "labels": [
     "area:auth",
     "domain:server",
-    "needs-user-decision",
+    "pm:queue",
     "priority:p1",
     "security"
   ],
@@ -21,12 +21,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T02:38:39Z",
-  "updated_at": "2026-10-30T03:07:41Z",
+  "updated_at": "2026-10-30T12:40:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27884",
-  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ③ maintainer decision split out of a card that is closing (`security`, rule level only).\n\n**From:** #27818 item 3. Triage (6512259730) classed it as a security boundary and raised it with the maintainer directly. PR #27860 closes #27818's items 1 and 2, so this card keeps item 3 open. Rule-level text only; mechanism goes to the maintainer off GitHub.\n\n## The question\n\nToday a read of a datasource's definition through the metadata read doors serves its `external.credentialsRef` to every caller that can read the definition. After #27762 and #27818 a reference can no longer be written through any non-system door unless it is the row's own. Should the read doors still serve it?\n\n- **Option A, keep serving it.** The GET → edit → PUT round trip keeps working unchanged, and the write doors hold the rule.\n- **Option B, withhold it from readers below datasource administration** (redacted the way the read decorations strip other server-held values). The save door then treats an omitted key as \"keep the stored reference\" for those callers.\n\n## Business reason\n\nThe reference is a handle to a stored secret. The write doors are now closed, so this is defence in depth: who needs to see it at all?\n\n**Reader:** the maintainer. No seat acts on it until it carries a `Ruled:` line.\n\n**Links:** #27722, #27762, #27818, #27582."
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nRuled: 6522945866 · letter B · 2026-10-30T12:39Z\nRuling-ref: 6522945866\n\nFiling gate: ③ maintainer decision split out of a card that is closing (`security`, rule level only).\n\n**From:** #27818 item 3. Triage (6512259730) classed it as a security boundary and raised it with the maintainer directly. PR #27860 closes #27818's items 1 and 2, so this card keeps item 3 open. Rule-level text only; mechanism goes to the maintainer off GitHub.\n\n## The question\n\nToday a read of a datasource's definition through the metadata read doors serves its `external.credentialsRef` to every caller that can read the definition. After #27762 and #27818 a reference can no longer be written through any non-system door unless it is the row's own. Should the read doors still serve it?\n\n- **Option A, keep serving it.** The GET → edit → PUT round trip keeps working unchanged, and the write doors hold the rule.\n- **Option B, withhold it from readers below datasource administration** (redacted the way the read decorations strip other server-held values). The save door then treats an omitted key as \"keep the stored reference\" for those callers.\n\n## Business reason\n\nThe reference is a handle to a stored secret. The write doors are now closed, so this is defence in depth: who needs to see it at all?\n\n**Reader:** the maintainer. No seat acts on it until it carries a `Ruled:` line.\n\n**Links:** #27722, #27762, #27818, #27582.\n"
 }

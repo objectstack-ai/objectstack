@@ -1,0 +1,36 @@
+{
+  "number": 28059,
+  "kind": "issue",
+  "title": "spec(data-engine): engine-side `searchFields` declarations refuse an empty list, as the engine now does (spec half of #27732)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:07:59Z",
+  "updated_at": "2026-10-30T16:28:19Z",
+  "closed_at": "2026-10-30T16:20:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28059",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nCarries the spec half of #27732 item 1; #27732 keeps the engine half (the in-process engine refuses an empty `searchFields` / `search.fields` override, 400 `VALIDATION_ERROR`, built in its card thread).\n\n## What is left\n\nAfter PR #27725 the shared `FullTextSearchSchema.fields` refuses `[]`, and #27732 makes the in-process engine refuse an empty override too. The engine-side option declarations still admit `[]`:\n\n- `EngineQueryOptionsSchema.searchFields` (`packages/spec/src/data/data-engine.zod.ts`, ~line 190)\n- `EngineAggregateOptionsSchema.searchFields` (~line 514)\n- `EngineCountOptionsSchema.searchFields` (~line 559)\n\nSo the engine-side declarations say two things about one value: `search.fields: []` is refused (it reuses `FullTextSearchSchema`), while `searchFields: []` is admitted, and the engine refuses both. Flip the three `searchFields` declarations to refuse an empty list, so the declaration never admits what the engine refuses (the #27008 shape on the projection axis).\n\nRe-check: `grep -n \"searchFields\" packages/spec/src/data/data-engine.zod.ts`\n\nThis narrows a published declaration: `Clause-②: no (narrowing)`, a contract review, the ADR-0087 disposition. It is `packages/spec`, so `domain:spec` (triage decides). Item 2 of #27732 (the comma-string transport encoding) is by design (triage `6519918549`) and is not part of this card.\n\nFiled by `domain:server` seat 1 from the #27732 card thread's report."
+}

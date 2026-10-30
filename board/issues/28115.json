@@ -1,0 +1,35 @@
+{
+  "number": 28115,
+  "kind": "pull_request",
+  "title": "fix(console): a packaged action switched off for this deployment is no longer offered as a live button",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:10:33Z",
+  "updated_at": "2026-10-30T13:57:23Z",
+  "closed_at": "2026-10-30T13:57:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T13:57:21Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28115",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgDFH4S5pR1C8YvYCWWsZfXx)_\n\n## 维护者速读\n\n- 改了什么：管理员在 Setup › Packaged automation 关掉的打包动作，控制台不再给出可点的按钮；记录页标题栏、操作栏、快捷动作、列表/关联列表工具栏、行动作和批量动作一律不显示，重新打开后按钮回来。\n- 为什么改：以前按钮照样亮着，点了只会弹出写给工程师的报错（表名、ADR 编号）。服务端已由 #27842（PR #27964）在对象读的信封里下发 `disabledActions`，本 PR 是读它并隐藏的 ui 半边。\n- 风险与回滚：只在服务端给出名字时才隐藏，缺键（旧后端、内联 schema）一律照旧显示；标记用 symbol 挂在动作对象上，不进 JSON，不会被存回元数据。回滚即 revert 本 PR。\n- 先看：`ui/packages/core/src/utils/action-activation.ts`（标记与判定）、`ui/packages/app-shell/src/providers/MetadataProvider.tsx`（`cloneServedObject` 与 `ingestObjectList`，按名读的副本保留标记）、`ui/packages/components/src/renderers/layout/containers.tsx`（标题栏闸门）。\n- 两分钟验证：showcase 里把 Mark Done 关掉，打开任一未完成的 Task，标题栏和下方操作栏都没有 Mark Done；在 Setup 里重新打开，刷新后两处都回来。\n- 需要你做的：无，席位落地。\n\nFixes #27504\nConsumer-of: #27842\nClause-②: yes (widening) — four new `@object-ui/core` exports: `ACTION_SWITCHED_OFF_KEY`, `markSwitchedOffActions`, `markSwitchedOffActionsByObject`, `isActionSwitchedOff`\nMetadata-protocol: none\n\n## What changes\n\nThe object reads serve, beside the document, the names of the actions this deployment switched off (`disabledActions`, #27842: a `string[]` on `GET /meta/object/NAME`, a map keyed by object name on `GET /meta/object`). The console reads it and stops offering those actions.\n\n- `@object-ui/core`: `utils/action-activation.ts` stamps a switched-off action entry under a symbol key (`markSwitchedOffActions`, `markSwitchedOffActionsByObject`) and answers `isActionSwitchedOff`. A symbol rides through a spread (localization, a promoted bulk def) and never reaches `JSON.stringify` or `Object.keys`, so an action handed back to a metadata write never carries it. `ActionEngine.getActionsForLocation` and `getBulkActions` leave such an action out.\n- `@object-ui/data-objectstack`: the single-object read stamps from its envelope before unwrapping `item`, beside the existing `sortability` carry.\n- `@object-ui/app-shell`: `MetadataProvider` stamps the whole list and a package-scoped list through one ingestion (`ingestObjectList`). Its by-name read hands out a `structuredClone` of the adapter's schema, which drops symbol keys; `cloneServedObject` carries the stamps onto the copy. Found live: without it the record header kept the button.\n- Every action gate that already hides an action whose `requiredPermissions` the caller lacks asks `isActionSwitchedOff` beside it: `page:header` (`containers.tsx`), `action:bar`, the data table's row action defs, `RowActionMenu`, `BulkActionBar`, the grid actions column, `RelatedList` toolbar, `DeclaredActionsBar`, and the managed-by empty state's list toolbar check.\n- No `packages/**` file: the server half, including the plain refusal sentence, landed with #27842.\n\n## What to look at (preview)\n\n`examples/app-showcase`, signed in as the seeded admin, viewport 1440×900.\n\n1. Switch **Mark Done** (`showcase_mark_done`, object `showcase_task`) off under Setup › Packaged automation › Packaged actions.\n2. Open any task that is not done: the record header and the action bar under the path show **Log Time** and **Archive** but no **Mark Done**.\n3. Switch it back on and reload the task: **Mark Done** is back in both places.\n\n## Tests\n\n- New: `core/src/utils/__tests__/action-activation.test.ts` (stamp, spread, JSON, list form, engine location and bulk sets), `components/src/__tests__/page-header-switched-off-27504.test.tsx` (`page:header` and `action:bar`, hidden then offered again), `data-objectstack/src/getObjectSchema.disabledActions-27504.test.ts` (envelope carried, absent key stamps nothing), `app-shell/src/providers/__tests__/MetadataProvider.disabledActions-27504.test.tsx` (list envelope, absent key, by-name copy keeps the stamp).\n- 128 test files that name the touched modules, 1056 tests, all passed on c700e999. `type-check` passed for core, components, data-objectstack, plugin-detail, plugin-grid and app-shell.\n\n## Acceptance notes\n\n- Hidden rather than disabled with a reason: it mirrors the capability gate the same surfaces already apply, and it needs no new i18n key.\n- Absence of `disabledActions` hides nothing, and `[]` hides nothing: only a served name hides an action.\n- The refusal toast a click that still reaches the door shows is the server's sentence, which #27842 made plain (\"This action is turned off for this deployment. …\").\n\n## Verification\n\n<details><summary>Repro on main 561b7642 (before)</summary>\n\nWith Mark Done switched off, the record header and the `record:quick_actions` bar both offered a live Mark Done, and a click toasted \"Action 'showcase_mark_done' is disabled — it is switched off for this installation in the packaged-metadata activation ledger (sys_metadata_activation, ADR-0126 §8). …\". `GET /meta/object/showcase_task` served `type`, `name`, `sortability`, `item` and no activation state.\n</details>\n\n<details><summary>Live check against #27842's branch plus this change (after)</summary>\n\nSwitched off: Mark Done buttons 0, Log Time 2. Re-enabled and reloaded: Mark Done 2, Log Time 2. `GET /meta/object/showcase_task` served `disabledActions: [\"showcase_mark_done\"]`; the list served `showcase_task: [\"showcase_mark_done\"]`.\n</details>\n\n<details><summary>Ablations (each red, each restored to HEAD)</summary>\n\nThe `page:header` gate, the `action:bar` gate, the engine's location filter, the adapter's stamp, the provider's list stamp and the by-name copy's stamp carry were each disabled through `scripts/ablation-replace.mjs`; the matching new test failed every time and the restore matched HEAD's blob.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZny6X72Dx4kxxzLm7)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZny6X72Dx4kxxzLm7\n"
+}

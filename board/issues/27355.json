@@ -2,8 +2,8 @@
   "number": 27355,
   "kind": "issue",
   "title": "console: suggestions from a full HotCRM browser pass on 18.2.0: clickable path steps, chart labels and empty charts, record-page Delete, list inline edit without edit rights, public web forms, and phone layouts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T02:24:41Z",
-  "updated_at": "2026-10-29T07:33:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T11:48:13Z",
+  "closed_at": "2026-10-30T11:48:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27355",
   "body": "Suggestions from HotCRM's full browser pass on platform **18.2.0** (hotcrm#2320): six testers, 115 UI suggestions. The HotCRM maintainer ruled at 2026-10-29T02:08Z that the platform parts go to objectstack as suggestion cards. This card holds the console parts. Setup and Studio are a separate card.\n\nEach row cites its track report on hotcrm#2320 and the finding id there (screenshots are attached to each report). An id such as `S14` is the 14th suggestion in that track's report.\n\n## Already carded: not asked again\n\nThe pass ran on 18.2.0 (published 2026-10-27 06:20Z). These findings match objectstack cards that closed after that, so HotCRM will take them with the next release:\n\n| Finding | Card |\n|---|---|\n| The path draws `Unqualified` / `Rejected` / `Unsubscribed` as later steps (Sales S1, Revenue S3, Marketing S7) | #26612, #26694 |\n| The path ticks stages the record skipped (Service S1, Revenue S3) | #26581 |\n| On a phone the opportunity path overflows the right edge (Sales S32) | #26897 |\n| A unique refusal does not name the field (Sales S11) | #26891 |\n| Time-series charts skip empty days and months (Service S14, Revenue S18) | #26893 |\n| The phone list and record page (Sales S30, Revenue S22) | #27058 (open) |\n\n## New suggestions\n\n| # | Observed on 18.2.0 | Report | Suggestion |\n|---|---|---|---|\n| 1 | Path steps cannot be clicked. | [Sales](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6443461344) S1 | Let a step request that status change, subject to the field's validation and state machine. |\n| 2 | Chart data labels are not formatted: `174000` sits beside a `400K` axis. | [Marketing](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444160853) S14, [Revenue](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444188882) S18 | Format data labels with the measure's field format, as the axis is. |\n| 3 | A dashboard table cuts off its last column, and the tallest bar of a bar chart loses its value label. | [Marketing](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444160853) S14, [Revenue](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444188882) S18 | Fit or scroll the table columns; keep the label of the tallest bar inside the plot. |\n| 4 | A chart whose values are all zero draws an empty axis. | [Service](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444034183) S13 | Show the widget's empty state. |\n| 5 | The record page has no Delete. It is only in the list row menu. | [Sales](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6443461344) S14, [Revenue](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444188882) S13 | Offer Delete in the record header's overflow menu when the user may delete. |\n| 6 | A service agent is offered inline edit on an opportunity list where the agent cannot edit any row. | [Setup](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6442758420) S13 | Offer list inline edit only when the user may edit the object (the record page now asks via #27138 / #27328; the list grid does not). |\n| 7 | A manager opening a deal they may not read sees \"the record does not exist or has been deleted\". | [Sales](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6443461344) S25 | Consider \"you do not have access to this record\" where revealing existence is acceptable, or say both are possible. |\n| 8 | A calendar view's footer count counts the records in the loaded window, not the records the view matches. | [Marketing](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444160853) S6 | Label it as the window's count, or count the view. |\n| 9 | Public web forms (`/forms/:name`) carry no branding. The submit button is blue while the app's color is orange, and the description placeholder is monospace. | [Sales](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6443461344) S6, [Service](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444034183) S3 | Let a public form take the app's brand color and logo; use the body font for placeholders. |\n| 10 | A refused public-form submit shows a toast and a banner but does not mark the fields. | [Sales](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6443461344) S6 | Mark each refused field, as the record dialog does. |\n| 11 | On a phone, Sales Home's four KPI tiles take a row each and fill the first screen; the page tab strip overflows. | [Sales](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6443461344) S29 | Two KPI tiles per row at phone width; scroll the tab strip with a cue. |\n| 12 | On a phone, the pipeline kanban opens on an empty first stage. | [Sales](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6443461344) S31 | Open on the first non-empty column, or show column counts in a header strip. |\n| 13 | On a phone, a gantt bar has no label, and a long campaign title is cut with no ellipsis. | [Marketing](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6444160853) S19 | Label bars; ellipsize titles. |\n\n## Acceptance\n\nEach row is either taken, with its own card if it needs one, or answered \"will not do\", with the reason. HotCRM needs no metadata change for rows 1–13.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from the #2320 UX summary, on the maintainer's ruling. Dedupe: read the titles of every open `domain:ui` card and every `domain:ui` card closed since 2026-10-26, and the open issue list. The matches are in the first table. The HotCRM-side parts of the same themes are HotCRM cards.</sub>"

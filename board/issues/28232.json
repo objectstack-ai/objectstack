@@ -1,0 +1,31 @@
+{
+  "number": 28232,
+  "kind": "issue",
+  "title": "Metadata create form: say \"type a name\" next to Name when the label cannot fill it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T18:08:17Z",
+  "updated_at": "2026-10-30T19:08:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28232",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ② the optional half of #28180 that triage audit 6527260428 split out (\"The optional Console prompt next to Name is a `ui/` change, outside this card. If it is wanted, it becomes its own p3 card\"), carried to the seat by the #28180 card thread's `out_of_scope_findings` (os-dev-report 6529942225). ⛔ Not a claim. Triage sets the lane and grade.\nReach: a zh-CN or ja-JP administrator creating a permission set (or any metadata type whose create form derives `name` from the label) with a label written all in Chinese or Japanese. PR #28229 fixes the help text; the field itself still sits empty and required with nothing at the field saying why.\n\n## Observed (on `main`)\n\n- `ui/packages/app-shell/src/views/metadata-admin/createDerive.ts`: `slugify` keeps only `[a-z0-9]`; an empty derivation clears the target, with the comment \"Empty derivations … just clear the target; the UI then knows to prompt for manual entry\". No Console surface issues that prompt.\n\n## Wanted\n\n- When the label is non-empty and its derivation is empty, the create form says so next to Name, in one short line (for example \"This label can't be turned into a name; type one in snake_case\"), translated in the shipped locales. It goes away once Name is typed. Test plus ablation.\n\nDedupe words: empty name derivation prompt, slugify CJK label prompt, createDerive manual entry, type a name hint.\n\nLinks back: #28180, PR #28229, triage 6527260428."
+}

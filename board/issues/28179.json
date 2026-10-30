@@ -1,0 +1,33 @@
+{
+  "number": 28179,
+  "kind": "issue",
+  "title": "console(metadata-admin): a served form row marked `required` that the Zod leaves optional is only a star, so Save accepts it empty (permission set Label after #28152)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T15:36:16Z",
+  "updated_at": "2026-10-30T16:01:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28179",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a should-fix a contract review carried out of scope (triage contract review 6526229582 on PR #28152, card #27864, attempt 1). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade and no lane: triage sets both (the code is `ui/packages/app-shell`).\nReader: the lane triage assigns.\nDedupe (open AND closed): semantic search \"metadata create form Save ignores required star served form required override empty field\" → 4 hits, all public-form (`/forms/:slug`) cards (#24131, #27398, #27496, #27602). None is the Studio metadata create form. **New.**\nreach: **read in code, NOT measured through a public door.** Console › Setup › Permission sets › New, after PR #28152: leave the starred Label empty, type a Name, Save.\n\n## What the code says\n\n- A served metadata form row's `required: true` is a layout override (`FormFieldSchema.required`, `packages/spec/src/ui/view.zod.ts`, \"Required override\"). The Console draws it as a star plus `aria-required`, deliberately not native `required` (`ui/packages/app-shell/src/views/metadata-admin/SchemaForm.tsx` around lines 1939–1948).\n- The create page's client validation reads the Zod, not the form rows (`ResourceEditPage.tsx` around lines 945–960). So a row the form marks required but the schema leaves optional is advisory: Save succeeds with it empty.\n- PR #28152 made `permission`'s Identity row `label` required in the form while `PermissionSetSchema.label` stays `z.string().optional()` (the ruling forbade moving the accept set). It is the first registry row where the override and the Zod disagree; every other `label` row marked required sits over a required `z.string()`.\n\n## Wanted\n\n- The metadata create form's Save refuses (client-side, by name) an empty field that the served form marks `required`, even when the Zod leaves it optional. Server accept sets do not move.\n- Pin it on the `permission` create screen: empty Label + typed Name is refused with a field-level message on Label.\n\nRelated: #27864 / PR #28152 (contract review should-fix 1)."
+}

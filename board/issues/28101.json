@@ -1,0 +1,35 @@
+{
+  "number": 28101,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a corrupt correlation cycle back to the resumed run no longer names that run as its own child",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:49:46Z",
+  "updated_at": "2026-10-30T13:32:05Z",
+  "closed_at": "2026-10-30T13:32:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T13:32:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28101",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DG3gN5hhvu8HEmLydwk8EsW)_\nPart of #27971 — this PR carries the rider (comment 6516883756) and the docs half only. The card's main fix (recording a cancelled `map` item on a parent-id resume) waits on the maintainer's ruling (decision analysis 6523020455) and is not in this PR.\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — `skills/**` names neither `RESUME_CHILD_PENDING` nor map cancellation; under `content/docs/**` the code appears only in the generated `references/api/` pages (automation-api, contract, error-code-ledger), which already list it.\n\n## 维护者速读\n\n- 改了什么:恢复闸门沿关联 run 链往下走时，先把调用方自己的 run 记为已访问；另在客户端注释、README、QA 清单补上 409 RESUME_CHILD_PENDING。\n- 为什么改:关联数据损坏成 A→B→A 环时，拒绝信息会让调用方去恢复它正在恢复的那个 run，指错了门。\n- 风险与回滚:只影响损坏的环形关联；正常链路的遍历结果不变。回滚即还原 engine.ts 里那一行。\n- 先看:`packages/services/service-automation/src/engine.ts`(resolveSuspensionChain 的 seen 初值)、`src/map-parent-resume-refusal.test.ts`(新环形用例)。\n- 两分钟验证:`pnpm --filter @objectstack/service-automation exec vitest run --maxWorkers=2 src/map-parent-resume-refusal.test.ts`，预期 6 个用例全绿。\n- 需要你做的:无，席位落地。#27971 主修复的形状另在卡上等你裁决。\n\n## What changes\n\n- **Rider 6516883756.** `resolveSuspensionChain` (`service-automation/src/engine.ts`) seeds its `seen` set with the caller's run id before the walk. A corrupt correlation cycle A → B → A used to yield the chain `[A, B, A]`, and the `409 RESUME_CHILD_PENDING` refusal then told the caller to resume A, the run it was already resuming. The chain now ends at B and the refusal names B.\n- **Docs half.** `409 RESUME_CHILD_PENDING` is added to the client `resume()` docblock's list of refusals that leave the suspension intact (`packages/client/src/index.ts`), to the service-automation README's code list, and to the automation checklist item `automation.trigger-status-contract` (acceptance[4], a new variant row, history revision 9).\n- Changeset: `@objectstack/service-automation` patch.\n\n## Tests\n\n- New pin in `map-parent-resume-refusal.test.ts`: *names the item run, never the caller's own, when a corrupt correlation cycles back to the caller*. It points the item's row back at its parent (`map:PARENT`), resumes the parent, and asserts the code, that the message names the item run and not the parent, and that the map state did not move.\n- Ablation (fix committed first; the test imports `./engine.js` from `src`, so no `dist` is on the path): `scripts/ablation-replace.mjs` replaced the seeded constructor with an empty one (anchor x1 → x0, blob c3ff057c → 43ab85a7); the new pin went red (1 failed, 5 passed); the restore matched the HEAD blob c3ff057c and `git diff HEAD` was empty.\n\n## Acceptance notes\n\n- Measured on `main` f6adf480 for the card's main half (not changed here): after `cancelRun` on a parked map item, a parent-id resume advances past it. The parent completes, a downstream node sees `results` holding only item 2's output, and `count` is 1.\n- No stock showcase flow reaches `409 RESUME_CHILD_PENDING`: `showcase_release_signoff`'s item parks on an approval, which answers 403 first. The new checklist variant says so.\n\n## Verification\n\n<details><summary>Package suite and typecheck at 24787eeb</summary>\n\n`pnpm --filter @objectstack/service-automation test`: Test Files 226 passed (226), Tests 2863 passed (2863). `pnpm --filter @objectstack/service-automation typecheck`: check:test-typecheck OK, 0 errors. The head after that commit only adds the changeset.\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, reconciled with --ran)</summary>\n\n67 derived families: 66 ran with exit 0 and 1 is NOT MEASURED. 58 of them ran at 24787eeb; the 9 changeset families the changeset added ran at 1b77a96a. `check-plugin-teardown-shape --self-test` was re-run after fetching its pinned positive-control commit, and `check:skill-examples` after building `@objectstack/client-react` and its dependencies; both exit 0. NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3 (prerequisite): it reads the `dist/` of about 40 packages, apps and adapters included, that this container did not build. CI's run is the reading for it. `node scripts/check-platform-checklist.mjs --changed-from origin/main`: exit 0, 14 anchors judged, 0 lost. `pnpm lint` is a repo-wide scan owned by CI.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1oZadHHFdEZXANxiG\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4d1oZadHHFdEZXANxiG)_\n"
+}

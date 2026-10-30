@@ -1,0 +1,35 @@
+{
+  "number": 28094,
+  "kind": "pull_request",
+  "title": "fix(rest): fold the switched-off action names into the cached object read's ETag",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:33:55Z",
+  "updated_at": "2026-10-30T13:42:17Z",
+  "closed_at": "2026-10-30T13:42:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T13:42:14Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28094",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFixes #28044\n\n## 维护者速读\n- 改了什么：默认缓存门 `GET /meta/object/:name` 把随对象下发的 `disabledActions`（被启用台账关掉的动作名）折进 ETag；没变化时重新验证答 304，管理员开关动作后答 200 并换新 ETag。spec 里这个键的描述同步改成\"折进 ETag\"。\n- 为什么改：#27964 把 `disabledActions` 放到对象读旁边时，为了正确性让每个带这个键的读都放弃 304；默认部署都挂着台账，所以控制台每次读对象都重新下载整个定义。\n- 风险与回滚：只动响应头里的校验值，响应体一个字节不变；没有台账的对象 ETag 和以前逐字节相同。回滚就是 revert 这个 PR，后果只是对象读又不答 304。\n- 先看：`packages/rest/src/meta-item-read-routes.ts` 的 `besideJudged`（现在只有 flow 的 `registration` 还让 304 让位）和文件末尾的 `cachedDisabledActionsFingerprint`；然后看 `meta-object-cached-disabled-actions.test.ts`。\n- 亲手验证：`pnpm --filter @objectstack/rest exec vitest run src/meta-object-cached-disabled-actions.test.ts`，应看到 8 passed，其中 #28044 的 5 条（304 / 关掉后 200 / 打开后 200 / 缺失与 [] 不同 / 无台账对照 304）。\n- 需要你做的：无，席位落地。\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- `packages/rest/src/meta-item-read-routes.ts`, the cached branch of `GET /api/v1/meta/:type/:name`:\n  - For an object, the `disabledActions` served beside the item is now a fifth dimension folded into the ETag that this layer already builds and checks for objects (`audienceFolds`). The fingerprint is a hash of the list exactly as served.\n  - When the key is absent (no ledger answered), nothing is folded, so the ETag stays byte-identical to the one before this change.\n  - `[]` folds a fingerprint of its own, so a ledger being attached or detached also changes the ETag.\n  - `besideJudged`, which skips the 304, is now set only by the flow `registration`. That verdict is in no validator, so a flow read that carries it still never gets a 304.\n- `packages/rest/src/meta-object-cached-disabled-actions.test.ts`: the old pin \"a read that carries the key is never answered 304\" is replaced by five #28044 pins:\n  - an unchanged object with an unchanged switch set gets 304;\n  - switching an action off gets 200 with the new list and a new ETag;\n  - switching an action back on gets 200 with `[]` and a new ETag;\n  - absent and `[]` give different ETags, in both directions;\n  - control: an object with no switched-off actions keeps its 304, and its ETag stays `\"etag_task\"`.\n- `packages/spec/src/api/protocol.zod.ts`: only the `GetMetaItemResponseSchema.disabledActions` `.describe()` string. It said the list is \"never part of the ETag, so a cached read that carries it is never answered 304\"; it now says the list is folded into the ETag, so a cached read revalidates to 304 only while the switched-off set is unchanged. The generated `content/docs/references/api/protocol.mdx` line follows. No shape changes.\n- A `patch` changeset for `@objectstack/rest` and `@objectstack/spec`.\n\nThe response body is unchanged and no accepted input changes. The list read `GET /meta/object` has no cached or ETag door (`meta-collection-routes.ts` has no ETag handling), so it has nothing to pin.\n\n## Why\n\n#27964 put `disabledActions` beside the object read but kept it out of the validator. To avoid sending a stale list with a 304, it skipped the 304 for every read that carried the key. On a default deployment the ledger is attached, so every cached object read was a full 200. The maintainer approved #27964 as built and asked for the 304s back. Folding the served list into the validator means a 304 is correct again: the ETag now covers what is actually sent.\n\n## Verification\n\n<details><summary>Measured before the fix (tree c1b52de2)</summary>\n\nA cached object read with `disabledActions: ['showcase_mark_done']` was sent back its own ETag as If-None-Match and got 200, not 304 (`AssertionError: expected 200 to be 304`). The ETag was `\"etag_task\"` whatever the switch set held. The new pins: 5 failed, 3 passed. One part of the control already passed before the fix (no ledger → 304); its `[]` part failed (200).\n</details>\n\n<details><summary>After the fix and ablation (commit 8efc06e6)</summary>\n\n- The pins file: 8/8 passed.\n- Ablation: `meta-item-read-routes.ts` restored to its c1b52de2 version; the same 5 pins went red, 3 passed. Restored with `git checkout HEAD -- <path>`; `git diff HEAD` empty.\n</details>\n\n<details><summary>Package suite and gates (commit 8efc06e6)</summary>\n\n- `pnpm --filter @objectstack/rest test`: Test Files 353 passed (353); Tests 6801 passed, 332 skipped (7133).\n- `pnpm --filter @objectstack/rest typecheck`: OK.\n- eslint on the two changed `.ts` files with `--no-inline-config`: exit 0.\n- `dispatch-gates --commands`: 60 derived; 59 ran with exit 0. `check:dual-build-cjs-loads` needs a whole-tree build, so it is left to CI.\n</details>\n\n<details><summary>Spec string and merge of main (head b45e4528)</summary>\n\n- `pnpm gen:schema` and `pnpm gen:docs` in `packages/spec`: exit 0; only `content/docs/references/api/protocol.mdx` changed among tracked files.\n- After merging `origin/main` (c4390f73): the pins file plus the meta-item-read tests, 11 passed; `packages/spec` `src/api/protocol*` tests, 225 passed.\n- `check-commit-card-trailers --range origin/main..HEAD`: exit 0.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1Np3hU7RQnA13YZcL\n"
+}

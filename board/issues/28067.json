@@ -1,0 +1,34 @@
+{
+  "number": 28067,
+  "kind": "pull_request",
+  "title": "test(rest): fail the late-cancel control loudly when its wait for the results write runs out",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:27:02Z",
+  "updated_at": "2026-10-30T12:13:20Z",
+  "closed_at": "2026-10-30T12:13:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T12:13:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28067",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DFm2bnNC5WSDWCqwoXTpNTR)_\n\ndomain:server#3 · os-elon-musk · session_016WV4cyGcBtnptfcfKE14ZS\n\nFixes #27839\n\n## What changes\n\nIn `packages/rest/src/import-job-integration.test.ts`, the control \"a cancel that lands after the last row still wins over an all-failed outcome\" now records how many rows the `results` read returned during its 400 × 5 ms wait, and asserts it reached 3 before it checks the job row. Test-only; no product change.\n\n## Why\n\nThe worker's final patch is the only write of `results`. If the wait ran out, the cancel route's own `cancelled` write and the progress flush could satisfy the status and count checks without the final patch ever landing. The new assertion makes an exhausted wait fail on its own cause (contract review of #27795, record 6512470441, should-fix 1).\n\n## Verification\n\n- `npx vitest run src/import-job-integration.test.ts` in `packages/rest`: 21/21 pass.\n- Ablation (local, restored): with the wait loop cut to 0 iterations, the new line fails with `expected +0 to be 3`. Under the same ablation the pre-change test also fails, but on the later `toMatchObject` counts, which does not name the wait.\n- `packages/rest` full suite: 357 files, 7073 passed, 350 skipped.\n- `dispatch-gates --ran`: 49 derived, 47 run green, 2 NOT MEASURED (exit 3, worktree prerequisites: `check-plugin-teardown-shape --self-test`, `check:dual-build-cjs-loads`), 0 unrun.\n- `pnpm lint`: exit 0.\n\nSkills-docs: none. `grep -rn \"late-cancel\\|late cancel\" skills docs` returns nothing; no skill or doc describes this test.\n\nClause-②: no\nMetadata-protocol: none\n\nNo changeset: a test file publishes nothing from any released package (`skip-changeset`).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyGcBtnptfcfKE14ZS\n"
+}

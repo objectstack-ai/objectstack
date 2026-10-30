@@ -1,0 +1,32 @@
+{
+  "number": 28054,
+  "kind": "issue",
+  "title": "automation: a flow's successMessage is copied verbatim, so a {{ }} hole naming a run variable reaches the user raw",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:44:45Z",
+  "updated_at": "2026-10-30T11:03:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28054",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cyVSbyvGiXWKxk8GG8\n\nFiling gate: ① user-visible UX defect, `reach:` named producer HotCRM (enrolment screen flow, hotcrm#2371 / hotcrm#2376), and ④ per-layer child of #27381 (row 3).\n\n## Question\n\nShould a flow's `successMessage` (and `errorMessage`) become a template text slot over the run's variables, like a `screen` node's `description` or an `end` node's `message`?\n\n## Reading — `origin/main` bc496bf7, 2026-10-30T10:42Z\n\nProbe: `AutomationEngine.registerFlow` + `execute` of a flow with `successMessage: '{{enrolledCount}} contacts enrolled'` whose one node sets `enrolledCount = 3` (vitest probe in `packages/services/service-automation`, not committed). Output:\n\n```text\n{\"success\":true,\"successMessage\":\"{{enrolledCount}} contacts enrolled\",\"output\":{\"enrolledCount\":3}}\n```\n\n- `FlowSchema.successMessage` (`packages/spec/src/automation/flow.zod.ts`) is a plain `z.string()`; its docblock says \"`{var}` is NOT interpolated here\". It is not one of `FLOW_NODE_TEXT_SLOTS` (`packages/spec/src/automation/flow-text-slot-template.ts`), so no door judges or compiles its holes either.\n- The engine copies `flow.successMessage` onto the result unrendered at every terminal exit: `AutomationEngine.execute` (`engine.ts`), `dag-traversal.ts`, `run-resume.ts`.\n- The console's `FlowRunner` / `flowResponse.ts` (`ui/packages/app-shell`) shows it verbatim after the `flows.FLOW.successMessage` translation.\n\n## Suspected fix sites\n\n- Contract: type `successMessage`/`errorMessage` as flow text slots (`{{ }}` holes over the run's variables), judged at the same doors as the node text slots — `packages/spec`, `domain:spec`.\n- Runtime: render them against the run's variables at each terminal exit before they ride the result — `packages/services/service-automation`, `domain:server`. Open point for whoever builds it: the console translates by key, so the translated sentence must be rendered too (render server-side after translation, or ship the variables).\n\nLane guess: spec contract first, server render after; triage decides.\n\n## Business reason\n\nA screen flow cannot say \"3 contacts enrolled\" when it finishes; HotCRM ends its enrolment flow on an extra result screen instead of a toast. An autolaunched flow invoked as an action already reaches the same numbers through the action's `{{ result.output.* }}`, so the two paths answer the same author differently.\n\nDedupe: semantic search \"flow successMessage interpolate run variables template\" in objectstack issues, 1 hit (#24546 closed, unrelated resume variables)."
+}

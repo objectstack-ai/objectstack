@@ -1,0 +1,32 @@
+{
+  "number": 28158,
+  "kind": "issue",
+  "title": "Action param dialog: draw the action's `submitText` on the submit button, falling back to Confirm",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T14:42:11Z",
+  "updated_at": "2026-10-30T15:54:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28158",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② the consumer half of #27944. That card's spec half (the PR that names this card) adds `ActionSchema.submitText`, an optional `I18nLabel`: the label of the submit button in the dialog an action opens to collect its `params`. Nothing draws it yet, so the spec liveness ledger marks the key `planned` with `authorWarn`.\nReach: every action with `params` opened from the record header, a list row's menu or the toolbar. HotCRM `send_email`, `log_call`, `log_meeting`.\nReader who acts: `domain:ui`.\nLands after: the #27944 spec PR (it declares the key this card reads).\n\n## Observed\n`ui/packages/app-shell/src/views/ActionParamDialog.tsx` draws `t('actionDialog.confirm')` (\"Confirm\") on the submit button for every action. The two param-collection handlers (`useConsoleActionRuntime.tsx#paramCollectionHandler`, `RecordDetailView.tsx#paramCollectionHandler`) pass the dialog the action's title and its `description` (through `actionDescription(...)`), and nothing for the button.\n\n## Wanted\n- Both param-collection handlers resolve the action's `submitText` the way they resolve `description`: the bundle's `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action) first, then the authored inline locale map collapsed to the active language, then the authored string. They pass it to `ActionParamDialog`.\n- `ActionParamDialog` draws it on the submit button and falls back to `actionDialog.confirm` when there is none. The uploading state keeps `actionDialog.uploading`.\n- `UIActionSchema` (`@object-ui/types`) declares `submitText`, derived from the spec's `ActionSchema`.\n- The spec liveness row `submitText` (`packages/spec/liveness/action.json`) flips to `live` with these read points and drops `authorWarn` / `authorHint` in the same edit.\n- In that same change, the Studio action form offers the key: delete the `action` / `submitText` omit row in `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts` and add a `submitText` row to `packages/spec/src/ui/action.form.ts` (its `metadata-forms` translations in `@objectstack/platform-objects` regenerate with `node scripts/check-i18n-bundles.mjs --write`).\n\nDedupe words: param dialog submit label, submitText, actionDialog.confirm, action verb button.\n\nRelated: #27944.\n\nBlocked-by: #27944\n"
+}

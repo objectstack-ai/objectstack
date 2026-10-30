@@ -1,0 +1,35 @@
+{
+  "number": 28043,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): refuse a derived measure currency that contradicts its operands' fixed code",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:27:52Z",
+  "updated_at": "2026-10-30T11:20:28Z",
+  "closed_at": "2026-10-30T11:20:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T11:20:25Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28043",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFixes #28019\n\n## 维护者速读\n- 改了什么：数据集编译时，派生度量（derived sum / difference）若自行声明的 `currency` 与其操作数统一解析出的 `fixed` 币种不同，直接拒绝（`DATASET_INVALID` / 400），报错写明改法；重述同一币种仍合法。\n- 为什么改：守卫 1 原先跳过派生度量，两个 EUR 固定币种的度量求和后声明 `currency: 'USD'` 能编译通过，结果列把欧元金额标成美元，没有任何提示（#28019）。\n- 风险与回滚：收窄，`Clause-②: yes (narrowing)`、`Metadata-protocol: narrowed`、`minor`；此前能编译的这类数据集现在被拒，仓内没有数据集用到该形态，已部署租户若有，报错会点名要删的 `currency`。回滚即还原本 PR。\n- 先看：`packages/services/service-analytics/src/measure-currency-coherence.ts` 守卫 1 末尾新增的 fixed 判断，`src/__tests__/record-currency-analytics.test.ts` 新增的固定测试。\n- 两分钟验证：`pnpm --filter @objectstack/service-analytics exec vitest run src/__tests__/record-currency-analytics.test.ts`，49 例全绿；修复前其中 5 例红。\n- 需要你做的：无（契约复审由席位在本 head 上做，席位按本任落地授权落地）。\n\nClause-②: yes (narrowing) — a dataset that declared a derived measure's `currency` against its operands' single `fixed` code compiled before and is refused now\nMetadata-protocol: narrowed\n\n## What changes\n- `measure-currency-coherence.ts`, Guard 1: a derived measure that declares a `currency` is now also compared with its resolved currency (`resolvedOf`). When every monetary operand resolves to one `fixed` code and the declared code differs, compile refuses with `DATASET_INVALID` / 400. The sentence follows the existing fixed-field refusal: it names the dataset, the derived measure, its operands, the operands' code, and the fix (delete the measure's `currency`; the column takes the operands' code). Operands reached through a fixed-code derived sum are covered too.\n- Unchanged: a derived measure that restates its operands' `fixed` code; a derived measure whose operands resolve to no one `fixed` code (a `fixed` amount with a tenant-currency one, a `ratio` / `product`); the record-mode refusal on derived measures; Guard 2.\n- The module header and Guard 1's comment describe the derived arm.\n- One `minor` changeset for `@objectstack/service-analytics` (a dataset value is refused, so `Metadata-protocol: narrowed`, as in #27579's changeset for the sibling refusals), with the BREAKING note and the ADR-0087 `not-required (no-migration-prescription)` disposition.\n\n## Why\n`{ derived: { op: 'sum', of: ['eur_a', 'eur_b'] }, currency: 'USD' }` over two EUR-fixed measures compiled, and `enrichResultColumns` let the declared `USD` label a column of euros. Guard 1 skipped derived measures for the fixed comparison (`const field = m.derived ? undefined : fieldOf(m)`), although `resolvedOf` already knew the operands' common `fixed` code. Triage (6518908209) ruled that Guard 1 judges derived measures too and that restating the same code stays legal.\n\n## Verification\n- Red first: on the unfixed tree `record-currency-analytics.test.ts` gives 5 failed / 44 passed. The 5 are the derived sum and difference pins, the fixed-code derived sum pin, and the `queryDataset` and draft-preview door pins; the controls (restated code, no one fixed code) stay green.\n- Ablation: with the new condition replaced by `false`, the same 5 go red; restored, the blob equals HEAD's and `git diff HEAD` is empty.\n- `pnpm --filter @objectstack/service-analytics test`: 196 files, 4759 passed / 282 skipped. `typecheck` exits 0. eslint on both changed files exits 0.\n- `dispatch-gates --commands`: 59 derived, 58 run green, 1 not measured locally (`check:dual-build-cjs-loads` needs a whole-tree build), 0 unrun. Dogfood battery: 357 files / 2875 tests passed, 0 failures.\n- The declaration lines were moved from the claim's first `no (narrowing)` / `none` / `patch` to `yes (narrowing)` / `narrowed` / `minor` before the push (claim amended); the gates above ran on the same code.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1Np3hU7RQnA13YZcL\n"
+}

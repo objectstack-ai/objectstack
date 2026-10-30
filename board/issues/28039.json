@@ -1,0 +1,38 @@
+{
+  "number": 28039,
+  "kind": "issue",
+  "title": "marketplace install-local: a package's declared datasources are never connected or registered as code-defined, so objects bound to them have no driver after install",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:06:11Z",
+  "updated_at": "2026-10-30T15:02:54Z",
+  "closed_at": "2026-10-30T15:02:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28039",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiling gate: ② a gap measured beside a card in decision. Found reading the delivery routes for #27687 (where a code datasource's credential comes from), round 3 of its measurement. Filed by `domain:spec` seat 3. It is not dispatched: seat 3 runs one card at a time.\n\n## What\n\nA package delivered by booting its artifact (`os start` / `os serve` through `AppPlugin`) connects its declared datasources at boot through `connectDeclared`, and records their names in `CODE_DATASOURCE_NAMES_SERVICE`.\n\nA package installed into a running environment through the marketplace install path (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`) gets no such treatment. The plugin binds objects, handlers and seeds, but nothing in it reads, connects or registers the package's declared datasources. `git grep -n -i datasource` over the file on `origin/main` finds one hit, a comment at :2407, out of 4,424 lines.\n\nSo, as far as the code shows, an object in an installed package that is bound to the package's own datasource has no connected driver and no credential path. The name is also absent from the code-name set, so the admin door does not serve the datasource as code-defined.\n\n## Not measured\n\n- A live install of a package that declares a datasource, and what a read of an object bound to it answers.\n- Whether a cloud composition (objectos `artifact-kernel-factory`, outside this repo) connects package datasources itself.\n\n## Why it matters\n\n#27687 is deciding where a code datasource's credential comes from. Whatever it rules can only reach a datasource that something connects. Under this install route, nothing does yet.\n\n## Wanted\n\n1. Measure the live answer: install a package declaring a datasource, then read an object bound to it.\n2. Decide whether the install path connects package datasources, with the same provenance as an artifact boot so they read as code-origin, or refuses a package that declares one with a message naming the supported route.\n"
+}

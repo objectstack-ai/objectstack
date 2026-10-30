@@ -1,0 +1,35 @@
+{
+  "number": 28100,
+  "kind": "issue",
+  "title": "plugin-auth: opt-in Cloudflare Turnstile on email sign-up (server verify + Console widget), off unless a site key and secret are configured",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:49:27Z",
+  "updated_at": "2026-10-30T16:00:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28100",
+  "body": "Filing gate ③: a task on the maintainer's word. Sam ruled 「同意 A」 (2026-10-30 12:46Z) on the cloud#3367 sign-up abuse evaluation (doc https://claude.ai/artifact/2fdum3A7ZLCY8fwteW7CmH; card comment https://github.com/objectstack-ai/cloud/issues/3367#issuecomment-6493731251): option A, Cloudflare Turnstile on sign-up, at the framework layer. Option D (OS_ORG_LIMIT 10→2) was not ruled. Filed by `repo:cloud` seat 2. ⛔ Not a claim.\n\n## 维护者速读\n\n公开发布前，注册需要人机校验，防止有人批量注册 Free 账号刷模型费用。cloud 的注册页由框架的 plugin-auth（better-auth）和 Console 提供，所以 Turnstile 要做在框架里。这张卡加一个可选开关：配置了 site key 和 secret 才启用；不配置时行为和现在完全一样。cloud 那半边（配密钥、pin 轮、staging 验收）是 cloud 的卡，阻塞于本卡。\n\n## Facts (objectstack main 6410029d1b)\n\n- plugin-auth pins `better-auth` 1.7.12. better-auth ships a `captcha` plugin with a `cloudflare-turnstile` provider, which verifies the `x-captcha-response` header on the endpoints it guards.\n- No captcha is wired anywhere in `packages/` today. `ui/packages/plugin-form` has a `captchaToken` for embeddable forms only.\n- The sign-up rate limit is better-auth's default (3 per 10s per IP, cloud#3367 measurement).\n- The public auth config (`getPublicConfig`, `features.*`) is how the Console learns sign-in options. The `termsUrl`/`privacyUrl` pattern is `auth-manager.ts:4517-4530`.\n\n## Work\n\n1. **Server.** When both `OS_TURNSTILE_SITE_KEY` (public) and `OS_TURNSTILE_SECRET_KEY` (secret) are set, mount better-auth's captcha plugin with provider `cloudflare-turnstile` on the email sign-up endpoint. Add sign-in and password reset only if the evaluation's measurement supports it, and say which in the PR. When either is unset, mount nothing. The secret is never logged, never served, and never echoed in an error.\n2. **Public config.** Serve `features.turnstileSiteKey` (the public site key only) when enabled.\n3. **Console.** When the config carries a site key, the sign-up form renders the Turnstile widget and sends its token as `x-captcha-response`. A failed or expired challenge shows a retry message and no raw provider error. Allow `https://challenges.cloudflare.com` (script and frame) in the Console CSP, only when enabled if the CSP is per-config.\n4. **Tests.** Enabled: sign-up without a token is refused, and with a token is verified through a stubbed verifier. Disabled: sign-up is unchanged. The config serves the site key and never the secret. Include an ablation.\n5. A changeset and a docs line naming the two env vars (names only).\n\n## Done when\n\nWith the two vars set, sign-up needs a valid Turnstile token. Without them, nothing changes."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 28214,
+  "kind": "issue",
+  "title": "A page's object-form thank-you panel has no translation key",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T16:59:58Z",
+  "updated_at": "2026-10-30T19:09:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28214",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ should-fix S1 of contract review 6528389425 on PR #28195 (#28004), filed by the seat so the gap does not stay \"noted, not filed\". ⛔ Not a claim. Triage sets the lane and grade.\nReach: any page that embeds an `object-form` with a `thank-you` submit behavior. The showcase's `new-project-wizard` page (`examples/app-showcase/src/ui/pages/new-project-wizard.page.ts` L68) authors one; its \"Project created\" panel stays in the authored language in every locale.\nReader who acts: `domain:spec` (the translation key and the `translatePage` overlay), then lint and the extractor, as in PR #28195.\nDuplicate search: `search_issues` \"object-form submitBehavior thank-you translation page component\" → #28004 (the form view's own panel, landing in PR #28195), not this.\n\n## Observed (once PR #28195 is on `main`)\n\n- A form view's thank-you `title` / `message` are translatable at `objects.OBJECT._views.VIEW.submitBehavior.title` / `.message` and overlaid by `translateView`.\n- `ObjectFormPropsSchema.submitBehavior` (`packages/spec/src/ui/component.zod.ts` ≈L7076, the page `object-form` block, the form view's own member by reference) has no key under `pages.<name>` and nothing in `translatePage` overlays it.\n\n## Wanted\n\n- A translation address for the page `object-form` component's thank-you `title` / `message`, overlaid by `translatePage` with the same override rules `translateFormSubmitBehavior` uses (one comparison, no second copy). Whether the address lives under `pages.<name>` or under the bound object (the `_sections` precedent at `translation.zod.ts` ≈L530) is the card thread's design call; it names the alternative.\n- The extractor scaffolds the keys, lint knows them, and the showcase page's panel gains its zh-CN strings.\n\nDedupe words: page object-form thank-you translation, submitBehavior page i18n, translatePage object-form.\n\nLinks back: #28004, PR #28195, review 6528389425.\n\nBlocked-by: #28195\n"
+}

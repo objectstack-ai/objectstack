@@ -1,0 +1,32 @@
+{
+  "number": 28255,
+  "kind": "issue",
+  "title": "Percent field shows a plain percentage when percentDisplay is plain: PercentCellRenderer reads the key",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T19:43:02Z",
+  "updated_at": "2026-10-30T20:00:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28255",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the renderer half of #27973, whose contract half lands in PR #28222 (claim 6526095170; os-dev-report on the card; contract review 6531984191 PASS). ⛔ Not a claim. Triage sets the lane and grade.\nReach: any `percent` field that is a rate or a probability rather than progress: HotCRM `crm_opportunity.probability` and the campaign rate fields (#27430 row 3) still draw a progress bar.\n\n## Observed (once PR #28222 is on `main`)\n\n- `FieldSchema.percentDisplay` is declared: `'bar' | 'plain'`, optional, bar by default, beside `useGrouping`. Its liveness row is `planned` and the describe says nothing reads it yet.\n- `PercentCellRenderer` (`ui/packages/fields/src/index.tsx`) draws a bar for every percent value on every host (list grid cells, `DetailView`, `HeaderHighlight` chips).\n\n## Wanted\n\n- `PercentCellRenderer` reads `percentDisplay` on every host; `plain` prints the percentage with no bar. The grid / detail relay sites that copy `useGrouping` onto the cell's field metadata copy `percentDisplay` too. Test plus ablation.\n- `field.form.ts` gains the `percentDisplay` row, and the form-reconciliation omit row added by #28222 goes.\n- In the same PR, flip the liveness row `planned` → `live`, drop the describe's not-yet-read clause, and (contract review should-fix) name the relay sites in the row's `producer` the way the `useGrouping` row does.\n\nDedupe words: percentDisplay renderer, PercentCellRenderer plain percentage, percent progress bar.\n\nLinks back: #27973, PR #28222, #27430.\n\nBlocked-by: #28222\n"
+}

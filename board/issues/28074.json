@@ -1,0 +1,34 @@
+{
+  "number": 28074,
+  "kind": "pull_request",
+  "title": "fix(pm): the four blocker readers say merged for a PR target, closed unmerged for an abandoned one, closed for an issue",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:40:33Z",
+  "updated_at": "2026-10-30T12:18:08Z",
+  "closed_at": "2026-10-30T12:18:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T12:18:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28074",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D9jGmwwyTkCF9iu11q2k3eK)_\n\nFixes #28033\n\n## What changes\n\nWording only, in the four readers the card names. No verdict moves and no gate is added.\n\n1. `.claude/skills/pm-dispatch/references/dispatch-runbook.md` :85, flag two. 「目标已关闭」 → 「目标已关单(PR 则已合并;关而未合并不算)」. The line now says what H19 fires on: an issue closed, a PR merged, never a PR closed unmerged. In-line, line count 245 → 245, 100 bytes (ceiling 120).\n2. `scripts/pm/check-half-states.mjs` `h28StaleBodyBlockerLine`. The spent body targets are no longer all called `CLOSED`: the row says `target(s) no longer OPEN` and names each the way `namedTargets` renders it (`closed`, or `closed UNMERGED` for an abandoned PR, which it says released nothing while the body line is spent either way). The `spent` filter is unchanged, so the row fires exactly where it did.\n3. `scripts/pm/check-half-states.mjs` `proseBlockerClause`, the mixed branch. Each count is named only when non-zero, so an abandoned PR beside an unresolved target reads `None of them has released — 1 closed UNMERGED (which withholds), 1 could not be resolved from this install` instead of opening with `0 still read OPEN`.\n4. `scripts/ci/scheduled-full-run.mjs`. `judgeCardBlock` carries `merged: true` on a closed PR row whose `pull_request.merged_at` is set; `renderBlockNote` renders that row `(merged <date>)` and its headline says `closed (a PR: merged)`; `targetReading` logs it as `merged`. `staleBlockVerdict` is untouched.\n\nPins: six added to the existing H4 prose PR and H28 lines of `check-half-states --self-test` (5105 → 5111 cases), and the merged-PR case of `scheduled-full-run --self-test` now checks the note and the log name the merge. The optional `platform-readings.md` measured-leg line was not added: the file sits at its 458-line ceiling with no headroom, so it would have cost a line elsewhere.\n\n## Why\n\nAfter PR #28031 a `Blocked-by:` PR target releases on merged and a PR closed unmerged releases nothing, but these four places still said closed for every target. A seat reading them could take an abandoned PR for a released blocker. Follow-up card #28033 took review should-fixes 1, 2, 4 and 5 from that PR's contract review.\n\n## Verification\n\n- `node scripts/pm/check-half-states.mjs --self-test`: 5111 cases, exit 0.\n- `node scripts/ci/scheduled-full-run.mjs --self-test`: OK, exit 0.\n- Two ablation legs, each restored to a byte-identical file: (A) the mixed branch always prints the open count → the two new H4 prose PR pins red; (B) `merged` never set in `judgeCardBlock` → the merged-PR case throws `the note does not name the merge`.\n- `pnpm check:pm-skill-ratchet`, `pnpm check:pm-skill-id-lint` (105 files clean), `node scripts/check-skills-token-ratchet.mjs`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` derives 54 families on the committed change; every one run locally after `pnpm install --frozen-lockfile --ignore-scripts` and reconciled with `--ran` (see the os-dev report on the card).\n- `check-governed-merges.mjs --test` on the three paths: one `.claude/**` hit, Tier S; the two scripts are not on the register. The landing tier is read off the register at PR time.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:四处把 `Blocked-by:` 的 PR 目标说成「关闭」的读器改成「合并」:runbook 旗二、H28 的「已关」措辞、H4 混合行的 `0 still read OPEN`、定时全量运行备注里的 `(closed …)`。三个文件,规则文本行数不变(245)。\n- 为什么改:PR #28031 之后规则是 PR 合并才放行、关而未合并不放,但这四处仍写「关闭」,席位可能把废弃 PR 当成已放行的阻塞。\n- 风险与回滚:只改 report-only 行文,不动判定、不加门禁、不写标签;issue 目标仍是关闭即放行。回滚即 revert。\n- 先看:`scheduled-full-run.mjs` 的 `judgeCardBlock`(新增 `merged: true` 标记)和 `renderBlockNote`。\n- 两分钟验证:`node scripts/pm/check-half-states.mjs --self-test`(5111 例)与 `node scripts/ci/scheduled-full-run.mjs --self-test`,都 exit 0。\n- 需要你做的:无。契约复审待席位完成(contract review owed),落地层级以登记册读数为准。\n\n## Human Minimum\n\n- [ ] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (no published package touched; `skip-changeset`)\n- [ ] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cycQZLtWnoRe2XWgyz\n"
+}

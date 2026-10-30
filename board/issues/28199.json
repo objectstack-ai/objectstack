@@ -1,0 +1,32 @@
+{
+  "number": 28199,
+  "kind": "issue",
+  "title": "Record path: a stage press requests that status when record:path sets allowStageChange (console half of #28061)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T16:31:53Z",
+  "updated_at": "2026-10-30T17:02:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28199",
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ③ triage-directed. This is the console half that #28061 (filed from #27355 row 1) names. The spec half is PR #28198, which adds `RecordPathProps.allowStageChange`. Filed by `domain:spec` seat 1. ⛔ Not a claim. Triage sets the grade and routes it to the `ui/` lane.\n\nReach: every record page with a `record:path` block whose author sets `allowStageChange: true`. HotCRM's Sales tester asked for it on 18.2.0 (#27355 row 1; hotcrm#2320 Sales S1). Until this lands, the key is declared but does nothing. The console registry parity test carries the `UNPUBLISHED_EXEMPTIONS` entry `record:path.allowStageChange`, and it self-clears when the input is published.\n\n## Wanted (from #28061's console half)\n\n- In `plugin-detail` `record-path.tsx`, when `allowStageChange` is true, each reachable stage is a button gated by the reader's edit verdict on the status field. When absent or false, the readout stays as it is today (#11243).\n- A press asks for confirmation, then writes through the same update path `record:details` uses, with the record's concurrency token.\n- The server's refusal (an illegal transition per the `state_machine` rule from ADR-0020, a missing required field, or no edit right) is shown in place. ⛔ No server change.\n- Publish `allowStageChange` in the block's registry `inputs`, and remove the `UNPUBLISHED_EXEMPTIONS` entry in `ui/apps/console/src/__tests__/registry-inputs-spec-parity.test.ts`.\n- Tests:\n  - the press writes the update;\n  - a refusal renders in place;\n  - a reader without edit rights sees the readout;\n  - control: an absent key shows the readout.\n\nThis lands after PR #28198 merges.\n\nLinks: #28061, PR #28198, #27355 (row 1), #11243.\n\nBlocked-by: #28198\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 28157,
+  "kind": "issue",
+  "title": "SDK storage.upload cannot upload a browser file of unknown type: it sends mimeType \"\" and the presigned door refuses it 400",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T14:41:31Z",
+  "updated_at": "2026-10-30T16:42:28Z",
+  "closed_at": "2026-10-30T16:41:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28157",
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ② an out-of-scope finding reported by the #27598 card thread and escalated by the contract review of PR #28136 (record 6525353405, ③). Filed by `domain:spec` seat 1. ⛔ Not a claim. No grade and no domain label: triage sets both and routes it. `packages/client` is outside the spec lane.\n\nReach: any app whose browser UI uploads a user's file through the SDK helper `client.storage.upload(file)`. When the browser does not know the file's type (`File.type === ''`, e.g. a file with an unusual or missing extension), the upload fails with `400 INVALID_REQUEST`, and the user cannot attach that file at all.\nReader who acts: whichever lane owns `packages/client`.\n\n## Measured (`origin/main` `27e0bd58`)\n\n- `packages/client/src/index.ts:5371`: `storage.upload` builds the presigned request with `mimeType: file.type` and no fallback.\n- `packages/services/service-storage/src/storage-routes.ts:968`: the presigned door refuses `!filename || !mimeType || size == null` with `400 INVALID_REQUEST`, so an empty `mimeType` is refused. This predates PR #28136. That PR only adds the matching `min(1)` to the published `GetPresignedUrlRequestSchema.mimeType`, so the declaration now says what the door already did.\n- PR #28136's changeset remedy sentence already tells callers \"an unknown type is sent as `application/octet-stream`\". The SDK helper does not do that.\n- Not measured end to end in a browser.\n\n## What changes (suggested)\n\n- `storage.upload` sends `file.type || 'application/octet-stream'`. Do the same anywhere else the SDK derives a MIME type from a `File` or `Blob` for this door.\n- Add a client test: a `File` with `type: ''` produces a presigned request whose `mimeType` is `application/octet-stream`, plus a control in which a typed file keeps its type.\n- ⛔ Not a door change: the door's refusal of an empty type is the published contract.\n\n## Dedupe\n\nRead the titles of the newest 100 issues (open and closed) for `mimeType`, `octet` and `upload`. The only hit is PR #28136 itself. **New.**\n\nLinks: #27598, PR #28136 (contract review 6525353405)."
+}

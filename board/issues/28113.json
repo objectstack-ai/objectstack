@@ -1,0 +1,30 @@
+{
+  "number": 28113,
+  "kind": "issue",
+  "title": "platform-objects: the import job error column is labelled \"Fatal Error\", but since #27676 it also holds the every-row-failed sentence",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:09:27Z",
+  "updated_at": "2026-10-30T14:07:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28113",
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ① a user-visible defect at a named location. The #27734 card thread found it (PR #28087 report 6522612322, `out_of_scope_findings`); note 6512498465 on #27734 and contract review 6523565061 ③ confirm it on `main`. ⛔ Not a claim. Filed without a `domain:*` label; triage sets the lane and grade (the file is `packages/platform-objects`, which reads as `domain:server`).\nreach: Setup → an async import job's record page and list columns, which show the `error` field under the label \"Fatal Error\".\nBusiness reason: since ruling B on #27676 (record 6509036166, PR #27795), a job whose every row failed ends `failed` with `error` = \"Every row of this import failed and nothing was imported; each row's reason is in the job's results.\" An administrator then sees that sentence under \"Fatal Error\" and looks for a crash instead of the per-row reasons.\nReader who acts: the lane that owns `packages/platform-objects`: a one-line label change plus the regenerated translation bundle.\nDedupe: the titles and bodies of the 862 most recently updated issues, open and closed, read for \"Fatal Error\" or \"sys-import-job\" with \"label\". Two hits: #28087 (the spec describe PR that found it) and #27676 (the ruling card). No card covers the label.\n\n## Measured (`origin/main` `59547058`)\n\n- `packages/platform-objects/src/audit/sys-import-job.object.ts:70`: `error: Field.textarea({ label: 'Fatal Error', … group: 'Outcome' })`.\n- The generated English bundle repeats it (`en.objects.generated.ts:3050`, per review 6523565061).\n- `packages/rest/src/data-action-routes.ts:187–188` writes the every-row-failed sentence into that column.\n\n## Wanted\n\n- A label that covers both outcomes, matching the spec describe that PR #28087 lands for `ImportJobProgressSchema.error` (\"Why the job failed (when status = failed): the fatal error that aborted it, or, when every row failed, one sentence pointing at the job's `results`\"). For example \"Failure Reason\". Regenerate the translation bundle.\n\n**Clause-②:** no. **Metadata-protocol:** none."
+}

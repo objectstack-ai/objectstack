@@ -1,0 +1,37 @@
+{
+  "number": 28064,
+  "kind": "issue",
+  "title": "i18n: the Data Lifecycle settings page reads English in every locale (no `settings.lifecycle.*` translations)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:21:18Z",
+  "updated_at": "2026-10-30T14:28:25Z",
+  "closed_at": "2026-10-30T14:26:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28064",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ② a wrong state shown to the user, found by the #27854 card thread (PR #28062, os-dev report 6521408387) outside its file surface. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What is shown\n\nSetup → All Settings → Data Lifecycle (the hub card and the page) reads English under zh-CN, ja-JP and es-ES: the card title, its description and every field.\n\n## Mechanism (read)\n\n- The page comes from objectql's `lifecycleSettingsManifest`. No bundle carries a `settings.lifecycle.*` entry.\n- `settingsBuiltinTranslations` covers only `service-settings`' own manifests, and its coverage test refuses a namespace that no bundled manifest declares, so the lifecycle namespace cannot be added there as it stands.\n- After PR #28062 the Setup sidebar entry for Data Lifecycle is translated, so in those locales the sidebar and the hub disagree for this one page. That PR pins the gap as `HUB_UNTRANSLATED = ['lifecycle']`; this card's fix should empty that list.\n\n## Wanted (route is triage's)\n\nThe Data Lifecycle manifest's title, description and field labels and help translate in the shipped locales like every other settings page, and the parity pin drops its exception.\n\n## Dedupe\n\nRead open titles for `lifecycle` + `translation`, `Data Lifecycle`, `settings.lifecycle`: none. **New.**"
+}

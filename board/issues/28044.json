@@ -1,0 +1,37 @@
+{
+  "number": 28044,
+  "kind": "issue",
+  "title": "rest: a cached GET /meta/object/:name that carries disabledActions is never answered 304 — fold the switched-off names into the ETag so object reads revalidate again",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:30:58Z",
+  "updated_at": "2026-10-30T13:44:50Z",
+  "closed_at": "2026-10-30T13:42:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28044",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a cost the contract review escalated to the maintainer on PR #27964 (#27842), triage record 6515936468 ③ \"The 304 trade on objects\". The maintainer approved #27964 as built (2026-10-30T10:29Z) and asked that 304s on object reads be won back by a separate card. This is that card. Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade and no lane: triage sets both (the code is `packages/rest`, with a possible touch in `packages/metadata-protocol`).\nReader: the lane triage assigns; one small PR.\nDedupe (open AND closed): semantic search \"object metadata read ETag 304 disabledActions switched-off actions fingerprint cached GET meta object\" → 7 hits. #27842 is the card that adds the key; #16525 is the organization-scope fold, closed; #25783 is metadata read CPU, closed. None folds the activation projection into the validator. **New.**\nreach: read in code at PR #27964 head `b3d92fee`, not driven through a public door. Every console that opens an object on a deployment where the activation ledger is attached, which is the default: `PlatformObjectsPlugin` registers `sys_metadata_activation`, and `ObjectQLPlugin` attaches the ledger on every such boot.\n\n## What the code does after #27964\n\n`GET /api/v1/meta/object/:name` through the cached door serves `disabledActions` beside the item. The key is read live on every call and kept out of the ETag, so a read that carries it is answered `200` with the full body and never `304 Not Modified` (the docblocks on `GetMetaItemResponseSchema` and `GetMetaItemCachedResponseSchema` say so). On a default deployment that means every cached object read: objects are the console's hottest metadata read, so revalidation stops saving anything there.\n\n## Wanted\n\n- Fold the object's switched-off action names into the REST validator the way visibility, runtime-view, intake and audience fingerprints already are (`packages/rest/src/meta-item-read-routes.ts`, the nested `foldVisibilityFingerprintIntoEtag` calls). Then an unchanged object with an unchanged switch set answers `304` again, and an administrator's switch under Setup › Packaged automation moves the ETag.\n- The fold uses the same per-object answer the response carries (the names in `item.actions` that the projection switches off), so the validator describes the representation actually served (the #16525 lesson). Absent versus `[]` must fold differently.\n- Pins: a `304` on a repeat read with no switch change; a `200` with a new ETag after a switch flips; the list read (`GET /meta/object`) if its cached door shares the rule.\n- Correct the two docblocks' \"never answered 304\" sentence in the same PR. That is a published schema docblock, so it owes a contract review.\n\n**Clause-②:** `no` (the accept set and the response shape do not change; only the validator does). **Metadata-protocol:** `none`. Lands after PR #27964."
+}

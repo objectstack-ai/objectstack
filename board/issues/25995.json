@@ -1,7 +1,7 @@
 {
   "number": 25995,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 2 — 🟢 os-bill · 由 os-bill 账户的项目负责",
+  "title": "[PM seat] domain:ui · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T08:21:41Z",
-  "updated_at": "2026-10-29T13:05:04Z",
+  "updated_at": "2026-10-30T15:10:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25995",
-  "body": "domain:ui#2 · os-bill · session_01Utp6CY2n1JmZZKrHgtp9jC\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**. Seat 1 is #25966; seat 4 is #26620; seat 5 is #26945.\n\n## Current PM\n\n🟢 `os-bill` · Claude Code project \"Objectstack 多币种 UI\", seat thread \"运行 ui 车道席位 2 派发\" · `session_01Utp6CY2n1JmZZKrHgtp9jC` · seated 2026-10-29T13:04Z. Posture, ledger and round reports live in the project (pointer below).\n\n- Previous PM: `os-warren` · `session_01JQwxbXpF772qWJjojJvRXw` · stood down with brief 6493377654 (stay-behind none). The previous body revision holds that vacant write and its ledger.\n\n## Hot-file serial queue\n\nSeat 2 holds no file yet. Read #25966's queue before any claim. ⛔ `ui/.github/**` and the root `ci.yml` stay out of ui cards unless the maintainer approves.\n\n## Notes\n\n- **File area:** seat 2 = `ui/packages/` plugin-list, plugin-grid, plugin-detail, plugin-form, plugin-view, fields, plugin-kanban, plugin-calendar, plugin-gantt, plugin-map, plugin-timeline, plugin-tree, plugin-charts, plugin-dashboard and plugin-report, plus auth, the Setup / admin pages, marketplace and the console sidebar. Seat 1 (#25966) = every other `domain:ui` path. Cards on one file stay with one seat and land in order.\n- **Excluded subtrees:** the `pm:epic` subtrees of #26676 (record page) and #8345 (multi-currency; its epic PM runs in the same project).\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. PRs carry no seat-account assignee or review request; a Tier H PR asks its approvers only after the seat ACCEPT and a same-head contract PASS.\n- **Mailbox:** none. A cloud seat container cannot create the `mailbox/<login>` branch (`mailbox-open.mjs` ②), and this thread's one push branch is kept for in-seat dev work. Reach the seat with a comment on this post or on a seat-2 claimed card.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs.\n- **Wall:** none.\n"
+  "body": "domain:ui#2 · os-bill · session_01Utp6CY2n1JmZZKrHgtp9jC\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 2**. Seat 1 is #25966; seat 4 is #26620; seat 5 is #26945.\n\n## Current PM\n\n⏳ **vacant** since 2026-10-30T15:00Z. To take it: `/pm-dispatch 接手`, after reading this post.\n\n- Previous PM: `os-bill` · Claude Code project \"Objectstack 多币种 UI\", seat thread \"运行 ui 车道席位 2 派发\" · `session_01Utp6CY2n1JmZZKrHgtp9jC` · seated 2026-10-29T13:04Z, stood down on the maintainer's 「UI 车道当前任务处理完就下班」 (2026-10-30T12:17Z).\n- Stay-behind: #27524 (PR ② #28116 is ACCEPTed and waits on a human approval from os-zhuang / hotlong. The next holder lands it through the queue after approval. ③ and ④ open after it; handover on the card).\n\n## Hot-file serial queue\n\n- `ui/packages/plugin-detail/src/**` (RecordPageColumns, RelatedList, RelatedCardStack) and `ui/packages/app-shell/src/views/RecordDetailView.tsx`: #27524 ② (#28116) → ③ → ④. Then #27058 / #27059 (p1), which wait on the v4 anatomy.\n- `ui/packages/components/src/custom/navigation-overlay.tsx`: #28156 (p2, queued).\n\n## Ledger at sign-off\n\n- **Queue snapshot** (`domain:ui` + `pm:queue`, 16):\n  - p1: #27058, #27059\n  - p2: #26998, #27797 (domain:ui#1 takes it, 6525733319), #27950, #28156\n  - p3: #25918, #25921, #27356, #27375, #27453, #27520, #27521 (Invitations rows, unblocked by #27902), #27975, #28073, #28085\n- **Landed this term (10-30):** #27943 (#27594 closed), #27953 + #28129 (#27545 closed), #27920 (#27524 ①), plus the earlier #27805 / #27849 / #27804 / #27800 rounds (round reports in the project).\n- **Rulings in force:** #26676 preview gate ruled B (6520722066). The card thread runs a proxy preview review before the seat's ACCEPT, and #27524 ④ gets a full walk against the boards.\n- **Cross-lane:** none open. #27843 (server) landed through #27902.\n- **Not seat 2's:** #28077, #28078, #28079 carry `os-bill` from other sessions.\n\n## Notes\n\n- **File area:** seat 2 = `ui/packages/` plugin-list, plugin-grid, plugin-detail, plugin-form, plugin-view, fields, plugin-kanban, plugin-calendar, plugin-gantt, plugin-map, plugin-timeline, plugin-tree, plugin-charts, plugin-dashboard and plugin-report, plus auth, the Setup / admin pages, marketplace and the console sidebar. Seat 1 (#25966) = every other `domain:ui` path. Cards on one file stay with one seat and land in order.\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card. PRs carry no seat-account assignee or review request; a Tier H or over-3000-line PR asks its approvers only after the seat ACCEPT and a same-head contract PASS.\n- **Mailbox:** none. Reach the seat with a comment on this post.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#2` + `head:claude/` PRs.\n- **Wall:** none.\n"
 }

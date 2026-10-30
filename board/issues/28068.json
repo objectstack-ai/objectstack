@@ -1,0 +1,37 @@
+{
+  "number": 28068,
+  "kind": "issue",
+  "title": "console: a domain-bearing settings select shows a stored code (`DE`) in the box, not its name (#27867)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:27:31Z",
+  "updated_at": "2026-10-30T14:50:46Z",
+  "closed_at": "2026-10-30T14:49:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28068",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ② a wrong state shown to the user, found by the #27853 / #27867 card thread (PR #28063, os-dev report 6521433006) outside its file surface. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What is shown\n\nAfter PR #28063, Company `country` and Localization `default_country` are selects with ISO codes and English names, keeping `valueDomain: iso_3166_alpha2`. In the console, a stored `DE` still shows as the bare code `DE` in the text box. The named options appear only in the suggestion list.\n\n## Mechanism (read)\n\n`ui/apps/console/src/pages/settings/SettingsField.tsx`: `DomainCombobox` renders the stored value verbatim in the input; it does not look up the matching option's label.\n\n## Wanted (route is triage's)\n\nA domain-bearing select shows the stored code as its option's name (and still stores the code), so #27867's acceptance \"an existing stored code shows as its picked option\" holds in the console too.\n\n## Dedupe\n\nRead open titles for `DomainCombobox`, `valueDomain` + `select`, `country picker`: none. **New.**"
+}

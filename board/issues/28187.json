@@ -1,0 +1,37 @@
+{
+  "number": 28187,
+  "kind": "pull_request",
+  "title": "fix(client): storage.upload sends application/octet-stream for a file of unknown type",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T15:49:44Z",
+  "updated_at": "2026-10-30T16:41:43Z",
+  "closed_at": "2026-10-30T16:41:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T16:41:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28187",
+  "body": "Fixes #28157\n\ndomain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\n## What changes\n\n- `packages/client/src/index.ts` (`storage.upload`): the presigned request now sends `mimeType: file.type || 'application/octet-stream'` instead of `file.type` bare. A typed file keeps its own type.\n- `packages/client/src/storage-wire-dialect.test.ts`: two cases beside the existing storage wire tests. A `File` with `type: ''` produces a presigned request whose `mimeType` is `application/octet-stream`; control: a `File` typed `image/png` keeps `image/png`.\n- `content/docs/api/plugin-endpoints.mdx`: one sentence under the storage table saying the helper sends `application/octet-stream` for a file of unknown type.\n- `.changeset/28157-upload-unknown-mime-type.md`: `@objectstack/client` patch.\n\nThe presigned door (`packages/services/service-storage/src/storage-routes.ts`) is not touched: its `400 INVALID_REQUEST` on an empty `mimeType` is the published contract (`GetPresignedUrlRequestSchema.mimeType` is `min(1)`).\n\nOther SDK sites checked: `storage.upload` is the only place in `packages/client/src` that derives this door's `mimeType` from a `File`/`Blob` (`grep -n \"\\.type\\b\"` and `grep -rn mimeType` over `packages/client/src`, non-test, at `d70e94ae`: one hit, line 5371). `getPresignedUrl` and `initChunkedUpload` take a caller-built request; `uploadPart` and `resumeUpload` send no `mimeType`.\n\n## Why\n\nA browser `File` whose type the browser does not know carries `type === ''`. The SDK sent that empty string, the door refused it with `400 INVALID_REQUEST`, and the user could not attach the file at all.\n\n## Verification\n\nPremise, measured on `d70e94ae` (unit level): with the fix reverted, the new case reads `\"mimeType\": \"\"` off the presigned request.\n\nPin bites (fix committed first, then reverted in the tree, then restored with `git restore --source=HEAD --staged --worktree`):\n\n```\nfix reverted:  Tests  1 failed | 11 passed (12)\n  - \"mimeType\": \"application/octet-stream\",\n  + \"mimeType\": \"\",\nrestored:      Tests  12 passed (12)\n```\n\n- `@objectstack/client` `pnpm test`: 52 files, 682 tests passed, exit 0.\n- `@objectstack/client` `pnpm typecheck` (tsc + `check:test-typecheck`): exit 0.\n- Lint in the repo's form (`eslint --no-inline-config`) over the two changed `.ts` files: exit 0.\n- `dispatch-gates --commands` over the four changed paths: 88 commands, each run with its exit code recorded. Two first exited 3 (`check:skill-examples`, `check:dual-build-cjs-loads`: no `dist/` to read). After `pnpm build` both exited 0. `dispatch-gates --ran`: 88 derived, 88 run, 0 NOT-MEASURED, 0 UNRUN.\n- `origin/main` moved 5 commits since `d70e94ae`. None touches `packages/client`, the storage routes, the storage schema or the docs page, so no merge.\n\nSkills-docs: `grep -rn \"storage\\.upload\\|mimeType\" skills` has one hit, `skills/objectstack-ai/SKILL.md:237` (`mimeTypes?` on a knowledge source, unrelated), so no skill text changes. `content/docs/api/plugin-endpoints.mdx` gains the one sentence above. `content/docs/api/client-sdk.mdx:504` only shows the call and is unchanged.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes (scoped to the changed files).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [ ] The *Before Submitting* list in CONTRIBUTING.md is done. (Not run: the full repo-wide `pnpm test`. The client package suite and the 88 derived gates were run instead.)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4czuTWNgKR22fKv7jia)_\n"
+}

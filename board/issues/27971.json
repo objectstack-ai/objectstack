@@ -2,8 +2,8 @@
   "number": 27971,
   "kind": "issue",
   "title": "service-automation: a parent-id resume of a `map` whose parked item run was cancelled still advances past that item",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:automation",
     "domain:server",
     "finding",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T05:42:42Z",
-  "updated_at": "2026-10-30T06:56:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T17:02:15Z",
+  "closed_at": "2026-10-30T17:01:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27971",
-  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① read beside a ruled card by the #27877 dev (PR #27951, os-dev-report 6515519800, out-of-scope finding) and escalated for filing by its contract review 6515887943. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade, and whether it is the accepted shape.\n\n## What the code does (read, not measured)\n\nAfter PR #27951 a parent-id resume of a `map` whose item child is still suspended is refused `409 RESUME_CHILD_PENDING`. The ruling (triage 6513867475) covers a still-suspended item only. When the item run is gone because it was cancelled through `cancelRun`, which does not touch the parent, a parent-id resume of the `map` still advances past that item: the map moves on as if the item had run.\n\n## Wanted (route is triage's)\n\nDecide whether advancing past a cancelled item is the accepted shape (cancellation means skip), or whether the parent should record the item as cancelled or fail. Measure first through `engine.resume`.\n\n## Also from the same review (docs, no behaviour)\n\nThe new 409 is missing from the code lists in `packages/client/src/index.ts` (~L5947) and `packages/services/service-automation/README.md` (~L310), and `docs/qa/platform-checklist/areas/automation.json` has no `409 RESUME_CHILD_PENDING` row. These can ride whichever PR takes this card.\n\n## Dedupe\n\nRead the open titles for `map` + `cancel`, `parked item`, `RESUME_CHILD_PENDING`: only #27877. **New.**\n\nLinks back: #27877, PR #27951, contract review 6515887943\n\nBlocked-by: #27951\n"
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nRuled: 6523833308 · letter A · 2026-10-30T13:22Z\nRuling-ref: 6523833308\n\nFiling gate: ① read beside a ruled card by the #27877 dev (PR #27951, os-dev-report 6515519800, out-of-scope finding) and escalated for filing by its contract review 6515887943. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade, and whether it is the accepted shape.\n\n## What the code does (read, not measured)\n\nAfter PR #27951 a parent-id resume of a `map` whose item child is still suspended is refused `409 RESUME_CHILD_PENDING`. The ruling (triage 6513867475) covers a still-suspended item only. When the item run is gone because it was cancelled through `cancelRun`, which does not touch the parent, a parent-id resume of the `map` still advances past that item: the map moves on as if the item had run.\n\n## Wanted (route is triage's)\n\nDecide whether advancing past a cancelled item is the accepted shape (cancellation means skip), or whether the parent should record the item as cancelled or fail. Measure first through `engine.resume`.\n\n## Also from the same review (docs, no behaviour)\n\nThe new 409 is missing from the code lists in `packages/client/src/index.ts` (~L5947) and `packages/services/service-automation/README.md` (~L310), and `docs/qa/platform-checklist/areas/automation.json` has no `409 RESUME_CHILD_PENDING` row. These can ride whichever PR takes this card.\n\n## Dedupe\n\nRead the open titles for `map` + `cancel`, `parked item`, `RESUME_CHILD_PENDING`: only #27877. **New.**\n\nLinks back: #27877, PR #27951, contract review 6515887943\n\n\n"
 }

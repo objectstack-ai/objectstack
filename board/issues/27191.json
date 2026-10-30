@@ -14,19 +14,20 @@
     "area:records",
     "domain:spec",
     "enhancement",
-    "pm:epic",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:40:15Z",
-  "updated_at": "2026-10-30T05:08:10Z",
+  "updated_at": "2026-10-30T15:24:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27191",
   "body": "Blocked-by: #27184\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** record 模式金额字段可声明 `homeAmount`：`field` 指向同对象上一个 dynamic 模式（组织本位币）的存储型币种字段（平台写、只读），`rateDate` 指向日期字段（无默认），`rateField` 必填，指向 number 字段（ADR-0144 D5：裁决 6465431966 D1「STORED with the rate used」+ D8 规则 2；PR #27239 契约复审 6468858562 M2）。\n- **为什么改：** 合并报表要一个存下来的本位币金额。\n- **风险与回滚：** 新增可选键；⛔ 不单独发版，与 M2-2 同一次发布，否则是声明而未兑现。\n- **先看：** `field.zod.ts` `CurrencyConfigSchema`；`object.zod.ts` superRefine 臂。\n- **两分钟验证：** 指错类型 / 漏 `rateDate` / 影子列是 fixed ⇒ 各自拒收带处方。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Keys and refusals: `field` must be a stored `currency` field in `dynamic` mode on the same object; `rateDate` a `date`/`datetime` field, required; `rateField` a `number` field, **required** (corrected from optional: ADR-0144 D5, contract review 6468858562 M2 on PR #27239); the home field and the rate field are marked platform-computed (read-only at the door).\n- [ ] Describe / guidance / baselines / skills guidance (`Skills-docs: updated here`).\n- [ ] Pin tests.\n\nLane: spec · Size: M · Review: CONTRACT_REVIEW_TIER. `Clause-②: yes (widening)` · `Metadata-protocol: added` · `Skills-docs: updated here`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice.\n"

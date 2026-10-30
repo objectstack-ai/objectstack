@@ -1,0 +1,37 @@
+{
+  "number": 28119,
+  "kind": "pull_request",
+  "title": "docs(adr-0066): record that D4's three landing steps and the sys_* MCP follow-up have landed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:11:47Z",
+  "updated_at": "2026-10-30T13:55:18Z",
+  "closed_at": "2026-10-30T13:55:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-30T13:55:15Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28119",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DRAvoKK4WGPwFkh7crrTU5R)_\n\nFixes #27694\nFixes #27956\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：ADR-0066 D4 的 2026-10-29 修订下面加一条带日期的注记（2026-10-30），记录三件已落地的事：`sys_*` 对象上的动作经 MCP 的缺口已由 #27940 关闭（按动作逐条看 `ai.exposed: true`，存储元数据表照旧在读开关前就拒绝，后面各闸不变）；第 2 步 #27649 已落地；第 3 步 #27611（PR #27793）已落地。原句不改，标为「按当日读，被本注记取代」。Status 行补一句落地记录。`requiredPermissions` 文档注释里的「Landing, as of 2026-10-29」整段删掉。\n- 为什么改：ADR 还写着「sys_* 动作留在 MCP 之外、#27681 承接」和「控制台仍直接请求 `target`」，两句在 main 上都已不成立；随 `@objectstack/spec` 的 `.d.ts` 发出的注释还在说控制台条款和「#27694 会删掉本段」。治理文本说错，等于给作者和 agent 讲错规则。\n- 风险与回滚：两个文件 +3/−6，只动 ADR 正文和一段 JSDoc 注释；不改 `.describe()`、不改代码、无生成物变化、不发布（`skip-changeset`）。回滚即 revert 这一个提交。\n- 先看：`docs/adr/0066-unified-authorization-model.md` D4 修订段下面新加的 `> **Note (2026-10-30, #27956, #27694)**` 那一段，再看第 3 行 Status 末尾新加的「Landed: …」一句。\n- 两分钟验证：`pnpm check:adr-symbol-anchors`，预期 exit 0，符号锚 623 个（597 个声明锚），main 上是 614（588）；多出的 9 个就是注记里引用的 9 个符号，以后改名或挪走会转红。\n- 需要你做的：暂无。contract review owed（契约复审未完成，席位复审后再求批）；落地档以登记表在 PR 上的读数为准，预期 Tier H，需受管批准人（os-zhuang 或 hotlong）批准。\n\n## What changes\n\nTwo files, +3 / −6, one commit on `origin/main` `6b125a7a`.\n\n- **`docs/adr/0066-unified-authorization-model.md`, D4.** A dated note, `Note (2026-10-30, #27956, #27694)`, goes under the 2026-10-29 amendment paragraph, in the ADR's own note style (Prime Directive #13: the recorded sentence stays and a note goes under it). It says the amendment reads as of its date, and that two of its clauses are superseded by the note, not deleted: the closing \"Until step 2 lands …\" sentence, and \"stay off MCP … card #27681 carries it\". Then it records:\n  - (a) the `sys_*` MCP gap is closed by PR #27940 (#27681, ruling `6513869839`, letter B). The rule is per action: a `sys_*` action is listed and run over MCP only when it declares `ai.exposed: true` itself. One predicate (`systemObjectActionExposureError`) answers for `run_action`, the `list_actions` filter and the `resume_run` admission, and the tool layer's filter yields only to the bridge's attestation (`isListableAction`). The stored-metadata family is refused before the flag is read (`isStoredMetadataBodyObject`). Every gate after admission is unchanged;\n  - (b) step 2 landed (PR #27649, 2026-10-29);\n  - (c) step 3 landed (PR #27793 for #27611, 2026-10-30). The off-origin and undeclared/object-less clicks still fetch `target` directly.\n- **ADR-0066, Status line.** After the recorded \"The server half lands under #27506; see the note under D4.\", one sentence records the landings: server half PR #27649 (2026-10-29), step 3 PR #27793 for #27611 (2026-10-30), the `sys_*` follow-up PR #27940 for #27681 (2026-10-30, ruling `6513869839`). This is should-fix 1 of the first-pass review 6515866455.\n- **`packages/spec/src/ui/action.zod.ts`, the `requiredPermissions` docblock.** The \"Landing, as of 2026-10-29\" paragraph is removed. Once the console clause and the self-removal sentence go, what is left (\"ADR-0066 records the decision; the server half … is on `main`\") is a landing status with nothing pending. The paragraph above it already cites ADR-0066 D4 as amended 2026-10-29. No `.describe()` change.\n\n## Why\n\nThe amendment's present-tense clauses are false on `main`:\n\n- `invokeBusinessAction`, the `list_actions` bridge (`buildMcpBridge`) and `resumeAdmissionRefusal` all call `systemObjectActionExposureError` (bc496bf7d). It returns `null` for a `sys_*` action that declares `ai.exposed: true`. It refuses `sys_metadata` / `sys_metadata_history` before reading the flag. `isSystemObjectName` is still its first test, so the amendment's citation of it still resolves and stays true as the \"which objects\" test.\n- `useConsoleActionRuntime` and `RecordDetailView` send a declared same-origin api click to `POST /api/v1/actions/:object/:action` through `ui/packages/app-shell/src/utils/apiActionDoor.ts` (b00e3f496). An off-origin target, an inline button that names no declared action, and an object-less action keep the direct fetch, as that module's header says.\n\n## Verification\n\n- `check:adr-symbol-anchors`: exit 0. Head: 623 symbol anchors (597 declaration, 26 literal), 2163 file-level. Base `6b125a7a`: 614 (588, 26), 2163. The +9 declaration anchors are the nine new citations; every one resolves.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 74 families derived after the commit. All 74 exit 0. `--ran` reconcile: 74 run, 0 NOT-MEASURED, 0 UNRUN. That is after a whole-tree `turbo run build` (116/116), because 15 families exit 3 or miss generated inputs in a fresh worktree.\n- `pnpm --filter @objectstack/spec run typecheck`: exit 0. `pnpm --filter @objectstack/spec run test`: 756 files, 22510 passed, 1 todo.\n- Generated outputs: `check:docs`, `check:authorable-surface` and `check:api-surface` exit 0, and the tree is clean after the build. `git grep \"Landing, as of 2026-10-29\"` on base hits only the source file, so no generated file carries this JSDoc.\n- Changeset: none. JSDoc and ADR prose only; the label is `skip-changeset`, as on the first pass (#27965).\n\nOut of scope, as #27956 says: the action-invocation audit row (#27908) and the platform `ai` declarations (#27900).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No schema change.)\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [ ] 3. No formatter ran; `pnpm lint` was not run locally (no code changed; CI's ESLint job judges it).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request. (Two cards that edit the same ADR-0066 D4 note, by the seat's dispatch.)\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (Publishes nothing: `skip-changeset`.)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (None changes; `check:docs` exit 0 on a clean tree.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (Except the Chinese maintainer brief.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cw9gAhrah1Mtf9tSZ7\n"
+}

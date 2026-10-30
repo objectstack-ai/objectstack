@@ -1,0 +1,33 @@
+{
+  "number": 28227,
+  "kind": "pull_request",
+  "title": "test(ui): the Automations Problems double serves the draft door's node path (#28192)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T17:48:39Z",
+  "updated_at": "2026-10-30T19:18:07Z",
+  "closed_at": "2026-10-30T19:18:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T19:18:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28227",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoBtX2c3X95gPkWQR9dnEYaY)_\n\nClause-②: no\nMetadata-protocol: none\n\nFixes #28219\n\n## 维护者速读\n\n- 改了什么：只改了一个测试文件。Studio「自动化」页「问题」列表与节点单元格一致性的测试里，模拟草稿读取的替身现在像真实服务端一样，把节点配置值发现的路径改写成草稿诊断的写法（`nodes.1.config.fields.id`）。\n- 为什么改：#28192 让这类发现带上了键路径 `flows[0].nodes[1].config.fields.id`；真实草稿接口会把它改写成条目相对路径，但测试替身直接透传原始路径，导致 main 上 `Test UI (13/16)` 一直红、合并队列不断踢出 PR。\n- 风险与回滚：不动任何产品代码，不发包；回滚即 revert 本 PR。\n- 先看：测试文件里新增的 `itemRelative`（对照 `packages/metadata-protocol/src/metadata-diagnostics.ts` 的 `itemRelativeIssuePath`），以及重新钉住的两行断言。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/views/studio-design/AutomationsPillar.problemsAgree-27799.test.tsx`，预期 3 条全过。\n- 业务含义：问题行现在直接定位到节点本身（显示节点名「Write」，悬停为节点 id），与节点单元格说的是同一句「需要表达式」，这正是 #28192 想要的行为；Studio 没有回归。\n\n## What changed\n\n`draftVerdict` in the test's server double built `_diagnostics` from `validateStackExpressions` with `path: i.path ?? i.where`. Since #28192 (`3efccfd5`) a node config-value finding carries `path: 'flows[0].nodes[1].config.fields.id'`. The real draft door re-spells a gate path found on the written item to the dotted item-relative form in `itemRelativeIssuePath` (`packages/metadata-protocol/src/metadata-diagnostics.ts` L388–400, called from `withPublishVerdict` L422; pinned by the `[#27828]` case in `protocol.draft-publish-verdict.test.ts` L466, `nodes.1.config.fields.name`). That helper is not exported and `@object-ui/app-shell` does not depend on metadata-protocol, so the double mirrors it (for `type: 'flow'`, prefix `flows[0]`) and cites the line.\n\nWith the door's spelling the Problems row is located at the node itself: `targetLabel` (`ProblemsPanel.tsx` L54–57) renders the node's display name `Write` with the node id as `title`. Before #28192 the row fell back to the `where` prose (`node 'write' … config.fields.id`), which is what L211–212 pinned. They are re-pinned to the node-located shape. The case's subject is unchanged: the row still reads the cell's own refusal, `NEEDED()` (the assertion before the target pins, which stayed green throughout).\n\n## Verification\n\n- Red on `origin/main` @ `7811c3f6` (≥ `3efccfd5`): `AssertionError: expected 'flows[0].nodes[1].config.fields.id' to contain 'node \\'write\\''` — 1 failed | 2 passed.\n- Green on `3efccfd5^`: by reasoning from L62, not a second build — before #28192 lint gave a node config finding no `path`, so `i.path ?? i.where` served the `where` prose that L211–212 pinned.\n- Door spelling only (before the re-pin): `expected 'Write' to contain 'node \\'write\\''` — the row names the node by its label; cell and row agree.\n- With the fix: 3 passed (3).\n- Ablation: `path: i.path ?? i.where` restored verbatim ⇒ reds again with `Received: \"flows[0].nodes[1].config.fields.id\"`; fix restored, `git diff HEAD` empty.\n- Gates: `dispatch-gates.mjs --commands` derived 24 commands for this one file; ran record below.\n\nRan record (in progress; completed record follows in the os-dev-report): 14 of 24 exit 0 so far; `pnpm --dir ui exec vitest run scripts/` exit 1 (7 tests in 2 files, under triage against main — this diff touches no script).\n\n## Acceptance notes\n\n- File surface: this one test file only.\n- Changeset: none. `@object-ui/app-shell` is private and its `files[]` ships no test sources, so the diff publishes nothing; `skip-changeset` rides the create (as #28193 did).\n- No Studio change: the Problems row still names the node, so no revert of `3efccfd5` is needed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibvQ7smY6Y87y1pRDaY\n"
+}

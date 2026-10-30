@@ -14,7 +14,6 @@
     "area:data",
     "domain:skills",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,7 +23,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T23:08:00Z",
-  "updated_at": "2026-10-30T07:52:04Z",
+  "updated_at": "2026-10-30T08:47:39Z",
   "closed_at": "2026-10-30T07:52:04Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -32,7 +31,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27786",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① docs/skills follow-up owed by #27742 (PR #27783), named in its os-dev-report 6510596837 (carrier: PM, Skills-docs).\nRuling-ref: 6486136301 (#27298, D7)\nDedupe (open AND closed): follow-ups of #27742 → none.\nReader: the epic PM (#27261) dispatches it in the epic subtree.\nBlocked-by: #27746\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 数据源技能规则和两篇数据建模指南目前只教 `credentialsRef`；#27742 加了 `external.connector`（复用连接器授权），要把新写法教给 AI 作者和开发者。\n- **为什么等 #27746：** 运行时读这个键之前，教它会让作者写出不生效的配置。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `skills/objectstack-data/rules/datasources.md`: an API-backed datasource borrows a declared connector instance's credential through `external.connector`; exclusive with `credentialsRef`; refused on built-in drivers and managed datasources.\n- [ ] `content/docs/data-modeling/virtual-objects.mdx` and `content/docs/data-modeling/external-datasources.mdx`: the same, with one example (an OData datasource naming a connector instance).\n- [ ] A skills change releases `@objectstack/skills` (route 1 changeset).\n\n`Clause-②: no` · `Metadata-protocol: none`. Touches `skills/**`: owes an independent full Fable review before landing."

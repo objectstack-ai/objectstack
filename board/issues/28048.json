@@ -1,0 +1,38 @@
+{
+  "number": 28048,
+  "kind": "issue",
+  "title": "A flow a composed stack declares only on its top level, beside package bodies, is never registered with the automation engine at boot — the manifest service registers the residual's objects and connectors only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:40:38Z",
+  "updated_at": "2026-10-30T13:11:11Z",
+  "closed_at": "2026-10-30T13:09:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28048",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2dhraZ7BwSanQPGEAb\nFiling gate: ③ out-of-scope finding of os-dev-report 6520658127 (#28032, PR #28046), measured here before filing.\nDedupe (open AND closed): \"residual top-level flow not registered manifest service unclaimedTopLevel package bodies\" → 0 hits; \"top-level items no package body declares registered only into metadata service engine registry\" → none this work (#22521 closed: the config-boot half of the residual rule for the metadata door; #14599 closed).\nReader: the epic PM (#27261), the lane that owns the engine `manifest` service (`packages/objectql/src/plugin.ts`).\ntype: Bug\n\n## 维护者速读\n\n- **问题：** 合成栈（`composeStacks`，`manifest: 'preserve'`）里，如果某个输入带 `packages[]` 包体，又只在顶层声明了一个 flow（没有包体声明同名），开机后这个 flow 进了元数据服务，但没有进 ObjectQL 注册表，自动化引擎在开机时也没有注册它：`getFlow` 返回空，它的触发器不会挂上。包体里声明的 flow 正常。\n- **原因：** ObjectQL 的 `manifest` 服务对这类\"残留\"顶层项只注册对象（ADR-0130 D4）和连接器（#28046）。其余从注册表读取的集合（flows、permissions 等 `METADATA_ARRAY_KEYS`）只进元数据服务。\n- **影响：** 只有手工构造的嵌套或混合输入会遇到，常规单栈和 `last` 合成不受影响。边缘形状。\n- **需要您做的：** 无。\n\n## Measured (at PR #28046 head a5d4ed3f, whose objectql registers residual objects and connectors)\n\nA real kernel (ObjectKernel, ObjectQLPlugin over SQLite, AutomationServicePlugin) boots `composeStacks([mixed, other], { manifest: 'preserve' })` through the `manifest` service, the way `AppPlugin` hands a config boot's stack to it. `mixed` carries `packages: [{ manifest: { id: 'com.acme.orders', flows: [acme_body_flow] } }]` and, on its top level only, `flows: [acme_residual_flow]`.\n\n- The composed stack's top level carries `acme_residual_flow`; no body declares it, so it is residual (`unclaimedTopLevel`).\n- `ql.registry.listItems('flow')` after boot: `[[\"acme_body_flow\",\"com.acme.orders\"]]`. The residual flow is absent.\n- `automation.listFlows()`: `[\"acme_body_flow\"]`. `automation.getFlow('acme_residual_flow')` is `null`; `getFlow('acme_body_flow')` answers.\n\nThe automation plugin's boot pull reads `ql.registry.listItems('flow')` (`service-automation/src/plugin.ts`, the boot pull around :1536), so a residual flow never reaches it. The metadata door registers it under the stack's `manifest.id` (`MetadataPlugin.registerUnclaimedTopLevel`), so `/meta` lists a flow that never runs.\n\n## By reading (not measured)\n\nThe same holds for every collection in `METADATA_ARRAY_KEYS` (`objectql/src/engine.ts`) other than objects and connectors: the `manifest` service registers bodies through `registerApp` and, of the residual, only `unclaimedTopLevelObjects` and (with #28046) `unclaimedTopLevelConnectors`. Readers that take permissions from the registry (for example `plugin-security`'s `packaged-permission-set-lock.ts`, `ql.registry.listItems('permission')`) would miss a residual permission set the same way.\n\n## Task\n\n- [ ] Decide the shape of the fix: register the whole residual through the registration body a package's collections take (`registerMetadataCollections`), under the residual rule's id, or extend the per-type registration (objects, connectors) type by type. The first is one path for every type; it also makes a residual flow, permission set or job live at boot, which is what the metadata door already reports.\n- [ ] A test pins the boot-time reading for a residual flow, and for one security-domain type, both directions (residual registered; a body's own unchanged).\n\n`Clause-②:` decided from the diff · `Metadata-protocol: none`."
+}

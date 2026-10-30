@@ -1,0 +1,37 @@
+{
+  "number": 28052,
+  "kind": "issue",
+  "title": "validation: a state_machine rule's authored message cannot name the refused move, and the built-in sentence names it by option value, not label",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:43:46Z",
+  "updated_at": "2026-10-30T16:21:10Z",
+  "closed_at": "2026-10-30T16:20:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28052",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cyVSbyvGiXWKxk8GG8\n\nFiling gate: ① user-visible UX defect, `reach:` named producer HotCRM (`quote_status_progression`, hotcrm#2371 / hotcrm#2376), and ④ per-layer child of #27381 (row 1).\n\n## Question\n\nShould a `state_machine` rule's `message` be able to say which move it refused (\"from Presented to Draft\"), and should the built-in sentence name the states by their option labels?\n\n## Reading — `origin/main` bc496bf7, 2026-10-30T10:42Z\n\nProbe: `evaluateValidationRules` on a `select` field `status` with options `draft`/`presented`/`accepted` labelled `Draft`/`Presented`/`Accepted`, update `presented → draft` (a vitest probe in `packages/objectql`, not committed). Output:\n\n```text\nauthored: message=\"Cannot move a quote from {{from}} to {{to}}.\"\n  fields=[{\"field\":\"status\",\"code\":\"invalid_transition\",\"message\":\"Cannot move a quote from {{from}} to {{to}}.\",\"label\":\"Status\",\"constraint\":{\"from\":\"presented\",\"to\":\"draft\"}}]\nbuilt-in: message=\"Invalid transition for Status: presented → draft\"\n```\n\n- `authoredRuleMessage` (`packages/objectql/src/validation/rule-validator.ts`) hands the authored message over verbatim; its docblock says \"no `{{…}}` interpolation, because an authored message has no parameter contract and never had one\".\n- `checkStateMachine` builds `constraint: { from, to }` from the raw option values; the built-in template `invalid_transition` (`packages/spec/src/system/validation-message.ts`) fills `{{from}}`/`{{to}}` from them, so the user reads machine values.\n- The spec rule's `message` describe (`packages/spec/src/data/validation.zod.ts`) declares no holes.\n\n## Suspected fix sites\n\n- Contract: declare the holes a `state_machine` message may carry (`{{from}}`, `{{to}}`, as option labels) on the validation rule schema in `packages/spec` — `domain:spec`.\n- Runtime: `checkStateMachine` / `authoredRuleMessage` render those holes, resolving option labels in the caller's locale (the same label resolution `resolveFieldLabel` uses), and the built-in `invalid_transition` sentence gets labels too — `domain:server`.\n\nLane guess: spec contract first, server render after; triage decides. Related: #25933 (closed; the console names the allowed next states).\n\n## Business reason\n\nA user refused a status change reads \"Invalid quote progression\" with no hint of which move was wrong; HotCRM worked around it by listing the whole path in every message. Without a fix every package writes the same long workaround sentence.\n\nDedupe: semantic search \"state_machine validation message from to placeholders option labels\" in objectstack issues, 2 hits (#27381 parent, #25332 closed, unrelated setup-form option text)."
+}

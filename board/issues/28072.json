@@ -1,0 +1,37 @@
+{
+  "number": 28072,
+  "kind": "pull_request",
+  "title": "fix(runtime): say the flow clone notice in one business line",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:32:06Z",
+  "updated_at": "2026-10-30T12:13:20Z",
+  "closed_at": "2026-10-30T12:13:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T12:13:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28072",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DR7SzDBhXQGAHb2Ls1TDmTM)_\n\nFixes #27886\n\ndomain:server#3 card thread · os-elon-musk · session_016WV4cxQRTfRrRf5wo1ZC3U\n\n## What changes\n\n`FLOW_CLONE_NOTICE` (`packages/runtime/src/flow-clone.ts`), the notice `POST /api/v1/automation/:name/clone` returns with `{ flow, notice }`, goes from seven sentences of engine prose to one line:\n\n> The copy runs alongside the original until you switch one of them off, and it still uses the same subflows, actions and objects as the original.\n\nThe detail the old paragraph carried (`status: 'draft'` is not an off-switch, references are not re-pointed, the Packaged automation `Switch \"…\" off` action does not reach the clone, the clone is switched off in Studio with its Enabled switch and a publish) now lives in the constant's TSDoc. The REST recipe stays in the client SDK's `automation.toggle` TSDoc, unchanged.\n\nThe runtime pin in `domains/automation-flow-clone.test.ts` now asserts both facts by their new wording, exactly one sentence, and no engine words (`draft`, `status`, `off-switch`, `lifecycle`, `Studio`). The existing `toBe(FLOW_CLONE_NOTICE)` and no-endpoint pins stay.\n\n## Why\n\nTriage 6515426773: the packaged-flow clone notice is one business line. The console shows it verbatim beside a \"Switch the original off\" button, so most of the paragraph repeated the screen. Re-measured on `main` at 5aee2065: the notice was the seven-sentence string the card quotes.\n\nBoth facts are kept on purpose. \"Runs alongside the original\" is the double-fire warning the card asks to keep. \"Still uses the same subflows, actions and objects\" is the ADR-0126 §9 line (\"the clone's references stay pointed at what the original pointed at, and the surface tells the admin so\"), said in business words, so the shortening does not drop an ADR requirement.\n\n## Verification\n\n- `vitest run src/domains/automation-flow-clone.test.ts src/dispatcher-plugin.automation-clone-mount.integration.test.ts`: 23 passed.\n- Red control: with `origin/main`'s `flow-clone.ts` restored, the rewritten notice test fails (1 failed, 18 passed); restored to this diff, green.\n- `dispatch-gates --ran`: 60 derived families accounted for, 58 exit 0, 2 exit 3 in the fresh worktree. Re-run after their prerequisites: `check-plugin-teardown-shape --self-test` exit 0 after fetching its pinned commit; `check:dual-build-cjs-loads` NOT MEASURED (needs every package's dist).\n- `pnpm lint` exit 0; `pnpm --filter @objectstack/runtime typecheck` exit 0.\n- The dogfood door test (`qa/dogfood/test/automation-flow-clone-door.dogfood.test.ts`) asserts `toBe(FLOW_CLONE_NOTICE)` by import, so it follows the constant; not run locally.\n\nClause-②: no\nMetadata-protocol: none\n\nSkills-docs: none. `grep -rn \"re-pointed\\|alongside the original\\|lifecycle label and NOT\\|does not reach the clone\" skills/ docs/ content/` finds no copy of the notice; the one Setup mention (`content/docs/build-without-code.mdx:38`) does not quote it.\n\nOut of scope, for the seat: `ui/packages/app-shell/src/views/setup/PackagedAutomationPage.test.tsx` keeps a fixture `CLONE_NOTICE` with the first two old sentences. The page test pins that whatever notice arrives is shown unedited, so it stays green, but the fixture text is now stale (`ui/` is outside this order's surface).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxQRTfRrRf5wo1ZC3U\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 28211,
+  "kind": "issue",
+  "title": "Kanban board draws only the declared lanes, in their order: ObjectKanban reads kanban.lanes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T16:55:59Z",
+  "updated_at": "2026-10-30T18:16:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28211",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the renderer half of #28018, whose contract half lands in PR #28196 (claim 6526161926 and amendment 6526184775 name this follow-up; contract review 6528382115 PASS). ⛔ Not a claim. Triage sets the lane and grade.\nReach: any kanban whose view filters out a status. HotCRM's task board filters out completed tasks but still draws an always-empty `Completed` lane, and its author cannot reorder lanes, until the console reads the key.\n\n## Observed (once PR #28196 is on `main`)\n\n- `KanbanConfigSchema.lanes` (`packages/spec/src/ui/view.zod.ts`) is declared: an ordered list of the group field's stored option values. Lint refuses a non-option lane (`list-view-kanban-lane-unknown`) and a repeat (`list-view-kanban-lane-repeated`) at validate, build and the publish door.\n- `ui/packages/plugin-kanban/src/ObjectKanban.tsx` `effectiveColumns` (≈L1453–1482) still builds one lane per explicit column or per option and reads no lane list, so the key draws nothing. The `liveness/view.json` `kanban` row names `lanes` at planned strength.\n\n## Wanted\n\n- `effectiveColumns` filters and orders its lane list by `kanban.lanes` when set. A record whose value is not listed lands in the existing `Uncategorized` lane (≈L1819–1873), never hidden. Test plus ablation.\n- The liveness note moves `lanes` from planned to live in the same PR, with the reader as evidence.\n- Riders named by the contract review 6528382115 (should-fix, non-blocking): **S1** an author of `lanes` gets no \"declared, not yet drawn\" word today, because the blanket `kanban` row cannot carry `authorWarn`. Flipping the row to live here closes it. **S2** a one-line note in the `checkKanbanLanes` module docblock that any future widening of inline options must join its option map.\n\nDedupe words: kanban lanes renderer, effectiveColumns lanes, hide empty kanban lane, kanban lane order.\n\nLinks back: #28018, PR #28196."
+}

@@ -1,0 +1,38 @@
+{
+  "number": 28057,
+  "kind": "issue",
+  "title": "pm(record-recognisers): close a fence only on a bare run, refuse a code-indented Contract review heading, and name the new Head-sha refusal causes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:53:55Z",
+  "updated_at": "2026-10-30T13:21:49Z",
+  "closed_at": "2026-10-30T13:21:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28057",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work. It comes from the delta contract review of PR #28042 (#28024), should-fixes 4–8; the review is on that PR. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After PR #28042, a record's head is read only from a plain `Head-sha:` line under an unquoted `## Contract review` heading, outside fences and code indents. The review found two residual shapes. Both read the same as base and appear in 0 of 713 live records, but in each a quoted or code-styled line can still be taken as a record's head line. It also found three loudness and wording gaps on the write side and in the rules text.\n\n**Reader who acts:** the PM recogniser tooling owner (skills lane).\n\n## Measured (PR #28042 head `2e75b193`, 2026-10-30)\n\n1. `FENCE_LINE` closes a fence on a run with trailing text (three backticks then prose). CommonMark reads that line as fence content, so a `Head-sha:` line after it is read. This is review should-fix 6; it behaves the same on base.\n2. `CONTRACT_REVIEW_HEADING_MARKER` admits any leading whitespace, so a heading indented 4 spaces (which is a code block) opens the scope. The key line, by contrast, is held to 3 spaces. This is review should-fix 7: unchanged from base, 0 live instances.\n3. `HEAD_SHA_KEY_ANYWHERE` (in `post-stamped.mjs`) tests for the key anywhere in the comment, ignoring case. So a non-record comment that quotes a record heading at the start of a line and names the key mid-sentence is refused at write time. This is loudness only (review should-fix 4).\n4. In `post-stamped.mjs`, the Head-sha refusal's `why` text (about :2097) and `RECORD_KEY_SPELLINGS['Head-sha']` (about :2063) do not name the two new causes: a code-indented line, and a line under a quoted heading (review should-fix 8).\n5. `.claude/skills/pm-dispatch/references/contract-review.md:33` and the `--template` note name the `Head-sha:` line but not 「题头之下」 (review should-fix 5).\n\n## Wanted\n\n- Items 1 and 2: close the fence only on a whitespace-only run of the same char and at least the opening length. Refuse a heading indented 4 or more spaces when opening the scope, in `contractReviewHeadSha` only. Pin both, and ablate each once.\n- Items 3 and 4: wording and precision of the existing write-time refusal. ⛔ No new refusal class.\n- Item 5: an in-line edit, line-neutral, on a governed path (Tier S, `.claude/**`, developed on fable per the project rule).\n- ⛔ No new gate.\n\n## Blocked-by\n\nPR #28042 (the heading-scoped reader this tightens).\n\nBlocked-by: #28042\n\n## Dedupe\n\n#28024 is the card PR #28042 closes. #28033 covers the \"closed\" wording for PR targets, not this reader. Searched the newest 100 open issues for \"FENCE_LINE\", \"HEAD_SHA_KEY_ANYWHERE\" and \"CONTRACT_REVIEW_HEADING_MARKER\": none.\n"
+}

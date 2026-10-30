@@ -1,0 +1,32 @@
+{
+  "number": 28205,
+  "kind": "issue",
+  "title": "spec(currencyConfig.homeAmount): a home or rate field with both readonly: false and an expression is told only about readonly, so the author meets the second fault on the next parse",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T16:42:10Z",
+  "updated_at": "2026-10-30T16:59:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28205",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② should-fix 1 of triage contract review 6526217217 on PR #28096 (card #27191), carried out so the reviewed head lands unchanged. Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade and no lane: triage sets both (the code is `packages/spec/src/data/object.zod.ts`).\nReader: the lane triage assigns.\nDedupe (open AND closed): semantic search \"refuseUnlessPlatformWritten homeAmount readonly expression one message both faults\" → only #27191 / PR #28096. **New.**\nreach: `os validate` / any object save, once PR #28096 lands: a `homeAmount` target field (the home field or the rate field) declared with both `readonly: false` (or absent) and an `expression`.\nBlocked-by: #28096.\n\n## What the code says\n\n`refuseUnlessPlatformWritten` reports only the `readonly` fault when a target carries both faults, so the author fixes one and meets the second on the next parse.\n\n## Wanted\n\n- One refusal message that names both faults when both are present (mark it `readonly: true` and drop the `expression`), pinned by one test case.\n\nRelated: #27191 / PR #28096."
+}

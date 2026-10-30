@@ -1,0 +1,34 @@
+{
+  "number": 28029,
+  "kind": "pull_request",
+  "title": "chore(pm): run the mailbox-open self-test in CI and pin the roster fixture lanes to its lane-word lists",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T09:14:40Z",
+  "updated_at": "2026-10-30T09:50:47Z",
+  "closed_at": "2026-10-30T09:50:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T09:50:44Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28029",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DGFvM99dFuz4YKM4noaMUMS)_\n\nFixes #27997\n\n## What changes\n\n- `package.json` `check:pm-record-recognisers` now chains `node scripts/pm/mailbox-open.mjs --self-test` (71 cases in 10 batteries). The existing `Lint & Repo Gates` step (`.github/workflows/lint.yml:1275`) runs that script, so no workflow job is added.\n- `scripts/pm/fleet-roster.mjs --self-test` gains one case in the fixture-snapshot battery (floor 17 → 18): every distinct lane in the fixture rows (`repo:hotcrm`, `domain:devx`, `domain:skills`, `triage`, `domain:ui`) is a kind from `SEAT_LANE_KINDS` or a word from `SEAT_BARE_LANES`, read through the already-imported `mailbox-open.mjs` namespace, never re-spelled.\n\n## Why\n\nShould-fixes 2 and 3 from the contract review of PR #27986: the reserved-lane refusal pinned in `mailbox-open.mjs --self-test` ran in no CI job, and nothing asserted that the roster's fixture lanes stay inside the exported lane-word lists.\n\n## Verification\n\n- `pnpm check:pm-record-recognisers` → exit 0; the chain prints `✓ mailbox-open self-test: 71 cases in 10 batteries pass.`\n- `node scripts/pm/fleet-roster.mjs --self-test` → `✓ fleet-roster self-test: 83 cases in 8 batteries pass.`\n- Ablation (scratch copy): `SEAT_BARE_LANES` set to `['director']` → the new case fails with `triage:false`, exit 1.\n- No import cycle: `fleet-roster.mjs` already imported `mailbox-open.mjs` on `main`; no new import line.\n- Gates: `dispatch-gates.mjs --commands` derives 38 families on 66f3f154; all 38 exit 0 (four needed a whole-tree `pnpm build` first), and `--ran` reconciles 38 run, 0 NOT-MEASURED, 0 UNRUN. `eslint scripts/pm/fleet-roster.mjs` exit 0.\n- Tier: `check-governed-merges.mjs --test package.json scripts/pm/fleet-roster.mjs` → 0 of 2 paths governed.\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:把信箱开箱脚本的自测接进已有的 CI 检查链,并让车队总表自测断言夹具里的车道词都在导出的词表中。\n- 为什么改:#27986 合同复核的两条应修项;此前保留车道名的拒绝只在本地自测里,CI 不跑,改坏了也是绿的。\n- 风险与回滚:只动一条 npm 脚本和一个自测用例,不改运行逻辑;回滚即还原这次提交。\n- 先看:`scripts/pm/fleet-roster.mjs` 新增的那一条断言。\n- 两分钟验证:跑 `pnpm check:pm-record-recognisers`,末行应是 mailbox-open 71 例通过。\n- 需要你做的:无;不欠合同复核(四个契约面都没碰),落地档位以登记表为准。\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset — nothing here publishes (`skip-changeset`).\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to generated docs or changelogs.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxhQA7zwJ62YFCW4fH\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 28173,
+  "kind": "pull_request",
+  "title": "fix(objectql): name a refused state_machine move by its option labels",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T15:17:41Z",
+  "updated_at": "2026-10-30T16:20:00Z",
+  "closed_at": "2026-10-30T16:19:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T16:19:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28173",
+  "body": "Fixes #28052\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — `skills/**` and `content/docs/**` carry no copy of the built-in `invalid_transition` sentence (grep for `invalid_transition`, `Invalid transition for` and `不允许从`: four doc hits, all naming the code or a user hook's own message, none quoting the built-in wording)\n\n## 维护者速读\n\n- 改了什么:状态机规则拒绝非法状态流转时,内置提示句里的「从哪到哪」改用选项的显示名(按调用者语言翻译),不再用原始选项值。\n- 为什么改:用户被拒时看到「Invalid transition for Status: presented → draft」这种机器值,看不懂哪一步错了;现在读到「Presented → Draft」,中文读到「已提交 → 草稿」。\n- 风险与回滚:只改提示文字;`code` 与机器可读的 `constraint: { from, to }` 仍是原始值,作者自写的 message 原样不动;回滚即 revert 本 PR。\n- 先看:`packages/objectql/src/validation/rule-validator.ts` 的 `checkStateMachine` 末尾与新函数 `resolveOptionLabel`;再看新测试文件。\n- 两分钟验证:`pnpm --filter @objectstack/objectql exec vitest run src/validation/rule-validator.state-machine-option-labels.test.ts`,预期 6 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `checkStateMachine` (`packages/objectql/src/validation/rule-validator.ts`): on the built-in path (no authored `message`), the `invalid_transition` template's `{{from}}` / `{{to}}` are now filled with each state's option label; `constraint` is still built from, and shipped with, the raw option values. The authored-message path is untouched and does not even run the label lookup.\n- New `resolveOptionLabel(field, def, value, messages)`: the field's own option translation (`objects.OBJECT.fields.FIELD.options.VALUE`) → for a picklist-bound field, the list's (`picklists.NAME.options.VALUE`) → the option's declared `label` → the raw value. That is the chain `translateObject` serves a field's options by on `/meta`, asked through the same `ValidationMessageContext.translate` hook `resolveFieldLabel` uses (no second i18n path), with the same echo-on-miss test and the same swallow-a-throwing-service guard.\n- `buildFieldError` interpolates its `constraint` over its `messageParams`, so the built-in path renders with `messageParams: { ...constraint, ...labels }` and no constraint, then attaches the raw `constraint` itself. The returned key order (`field, code, message, label, constraint`) is unchanged.\n- `ConditionalFieldDef` gains the `picklist` key and `ConditionalFieldOption` the `label` key it already receives at runtime (types only).\n- `.changeset/28052-state-machine-option-labels.md`: `@objectstack/objectql` patch.\n\nNot in scope, per triage: `{{from}}` / `{{to}}` holes in an author-written `message` (new authorable vocabulary, `Clause-②: yes`, back to triage). `packages/spec` is untouched; the template text is unchanged.\n\n## Tests\n\nNew `packages/objectql/src/validation/rule-validator.state-machine-option-labels.test.ts`, six pins:\n\n1. built-in sentence names declared option labels: `Invalid transition for Status: Presented → Draft`; `constraint` is `{ from: 'presented', to: 'draft' }`;\n2. translated option labels under `zh-CN`: `状态不允许从 已提交 变更为 草稿`;\n3. picklist-bound field: the field-level entry wins, the picklist entry answers for an option the field does not translate;\n4. fallback: a missing translation falls to the declared label, an unlabelled option and a bare scalar option fall to the raw value;\n5. a throwing i18n service leaves the declared labels standing (a 400 never becomes a 500);\n6. an authored `message` containing `{{from}}` / `{{to}}` is returned exactly as written, with the raw `constraint` beside it.\n\nMeasured on `main` 277275aa before the fix (test file only): pins 1–5 red, pin 6 green (a preservation pin). Received on main for pin 1:\n\n```text\nExpected: \"Invalid transition for Status: Presented → Draft\"\nReceived: \"Invalid transition for Status: presented → draft\"\n```\n\nAblations, each reverted from the committed fix and restored with `git restore --source=HEAD --staged --worktree` (tree clean afterwards, 6/6 green on restore):\n\n| Ablation | Red pins |\n|---|---|\n| A1 built-in path renders from `constraint` again (as on main) | 1, 2, 3, 4, 5 |\n| A2 no translate lookup for options | 2, 3 |\n| A3 no picklist key | 3 |\n| A4 no raw-value fallback | 4 |\n| A5 `constraint` carries the labels | 1, 2, 4 |\n| A6 no try/catch around the option lookup | 5 |\n| A7 an authored message gets its holes filled | 6 |\n\n## Acceptance notes\n\n- The `invalid_initial_state` built-in sentence still lists `{{value}}` / `{{allowed}}` as raw option values. Same wording shape, left alone because the card and its claim scope this PR to `invalid_transition` only; noted, not filed.\n- No helper in `packages/spec` spells the option-label bundle key (only `objectFieldLabelKey` / `objectLabelKey` / `objectValidationMessageKey` exist), so the key is spelled inline here, as `plugin-audit`'s activity summary already does. A spec helper would be a `domain:spec` change; noted, not filed.\n\n## Verification\n\nAll at head f118099e (worktree off `origin/main` 277275aa):\n\n- `pnpm --filter @objectstack/objectql test`: 495 files / 9629 tests passed.\n- `pnpm --filter @objectstack/objectql typecheck` (tsc plus `check:test-typecheck`): exit 0.\n- eslint on the two changed `.ts` files: exit 0. `pnpm lint`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 62 families, each run with its exit code recorded before any pipe; `--ran` reconciliation: \"62 derived, 62 run, 0 NOT-MEASURED, 0 UNRUN\" (exit 0). `check:dual-build-cjs-loads` first exited 3 (PREREQUISITE NOT MET, no full build yet); re-run after a full `pnpm turbo run build` (116/116 tasks): exit 0, \"113 published require entry point(s) across 70 package(s) load\". The ten commits `main` gained since 277275aa touch neither `packages/objectql` nor the `invalid_transition` template.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czVnUdQQCVKSW5J2uk\n"
+}

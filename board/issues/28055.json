@@ -1,0 +1,32 @@
+{
+  "number": 28055,
+  "kind": "issue",
+  "title": "automation: a try_catch region with two exits is refused at registration without saying how to join them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:45:08Z",
+  "updated_at": "2026-10-30T11:03:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28055",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cyVSbyvGiXWKxk8GG8\n\nFiling gate: ① user-visible (author-facing) refusal defect, `reach:` named producer HotCRM (a guarded loop, hotcrm#2371 / hotcrm#2376), and ④ per-layer child of #27381 (row 4).\n\n## Question\n\nWhen a `try_catch` (or `loop` body / `parallel` branch) region has more than one exit, should registration accept it (the region ends when every exit has run), or should the refusal prescribe the fix (add one node both exits lead to)?\n\n## Reading — `origin/main` bc496bf7, 2026-10-30T10:42Z\n\nProbe: `AutomationEngine.registerFlow` of a flow whose `try_catch` try region is `d → x`, `d → y` (vitest probe in `packages/services/service-automation`, not committed). Output:\n\n```text\ntry_catch 'tc' try: region must be single-exit but has 2: x, y\n```\n\n- The refusal comes from `analyzeRegion` via `validateControlFlow` (`packages/spec/src/automation/control-flow.zod.ts`), called by `registerFlow`'s parse in `packages/services/service-automation/src/flow-definitions.ts`. It names the slot and the exit ids, so half of the card's second suggestion already holds; it gives no prescription (which node to add, what kind), against the north-star line \"wrong must be refused loudly, with a prescription\" (the triage path line on #27381).\n- Single-exit is the documented region contract (ADR-0031, `FlowRegionSchema`), and the runtime (`runRegion` / `findRegionEntry`) relies on one entry and one exit.\n\n## Suspected fix site\n\n`analyzeRegion`'s multi-exit line in `packages/spec/src/automation/control-flow.zod.ts` (the same sentence serves `loop`, `parallel` and `try_catch` regions): add the prescription, e.g. \"add one node that x and y both lead to (an assignment or a no-op step) and make it the region's last node\". Lane guess: `domain:spec`. Accepting multi-exit regions instead would change ADR-0031's contract and the region runner (`domain:server`), which is a maintainer decision; triage decides.\n\n## Business reason\n\nAn author whose guarded region branches gets a refusal that names the problem but not the cure; HotCRM found the join-node workaround by trial. Every flow author with a branching guarded region meets the same line.\n\nDedupe: semantic search \"try_catch region single-exit multiple exits join node refusal\" in objectstack issues, 9 hits, none on the multi-exit refusal wording (closest: #14394 closed, try_catch lint; #18112 closed, refusing end inside a region)."
+}

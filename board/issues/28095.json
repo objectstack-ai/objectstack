@@ -1,0 +1,36 @@
+{
+  "number": 28095,
+  "kind": "pull_request",
+  "title": "test(dogfood): the api-action door's disabled pin reads #27842's sentence, not the ledger table name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:34:38Z",
+  "updated_at": "2026-10-30T13:11:22Z",
+  "closed_at": "2026-10-30T13:11:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T13:11:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28095",
+  "body": "Fixes #28082\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:只改一条 dogfood 断言。`api-action-door-forward` 里「关掉 Ban User 后经动作入口调用」那条用例,原来要求 409 提示里出现系统表名 `sys_metadata_activation`,现在改为要求提示是 #27842 裁定的白话句子(点名「Setup › Packaged automation」),并且不许出现该表名。\n- **为什么改**:#27964 落地后入口回的是给终端用户看的白话句子,不再点名系统表,这条旧断言因此让 main 的 Dogfood Regression Gate (3/3) 持续变红。产品行为是对的,错的是断言。\n- **风险与回滚**:仅测试文件,不发布任何包;409、`ACTION_DISABLED` 代码和「用户没被封禁」三条断言原样保留。回滚即还原本 PR。\n- **先看**:`packages/qa/dogfood/test/api-action-door-forward.dogfood.test.ts` 第 176–184 行(唯一改动处)。\n- **两分钟验证**:`pnpm --filter @objectstack/dogfood exec vitest run --maxWorkers=2 test/api-action-door-forward.dogfood.test.ts`(先建依赖闭包),预期 8/8 全绿;在 main 上同一命令预期第 178 行失败。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n`packages/qa/dogfood/test/api-action-door-forward.dogfood.test.ts`, the `ban_user OFF answers 409 ACTION_DISABLED through the door` case. The message assertion that pinned the ledger table name now pins the sentence the engine actually returns (`packages/objectql/src/action-activation.ts`, `describeDisabled`, reached through `ObjectQL.describeDisabledAction` from `disabledActionRefusal` in `packages/runtime/src/action-execution.ts`):\n\n- the message starts with `This action is turned off for this deployment. `;\n- it contains `An administrator can turn it on again under Setup › Packaged automation`;\n- it does not contain `sys_metadata_activation`.\n\nThe 409 status, the `ACTION_DISABLED` code and the not-banned assertions are unchanged. The shape copies the sibling helper `expectDisabledSentence` in `packaged-action-disabled-dispatch-live.dogfood.test.ts`, which #27964 already flipped.\n\nThis is a deliberate pin flip. Nothing is skipped, marked todo, retried or quarantined.\n\n## Tests\n\nThe same file, run both ways under the verify lock after building the dogfood dependency closure (`pnpm --workspace-concurrency=2 --filter '@objectstack/dogfood^...' build`, VERDICT command-exit 0).\n\n<details><summary>Before the flip (origin/main f6adf4800e): exit 1, fails at L178</summary>\n\n```text\n× the switch holds: ban_user OFF answers 409 ACTION_DISABLED through the door and the user is NOT banned\nAssertionError: expected 'This action is turned off for this de…' to contain 'sys_metadata_activation'\nExpected: \"sys_metadata_activation\"\nReceived: \"This action is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or you can use another action.\"\n ❯ test/api-action-door-forward.dogfood.test.ts:178:50\n Test Files  1 failed (1)\n      Tests  1 failed | 7 passed (8)\nos-verify-lock: VERDICT command-exit 1\n```\n\n</details>\n\n<details><summary>After the flip (1b2c59be8f): exit 0</summary>\n\n```text\n Test Files  1 passed (1)\n      Tests  8 passed (8)\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n<details><summary>Typecheck</summary>\n\n`pnpm --filter @objectstack/dogfood run typecheck`: VERDICT command-exit 0. `tsc --noEmit --listFiles` in the package lists the edited test file (1 hit), so the typecheck covers it.\n\n</details>\n\n## Acceptance notes\n\n- Grep of `packages/qa/dogfood` for other refusal-message pins on `sys_metadata_activation` or on the pre-#27842 wording (`is disabled —`, `activation ledger`, `Re-enable the packaged action`, `author your own action`): none besides L178. The other `sys_metadata_activation` hits are ledger-table reads (`const LEDGER`, `ql.find(...)`, SQL fixtures). `packaged-action-disabled-dispatch-live` already pins the new sentence. `packaged-activation-ledger-reach` and `mcp-system-object-action-exposure` assert only the code and status.\n- The dogfood shards do not run on `pull_request` or `merge_group`. This PR's first CI dogfood reading is `main`'s push battery after the merge. The local before/after readings above are the evidence for this file.\n\n## Verification\n\nLocal subset at `1b2c59be8f` (`git rev-parse --short HEAD`), derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (51 commands, exit 0). Each command's exit code was written to disk before any pipe.\n\n- 50 of 51 exit 0.\n- `pnpm check:dual-build-cjs-loads` exits 3, PREREQUISITE NOT MET. It reads every package's built `dist/`, and seven packages outside this diff's closure have none. NOT MEASURED locally, reason: no full workspace build. CI's `Lint & Repo Gates` runs it.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran ran.list` exits 0 and reconciles: `51 derived famil(ies) accounted for — 50 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)`.\n\nNo changeset: the diff changes one test file in a private package (`@objectstack/dogfood`, `\"private\": true`) and publishes nothing, hence `skip-changeset`. The families CI runs over the whole tree, the type-check lanes and `test:repo` are left to this PR's check-runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n"
+}

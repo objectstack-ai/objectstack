@@ -1,0 +1,37 @@
+{
+  "number": 28070,
+  "kind": "issue",
+  "title": "automation: a runAs:'user' run carries no posture rung, so a platform administrator's flow is served organization ledger rows only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:29:48Z",
+  "updated_at": "2026-10-30T13:25:06Z",
+  "closed_at": "2026-10-30T13:21:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28070",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFound by the contract review of PR #28047 (card #26750, ruling A `6457448424`): should-fix 1 in record `6520912495`.\n\n## What happens\n\nAfter #26750, deployment-level ledger rows (`tenant_id` NULL) are served only to a request whose execution context carries the `PLATFORM_ADMIN` posture rung. The rung is derived in `resolveAuthzContext` (`packages/core/src/security/resolve-authz-context.ts`) and carried by `assemble-execution-context.ts`. An automation run with `runAs: 'user'` builds its context in `service-automation` instead: `seedRunGrants` (`packages/services/service-automation/src/run-resume.ts`) seeds positions, permissions, peers and email, and no `posture`. So a flow run as a platform administrator that reads the ledger is served organization rows only.\n\nThis fails closed (fewer rows, never more), so it is not a leak. It is a gap between \"the platform administrator reads every row\" and what a flow running as that administrator gets.\n\n## Question for triage\n\nShould `seedRunGrants` seed the posture rung the way `resolveAuthzContext` derives it (one source of truth for the rung), or is \"a flow that needs deployment-level ledger rows reads them in system context\" the intended answer (then a docs sentence)? No known flow reads the ledger today; the measurement belongs to the claimant.\n\nRe-check: `grep -n \"posture\" packages/services/service-automation/src/run-resume.ts` → no hit expected.\n\nRelated: #26750, PR #28047 (its changeset's \"Unchanged\" bullet already names this case)."
+}

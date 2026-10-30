@@ -1,0 +1,31 @@
+{
+  "number": 28104,
+  "kind": "issue",
+  "title": "ai chat: a record_draft card opens a prefilled new-record form (values via router state, marked AI 建议, never auto-submitted)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p2",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:56:50Z",
+  "updated_at": "2026-10-30T14:03:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28104",
+  "body": "Filing gate ③: a task on the maintainer's word. Sam, on the objectstack#27286 re-evaluation (doc https://claude.ai/artifact/DLzVUSyDabAxTDuwAp7a97, §5 phase 1): 「同意开发 S1 粘贴即建单」 (2026-10-30 12:53Z), then 「其实不只是粘贴吧，任何内容我都可以让他创建和更新记录是吗？通过聊天的方式。」 (12:54Z), choosing to fold in update (phase 1b). Scope: AI drafts in chat, a person saves; no spec contract; no in-form button (phase 2), no S2, no S3. Filed by `repo:cloud` seat 2. ⛔ Not a claim.\n\n## 维护者速读\n\ncloud 那一半（cloud#3383）让 AI 在聊天里返回 `record_draft`：一份已经在服务端校验过的新记录草稿。这张卡做界面：聊天里显示一张卡片「新建 X（已预填 N 个字段）→」，点开跳到新建表单，字段已预填并标「AI 建议」，由用户检查后自己保存，绝不自动提交。预填值通过路由 state 传递，不放查询串，因为里面可能有联系人隐私。\n\n## Facts (objectstack main)\n\n- `ui/packages/plugin-chatbot` already renders the `open_record` hand-off (`recordHandoff` tests, `ChatbotEnhanced.tsx`).\n- `RecordFormPage` (app-shell) reads explicit prefill from the query string today.\n\n## Work\n\n1. plugin-chatbot: parse a `status:'record_draft'` tool result and render the card with the object label and the field count. Show `dropped` reasons in a collapsed detail.\n2. Clicking it navigates to the object's `/new` with the values in **router state**, never the query string.\n3. RecordFormPage: read router-state values as create values. An explicit query-string prefill wins over them. Mark each AI-filled field 「AI 建议」 until the user edits it. Never auto-submit. A reload drops the draft, which is acceptable; say so in the PR.\n4. Tests: card rendering, the navigation carries state with no query string, precedence, the marker, no auto-submit. Include an ablation.\n\n## Done when\n\nA record_draft from chat opens a prefilled, marked, unsaved new-record form.\n\nDepends on: objectstack-ai/cloud#3383 for the producer. The UI can build against the documented result shape."
+}

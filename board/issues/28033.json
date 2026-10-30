@@ -1,0 +1,38 @@
+{
+  "number": 28033,
+  "kind": "issue",
+  "title": "pm(half-states, pm-dispatch): four readers still say closed for a Blocked-by PR target that releases on merged (dispatch-runbook flag two, H28, the H4 mixed line, the scheduled run note)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T09:31:03Z",
+  "updated_at": "2026-10-30T12:19:06Z",
+  "closed_at": "2026-10-30T12:18:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28033",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work. It comes from the contract review of PR #28031 (#27989), should-fixes 1, 2, 4 and 5; the review is on that PR. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After PR #28031, the H4 prose half, the SKILL.md `pm:blocked` row and the platform reading all say that a `Blocked-by:` PR target releases on **merged**, while a closed-unmerged one releases nothing. Four places still say \"closed\" for a PR target. None of them changes a verdict, so this is wording only. But a seat reading them can mistake an abandoned PR for a released blocker.\n\n**Reader who acts:** the pm-dispatch protocol and the half-state patrol owner.\n\n## Measured (PR #28031 head `45763c74`, 2026-10-30)\n\n1. `.claude/skills/pm-dispatch/references/dispatch-runbook.md:85` reads 「旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关闭。」 It is the one remaining skill-text reader that says closed for a target which, when a PR, flags on merged. The fix is one word in-line, on a governed path (Tier S, `.claude/**`, developed on fable per the project rule).\n2. `scripts/pm/check-half-states.mjs` `h28StaleBodyBlockerLine` (about :7652 and :7659) counts an abandoned PR as \"spent\" and says CLOSED. This is card #27989 item 5, which was conditioned on touching H28; PR #28031 did not touch it. The verdict and the remedy are right. `namedTargets` already renders `closed UNMERGED`.\n3. In `proseBlockerClause`, the mixed branch prints `0 still read OPEN, …` when the only rows are abandoned or unresolved. This is cosmetic; the counts and the verdict are right.\n4. `scripts/ci/scheduled-full-run.mjs` `renderBlockNote` (about :661-663) renders a merged PR as `(closed …)`. It is reachable only after `staleBlockVerdict` has excluded unmerged rows, so it is true but imprecise.\n\n## Wanted\n\n- Items 1–4 as wording: merged for a PR target, closed for an issue.\n- Edit the rule text in-line and keep the line count neutral. Pin the script wording only where a pin already reads that text.\n- ⛔ No new gate. No verdict changes.\n- Optional, if a line of headroom exists: a measured-leg line in `platform-readings.md` for `issue_read` on a PR number (state closed, no `pull_request`, no `merged_at`), styled like :228-:230 (review should-fix 3).\n\n## Blocked-by\n\nPR #28031 (the merged/abandoned buckets this wording follows).\n\nBlocked-by: #28031\n\n## Dedupe\n\nSearched the newest 100 open issues for \"dispatch-runbook 旗二\", \"h28StaleBodyBlockerLine\" and \"renderBlockNote\": none.\n"
+}

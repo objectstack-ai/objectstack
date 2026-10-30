@@ -1,0 +1,31 @@
+{
+  "number": 28080,
+  "kind": "issue",
+  "title": "cli: `os plugin build` / `install` / `publish` spell the compiled manifest filename with `MANIFEST_FILENAME`, the runtime with `COMPILED_PLUGIN_MANIFEST_FILE`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:47:35Z",
+  "updated_at": "2026-10-30T12:03:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28080",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFound by the #27914 card thread (PR #28075, contract review 6521886792 ③) and filed by the `domain:server` seat. Outside that PR's rule. ⛔ Not a claim.\n\n## What is wrong\n\nThe compiled plugin manifest's filename has two spellings that must agree by hand: `MANIFEST_FILENAME` in `packages/cli/src/utils/osplugin.ts` and `COMPILED_PLUGIN_MANIFEST_FILE` in `packages/runtime/src/compiled-plugin-manifest.ts`. Today they are the same string. PR #28075 removes one place that depended on that (publish's second lookup), but these still do:\n\n- `os plugin publish`'s integrity preflight exempts the manifest by `MANIFEST_FILENAME` (`publish.ts`, the `verifyIntegrity(..., { exempt: [MANIFEST_FILENAME, SIGNATURE_FILENAME] })` call).\n- `os plugin build` writes the entry under `MANIFEST_FILENAME`, which the runtime later finds by `COMPILED_PLUGIN_MANIFEST_FILE`.\n- `os plugin install` names it with `MANIFEST_FILENAME` alongside the runtime read.\n\nIf the two ever drift, build writes an entry the runtime cannot find, and publish's preflight counts the manifest as an undeclared packaged file.\n\n## Expected\n\nOne spelling: the CLI imports the runtime's constant (or both import one shared constant), so a drift cannot happen. A pin that the CLI's name is the runtime's. Robustness tidy, no behaviour change.\n\nGrading is triage's."
+}

@@ -2,8 +2,8 @@
   "number": 27997,
   "kind": "issue",
   "title": "pm(mailbox): wire mailbox-open --self-test into CI and pin the roster fixture lanes against SEAT_LANE_KINDS / SEAT_BARE_LANES",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:devpath",
     "domain:skills",
     "finding",
-    "pm:blocked",
     "priority:p3",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T07:02:25Z",
-  "updated_at": "2026-10-30T07:57:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T09:51:35Z",
+  "closed_at": "2026-10-30T09:50:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27997",
   "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work, from the contract review of PR #27986 (#27891), should-fixes 2 and 3. The review is on that PR. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** PR #27986 makes `seatKey` refuse reserved `domain:` lane names, and pins that in `scripts/pm/mailbox-open.mjs --self-test`. But no CI job runs that self-test. A later edit can drop the refusal, or let the lane-word lists drift from what the roster reads, and CI stays green. Only the recognisers' one reserved pin covers the refusal in CI.\n**Reader who acts:** the mailbox tooling owner.\n\n## Measured (`origin/main`, 2026-10-30, with PR #27986's head `f37db597`)\n\n1. `package.json` `check:pm-record-recognisers` runs `record-recognisers.mjs --self-test` and `check-owed-reviews.mjs --self-test`. `.github/workflows/lint.yml:1275` runs only that script. `mailbox-open.mjs --self-test` (71 cases after PR #27986) is wired to no job.\n2. PR #27986 exports `SEAT_LANE_KINDS` / `SEAT_BARE_LANES` from `mailbox-open.mjs`, and nothing imports them. `fleet-roster.mjs` `parseSeat` reads a lane as the title's first token with no word list. Every lane in the roster fixture (`domain:` ×3, `repo:hotcrm`, `triage`) is in the exported lists today, but nothing asserts it.\n\n## Wanted\n\n- Run `mailbox-open.mjs --self-test` in CI by adding it to an existing script's chain (for example `check:pm-record-recognisers`). No new workflow job.\n- `fleet-roster.mjs --self-test` asserts that every fixture lane kind is in `SEAT_LANE_KINDS` / `SEAT_BARE_LANES`, importing them rather than re-spelling them.\n- ⛔ No new gate: both are existing self-tests.\n\n## Blocked-by\n\nPR #27986 (the exports and the pins this builds on).\n\nBlocked-by: #27986\n\n## Dedupe\n\nSearched open issues for \"mailbox-open self-test CI\" and \"SEAT_LANE_KINDS\": none.\n"

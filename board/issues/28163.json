@@ -1,0 +1,34 @@
+{
+  "number": 28163,
+  "kind": "issue",
+  "title": "migrate meta --stored does not list a stored connector_action whose connectorConfig.input carries a template token, though boot refuses it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T14:49:30Z",
+  "updated_at": "2026-10-30T19:47:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28163",
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ② should-fix ④.2 of the contract review of PR #28150 (#27968), record 6525595405. Filed by `domain:spec` seat 1. ⛔ Not a claim. Triage sets the grade.\n\nReach: an operator upgrading a deployment whose stored flows include a `connector_action` with a `{…}` token in `connectorConfig.input`. `os migrate meta --stored` is the tool that lists stored rows the new release refuses, and it will not name that row. `registerFlow` refuses it at boot. The ADR-0087 D3 entry names the boot warning as the locator, so the operator does have a path, but the listing tool's promise is broken.\n\n## Measured (on the #28150 head `6a06a420`)\n\n- `packages/spec/src/conversions/refused-shapes.ts:406`: the detector `flow-value-slot-template-dialect-refused` calls `flowNodeValueTemplateRefusals(node.type, node.config)`. It walks `config` only and never hands the node, so the new `connectorConfig · input.*` ledger entry is never read.\n- The header's invariant reads \"a site is listed here exactly when that door refuses it\". After #28150 there is a hole in it.\n\n## What changes\n\n- Hand the node to the judge, reading the same ledger, with the `connectorConfig` path prefix.\n- Add a test: a stored `connector_action` row with `input: { text: '{record.name}' }` is listed at `connectorConfig.input.text`, plus a control in which a CEL envelope is not listed.\n- This lands after #28150 merges.\n\nLinks: #27968, PR #28150 (record 6525595405).\n\nBlocked-by: #28150\n"
+}

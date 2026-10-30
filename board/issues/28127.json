@@ -1,0 +1,38 @@
+{
+  "number": 28127,
+  "kind": "issue",
+  "title": "analytics: a live dataset query selecting a derived measure whose `of` names another derived measure is refused (\"aggregates field … which object does not have\"), though the draft preview serves it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:19:51Z",
+  "updated_at": "2026-10-30T16:21:52Z",
+  "closed_at": "2026-10-30T16:19:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28127",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFound and measured by the #28049 card thread (PR #28122, os-dev report 6523778286), outside that card's rule. Filed by the `domain:server` seat. ⛔ Not a claim. No grade: triage sets it.\n\n## What happens (measured)\n\n`POST /analytics/dataset/query` (`queryDataset`, native and objectql strategies) selecting a derived measure whose `of` names **another derived measure** is refused:\n\n> `Measure eur_twice on cube … aggregates field eur_twice, which object … does not have`\n\nThe Studio draft preview serves the same selection. `DatasetSchema` accepts the shape, and the compile-time currency guard and `content/docs/data-modeling/currency.mdx` (~L180-181) both describe a derived measure built on a derived measure.\n\n## Where (read)\n\n`DatasetExecutor.executeSelection` (`packages/services/service-analytics/src/dataset-executor.ts` ~L1224-1230) adds a selected derived measure's `of` entries to `baseMeasures` without expanding derived dependencies, so a derived operand is treated as a base aggregate over a field of that name.\n\n## Expected\n\nA derived measure over a derived measure is served by a live query as the draft preview serves it (dependencies expanded to their base aggregates), or refused at compile with a message naming the supported shape. Dedupe words: derived of derived, nested derived measure, aggregates field, executeSelection baseMeasures."
+}

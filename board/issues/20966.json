@@ -1,7 +1,7 @@
 {
   "number": 20966,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 2 — 🟢 os-sales · 由Sales账户的项目负责",
+  "title": "[PM seat] domain:server · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:12:24Z",
-  "updated_at": "2026-10-29T13:06:31Z",
+  "updated_at": "2026-10-30T12:22:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 79,
+  "comments": 80,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20966",
-  "body": "domain:server#2 · os-sales · session_01L6bhgUCizoYWQVJWjhdR6F\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md`. This is **`domain:server` seat 2** (the former `domain:engine · seat 2` post; #21118 and #22648 are archives of it, ⛔ do not sit there). Seat 1 is #6367, seat 3 is #26761.\n\n<sub>Refreshed 2026-10-29T13:04Z (forced takeover).</sub>\n\n- **Current PM:** 🟢 `os-sales` · 由Sales账户的项目负责 · the Claude Code project \"Objectstack server ui\", seat thread \"server 席 2\" · `session_01L6bhgUCizoYWQVJWjhdR6F`, seated by forced takeover on the maintainer's word in that project (「再开 server seat 2」). The previous holder `os-project-manager` (`session_0186vfjHHMsRXC9EUT9hTFMo`, seated by `6411543253`) left no sign-off brief and holds no open card; nothing in flight is taken over. The same account sits seat 1 (#6367) from a separate thread; the two seats share the lane's card-thread cap (5) and pick from the lane's total order alternately.\n- **Mailbox:** #27357 (`pm:mailbox`, one per login, shared with seat 1).\n- **Hot-file serial queue:** kept on seat 1 (#6367); this seat claims nothing on a file seat 1 lists there. Every other lane file is FREE.\n- **Pointer:** posture and ledger live in the project; canonical ledger = labels + assignee + `Claim:` comments (`Seat: domain:server#2`) + `head:claude/` PRs, read by `assignee:os-sales`. The previous term's body is the revision of 2026-10-26T08:24Z.\n- **Wall:** none.\n"
+  "body": "domain:server#2 · os-sales · session_01L6bhgUCizoYWQVJWjhdR6F\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md`. This is **`domain:server` seat 2** (the former `domain:engine · seat 2` post; #21118 and #22648 are archives of it, ⛔ do not sit there). Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737.\n\n<sub>Refreshed at sign-off, brief 6522727185.</sub>\n\n- **Current PM:** ⏳ vacant. The previous holder `os-sales` (`session_01L6bhgUCizoYWQVJWjhdR6F`, the Claude Code project \"Objectstack server ui\", seat thread \"server 席 2\") signed off on the maintainer's word 「server 处理完当前任务合并后就下班」. Sign-off brief: 6522727185 (release marker).\n- **In-flight:** none. **Stay-behind:** none. `check-handover` exit 0.\n- **Mailbox:** #27357 (`pm:mailbox`, the `os-sales` login's).\n- **Hot-file serial queue:** kept on seat 1 (#6367).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments (`Seat: domain:server#2`) + `head:claude/` PRs. The previous term's body is the revision of 2026-10-29T13:04Z.\n- **Wall:** none.\n"
 }

@@ -1,0 +1,37 @@
+{
+  "number": 28046,
+  "kind": "pull_request",
+  "title": "fix(objectql): a connector a composed stack declares only on its top level, beside package bodies, lends its credential at boot",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:36:05Z",
+  "updated_at": "2026-10-30T11:18:07Z",
+  "closed_at": "2026-10-30T11:18:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T11:18:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28046",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiH18zL8aJRKfkWPzKCnyMP2)_\n\nFixes #28032\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 合成栈里，某个输入带 `packages[]` 包体、又只在顶层声明了一个连接器实例（没有包体声明同名）时，ObjectQL 的 `manifest` 服务现在会把这个\"残留\"连接器注册进 ObjectQL 注册表，归属栈自己的 `manifest.id`，和残留对象（ADR-0130 D4）已有的做法一样。\n- **为什么改：** 凭据出借方和连接器 reconcile 只读 ObjectQL 注册表。实测修复前：构建期 `composeStacks(…, { manifest: 'preserve' })` 接受这个借用，开机时数据源借用却被拒，报\"is not declared in this stack's connectors\"。修复后开机即可借到。\n- **风险与回滚：** 只多注册一种原本漏掉的残留项；包体重复声明的连接器、单栈、常规合成都不变。不改 spec，不改作者能写什么。回滚即 revert。\n- **需要您做的：** 无（非治理面，合入走常规流程）。\n\n## What changes\n\n- **`packages/objectql/src/plugin.ts`.** A new `unclaimedTopLevelConnectors(stack)` reads the residual rule's own answer (`unclaimedTopLevel`, `@objectstack/metadata`) for `connector` items, as `unclaimedTopLevelObjects` does for objects. The `manifest` service registers them after every body and after the residual objects, under the residual rule's id, through `registry.registerItem('connector', …)`, the verb a body's connectors take. Each is stamped with the stack's version on a shallow copy, so the artifact's own entry is left as it arrived (the residual-object precedent). The \"empty `packages: []`\" warning no longer fires for a stack whose only residual is a connector.\n- **`packages/services/service-automation/src/connector-credential-residual-connector.test.ts`** (new). A real kernel (ObjectKernel, ObjectQLPlugin over SQLite, AutomationServicePlugin) boots `composeStacks([mixed(instance), looseBorrower], { manifest: 'preserve' })` through the `manifest` service and borrows through `CONNECTOR_CREDENTIAL_SOURCE_SERVICE`. Pins: the composed check accepts the shape; the residual instance lends at boot and is owned by the stack's id; a residual descriptor (no `provider`) is refused at boot as a descriptor (`declares no provider`), not as undeclared; CONTROL: an instance a package body declares lends, owned by the body.\n- **`packages/objectql/src/manifest-service-residual-objects.test.ts`.** Three engine-half pins: a residual connector registers under the stack's id and version beside a body's own; it registers when the stack has no residual object; CONTROL: a top-level connector a body repeats is the body's, registered once.\n- **`.changeset/28032-residual-connector-lends-at-boot.md`.** `@objectstack/objectql` patch.\n\n## Why\n\n### The measurement (before the fix, at `origin/main` 13d85bb3)\n\nThe new service-automation test, run against the unfixed `@objectstack/objectql` build:\n\n- `registry.listItems('connector')` was `[]` after boot, for the residual instance and the residual descriptor alike.\n- `source.borrow('sap_s4')` was refused: \"connector instance 'sap_s4' (named by this datasource's external.connector) is not declared in this stack's connectors.\"\n- The CONTROL (the instance declared in a package body) lent, as did the composed check.\n\nSo the card's premise held: the build accepts a borrow the boot refuses. The reload half (\"lends after a reload\") was read off `captureReloadedConnectors`, not measured.\n\n### Why option (a)\n\nOption (a) makes the boot agree with what the composed check already accepts, and changes nothing an author can write. The residual rule already decides which items are residual and under which id, and the engine already registers that answer's objects; connectors are the second type a boot-time reader takes from the registry alone. Option (b) (refuse the borrow in `stack.zod.ts`) would narrow the accept set and was not claimed.\n\n## Verification\n\n- `connector-credential-residual-connector.test.ts`: red before the fix (2 of 4: both residual cases), green after (4 of 4), against a rebuilt `@objectstack/objectql`.\n- `manifest-service-residual-objects.test.ts`: 12 passed. Reverse check from the committed fix: restoring `plugin.ts` from the parent commit fails exactly the two residual-connector pins; the CONTROL stays green.\n- `pnpm --filter @objectstack/objectql typecheck` and `pnpm --filter @objectstack/service-automation typecheck`: exit 0. Full suites: `@objectstack/objectql` 493 files, 9595 passed; `@objectstack/service-automation` 224 files, 2845 passed (1 expected fail).\n- `dispatch-gates --commands` derived 63 families; all run with exit codes recorded (after building `./packages/**`). One red on the first pass: `check:slot-lookup` (an untyped `getService<any>('automation')` in the new test), fixed in `3ab79536`. `--ran`: 63 derived, 63 run, 0 NOT-MEASURED (a derived zero). `origin/main` merged at `a5d4ed3f` (5 commits; `cc5586da` touched the lender's `plugin.ts`); the derived list is unchanged after the merge, and the borrow and lender tests re-run green on the merge (21 passed).\n\n## Acceptance notes\n\n- **Other residual types.** The `manifest` service still registers only the residual's objects and, now, connectors. Other registry-read collections a residual can carry (flows, permissions and the rest of `METADATA_ARRAY_KEYS`) are still metadata-service only. Not measured and not widened here; named in the os-dev-report for the PM.\n- **Both doors.** The test boots the config door's hand-off to the `manifest` service. The artifact door hands the engine the same stack through the same service, so the fix covers both; the artifact door was not booted separately.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (Not touched.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran (`pnpm lint` is CI's).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the repo's own Chinese reader section).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2dhraZ7BwSanQPGEAb\n"
+}

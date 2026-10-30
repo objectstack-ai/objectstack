@@ -1,0 +1,35 @@
+{
+  "number": 28112,
+  "kind": "pull_request",
+  "title": "fix(core): resolve an import lookup cell by the target object's unique fields, an autonumber included",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:08:36Z",
+  "updated_at": "2026-10-30T14:35:57Z",
+  "closed_at": "2026-10-30T14:35:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T14:35:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28112",
+  "body": "Fixes #27947\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — `skills/**` and `content/docs/**` (outside the generated `references/` and the release-owned `releases/`) carry no sentence listing the import lookup candidate fields; grepped for the fixed keys, `reference_not_found`, `reference_ambiguous` and the lookup-cell wording.\n\n## 维护者速读\n\n- 改了什么:数据导入的 lookup 单元格匹配,在原有候选(id、lookup 的 displayField、目标对象标题字段、name/title/label/full_name/email/username)全部落空后,再按目标对象字段声明顺序尝试其唯一字段(`unique` 声明了约束的字段,以及未写 `unique` 的 autonumber 字段)。\n- 为什么改:单元格写的是目标记录的编号(如 `ACC-000012`)或其它唯一字段时,今天一律报 `reference_not_found`;记录标题一改,之前导出的文件就全部导不回来。\n- 风险与回滚:只在原有候选全部未命中时才多查几次;原有候选命中时行为不变,多条命中仍报 `reference_ambiguous`,不会静默挑一条。回滚即还原 `import-runner.ts` 这一处候选列表。\n- 先看:`packages/core/src/utils/import-runner.ts` 的 `isUniqueReferenceField`(autonumber 默认唯一、`unique: false` 退出)与 `resolveRef` 候选列表末尾一行;其次 `import-runner-reference-unique.test.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/core exec vitest run src/utils/import-runner-reference-unique.test.ts`,预期 6 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`resolveRef` in `packages/core/src/utils/import-runner.ts` asked the id, the lookup's `displayField`, the target's title field, then `name` / `title` / `label` / `full_name` / `email` / `username`, and stopped. A cell holding the target's autonumber or another unique field answered `reference_not_found`.\n\nThe target's unique fields are now appended to the candidate list, read once per target per import off the same declaration the exposure check already reads (`servesReferenceTarget`), so no extra metadata read:\n\n- a field whose `unique` declares a constraint, judged by the spec's own `isUniqueDeclared` (`true`, `'organization'`, `'global'`);\n- an `autonumber` field that omits `unique`: the spec makes it `unique: 'organization'` by contract (`FieldSchema`'s autonumber default). The default is applied in the predicate too, so a declaration read unparsed still counts;\n- an `autonumber` declared `unique: false` has opted out (the spec's display-only ordinal) and is not asked.\n\nThey come after every existing candidate, in the target's declared field order, de-duplicated against the existing list (a unique `email` is asked once, in its fixed place), and virtual fields are still skipped. The existing rules are unchanged: the first field to match wins, and a field matching more than one record is `reference_ambiguous`.\n\nNo spec key, no published shape and no public export changes.\n\n## Tests\n\nNew `packages/core/src/utils/import-runner-reference-unique.test.ts` (6 cases), beside the `#24981` title pins:\n\n- an autonumber cell `ACC-000012` resolves and stores the matched id, asked after every existing candidate;\n- another declared-unique field (`unique: true`) resolves;\n- order control: a cell that is one record's `name` and another record's autonumber links the `name` match, and the autonumber is never asked;\n- a cell matching nothing still answers `reference_not_found`, after asking the unique fields in declared order, the unique `email` once, the opted-out autonumber never;\n- an opted-out autonumber's value answers `reference_not_found`;\n- a unique field two records answer is `reference_ambiguous` and links neither.\n\nMeasured on `main` 8cb8c7f4 before the fix: 4 of 6 red, the autonumber cell answering `reference_not_found` (`expected ok: true`, received `code: \"reference_not_found\"`, `field: \"account\"`).\n\nAblations on the fix commit, each restored from `HEAD` after the run:\n\n| Ablation | Red |\n|:---|:---|\n| drop the unique-field candidates | 4 (autonumber, unique, not-found order, ambiguity) |\n| ask the unique fields first | 5, the order-control pin among them |\n| ignore the `unique: false` opt-out | 2 (opt-out pin, declared-order pin) |\n| silently pick the first of several matches | 1 (ambiguity pin) |\n| drop the de-duplication | 4 |\n\n## Acceptance notes\n\n- A cell that matches nothing now costs one query more per unique field of the target before it answers `reference_not_found` (misses are not cached, as before, so a repeated unmatched cell repeats them). Matching cells cost what they did.\n- An `organization`-scoped unique field read across organizations can answer two records; that is reported `reference_ambiguous`, never a silent pick.\n\n## Verification\n\n- Pins and ablations as above.\n- Local gates: every family `node scripts/pm/dispatch-gates.mjs --commands` derives for this diff, exit codes captured, reconciled with `--ran`; `pnpm lint`. Counts are in the os-dev report on the card.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czVnUdQQCVKSW5J2uk\n"
+}

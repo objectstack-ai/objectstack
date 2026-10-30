@@ -1,0 +1,39 @@
+{
+  "number": 28093,
+  "kind": "issue",
+  "title": "objectql: a composed stack's residual top-level permissions (and other registry-read types) are never registered, like flows were before #28048",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:28:09Z",
+  "updated_at": "2026-10-30T16:21:49Z",
+  "closed_at": "2026-10-30T16:19:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28093",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① read beside a ruled card by the #28048 card thread (PR #28091, os-dev report 6522793952), outside that card's ruling. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What the code does (read, not run)\n\n`packages/objectql/src/plugin.ts`: the manifest service registers a composed stack's residual top-level objects and connectors, and after PR #28091 its residual top-level flows. Other types the registry is read for (permission sets and the security domain among them) declared only on the stack's top level, beside package bodies, are still not registered. That is the same silent drop #28048 fixed for flows. Read only, not measured.\n\n#28048's card body asked for a security-domain pin as its Task item 2; triage 6521012414 named flows only, so PR #28091 does flows and `Fixes #28048` closes the card without that item.\n\n## Wanted (route is triage's)\n\nMeasure which residual top-level types reach the registry. Then either register each one the way objects, connectors and flows are, or refuse it loudly at boot. No type should be silently dropped.\n\n## Dedupe\n\nRead open titles for `residual`, `top-level` + `permission`, `composed stack`: #28048 only. **New.**"
+}

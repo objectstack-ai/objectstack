@@ -1,0 +1,37 @@
+{
+  "number": 28125,
+  "kind": "issue",
+  "title": "driver-odata: an OData v2 dialect beside v4 (verbose JSON envelope, EDMX v1 Associations, v2 filter functions and literals, $inlinecount) through the existing dialect seam",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:17:43Z",
+  "updated_at": "2026-10-30T16:43:15Z",
+  "closed_at": "2026-10-30T16:41:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28125",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ (maintainer-directed). 田騏 2026-10-30 13:15Z in the epic PM thread: 「立卡 OData v2 方言」.\nRuling-ref: 6486145005 (Tier B = declarative OData), correction 6509311454 (the v4 card built a dialect seam \"so a v2 card can follow without rework\"), 「同意」 2026-10-29 22:01Z (generic parts open source here; vendor-specific drivers out of this repository)\nDedupe (open AND closed): \"OData v2 dialect driver-odata\" → none this work (#27741 is the v4 card, closed).\nReader: the epic PM (#27261, closed) dispatches it on the maintainer's word.\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 在 `@objectstack/driver-odata` 现有的方言接缝上加一个 OData v2 方言，`version: '2.0'` 的数据源就能用同一个驱动读写。v2 至今仍是 SAP Gateway / S/4HANA 大部分标准服务、旧版 Dynamics CRM（OrganizationData.svc）和 SharePoint 2013 REST 的协议。\n- **放在哪：** v2 是公开的协议标准（微软开放规范），不是某个厂商的扩展，所以放在本仓库的 driver-odata 里，与 v4 并列。SAP 自己的东西，比如 CSRF 令牌握手、`sap-client` 参数、`sap:*` 注解，按「同意」裁定仍然留在仓库外，由厂商插件提供。\n- **工作量：** 约 M，主要是响应封装、`$metadata` 的 Association、过滤函数和字面量写法、计数参数。spec 的类型矩阵要补几种 v2 才有的 EDM 类型，所以要做契约复核。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `config.ts`: `version` accepts `'2.0'` beside `'4.0'` (default stays `4.0`); the describe drops \"Only 4.0 is shipped\".\n- [ ] `dialect-v2.ts` beside `dialect-v4.ts`, behind the same `dialect.ts` interface. Each bullet below is v2 first, then its v4 equivalent:\n  - **Response envelope:** `{ d: { results, __count, __next } }` (verbose JSON, `$format=json` / `Accept: application/json`), where v4 uses `value` / `@odata.count` / `@odata.nextLink`.\n  - **Count:** `$inlinecount=allpages`, where v4 uses `$count=true`.\n  - **`$metadata`:** EDMX 1.0 / CSDL v2. Navigation goes through `Association` / `AssociationSet` with `Relationship` + `FromRole` / `ToRole`, and a `ReferentialConstraint` sits on the Association. `#27745`'s `$metadata` import must read both, so lookups come out the same.\n  - **Filter functions and literals:** `substringof('x', Field)` where v4 has `contains`; `startswith` / `endswith` are the same.\n    - Literals: `datetime'…'`, `datetimeoffset'…'`, `time'PT…'`, `guid'…'`, `123L`, `1.5M`, `1.0d`, `1.0f`.\n    - `$filter` precedence is unchanged; keep the `not (LIST)` rule from #27741.\n  - **Key predicates:** typed literals in keys, for example `Orders(guid'…')` and `Items(1L)`.\n  - **Writes:** the same operation set the v4 dialect supports, with v2's `MERGE` / `X-HTTP-Method` where the service needs it. Read the v4 dialect first and match its scope.\n- [ ] `packages/spec/src/data/type-compat.ts`: `DIALECT_ALIASES.odata` gains the v2-only EDM primitives `edm.datetime` (→ `datetime`) and `edm.time` (→ `time`). This touches the published spec, so a contract review is owed.\n- [ ] Tests: a recorded v2 fixture service (Northwind's public v2 endpoint shape, the way #27741 recorded v4) runs the conformance kit (#27744) and the 11 shared case-sets through the v2 dialect. The `$metadata` import is pinned on a v2 document.\n- [ ] Guide: `content/docs/data-modeling/odata-datasources.mdx` says v2 is supported, with the `version: '2.0'` line and the SAP-specific things that stay out of the repository.\n\n`Clause-②: yes (widening)` expected (`version` accepts `2.0`; the alias table grows) · `Metadata-protocol: added` expected (a new accepted value of `version`), so the changeset level follows AGENTS.md · CONTRACT_REVIEW_TIER review owed for `packages/spec/src/**`."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 28053,
+  "kind": "issue",
+  "title": "console: two failing validation rules on one save show as one banner line joined by '; ' instead of one entry per rule",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T10:44:10Z",
+  "updated_at": "2026-10-30T15:07:41Z",
+  "closed_at": "2026-10-30T15:05:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28053",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4cyVSbyvGiXWKxk8GG8\n\nFiling gate: ① user-visible UX defect, `reach:` named producer HotCRM (forecast rules, hotcrm#2371 / hotcrm#2376), and ④ per-layer child of #27381 (row 2).\n\n## Question\n\nWhen a save fails two validation rules, should the console list each rule's message as its own line (and on its field where the rule names one) instead of showing the server's `; `-joined summary?\n\n## Reading — `origin/main` bc496bf7, 2026-10-30T10:42Z\n\nProbe: `evaluateValidationRules` with a `cross_field` rule naming `fields: ['best']` and a `script` rule naming no field, both failing (vitest probe in `packages/objectql`, not committed). Output:\n\n```text\nmessage=\"Best case must be at least the amount.; Amount must be positive.\"\nfields=[{\"field\":\"best\",\"code\":\"rule_violation\",\"message\":\"Best case must be at least the amount.\"},{\"field\":\"_record\",\"code\":\"rule_violation\",\"message\":\"Amount must be positive.\"}]\n```\n\n- The SERVER half the card asked for is already there: `ValidationError` (`packages/objectql/src/validation/record-validator.ts`) keeps one `fields[]` entry per failed rule, located on `rule.fields[0]` when the rule names a field (`checkPredicate`, `rule-validator.ts`), else on `_record`. Only its top-level `message` is the `; `-join (note the doubled punctuation `.;`).\n- The console marks located entries inline: `extractFieldErrors` (`ui/packages/react/src/utils/error-message.ts`) feeds `form.setError` in the form renderer's submit catch (`ui/packages/components/src/renderers/form/form.tsx`) and `FormPage` (`ui/apps/console/src/components/FormPage.tsx`).\n- But as soon as one entry has no drawn input (`_record`, or a field the form does not render) the renderer falls through to `extractWriteErrorMessage`, which shows the joined top-level `message` in the banner and the toast; `FormPage` always toasts `err.message`. So two record-level rules still read as one `; `-joined line.\n\n## Suspected fix site\n\nThe console's write-refusal banner/toast: build the lines from `fields[]` entries not shown inline (one line each) rather than from the envelope's `message` — `form.tsx` submit catch, `FormPage` submit catch, around `extractWriteErrorMessage` / `extractFieldErrors`. Lane guess: `domain:ui`, no server or spec change needed; triage decides.\n\n## Business reason\n\nA user who breaks two rules at once reads one run-on sentence and may fix only the first; HotCRM had to make its two forecast rules mutually exclusive to avoid it. Any package with more than one record-level rule meets the same line.\n\nDedupe: semantic search \"ValidationError message joined semicolon multiple validation rules banner toast list each rule\" in objectstack issues, 2 hits (#27999 open, a warning-severity toast, different case; #24468 closed, unrelated)."
+}

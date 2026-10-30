@@ -1,0 +1,35 @@
+{
+  "number": 28152,
+  "kind": "pull_request",
+  "title": "fix(spec): the permission-set form asks for the label first, and requires it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T14:18:27Z",
+  "updated_at": "2026-10-30T16:20:00Z",
+  "closed_at": "2026-10-30T16:19:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T16:19:58Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28152",
+  "body": "🤖 Generated with [Claude Code](https://claude.com/claude-code)\nhttps://claude.ai/code/session_017ihL2fi9zfJhUTubyJYb6V\n\nFixes #27864\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：新建权限集表单的 Identity 区改为先填「显示名称」(Label，必填)，再填 API 名称 (Name)，Name 的提示改为「由显示名称生成；snake_case」。\n- 为什么改：原表单先问机器名、显示名称可留空，管理员要先敲一个 API 名，还能存出没有人类可读名称的权限集，和 Console 从 Label 自动生成 Name 的流程相反。\n- 风险与回滚：只动表单布局与提示文字，PermissionSetSchema 与 Name 的生成逻辑都不变，API 仍接受无 Label 的权限集；回滚即 revert 本 PR。\n- 先看：packages/spec/src/security/permission.form.ts（Identity 区前两行），packages/spec/src/security/permission-form-label-first.test.ts，packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts（permission.fields）。\n- 两分钟验证：`pnpm --filter @objectstack/spec exec vitest run src/security/permission-form-label-first.test.ts`，预期 6 个用例全绿；或在 Console 新建权限集，首个输入框是带必填星号的 Label，输入后 Name 自动填好。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/spec/src/security/permission.form.ts`: the Identity section lists `label` first with `required: true`, then `name` (still required). The `name` help now reads \"Derived from the label when you create the set; snake_case\". A code comment records that `required` on a form row is a layout flag and that `PermissionSetSchema` still accepts a set with no label.\n- `packages/spec/src/security/permission-form-label-first.test.ts` (new): pins that the form is the one `METADATA_FORM_REGISTRY.permission` serves, that the Identity section opens on `label` then `name`, that `label` precedes `name` across the whole form, that both rows are required (with a control that `description` is not), that the `name` help names the derivation, and that the schema still parses a set with no label.\n- `packages/platform-objects/src/apps/translations/*.metadata-forms.generated.ts`: regenerated with `node scripts/check-i18n-bundles.mjs --write --filter=platform-objects` (the `permission.fields` keys now come `label` first, and the English `name` help is the new source text). The zh-CN, ja-JP and es-ES `name` help leaves are re-translated by hand to say the same thing, since merge mode keeps a stale translated leaf as it is.\n- `.changeset/27864-permission-set-form-label-first.md`: `@objectstack/spec` patch and `@objectstack/platform-objects` patch, carrying the two declaration lines.\n\n## Tests\n\n- New test, six cases, green on the branch; against the `origin/main` form (ablation: form restored from `549203d040`, test unchanged) it is red on four of six (order, whole-form order, required flag, help text), the two that stay green being the registry identity and the accept-set control. Form restored from `HEAD` and byte-compared afterwards.\n- `@objectstack/spec`: build, `check:generated` (exit 0), `typecheck` (exit 0), full `vitest run`: Test Files 844 passed (844), Tests 23964 passed, 1 todo.\n- `@objectstack/platform-objects`: full `vitest run`: Test Files 101 passed (101), Tests 1434 passed.\n- `node scripts/check-i18n-bundles.mjs`: every bundle set in sync, platform-objects 11 bundles.\n\n## Acceptance notes\n\n- Measured house pattern: every other `*.form.ts` in `packages/spec/src` that carries both rows lists `name` before `label` (agent, skill, tool, flow, field, hook, object, position, email-template, action, app, dashboard, dataset, page, report, view), and none words its `name` help as derived from the label. This form follows the card's Wanted, not that pattern; whether the others should follow is not this card's scope.\n- The Console's create registration for `permission` (`ui/packages/app-shell/src/views/metadata-admin/anchors.ts`) already declares `createFields: ['label', 'name']` and the label-to-name slugify rule; the served form's section order is what put Name first on screen. No `ui/` change here.\n- `required` on a form row is read only by the renderer: `/meta/types` serves the form as layout beside the Zod-derived schema, and the save path validates with `PermissionSetSchema`, where `label` stays optional. No API accept set moves, which is why `Clause-②: no`.\n\n## Verification\n\nIndependent review: none run (quota); the seat reviews the diff (no contract-review face is expected unless `packages/spec/src` counts as a published schema here — the seat decides).\n"
+}

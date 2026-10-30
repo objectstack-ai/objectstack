@@ -1,0 +1,38 @@
+{
+  "number": 28024,
+  "kind": "issue",
+  "title": "pm(record-recognisers): read a record's Head-sha line only under its heading, name that line in contract-review.md, and refuse an unreadable one at write time",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T08:37:32Z",
+  "updated_at": "2026-10-30T11:07:46Z",
+  "closed_at": "2026-10-30T11:06:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28024",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work. It comes from the contract review of PR #28023 (#27979), should-fixes 1, 2 and 3; the review is on that PR. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After PR #28023, a contract-review record names its head on one `Head-sha:` line only. Three edges remain:\n\n1. The reader can still take a quoted line for the record's own.\n2. The rules text still describes the old shape.\n3. The write side does not refuse a record whose head line will read as no head.\n\nNone of these admits an unreviewed head. Edge 1 is a quoted sha read as reviewed. Edges 2 and 3 are loudness: an author learns of a bad line only when the record reads absent.\n\n**Reader who acts:** the PM recogniser tooling owner (skills lane).\n\n## Measured (PR #28023 head `40b5a25e`, 2026-10-30)\n\n1. `contractReviewHeadSha` (`scripts/pm/check-half-states.mjs` about :12643) takes the FIRST `Head-sha:` key line anywhere in the comment, with key decoration tolerated. Suppose a blockquoted, bulleted, fenced or pre-heading `Head-sha:` line naming another head sits ABOVE the record's own line. The reader then takes it as the record's head: the review's probe found the record at that head and absent at the real one. This is not a regression, since base read all of these as that head too. It is not reachable from prose. Records printed by `record-recognisers.mjs --template` are unaffected.\n2. `.claude/skills/pm-dispatch/references/contract-review.md:33` says 「head sha 独占码段」 with no line named. The readers now read only the span on the `Head-sha:` line. `:36` already uses the key-line style.\n3. `scripts/pm/post-stamped.mjs` `recordKeyedLineRefusals` (:2073) disciplines the record's keyed lines at write time, but not a present-and-unreadable `Head-sha:` line. The reader is now exported as `contractReviewHeadSha`.\n\n## Wanted\n\n- `contractReviewHeadSha` reads the first `Head-sha:` line AFTER the `## Contract review` heading, and refuses a blockquoted or fenced one. Add pins shaped like the review's probe cases (quoted line above the real one: absent at the quoted head, found at the real head).\n- `contract-review.md:33` names the line: 「`Head-sha:` 行上的独占码段」. This is `.claude/**`, so it is Tier S by the register and develops on fable per the project rule.\n- `recordKeyedLineRefusals` refuses a comment that has a `Head-sha:` key but for which `contractReviewHeadSha` reads null. Import the reader; do not re-spell it.\n- ⛔ No new gate: these are existing readers, self-tests and a write-time refusal.\n\n## Blocked-by\n\nPR #28023 (the exported reader and the pins this builds on).\n\nBlocked-by: #28023\n\n## Dedupe\n\nSearched the newest 100 open issues for \"Head-sha\", \"post-stamped\" and \"contract-review\": only #27979 itself.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 28256,
+  "kind": "issue",
+  "title": "skills: teach percentDisplay in the objectstack-data field-types rule",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "documentation",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T19:43:28Z",
+  "updated_at": "2026-10-30T20:01:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28256",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #28222 (#27973), filed by the seat before ACCEPT as the claim template requires. ⛔ Not a claim. Triage sets the lane and grade.\nReach: an AI author writing a probability or rate field from the `objectstack-data` skill does not learn `percentDisplay: 'plain'`, so the field draws a progress bar.\n\n## Wanted\n\n- `skills/objectstack-data/rules/field-types.md`, the `percent` row of the field-type table (which lists its keys), adds `percentDisplay` (`'bar'` default, `'plain'` for rates and probabilities).\n- Lands with or after the renderer card for #27973, so the skill never teaches a key that draws nothing. Governed path (`skills/**`): Tier H.\n\nLinks back: #27973, PR #28222.\n\nBlocked-by: #28255\n"
+}

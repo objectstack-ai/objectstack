@@ -1,0 +1,32 @@
+{
+  "number": 28102,
+  "kind": "issue",
+  "title": "The Console calendar does not read `calendar.initialDate`, so it still opens on today",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:49:49Z",
+  "updated_at": "2026-10-30T15:31:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28102",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② the consumer half of #28021. The spec half declares the key; this card is the renderer that reads it. It lands after that PR merges.\nReach: any calendar view whose records fall months ahead. HotCRM's renewals calendar opens on an empty month (#27386 row 3). Once the spec key ships, an author who writes `calendar.initialDate: 'next_record'` or `'{next_month_start}'` gets a view that parses and saves, and still opens on today.\nReader who acts: `domain:ui`.\nSeam: spec:`CalendarConfigSchema.initialDate` → renderer:`ui/packages/plugin-calendar/src/ObjectCalendar.tsx#ObjectCalendar`\n\n## Observed (this repo, `ui/` tree, on main at 549203d040)\n- `ObjectCalendar` sets its current date with `useState(new Date())` (`ObjectCalendar.tsx`, the `currentDate` state). It reads no anchor from the calendar config.\n- The spec PR for #28021 adds an optional `initialDate` to `CalendarConfigSchema`. It takes one of two forms: a record anchor, `'first_record'` or `'next_record'`, or a wrapped, known date-macro token such as `'{today}'`, `'{next_month_start}'` or `'{3_months_from_now}'` (the vocabulary is `DATE_MACRO_TOKENS` plus the parameterised grammar in `packages/spec/src/data/date-macros.zod.ts`). That schema is the list view's `calendar` block, and it is also the `object-calendar` node's `calendar` prop. `@object-ui/types` takes the block by reference, so the mirror accepts the key without an edit.\n\n## Wanted\n- `ObjectCalendar` reads `calendar.initialDate` where it seeds `currentDate`:\n  - absent: today, as now.\n  - a date-macro token: the period that holds the date the token resolves to when the calendar opens. Resolve it with the client resolver filter values already use (`resolveDateMacros()` in `@object-ui/core`), not a second one.\n  - `'first_record'`: the period that holds the earliest `startDateField` value among the records the view selects, with its filter applied.\n  - `'next_record'`: the period that holds the earliest `startDateField` value on or after the start of today.\n  - When no record qualifies, today.\n  - The period is the month, week or day of the active view mode.\n- The renderer fetches only the visible range. So the two record anchors need their own one-row read: sort by `startDateField` ascending, limit 1, plus a lower bound for `next_record`. Seed once on mount. After that, user navigation owns the date.\n- Copies that are owned by `ui/` and list the calendar block's keys, kept in step:\n  - the `list-view` registry input description in `ui/packages/plugin-list/src/index.tsx`, which feeds `sdui.manifest.json` and `content/docs/ui/components/plugins.mdx`;\n  - the `object-calendar` registry `calendar` input description in `plugin-calendar`;\n  - the hand-typed `calendar` options in `ui/packages/types/src/designer.ts`.\n  Regenerate the manifest with `node scripts/gen-sdui-manifest-node.mjs`.\n- Amend the `calendar` row note in `packages/spec/liveness/view.json`. It now says `initialDate` rides at planned strength. Change it to plain live, citing the read.\n\nDedupe words: calendar initialDate renderer, ObjectCalendar currentDate seed, calendar first_record next_record.\n\nRelated: #28021, #27386 (row 3).\n\nBody refreshed 2026-10-30T15:31Z: the values follow the formula form the maintainer asked for on #28021 (a record anchor or a date-macro token; the bare `'today'` is gone). The triage comment 6523386496 carries no request for the body; its `Blocked-by:` line is kept.\n\nBlocked-by: #28021\n\n"
+}

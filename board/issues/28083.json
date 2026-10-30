@@ -1,0 +1,38 @@
+{
+  "number": 28083,
+  "kind": "issue",
+  "title": "pm(half-states): H19 and the H4 prose list still print a merged Blocked-by PR as closed; carry merged from blockerResolutionFromRow",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:57:14Z",
+  "updated_at": "2026-10-30T14:28:24Z",
+  "closed_at": "2026-10-30T14:26:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28083",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work. It comes from the contract review of PR #28074 (#28033), should-fixes 1–3; the review is on that PR. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After PR #28074, H28 and the scheduled full run say **merged** for a merged `Blocked-by:` PR target. The two half-state renderers that name blocker targets still print a merged PR as a bare `closed`, which is the same word as a closed issue. H28 compensates with a legend. A seat reading H19 or the H4 prose list cannot tell a merged PR from a closed issue without opening it.\n\n**Reader who acts:** the half-state patrol owner.\n\n## Measured (PR #28074 head `708c0ce4`, 2026-10-30)\n\n1. `scripts/pm/check-half-states.mjs` `blockerResolutionFromRow` (about :5157) carries `unmerged` but no `merged`. So `namedTargets` (about :5189) and `namedProseCandidates` render a merged PR as `closed`. `scripts/ci/scheduled-full-run.mjs` `judgeCardBlock` already carries `merged: true` after PR #28074 and renders `(merged DATE)`.\n2. The new H28 firing pin (about :30784) tests the fragment `the body line is `. The pre-existing `so the body line is STALE` also matches it, so the pin only proves the row fired. A pin on `spent either way` would pin the new sentence. Cosmetic.\n3. `.claude/skills/pm-dispatch/references/platform-readings.md` still lacks a measured-leg line for `issue_read` on a PR number (state closed, no `pull_request`, no `merged_at`). The file is at 458/458 lines, so the line needs a same-file restatement deletion to pay for it. This is optional.\n\n## Wanted\n\n- Item 1: carry `merged: true` from `blockerResolutionFromRow` the way `judgeCardBlock` does, and render `merged DATE` in `namedTargets` and `namedProseCandidates`. Strings only. Move the H19 rendering pins with it, and keep every verdict identical.\n- Item 2: re-point the pin at the new sentence.\n- Item 3: only with a paid line. Report first.\n- ⛔ No new gate.\n\n## Blocked-by\n\nPR #28074 (the merged wording this follows).\n\nBlocked-by: #28074\n\n## Dedupe\n\n#28057 edits the same file but covers the record reader, not blocker rendering, so this card waits behind it if both are claimed. Searched the newest 100 open issues for \"namedTargets\" and \"blockerResolutionFromRow merged\": none.\n"
+}

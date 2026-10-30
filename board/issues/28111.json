@@ -1,0 +1,38 @@
+{
+  "number": 28111,
+  "kind": "issue",
+  "title": "pm(post-stamped): the key-line Head-sha presence test no longer refuses 16 reader-null record shapes base refused; restore loudness or record the bound",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "finding",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T13:05:10Z",
+  "updated_at": "2026-10-30T15:32:51Z",
+  "closed_at": "2026-10-30T15:31:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28111",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work. It comes from the contract review of PR #28103 (#28057), should-fixes 1–3; the review is on that PR. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** PR #28103 narrows the write-time `Head-sha:` presence test to a key line, using the same convention as `keyLineRegex`. That stops prose that mentions the key from being refused. But 16 record shapes that the reader reads as no head are now written without a word of refusal, although base refused them. None of them admits a wrong head: every reader reads them null on both trees, and there are 0 such records among 713 live ones. The loss is loudness: an author writes a record that silently reads as no record.\n\n**Reader who acts:** the PM recogniser tooling owner (skills lane).\n\n## Measured (PR #28103 head `f619d317`, 2026-10-30)\n\n1. `scripts/pm/post-stamped.mjs` `HEAD_SHA_KEY_LINE` (about :2072) no longer refuses these shapes, which base refused:\n   - a key line that opens on a word (`Current Head-sha:`);\n   - `Head-sha` as the second key on a line (`Served-tier: X · Head-sha: A`);\n   - a table row;\n   - underscore emphasis;\n   - a task-list item;\n   - a heading-styled key;\n   - a unicode bullet or emoji prefix;\n   - a bullet followed by a blockquote;\n   - strikethrough;\n   - parentheses;\n   - an NBSP indent;\n   - an HTML comment.\n2. `RECORD_KEY_SPELLINGS['Head-sha']` says the heading must be \"unindented\", but the reader admits 1–3 spaces. Cosmetic.\n3. `FENCE_LINE` opens a backtick fence whose info string contains a backtick, which CommonMark does not treat as a fence. This errs in the fail-closed direction. Cosmetic.\n\n## Wanted\n\n- Item 1: either add a second presence limb (the key directly followed by a 7–40 hex code span anywhere on a line; the review measured one prose false positive), or record the bound in the docblock as accepted. Pin whichever is chosen.\n- Items 2 and 3: wording, and the CommonMark info-string rule. Pin both.\n- ⛔ No new gate. No new refusal class.\n\n## Blocked-by\n\nPR #28103 (the key-line presence test this tunes).\n\nBlocked-by: #28103\n\n## Dedupe\n\n#28057 is the card that PR #28103 closes. #28083 covers blocker-target rendering, not this writer. I searched the newest 100 open issues for \"HEAD_SHA_KEY_LINE\" and \"RECORD_KEY_SPELLINGS\" and found none.\n"
+}

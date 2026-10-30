@@ -1,0 +1,33 @@
+{
+  "number": 28231,
+  "kind": "pull_request",
+  "title": "fix(objectql)!: refuse a composed stack's top-level picklist that no package body declares and no object field names",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T18:07:38Z",
+  "updated_at": "2026-10-30T20:14:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28231",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\n## 维护者速读\n- 问题：带 `packages[]` 的组合栈，若顶层声明了一个 picklist，既没有任何包体声明、也没有任何对象字段引用，启动照常成功，该列表在引擎注册表里静默缺失。\n- 修复：`manifest` 服务在注册任何内容之前拒绝这种工件，返回 `INVALID_METADATA`（422），消息点名每个 picklist 和所属栈，并给出处方。\n- 处方：在使用它的包的 `packages[]` 条目里声明；或由对象字段引用它；或从顶层删除。\n- 不变：被对象字段引用的残余 picklist 保持现有行为（顶层对象\"列出但不服务\"、包体字段由 picklist 审计拒绝）；包体声明的 picklist、无残余 picklist 的栈、不带 `packages[]` 的栈均不变。\n- 破坏性：是，收窄（以前能启动的组合现在被拒绝），patch 级 changeset，无 schema 变更，ADR-0087 not-required。\n- 文件面：仅 `packages/objectql/src/plugin.ts` 的残余注册段、其残余测试文件和一个 changeset。\n\nClause-②: yes (narrowing) — a stack with `packages[]` whose top level declares a picklist that no package body declares and no object field names booted, and now refuses the boot with `INVALID_METADATA` (422)\nMetadata-protocol: none\n\n## What changed\n\nThe `manifest` service registers a composed stack's residual (top-level items no package body declares) under the stack's own id, except picklists, which stay metadata only (`RESIDUAL_TYPES_WITH_OWN_PATH`). A residual picklist that an object field names was loud already. One that no object field names was neither registered nor refused.\n\n`unreferencedResidualPicklistRefusal` (in `packages/objectql/src/plugin.ts`) reads the residual rule's own answer (`unclaimedTopLevel`), takes its picklists, and keeps those that no object field names. \"Names\" is judged off the artifact alone: its top level and every package body, objects and `objectExtensions` both, through the existing `collectManifestPicklistReferences`. It is never judged off the registry, which is still filling during a boot. If any are left, `register` throws before anything of the artifact registers. The refusal uses the existing picklist envelope `picklistMetadataError` (`INVALID_METADATA`, 422), so no new error code is added. The residual objects rule's line does not move.\n\n## Measurement (on `main` at `35f20551`, then on this branch)\n\n| Composition | `main` | This branch |\n|:---|:---|:---|\n| Residual picklist that no object field names | boots, `state=running`; `resolvePicklistOptions('acme_unused')` is `undefined`; no warning names it | refused at boot, `INVALID_METADATA`, the message names `acme_unused` and stack `com.example.acme.release` |\n| `packages: []` with only such a picklist on the top level | boots; the list is absent; nothing names it | refused, as above |\n| CONTROL: residual picklist that a residual object's field names | boots; the object is listed and not served (one warning); the list is not registered | unchanged |\n| CONTROL: picklist a body declares | boots; the list resolves to `['open']` | unchanged |\n\n## Pins (`manifest-service-residual-objects.test.ts`, new `describe`)\n\nOn `main`'s `plugin.ts`: 4 red, 5 green (the 5 controls). On this branch: 9 of 9 green. Both residual test files: 72 of 72 green. Full `@objectstack/objectql` suite: green (counts under Gates).\n\n- Red on `main`, green here: the boot refusal (code, status, picklist, stack, all three remedies); several picklists named in one refusal, and not one a field names; `packages: []` with only such a picklist; after `start()`, the artifact is refused before anything of it registers.\n- Controls (green on both): a residual picklist a residual object's field names keeps the listed-and-not-served line, and the list stays unregistered; a residual picklist a body object's field names still fails the boot's picklist audit, not this refusal; a body-declared picklist registers whether or not the top level repeats it; a stack with no residual picklist boots unchanged; a stack without `packages[]` registers its unnamed picklist as before.\n\nAblations, each restored from the committed head:\n\n| Ablation | Red |\n|:---|:---|\n| A1: drop the throw | the 4 refusal pins |\n| A2: treat no picklist as named | both \"a field names it\" controls, the \"several in one refusal\" pin, and the existing listed-and-not-served pin |\n| A3: count references on the top level only, not in bodies | the body-field audit control |\n| A4: take every top-level picklist, not only the residual's | the body-declared control and the no-`packages[]` control |\n| A5: refuse whenever there is a residual | 52 tests, the no-residual-picklist control among them |\n\n## Gates\n\nRun on the head `b4c76532`, which merges `main` at `7811c3f6`, after a full rebuild:\n\n- `dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 61 families. All 61 were run and all exited 0. `--ran` reports 61 run, 0 NOT-MEASURED and 0 UNRUN, and exits 0.\n- The derivation names some work outside those 61 that cannot run locally: 4 families that take a value from the workflow, 5 CI jobs scheduled by these paths, and 5 type-check lanes. These are NOT MEASURED here, and CI runs them.\n- `pnpm lint`: exit 0. `pnpm --filter @objectstack/objectql run typecheck`: exit 0.\n- Test suites: `@objectstack/objectql` 9732 of 9732 green, `@objectstack/runtime` 8855 green with 19 skipped, `@objectstack/metadata` 906 of 906 green.\n\nFixes #28159\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1Np3hU7RQnA13YZcL\n"
+}

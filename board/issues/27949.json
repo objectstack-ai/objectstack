@@ -14,19 +14,21 @@
     "area:records",
     "domain:server",
     "finding",
-    "needs-user-decision",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T04:48:13Z",
-  "updated_at": "2026-10-30T05:05:43Z",
+  "updated_at": "2026-10-30T13:54:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27949",
-  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ③ split by the seat from #27559 on contract review 6515204227 (must-fix 1) of PR #27932. ⛔ Not a claim. No grade: triage sets the lane and grade, and routes the decision.\n\n## What happens today (measured on #27559's probe, card body)\n\nA tenant overlays a packaged object and rewords the message of a validation rule that a second package contributes through `objectExtensions`, keeping the rule's name. The registry fold then holds TWO rules of that name: the overlay's reworded copy and the extender's appended original (`mergeObjectDefinitions` concatenates extenders' `validations`; `subtractExtenderContributions` removes only byte-equal extender entries). Both are enforced, so a refused write reports both sentences. After PR #27932 (the one-packaged-rule-set half of #27559) the tenant's sentence is served as written and the extension's original stays translated, but both still fire.\n\n## The question (a product decision, not the lane's)\n\nShould a tenant overlay copy of an extension's rule **replace** the extension's rule in the fold (the rule then runs once, as the tenant wrote it), or keep running **beside** it as today?\n\n- Replacing it reverses ADR-0029 D9.2a's recorded sentence that the fold still runs additively for `validations`, and ADR-0126 regime E (\"additive, upgrade-safe\"). It needs a dated ADR amendment (Prime Directive 13; Tier H).\n- It also means a later package fix to that rule no longer reaches a tenant who overlaid it — the overlay freezes the enforced rule.\n- Keeping it beside means a tenant cannot reword an extension's rule without the original also firing.\n\nPR #27932's first head carried a replace-when-the-owner-does-not-declare-the-name design (`tenantCarriedRuleNames` / `withoutRulesNamed` in `packages/objectql/src/registry.ts`); the contract review failed it on the missing ADR amendment, and the seat split it off here.\n\n## Wanted (route is triage's)\n\nRoute the replace-or-beside question to the maintainer. If \"replace\": one PR with the registry fold change, its pins, and the ADR-0029 amendment.\n\nLinks back: #27559, PR #27932, contract review 6515204227, #27221"
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nRuled: 6524229156 · letter C′ (merge by name; message and active to the tenant, condition to the package; a changed condition refused at build) · 2026-10-30T13:42Z\nRuling-ref: 6524229156\n\nFiling gate: ③ split by the seat from #27559 on contract review 6515204227 (must-fix 1) of PR #27932. ⛔ Not a claim. No grade: triage sets the lane and grade, and routes the decision.\n\n## What happens today (measured on #27559's probe, card body)\n\nA tenant overlays a packaged object and rewords the message of a validation rule that a second package contributes through `objectExtensions`, keeping the rule's name. The registry fold then holds TWO rules of that name: the overlay's reworded copy and the extender's appended original (`mergeObjectDefinitions` concatenates extenders' `validations`; `subtractExtenderContributions` removes only byte-equal extender entries). Both are enforced, so a refused write reports both sentences. After PR #27932 (the one-packaged-rule-set half of #27559) the tenant's sentence is served as written and the extension's original stays translated, but both still fire.\n\n## The question (a product decision, not the lane's)\n\nShould a tenant overlay copy of an extension's rule **replace** the extension's rule in the fold (the rule then runs once, as the tenant wrote it), or keep running **beside** it as today?\n\n- Replacing it reverses ADR-0029 D9.2a's recorded sentence that the fold still runs additively for `validations`, and ADR-0126 regime E (\"additive, upgrade-safe\"). It needs a dated ADR amendment (Prime Directive 13; Tier H).\n- It also means a later package fix to that rule no longer reaches a tenant who overlaid it — the overlay freezes the enforced rule.\n- Keeping it beside means a tenant cannot reword an extension's rule without the original also firing.\n\nPR #27932's first head carried a replace-when-the-owner-does-not-declare-the-name design (`tenantCarriedRuleNames` / `withoutRulesNamed` in `packages/objectql/src/registry.ts`); the contract review failed it on the missing ADR amendment, and the seat split it off here.\n\n## Wanted (route is triage's)\n\nRoute the replace-or-beside question to the maintainer. If \"replace\": one PR with the registry fold change, its pins, and the ADR-0029 amendment.\n\nLinks back: #27559, PR #27932, contract review 6515204227, #27221\n"
 }

@@ -1,0 +1,34 @@
+{
+  "number": 28218,
+  "kind": "issue",
+  "title": "Tell the comment author who will not be notified: the discussion composer reads withheldMentions",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T17:16:05Z",
+  "updated_at": "2026-10-30T19:41:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28218",
+  "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ① maintainer ruling 6523848208 (#27703, letter A, 「27703 同意」 2026-10-30T13:21Z): \"The ui half … follows as its own `domain:ui` card once the key is on `main`.\" The key landed in PR #28174 (`7811c3f6`). ⛔ Not a claim. Triage sets the lane and grade.\nReach: any record discussion where the author @-mentions a colleague who cannot read the record. The server now withholds that notification and tells the author's own request which ids were withheld; the console says nothing, so the author still believes the colleague was told.\nReader who acts: `domain:ui` (`app-shell` record page discussion, `plugin-detail` composer).\n\n## Observed (on `main` at `7811c3f6`)\n\n- `CreateDataResponseSchema` / `UpdateDataResponseSchema` carry `withheldMentions?: string[]` (ids only, no reason, author's own request only, never stored); `@objectstack/client` mirrors it.\n- `ui/packages/app-shell/src/views/RecordDetailView.tsx` writes comments through three callbacks (`dataSource.create('sys_comment', …)` ≈L2980 and ≈L3020, `.update('sys_comment', …)` ≈L3374) and reads nothing from the answer.\n- Mention chips are drawn by `ui/packages/plugin-detail/src/RichTextCommentInput.tsx`.\n\n## Wanted (as ruled)\n\n- The three write callbacks read `withheldMentions`, map the ids to names through the mention picker's suggestions, and say in one sentence who will not be notified (no reason; the ruling's disclosure is one bit per named user). Test plus ablation.\n- Mention chips in `RichTextCommentInput.tsx` per the ruling.\n- ⛔ Not taken by the ruling: a picker-time readability read (B), so no new endpoint and no probe of colleagues' access.\n\nDedupe words: withheld mentions notice, mention not notified, comment mention gate toast, withheldMentions console.\n\nLinks back: #27703, PR #28174, ruling 6523848208."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 28190,
+  "kind": "issue",
+  "title": "skills(objectstack-ui, objectstack-i18n): teach the action param dialog's `submitText` (button verb instead of Confirm) and its translation slot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "documentation",
+    "domain:skills",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T15:54:17Z",
+  "updated_at": "2026-10-30T16:04:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28190",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② the `Skills-docs: follow-up owed` line of PR #28188 (card #27944), which declares `ActionSchema.submitText` without touching `skills/**` (governed, so it waits for its own Tier H PR). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade and no lane: triage sets both (skills lane).\nReader: the skills lane, next PR that touches `skills/objectstack-ui/rules/actions.md`.\nDedupe (open AND closed): semantic search \"skills objectstack-ui actions submitText param dialog submit button label\" → 13 hits; #27944 and #28158 are the key and its renderer, #27059 is the record page, none teaches the key. **New.**\nreach: authoring guidance only; no door.\nBlocked-by: #28188 (the key), and #28158 (the console draws it) before the skill teaches it as live.\n\n## Wanted\n\n- `skills/objectstack-ui/rules/actions.md`: an action with `params` can set `submitText` (\"Send\", \"Log Call\") instead of the dialog's default \"Confirm\". It is an I18nLabel; it is refused on an action without a non-empty `params`, and refused blank. It is not `confirmText` (the confirm dialog's message on a param-less action). `submitLabel` / `confirmLabel` are refused with a rename to `submitText`.\n- `skills/objectstack-ui/evals/views-apps-actions-pages.json`: one case where the prompt asks for a param dialog whose button says the verb, expecting `submitText` beside `params`.\n- `skills/objectstack-i18n/SKILL.md`: the translation slot `objects.OBJECT._actions.ACTION.submitText` (and `globalActions.ACTION.submitText` for an object-less action) in the action-copy list.\n- If it lands before #28158, teach the key as declared but not yet drawn (the liveness row is `planned` with `authorWarn`).\n\nRelated: #27944 / PR #28188, #28158."
+}

@@ -2,8 +2,8 @@
   "number": 27842,
   "kind": "issue",
   "title": "meta: GET /meta/object serves which packaged actions are switched off beside the item, and the disabled-action refusal reads as a plain sentence",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:automation",
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T01:39:19Z",
-  "updated_at": "2026-10-30T05:30:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T10:56:24Z",
+  "closed_at": "2026-10-30T10:54:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27842",
   "body": "director#1 · os-bill · session_01Utp6CbNFJEooRTBtezEt7\n\nFiling gate: **(a) a reachable defect**, the serve half of #27504, split out by a maintainer ruling (③: the maintainer's word 「同意」, 2026-10-30T01:35Z, on the brief recommending this split; the ruling comment of record is 6512814276 on #27504, letter B). `reach:` the public metadata read `GET /api/v1/meta/object/:name` (and the `GET /api/v1/meta/object` list) on a deployment whose administrator switched a packaged action off in Setup › Packaged automation: the read serves the action in `actions[]` with nothing beside it saying it is off, while `POST /api/v1/actions/...` for the same action is refused 409 `ACTION_DISABLED`. Measured by the 18.3.0 release-candidate walkthrough on `examples/app-showcase` (#27504, `showcase_mark_done` on `showcase_task`, framework `main` @ `c4c515ad`). Reader who acts: the `domain:spec` seat (lane fixed by the ruling); triage grades the level. ⛔ Not a claim.\n\nUnblocks: #27504 (the console half: hide the button from this key; stays `domain:ui`, seat 4).\nRuling-ref: https://github.com/objectstack-ai/objectstack/issues/27504#issuecomment-6512814276 (letter B).\n\n## What happens\n\n- A packaged action switched off in the `sys_metadata_activation` ledger (ADR-0126 §4, §8 item 2) is refused at both dispatch doors with the sentence `describeDisabled()` builds in `packages/objectql/src/action-activation.ts:297-303`: it names the ledger table and an ADR section, and is what an end user reads in a red toast.\n- The metadata reads that every client builds its action buttons from (`GET /meta/object/:name`, `GET /meta/object`) carry no activation fact at all. The only read of the fact is the generic data list of the ledger object (`apiMethods: ['get','list']`, `packages/platform-objects/src/system/sys-metadata-activation.object.ts:192-197`), which the Setup page joins client-side (`ui/packages/app-shell/src/views/setup/packagedActions.ts`). Every other consumer (the console record page, MCP agents, the SDK) sees the action as live.\n- Removing the action from the served `actions[]` is not an option (the Setup page lists from it to offer the re-enable switch); rewriting `visible` / `disabled` inside the item rides the GET → edit → PUT round trip back into the stored body.\n\n## Wanted\n\nThe #23316 shape (`registration`, PR #23358), as the action twin:\n\n1. **Item read, both doors.** A key beside `item` on `GetMetaItemResponseSchema` and on `GetMetaItemCachedResponseSchema` (`packages/spec/src/api/protocol.zod.ts`, the `registration` members at L682 and L2318–2331 are the template) naming the packaged actions of this object that are switched off for this deployment. Published by the cached default door too; never part of the ETag, so a read that carries it is never answered 304 (the #23316 trade, stated in the docblock). Present only when a process with an activation ledger answered; **absent means \"no ledger answered\", never \"nothing is switched off\"**, so a consumer that sees no key keeps today's behaviour.\n2. **List.** A name-keyed sibling of `items` on the object list, the `registrations` pattern (L326).\n3. **The read seam.** The metadata protocol reaches the engine's action-activation projection through the kernel service table, the way `getFlowRegistration?` was declared optional on `IAutomationService` in `@objectstack/spec/contracts` (PR #23358 \"The seam\"). Which contract carries the member (the ObjectQL / engine contract, where `ActionActivation` lives) is this card's measurement; `metadata-protocol` imports nothing from `objectql`.\n4. **The plain sentence.** `describeDisabled()` rewritten for the person who clicked: no tracker number, no system table, no ADR citation (AGENTS.md's runtime-string rule, \"the lesson goes into the text\"); for example \"This action is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or you can use another action.\" Both dispatch doors keep producing it from the one place; the existing refusal-sentence pins move with it.\n5. **Pins and an ablation.** A switched-off action appears in the key and `item.actions` is byte-identical; no key when no ledger is attached; a cached read that carries the key is not answered 304 and the unjudged control still is; the list is keyed by object name; the sentence pins; one ablation on the serve path.\n6. **Consumer-package tests** (a spec-lane card's standing commitment): `metadata-protocol`, `rest`, `objectql`, `runtime`; the six regenerated spec artifacts; changeset (`@objectstack/spec` minor, `metadata-protocol` / `rest` / `objectql` patch); `Clause-②: yes (widening)` ⇒ `CONTRACT_REVIEW_TIER` review before queueing.\n\nThe exact key name (`disabledActions` is the triage route's literal spelling), and whether an empty array is served or the key omitted when the ledger holds no row for the object, are the seat's measurement and its contract review, not fixed here.\n\n## Dedupe\n\nMCP `search_issues` on this repo, closed included: `packaged action switched off activation state served with action metadata meta object disabledActions hide button` → #27504 (the console half, parent of this split), #23316 (the flow twin, closed by PR #23358), #12348 (the activation write door, closed). None is this serve half.\n\nDedupe words: packaged action activation beside item; disabled actions envelope key meta object; action disabled refusal plain sentence.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

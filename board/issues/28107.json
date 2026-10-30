@@ -1,0 +1,31 @@
+{
+  "number": 28107,
+  "kind": "issue",
+  "title": "i18n: French is not a platform locale, so a user whose locale is `fr` reads English `sys_user` labels (Home feed field labels)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T12:57:31Z",
+  "updated_at": "2026-10-30T14:09:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28107",
+  "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: ① out-of-scope finding of the sys_user fold dev (PR #28065, os-dev report on #27858); it carries #27869 acceptance (b). Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade, and whether a fifth platform locale is wanted.\n\nReach: every user whose `sys_user.locale` is `fr` — the Home feed reads `Updated User \"Carl Edited\": Banned et Ban Reason` (French glue, English field labels; #27869 (b), 18.3.0 RC walkthrough).\nReader who acts: `domain:server` (`packages/platform-objects` bundles and the root `i18n:extract`), with HotCRM's declared locales in the question.\n\n## What the code does (read, not measured)\n\n`platform-objects` ships `en` / `zh-CN` / `ja-JP` / `es-ES` only (`setup.translation.ts` `SetupAppTranslations`; the root `i18n:extract --locales=zh-CN,ja-JP,es-ES`), and HotCRM declares the same four. `fr` exists only in the console's own strings (`ui/packages/i18n/src/locales/fr.ts`). So the console speaks French around metadata labels that stay English.\n\n## Wanted (route is triage's)\n\nDecide whether `fr` becomes a fifth platform locale (every platform bundle, through the generator) or whether the console should not offer a UI locale the platform metadata cannot follow. Either way, the two sides agree on one locale list.\n\n## Dedupe\n\nRead the open titles for `French`, `fr` locale, `fifth locale`, translation bundle: only #27869 (the parent row). **New.**\n\nLinks back: #27869, #27521, PR #28065"
+}

@@ -2,8 +2,8 @@
   "number": 27914,
   "kind": "issue",
   "title": "cli: `os plugin publish` decodes the compiled manifest twice and finds its raw entry by a filename two packages spell separately",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:devpath",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T03:40:03Z",
-  "updated_at": "2026-10-30T04:02:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T12:28:57Z",
+  "closed_at": "2026-10-30T12:28:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27914",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① a should-fix from the contract review of PR #27910 (#27810), record 6514352615, outside that card's dispatched file surface. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What the review found (read from code, not measured)\n\nAfter PR #27910, `packages/cli/src/commands/plugin/publish.ts` validates the archive's compiled manifest through `readCompiledPluginManifest` (`packages/runtime/src/compiled-plugin-manifest.ts`), then builds the verbatim `plugin_manifest` payload from a second `JSON.parse` over `archiveFiles.find(f => f.path === MANIFEST_FILENAME)!.data`. The verbatim upload is right (the parsed `ManifestSchema` value stamps `defaultDatasource` and `scope`, which would change every publish's payload and stop matching the signed bytes). The weak part is the second lookup: its non-null assertion holds only while the CLI's `MANIFEST_FILENAME` and the runtime's `COMPILED_PLUGIN_MANIFEST_FILE` spell the same string.\n\n## Wanted (route is triage's)\n\n`readCompiledPluginManifest` hands back the raw document (or entry) it already decoded beside the parsed manifest, so the publish door decodes once and asserts nothing.\n\n## Dedupe\n\nRead the open titles for `plugin publish`, `compiled manifest`, `readCompiledPluginManifest`: only #27810. **New.**\n\nLinks back: #27810, PR #27910"

@@ -1,0 +1,32 @@
+{
+  "number": 28245,
+  "kind": "issue",
+  "title": "Lookup pick fills the declared fields in the record form and the line-item grid (lookupAutofill, ui half of #27945)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T18:48:41Z",
+  "updated_at": "2026-10-30T19:04:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28245",
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ③ triage-directed. This is the ui half that #27945 names; #27945 came from #27434 row 3. The spec half is PR #28244, which declares `FieldSchema.lookupAutofill`. Filed by `domain:spec` seat 1. ⛔ Not a claim. Triage sets the grade and routes the card to the `ui/` lane.\n\nReach: any record form with a lookup whose target carries values to copy, such as a quote line's Sales Price from the product (HotCRM, #27434 row 3). Today a pick fills nothing until a server hook runs on save. Once #28244 merges, an author can declare `lookupAutofill: [{ target, source, overwrite? }]` on a single-value `lookup` or `master_detail` field, but no renderer performs the fill yet.\n\n## Wanted (the rule as #28244 declares it, read from its describe)\n\n- On a pick in the record form (`LookupField` or the form renderer) and in the line-item grid (`GridField` / `hydrateColumns`), write each declared `target` from the picked record's `source`.\n- Overwrite rule: fill only a target that is empty or that an earlier pick filled. `overwrite: true` replaces the value.\n- The grid column key `autofill` (same-named copy, on by default) is unchanged. A declared pair takes its target out of the same-named copy.\n- Tests:\n  - a pick fills an empty target;\n  - an author's own value is kept;\n  - `overwrite: true` replaces it;\n  - the grid with a declared pair;\n  - control: a lookup without the key fills nothing new.\n\nThis lands after PR #28244 merges. The skills and docs text is #28246's job, and it lands with this card.\n\nLinks: #27945, PR #28244, #27434 (row 3).\n\nBlocked-by: #28244\n"
+}

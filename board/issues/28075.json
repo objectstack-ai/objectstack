@@ -1,0 +1,37 @@
+{
+  "number": 28075,
+  "kind": "pull_request",
+  "title": "fix(cli): os plugin publish decodes the compiled manifest once",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T11:41:59Z",
+  "updated_at": "2026-10-30T12:28:20Z",
+  "closed_at": "2026-10-30T12:28:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T12:28:17Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28075",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DWfbWGe13nw95fycDvobgKZ)_\n\ndomain:server#3 · os-elon-musk · session_016WV4cxECYe6ksiqRSsT4Rm\n\nFixes #27914\n\n## 维护者速读\n\n- 改了什么:`os plugin publish` 只解码一次插件包里的编译清单;`readCompiledPluginManifest` 在解析结果旁一并交回解码出的原始文档,发布直接上传它。\n- 为什么改:原来发布要二次解码同一条目,还靠 CLI 与 runtime 两处各自拼写的文件名做非空断言查找,两边拼写一旦不同就会崩。\n- 风险与回滚:无行为变化,上传内容逐键不变(不带 schema 补的默认值);回滚即撤此 PR。\n- 先看:`packages/runtime/src/compiled-plugin-manifest.ts` 的返回类型与 `publish.ts` 的一行替换。\n- 两分钟验证:`pnpm --filter @objectstack/cli exec vitest run test/plugin-publish-manifest-entry.test.ts`(在 main 上红:TypeError)。\n- 需要你做的:无;席位复核后按落地授权处理。\n\n## What changes\n\n- `readCompiledPluginManifest` (`@objectstack/runtime`): the `ok` arm of `CompiledPluginManifestRead` gains `document`, the manifest entry as decoded before the `ManifestSchema` parse. Nothing else in the result moves.\n- `os plugin publish` (`@objectstack/cli`): `plugin_manifest` is `read.document`. The second `JSON.parse` and the non-null `archiveFiles.find(f => f.path === MANIFEST_FILENAME)!` are gone.\n- Changeset: `patch` on both packages.\n\n## Why\n\nThe publish door decoded the same entry twice and found it the second time by the CLI's own spelling of the filename, so it held only while `MANIFEST_FILENAME` (CLI) and `COMPILED_PLUGIN_MANIFEST_FILE` (runtime) spelled the same string (contract review 6514352615 on PR #27910). The verbatim upload stays verbatim: the parsed value stamps `scope` and `defaultDatasource`, which would no longer match the signed bytes.\n\n## Verification\n\nPins first, measured against `main`'s source (runtime rebuilt from it):\n\n- **Control, green on `main` and here:** `plugin-publish.test.ts` now also checks `JSON.stringify(plugin_manifest)` equals the archive entry's decoded document, key for key and in order.\n- **Drift pin, red on `main`, green here:** `plugin-publish-manifest-entry.test.ts` mocks the CLI's `MANIFEST_FILENAME` to a different spelling. On `main`: `TypeError: Cannot read properties of undefined (reading 'data')` at the second lookup. Here: publish posts both requests and uploads the entry's document. Reached without a product change.\n- **Runtime unit:** `compiled-plugin-manifest.test.ts` (new): `document` carries no stamped default and matches the entry key for key; red on `main` (no `document`).\n- `@objectstack/cli` full suite: 535 files passed, 1 skipped (6663 tests passed, 9 skipped). Runtime: `compiled-plugin-manifest` + `installed-plugin-loader` suites, 61 passed. `tsc --noEmit` clean on both packages.\n- `dispatch-gates --commands`: 61 families derived, 60 run with exit 0, 1 NOT MEASURED (`check:dual-build-cjs-loads`, exit 3, prerequisite). `--ran` reconcile: 0 UNRUN. `pnpm lint`: exit 0.\n\nOut of scope, noted only: the integrity preflight's `exempt` list in `publish.ts` is still spelled with the CLI's `MANIFEST_FILENAME`, so the same two-spelling dependency remains there (the drift pin uses a manifest with no `integrity` map for that reason).\n\nSkills-docs: none. `grep -rn \"readCompiledPluginManifest\\|CompiledPluginManifestRead\\|plugin_manifest\"` over `skills/`, `content/docs/`, `docs/` (`.md`/`.mdx`): 0 hits. `docs/qa/platform-checklist/areas/cli.json` names `readCompiledPluginManifest` and says the uploaded `plugin_manifest` stays the artifact's own manifest, which still holds.\n\nClause-②: yes (widening: the `ok` arm of `@objectstack/runtime`'s exported `CompiledPluginManifestRead` gains `document`; every existing key keeps its value)\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a, not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the fleet's Chinese channel).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxECYe6ksiqRSsT4Rm\n"
+}
