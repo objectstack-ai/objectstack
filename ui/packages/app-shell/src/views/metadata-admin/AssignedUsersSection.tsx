@@ -223,20 +223,20 @@ const asArray = (res: any): any[] =>
  */
 const refusalSentence = (err: unknown): string => extractWriteErrorMessage(err) ?? '';
 
+const personLabel = (u: any): string =>
+  u?.full_name || u?.name || u?.display_name || u?.email || String(u?.id ?? '');
+
 /**
- * The picker shows what a holder row shows: the person's name and, beside it,
- * their email, so two people of one name can be told apart before either is
- * granted the set, as `PositionHoldersSection`'s picker does. `name` is the
- * field `sys_user` declares as its `nameField`, and `email` is its login
- * identity. The picker draws only the columns the caller may read
- * (`RecordPickerDialog`'s own read rule), so for a caller who may not read
- * `email` the name column stands alone.
+ * objectstack#27433 — the picker shows what an assigned row shows: the
+ * person's name and, beside it, their email, so two people of one name can be
+ * told apart before either is granted the set. `name` is the field `sys_user`
+ * declares as its `nameField`, and `email` is its login identity. The picker
+ * draws only the columns the caller may read (`RecordPickerDialog`'s own read
+ * rule), so for a caller who may not read `email` the name column stands alone.
+ * The same shape as `PositionHoldersSection` (objectstack#27410).
  */
 const PICKER_NAME_FIELD = 'name';
 const PICKER_EMAIL_FIELD = 'email';
-
-const personLabel = (u: any): string =>
-  u?.full_name || u?.name || u?.display_name || u?.email || String(u?.id ?? '');
 
 /** The audience anchors: implicit memberships, noted rather than enumerated. */
 const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
@@ -337,10 +337,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
   const canAdd = resolveAffordance('relatedNew', grantSource).allowed;
   const canRemove = resolveAffordance('relatedRowDelete', grantSource).allowed;
   const memberOrganization = membershipOrganization(activeOrganizationId, metadataStore.objects);
-  /**
-   * `sys_user` as the registry serves it, read from the metadata this section
-   * already holds: the picker's name column resolves each person's title by it.
-   */
+  /** `sys_user` as the registry serves it, for the picker's column read rule. */
   const userSchema = ((metadataStore.objects ?? []).find((o) => (o as { name?: unknown } | null)?.name === 'sys_user') ??
     null) as Record<string, unknown> | null;
 

@@ -18,7 +18,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "ウェブフック",
     pluralLabel: "ウェブフック",
-    description: "送信 HTTP Webhook サブスクリプション。コードでは defineStack({ webhooks }) / defineWebhook() で宣言する（起動時に行として実体化）か、スタジオエディタで直接作成します。Webhook 自動エンキューアが共有 HTTP アウトボックスへディスパッチします。",
+    description: "送信 HTTP Webhook サブスクリプション。組織がスタジオエディタまたは API で作成します。コードで defineStack({ webhooks }) / defineWebhook() により宣言した Webhook はメタデータレジストリから読み取られ、ここに行を書き込みません。どちらも Webhook 自動エンキューアが共有 HTTP アウトボックスへディスパッチします。",
     fields: {
       id: {
         label: "Webhook ID"
@@ -81,7 +81,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "管理元",
-        help: "レコードの出所: platform = フレームワーク組み込み / package = アプリ・パッケージ宣言（defineStack の webhooks から起動時シード）/ admin = Setup で作成。",
+        help: "レコードの出所: admin = Setup または API で作成 / package = 廃止された 18.0 の起動時シーダーが書き込んだ、コード宣言 webhook のコピー（現在は何も書き込みません。宣言された webhook はメタデータレジストリから読み取られ、行ではありません）/ platform = 予約済み。",
         options: {
           platform: "プラットフォーム",
           package: "パッケージ",
@@ -90,7 +90,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       customized: {
         label: "カスタマイズ済み",
-        help: "管理者がパッケージ宣言の webhook を編集すると設定されます。以後、起動時シードはこの行を上書きしません（無効化したノイジーな webhook は再デプロイ後も保持）。admin 行では意味を持ちません。"
+        help: "管理者が package 行（廃止された 18.0 の起動時シーダーが書き込んだコピー）を編集すると設定されます。所有権セレモニーがこれを読み取り、宣言名の下で編集されたコピーはクローンとして保持し、未編集のコピーは削除します。admin 行では意味を持ちません。"
       },
       created_at: {
         label: "作成日時"

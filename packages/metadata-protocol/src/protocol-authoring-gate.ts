@@ -74,6 +74,7 @@ export interface AuthoringGateHost {
     externalBindingSaveRefusal: ObjectStackProtocolImplementation['externalBindingSaveRefusal'];
     foldStoredCollection: ObjectStackProtocolImplementation['foldStoredCollection'];
     getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    objectNamespacePrefixViolation: ObjectStackProtocolImplementation['objectNamespacePrefixViolation'];
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
     orgWallEnforced: ObjectStackProtocolImplementation['orgWallEnforced'];
@@ -461,7 +462,7 @@ export async function judgeRuntimeAuthoringRules(
 
 /** The body of `ObjectStackProtocolImplementation#draftPublishVerdict`; the method's docblock there is its contract. */
 export async function draftPublishVerdict(
-    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo'>,
+    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespacePrefixViolation'>,
     draft: { type: string; name: string; body: unknown; packageId: string | null },
 ): Promise<RuntimeAuthoringIssue[]> {
     const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
@@ -490,5 +491,22 @@ export async function draftPublishVerdict(
             ? { restoredCredentialPaths: () => channel.heldPaths({ name: draft.name, state: 'draft', item: draft.body }) }
             : {}),
     });
-    return (verdict.error as { issues?: RuntimeAuthoringIssue[] } | null)?.issues ?? [];
+    const issues = (verdict.error as { issues?: RuntimeAuthoringIssue[] } | null)?.issues ?? [];
+    // [#27444 · ADR-0129 D2] The namespace-prefix rule is not a gate rule: the
+    // doors that make an object live under a package ask it on their own
+    // (the publish pre-flight, the per-item publish), so the draft verdict
+    // asks the same judge, on the package the draft is staged into — the one
+    // "Publish all" promotes it under — and answers its code and sentence.
+    const prefixViolation = singular === 'object'
+        ? this.objectNamespacePrefixViolation(draft.name, draft.packageId)
+        : null;
+    if (!prefixViolation) return issues;
+    return [{
+        rule: 'NAMESPACE_PREFIX',
+        path: 'name',
+        where: `object "${draft.name}"`,
+        message: prefixViolation,
+        hint: prefixViolation,
+        severity: 'error',
+    }, ...issues];
 }

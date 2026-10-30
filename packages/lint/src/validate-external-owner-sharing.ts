@@ -41,7 +41,8 @@
  * the same anchor: a declared `owner_id` scopes them by owner, while the
  * platform's own injected one, with no `columnMap` entry naming it, proves no
  * owner, so on an owner-scoped model a member's read scope admits no row
- * (plugin-sharing `hasPhantomOwnerAnchor`, #27425) and an edit answers 404.
+ * (`isOwnerAnchorUnprovable`, `@objectstack/spec/data`, which plugin-sharing's
+ * `hasPhantomOwnerAnchor` reads; #27425) and an edit answers 404.
  *
  * ## The two arms
  *
@@ -76,7 +77,11 @@
  * accept set.
  */
 
-import { resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import {
+  externalColumnMapTargets,
+  isOwnerAnchorUnprovable,
+  resolveInjectedColumnProvenance,
+} from '@objectstack/spec/data';
 import { recordsOf } from './object-graph.js';
 import { effectiveSharingModelOf } from './validate-sharing-rule-enforceability.js';
 
@@ -132,13 +137,6 @@ export const READ_ONLY_EXTERNAL_WAY_OUT =
   "declare sharingModel: 'public_read' (no member writes a read-only binding, and on 'private' a member " +
   'reads no row: no declared field or external.columnMap entry names the remote owner_id)';
 
-/** Does `external.columnMap` (remote column → local field) map some remote column to `field`? */
-function columnMapTargets(external: AnyRec, field: string): boolean {
-  const map = external.columnMap;
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return false;
-  return Object.values(map as AnyRec).includes(field);
-}
-
 /**
  * The column whose missing storage refuses every member write on this object,
  * and whether the injection supplies it at all — or `undefined` when the
@@ -193,21 +191,20 @@ export function externalOwnershipGap(
   if (readOnlyDatasources.has(obj.datasource)) return undefined;
   const undeclared = undeclaredOwnershipColumn(obj);
   if (!undeclared) return undefined;
-  return { ...undeclared, mapped: columnMapTargets(external as AnyRec, undeclared.column) };
+  return { ...undeclared, mapped: externalColumnMapTargets(obj, undeclared.column) };
 }
 
 /**
- * [#27425] The lint's reading of plugin-sharing's `hasPhantomOwnerAnchor`: an
- * external object whose `owner_id` is the platform's injected anchor (no
- * declared field) and no `external.columnMap` entry targets it. No owner is
- * provable for such an object, so record sharing admits no row by ownership on
- * an owner-scoped model, whatever the binding's writability.
+ * [#27425] An external object whose `owner_id` is the platform's injected
+ * anchor (no declared field) and no `external.columnMap` entry targets it. No
+ * owner is provable for such an object, so record sharing admits no row by
+ * ownership on an owner-scoped model, whatever the binding's writability.
+ * The verdict is the spec's `isOwnerAnchorUnprovable`, the same function
+ * plugin-sharing's `hasPhantomOwnerAnchor` reads, so this warning and the
+ * runtime narrowing it describes cannot disagree.
  */
 export function hasUnprovableOwnerAnchor(obj: AnyRec): boolean {
-  const external = obj.external;
-  if (!external || typeof external !== 'object' || Array.isArray(external)) return false;
-  if (columnMapTargets(external as AnyRec, OWNER_COLUMN)) return false;
-  return resolveInjectedColumnProvenance(obj, OWNER_COLUMN) === 'injected-unprovisioned';
+  return isOwnerAnchorUnprovable(obj);
 }
 
 export function validateExternalOwnerSharing(stack: AnyRec): ExternalOwnerSharingFinding[] {

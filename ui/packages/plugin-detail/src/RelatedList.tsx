@@ -1941,6 +1941,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency in this list (objectui#12242).
         ...(def.currencyConfig && { currencyConfig: def.currencyConfig }),
+        // A formula's declared result type, which picks its face in the formula
+        // cell: `currency` draws through the currency cell with the
+        // `currencyConfig` above. Without it a money formula read as a bare
+        // number in this list (objectstack#27430).
+        ...(def.returnType && { returnType: def.returnType }),
         ...(def.precision !== undefined && { precision: def.precision }),
         ...((def as any).scale !== undefined && { scale: (def as any).scale }),
         // Beside `scale`, whose scale-0 grouping heuristic it overrides in the

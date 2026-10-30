@@ -301,6 +301,22 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     expect(f.message).toContain('gone_field');
   });
 
+  it('REFUSES an object whose searchableFields names a credential field the engine never searches', () => {
+    // The same rule's credential arm, at the publish door: the engine withholds
+    // a `secret` / `password` column from every search (ADR-0100), so the
+    // declaration is refused where a Studio tenant writes it.
+    const result = expectSingleRefusal(
+      cleanObject({
+        fields: { owner: { type: 'text' }, api_key: { type: 'secret' } },
+        searchableFields: ['owner', 'api_key'],
+      }),
+      'searchable-field-unsearchable',
+    );
+    const f = result.errors.find((e) => e.rule === 'searchable-field-unsearchable')!;
+    expect(f.path).toBe('objects.leave_request.searchableFields[1]');
+    expect(f.message).toContain("is a 'secret' field, a credential");
+  });
+
   it('REFUSES an object whose built-in list view names a column it does not have', () => {
     const result = expectSingleRefusal(
       cleanObject({ listViews: { all: { label: 'All', columns: ['owner', 'gone_column'] } } }),

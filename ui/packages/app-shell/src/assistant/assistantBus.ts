@@ -193,9 +193,20 @@ export function subscribeMetadataRefresh(listener: () => void): () => void {
 //     the next session in the tab.
 // Kept OFF the snapshot bus above, like the two event channels: a plan's state
 // must not re-render every `useAssistant` consumer.
+//
+// objectstack#25943 — each reading also carries how many items the proposal
+// asks the user to confirm (a change plan's rows, 1 for a proposed plan), the
+// 「N 项待确认」 Studio's right slot shows beside the folded copilot.
 
-/** conversation id → the user whose chat read its plan as awaiting approval. */
-let planApprovalOwners: ReadonlyMap<string, string> = new Map();
+interface PlanApprovalReading {
+  /** The user whose chat read the proposal as awaiting approval. */
+  owner: string;
+  /** Items awaiting confirmation; at least 1. */
+  count: number;
+}
+
+/** conversation id → the reading of its newest proposal, while one awaits approval. */
+let planApprovalOwners: ReadonlyMap<string, PlanApprovalReading> = new Map();
 const planApprovalListeners = new Set<() => void>();
 
 function subscribePlanApproval(listener: () => void): () => void {
@@ -205,25 +216,34 @@ function subscribePlanApproval(listener: () => void): () => void {
   };
 }
 
-function getPlanApprovalOwners(): ReadonlyMap<string, string> {
+function getPlanApprovalOwners(): ReadonlyMap<string, PlanApprovalReading> {
   return planApprovalOwners;
 }
 
 /**
- * Record a chat's reading of whether `conversationId`'s newest proposed plan
- * awaits the user's approval (chat hosts call this). No-op when unchanged.
+ * Record a chat's reading of whether `conversationId`'s newest proposal awaits
+ * the user's approval, and how many items it asks them to confirm (chat hosts
+ * call this; `count` defaults to 1 while pending). No-op when unchanged.
  * `pending: false` also drops the reading of a conversation that was deleted.
  */
 export function publishPlanApprovalPending(reading: {
   userId: string | undefined;
   conversationId: string;
   pending: boolean;
+  count?: number;
 }): void {
   const owner = reading.userId ?? '';
+  const count = Math.max(1, reading.count ?? 1);
   const current = planApprovalOwners.get(reading.conversationId);
-  if (reading.pending ? current === owner : current === undefined) return;
+  if (
+    reading.pending
+      ? current?.owner === owner && current.count === count
+      : current === undefined
+  ) {
+    return;
+  }
   const next = new Map(planApprovalOwners);
-  if (reading.pending) next.set(reading.conversationId, owner);
+  if (reading.pending) next.set(reading.conversationId, { owner, count });
   else next.delete(reading.conversationId);
   planApprovalOwners = next;
   for (const l of planApprovalListeners) l();
@@ -234,15 +254,25 @@ export function publishPlanApprovalPending(reading: {
  * awaiting approval, as last read by a mounted chat. Read by the launchers.
  */
 export function usePlanApprovalPending(): boolean {
-  const owners = useSyncExternalStore(
+  return usePlanApprovalPendingCount() > 0;
+}
+
+/**
+ * objectstack#25943 — how many items the signed-in user's chats read as
+ * awaiting their confirmation, summed over conversations; 0 when none. Read by
+ * Studio's right slot for its 「N 项待确认」.
+ */
+export function usePlanApprovalPendingCount(): number {
+  const readings = useSyncExternalStore(
     subscribePlanApproval,
     getPlanApprovalOwners,
     getPlanApprovalOwners,
   );
   const { user } = useAuth();
   const owner = user?.id ?? '';
-  for (const o of owners.values()) if (o === owner) return true;
-  return false;
+  let count = 0;
+  for (const r of readings.values()) if (r.owner === owner) count += r.count;
+  return count;
 }
 
 /** Subscribe a component to the assistant bus snapshot. */

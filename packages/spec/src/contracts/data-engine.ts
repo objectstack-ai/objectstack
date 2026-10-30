@@ -253,7 +253,9 @@ export interface EngineDatasourceDef {
    * after a reconnect, whose eviction drops the stored def — read as "not a
    * plugin driver" and was served unfloored. Optional because a caller that
    * registers only the write-gate facts keeps the id stored before it; the
-   * engine never reads an absent key as "built in".
+   * engine never reads an absent key as "built in". {@link
+   * IDataEngine.listDatasourceDefs} answers the stored id, so a sweep can ask
+   * which datasources name a plugin driver.
    */
   driver?: string;
   schemaMode?: string;
@@ -468,7 +470,9 @@ export interface IDataEngine {
    * — the engine accepts and retains the reference since #12758; before
    * this catch-up a caller typed against THIS contract was refused with
    * TS2353 for a value the runtime keeps). Distinct from registering a live
-   * driver connection. Safe to call repeatedly; last write wins.
+   * driver connection. Safe to call repeatedly; last write wins, except an
+   * absent `driver` keeps the id stored before it (see
+   * {@link EngineDatasourceDef.driver}).
    */
   registerDatasourceDef?(def: EngineDatasourceDef): void;
 

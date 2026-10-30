@@ -520,6 +520,24 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
     expect(f[0].message).toContain('400 INVALID_FIELD');
   });
 
+  it('flags a secret or password entry under the metadata verdict — the shared core\'s credential check', () => {
+    const vault = {
+      name: 'crm_account',
+      fields: { name: { type: 'text' }, api_key: { type: 'secret' }, portal_password: { type: 'password' } },
+    };
+    const f = pastDeprecation(validateReactPageProps(
+      listPage(
+        list(`data={{ provider: 'object', object: 'crm_account' }} searchableFields={['name', 'api_key', 'portal_password']}`),
+        [vault],
+      ),
+    ));
+    expect(f.map((x) => [x.rule, x.severity, x.path])).toEqual([
+      [SEARCHABLE_FIELD_UNSEARCHABLE, 'error', 'pages[0].source › searchableFields[1]'],
+      [SEARCHABLE_FIELD_UNSEARCHABLE, 'error', 'pages[0].source › searchableFields[2]'],
+    ]);
+    expect(f[0].hint).toBe('Drop "api_key": credential fields are never searched');
+  });
+
   it('[#8404] warns on an unprovisioned anchor, and PINS that this surface threads the index', () => {
     // Load-bearing beyond the warning itself. `validateReactPageProps` builds
     // `unprovisionedAnchors` for its other field-prop checks, so if this

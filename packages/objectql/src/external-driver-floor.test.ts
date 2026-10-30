@@ -460,13 +460,15 @@ describe('[#27277] predicate writes are not offered: every write reaches the dri
 });
 
 describe('[#27277] a re-registration that names no driver keeps the floor', () => {
-  it('the datasource-connection sequence: def with driver, driver, then a def without driver', async () => {
+  it('a caller registering only the write-gate facts: def with driver, driver, then a def without driver', async () => {
     const engine = new ObjectQL();
     const remote = remoteDriver('tree', TREE_ROWS);
     engine.registerDatasourceDef({ name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { allowWrites: true } });
     engine.registerDriver(remote.driver);
-    // What `datasource-connection-service.ts` registers after a connect and in
-    // `restoreOldPool`: no `driver` key (`EngineDatasourceDef` has none).
+    // A caller that registers only the write-gate facts (`schemaMode` and
+    // `external`) and names no `driver`. The datasource-connection service is
+    // not that caller: it names `driver` on every registration (the [#27666]
+    // block below).
     engine.registerDatasourceDef({ name: 'tree', schemaMode: 'external', external: { allowWrites: true } });
     engine.registerApp({
       id: 'tree_pkg',
@@ -582,5 +584,35 @@ describe('[#27666] the datasource-connection service\'s registrations floor a pl
     engine.registerDriver(rebuilt.driver);
     engine.registerDatasourceDef(connectDef('sqlite'));
     expect(engine.getDriverByName('tree')).toBe(rebuilt.driver);
+  });
+});
+
+describe('[#27727] listDatasourceDefs answers the stored driver id, the key the floor is decided on', () => {
+  it('answers the id a registration named, and the id a later registration without one kept', () => {
+    const engine = new ObjectQL();
+    engine.registerDatasourceDef({ name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { allowWrites: true } });
+    expect(engine.listDatasourceDefs()).toEqual([
+      { name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { allowWrites: true } },
+    ]);
+    engine.registerDatasourceDef({ name: 'tree', schemaMode: 'external', external: { allowWrites: false } });
+    expect(engine.listDatasourceDefs()).toEqual([
+      { name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { allowWrites: false } },
+    ]);
+  });
+
+  it('answers the id a package manifest declared', () => {
+    const engine = new ObjectQL();
+    engine.registerApp({
+      id: 'tree_pkg',
+      name: 'Tree',
+      datasources: [{ name: 'tree', driver: 'spike_tree', schemaMode: 'external', external: { allowWrites: true } }],
+    } as any);
+    expect(engine.listDatasourceDefs().find((d) => d.name === 'tree')?.driver).toBe('spike_tree');
+  });
+
+  it('a definition that never named a driver is listed without the key, never as built in', () => {
+    const engine = new ObjectQL();
+    engine.registerDatasourceDef({ name: 'bare', schemaMode: 'external' });
+    expect(engine.listDatasourceDefs()).toEqual([{ name: 'bare', schemaMode: 'external' }]);
   });
 });

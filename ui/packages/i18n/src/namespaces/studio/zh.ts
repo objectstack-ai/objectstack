@@ -2686,6 +2686,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.needsRuleField': '规则「{rule}」需要选择一个字段',
   'engine.studio.held.needsRuleMessage': '规则「{rule}」需要一条错误消息',
   'engine.studio.held.widgetNeedsInput': '组件「{widget}」的「{input}」需要填写',
+  // objectstack#27459 — a dashboard list property's item held until it is filled in.
+  'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',
   // objectstack#27464 — a navigation rename typed but not committed yet.
   'engine.studio.held.navRename': '导航项「{item}」的重命名尚未完成',
@@ -2718,6 +2720,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.slot.expand': '展开右栏',
   'engine.studio.slot.backToChat': '回到对话',
   'engine.studio.slot.planPending': '方案待确认',
+  'engine.studio.slot.pendingCount': '{count} 项待确认',
   'engine.studio.slot.openFullPage': '在完整页面中打开',
   'engine.studio.pillar.data': '数据',
   'engine.studio.pillar.automations': '自动化',

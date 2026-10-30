@@ -47,12 +47,18 @@
  * So the question is not "is this object federated?" but "is this object's
  * `owner_id` the anchor the PLATFORM injected, or a column the AUTHOR
  * declared?" — identity against the shipped declaration, never a pattern match
- * on a public grammar. Here the shipped declaration is {@link OWNER_FIELD_DEF}
- * itself: `applySystemFields` spreads it verbatim
- * (`additions.owner_id = { ...OWNER_FIELD_DEF }`) and a declared field of the
- * same name suppresses the injection entirely (`if (wantOwner &&
- * !schema.fields?.owner_id)`), so a registered def that equals the constant can
- * only have come from the platform.
+ * on a public grammar. [#27425] And past provenance, one more declaration
+ * counts: an `external.columnMap` entry that maps a remote column onto
+ * `owner_id` names the column that carries the owner, so the anchor is not
+ * phantom either.
+ *
+ * Both halves are read from `@objectstack/spec/data`, never restated here:
+ * {@link isOwnerAnchorUnprovable} is the one reader of "no owner is provable
+ * from declared metadata" (the provenance verdict
+ * `resolveInjectedColumnProvenance(schema, 'owner_id') ===
+ * 'injected-unprovisioned'` plus the `columnMap` arm), and lint's
+ * `hasUnprovableOwnerAnchor` reads the same function, so the author-time
+ * warning and this runtime narrowing cannot drift apart.
  *
  * Deliberately NOT an authorable "this column is phantom" flag: provenance is a
  * fact about who wrote the column, and letting metadata claim it would hand
@@ -71,74 +77,30 @@
  * `@objectstack/plugin-security` carries a structurally identical module for the
  * TENANT anchor (`federated-phantom-anchors.ts`, #7835), and #7738 / PR #7833
  * withheld `DriverOptions.tenantId` for `external` objects one layer down in
- * `@objectstack/objectql`. Three consumers, one producer. The duplication is
- * deliberate and temporary: this plugin does not depend on
- * `@objectstack/plugin-security` (it declares the narrow slices it probes —
- * see `SharingSecurityProbe`), so importing that copy would create a plugin
- * dependency edge to save nine lines. The maintainer's 2026-08-12 ruling on
- * #7865 chose direction **B** — the registry keeps injecting and grows a
- * machine-readable provenance marker, and consumer guards converge on that
- * marker **as they are touched**. When that marker lands, this module and its
- * plugin-security twin collapse into one read of it; keeping the two shaped
- * identically is what makes that collapse mechanical.
+ * `@objectstack/objectql`. Per the maintainer's 2026-08-12 ruling on #7865
+ * (direction **B** — the registry keeps injecting and consumers converge on the
+ * spec's provenance marker as they are touched), this module has converged:
+ * it holds no copy of the identity comparison and no `columnMap` reader of its
+ * own. The tenant twin converges the same way when next touched; it has no
+ * `columnMap` arm to carry.
  */
 
-// [#6562] The injected-column DEFINITION table lives in `@objectstack/metadata-core`
-// (the registry that provisions the columns reads the same one, and the `/meta` read
-// path consumes it too). Importing the constant — rather than restating its shape
-// here — is what makes the provenance test track the producer instead of a copy that
-// can drift silently. `@objectstack/objectql` re-exports it, but only from
-// `registry.js`, not from its package entry point, so `metadata-core` is the
-// importable home; its own dependencies are `{ @objectstack/spec, zod }`, so this
-// adds no cycle.
-import { OWNER_FIELD_DEF } from '@objectstack/metadata-core';
-
-/** The one column ownership scoping ever emits a predicate for. */
-const OWNER_COLUMN = 'owner_id';
-
-/** Pick a field definition out of either registered `fields` shape. */
-function readFieldDef(schema: unknown, name: string): unknown {
-  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
-  if (Array.isArray(fields)) {
-    return fields.find((f) => (f as { name?: unknown } | null)?.name === name);
-  }
-  if (fields && typeof fields === 'object') {
-    return (fields as Record<string, unknown>)[name];
-  }
-  return undefined;
-}
-
-/**
- * Structural identity against the shipped constant. Flat by construction —
- * every value in {@link OWNER_FIELD_DEF} is a primitive — so a flat comparison
- * is exact rather than a shortcut, and an extra or missing key is a mismatch
- * (see "Direction of an inexact match" in the module docs).
- *
- * The array shape carries an additional `name` key that the object shape
- * expresses as the map key; it is excluded so both shapes reach the same
- * verdict about the same column.
- */
-function equalsShippedDef(def: unknown, shipped: Readonly<Record<string, unknown>>): boolean {
-  if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
-  const actual = { ...(def as Record<string, unknown>) };
-  delete actual.name;
-  const shippedKeys = Object.keys(shipped);
-  if (Object.keys(actual).length !== shippedKeys.length) return false;
-  return shippedKeys.every((k) => actual[k] === shipped[k]);
-}
+import { isOwnerAnchorUnprovable, platformProvisionsStorage } from '@objectstack/spec/data';
 
 /**
  * Is `schema` a federated (ADR-0015 `external`) object binding a remote table?
  * The platform provisions no storage for one, so nothing it injects is real.
+ * The spec's `platformProvisionsStorage` is the one spelling of that predicate
+ * (#7865's convergence map), so this reads it rather than restating it.
  */
 export function isFederatedObject(schema: unknown): boolean {
-  return (schema as { external?: unknown } | null | undefined)?.external != null;
+  return !platformProvisionsStorage(schema);
 }
 
 /**
  * Does this object's `owner_id` exist only in the registry — i.e. is it the
  * platform's injected anchor on an object whose storage the platform never
- * provisioned?
+ * provisioned, with nothing declared naming a remote column for it?
  *
  * `true` ⇒ no owner predicate can be proven for the object: nothing declared
  * says a remote column answers to `owner_id`, even where a driver happens to
@@ -147,24 +109,10 @@ export function isFederatedObject(schema: unknown): boolean {
  * never widens. `false` for every local object (the platform DID provision the
  * column there), for a federated object whose author declared a real remote
  * `owner_id`, and for one whose `external.columnMap` maps a remote column onto
- * `owner_id` (see {@link mapsRemoteColumnOntoOwner}).
+ * `owner_id`. The built-in SQL drivers apply that map and serve the column; a
+ * driver that does not apply it returns no `owner_id`, so the owner predicate
+ * scoping composes matches no row — the fail direction stays closed either way.
  */
 export function hasPhantomOwnerAnchor(schema: unknown): boolean {
-  if (!isFederatedObject(schema)) return false;
-  if (mapsRemoteColumnOntoOwner(schema)) return false;
-  return equalsShippedDef(readFieldDef(schema, OWNER_COLUMN), OWNER_FIELD_DEF);
-}
-
-/**
- * [#27425] Does the object's `external.columnMap` (remote column → local field)
- * name `owner_id` as a target? That is the author declaring which remote column
- * carries the owner, so the anchor is not phantom. The built-in SQL drivers
- * apply the map and serve the column; a driver that does not apply it returns
- * no `owner_id`, so the owner predicate scoping composes matches no row — the
- * fail direction stays closed either way.
- */
-function mapsRemoteColumnOntoOwner(schema: unknown): boolean {
-  const columnMap = (schema as { external?: { columnMap?: unknown } } | null | undefined)?.external?.columnMap;
-  if (!columnMap || typeof columnMap !== 'object' || Array.isArray(columnMap)) return false;
-  return Object.values(columnMap as Record<string, unknown>).includes(OWNER_COLUMN);
+  return isOwnerAnchorUnprovable(schema);
 }

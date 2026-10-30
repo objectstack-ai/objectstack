@@ -5,7 +5,9 @@ import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService, RouteHa
 import type { ErrorCode, RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 // [#22470] The ONE upload-scope list — the upload requests' `scope` and the
 // `sys_file.scope` select read it too. A value import: the doors ask it.
-import { UploadScopeSchema } from '@objectstack/spec/api';
+// [#27549] The chunked-upload init door parses its whole body with the
+// declared request schema, so declared is enforced.
+import { InitiateChunkedUploadRequestSchema, UploadScopeSchema } from '@objectstack/spec/api';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // [#23174] A catch-all 5xx answers through `sendServerFault`: the route's
 // generic text on the wire, the caught error with its stack in the fault log.
@@ -173,6 +175,18 @@ function isDeclaredByteCount(size: unknown): size is number {
 
 const PRESIGNED_SIZE_REFUSAL_MESSAGE =
   'size must be the file size in bytes: a non-negative number, sent as a JSON number';
+
+/**
+ * [#27549] The chunked-upload init door's refusal for a body that does not
+ * parse with `InitiateChunkedUploadRequestSchema`: every failing field named
+ * with the schema's own words. `totalSize` is a whole number of bytes, at
+ * least 1, and `chunkSize` (when sent) a whole number at or above the
+ * declared 5 MiB minimum — a smaller one is refused, never clamped up.
+ */
+function chunkedInitRefusalMessage(issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>): string {
+  const named = issues.map((issue) => `${issue.path.map(String).join('.') || '(body)'}: ${issue.message}`);
+  return `The chunked upload request does not match its declared shape. ${named.join('; ')}`;
+}
 
 /**
  * [#27412] The chunk door's `chunkIndex` path segment, read strictly: decimal
@@ -1100,21 +1114,31 @@ export function registerStorageFamily(
     try {
       const session = await requireUploadSession(req, res);
       if (session === false) return;
-      const { filename, mimeType, totalSize, chunkSize: reqChunkSize, scope, bucket, metadata } = req.body ?? {};
-      if (!filename || !mimeType || !totalSize) {
+      const body = req.body ?? {};
+      if (!body.filename || !body.mimeType || body.totalSize == null) {
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;
       }
       // [#22470] Same scope gate as the presigned door — before the file row,
-      // the backend multipart and the session row.
-      if (!requireAcceptedUploadScope(scope, res)) return;
+      // the backend multipart and the session row. Asked before the parse
+      // below so an off-vocabulary scope keeps its own remedy.
+      if (!requireAcceptedUploadScope(body.scope, res)) return;
+      // [#27549] Declared is enforced: the body must parse with the declared
+      // request schema, before anything is stored or minted. A total that is
+      // not a positive whole number used to mint a session no chunk could
+      // complete, and a `chunkSize` under the minimum was clamped up.
+      const parsed = InitiateChunkedUploadRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        sendError(res, 400, 'INVALID_REQUEST', chunkedInitRefusalMessage(parsed.error.issues));
+        return;
+      }
+      const { filename, mimeType, totalSize, chunkSize, scope, bucket, metadata } = parsed.data;
       // [#22283] The declared total against the saved limit — before the file
       // row, the backend multipart and the session row. The chunk door judges
       // the bytes as they arrive.
       const { sessionTtl, maxUploadBytes } = currentLimits();
-      if (!requireWithinUploadLimit(Number(totalSize), maxUploadBytes, (n) => `The declared total size is ${n} bytes`, res)) return;
+      if (!requireWithinUploadLimit(totalSize, maxUploadBytes, (n) => `The declared total size is ${n} bytes`, res)) return;
 
-      const chunkSize = Math.max(reqChunkSize ?? 5242880, 5242880);
       const totalChunks = Math.ceil(totalSize / chunkSize);
 
       const fileId = randomUUID();

@@ -3017,6 +3017,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11910 — a dashboard widget held until it is bound; `input` is the
   // widget inspector's own label for it (Dataset, Values (measures)).
   'engine.studio.held.widgetNeedsInput': '{input} on the widget “{widget}” needs a value',
+  // objectstack#27459 — an item of a dashboard list property (Global Filters,
+  // the header's Actions) held until it is filled in; `n` is the `#n` its row shows.
+  'engine.studio.held.listItemNeedsInput': '{input} on item #{n} of “{list}” needs a value',
   // objectstack#27461 — a roll-up held until it is set up; `input` is the field
   // inspector's own label for the roll-up input it still needs.
   'engine.studio.held.fieldNeedsInput': '{input} on the field “{field}” needs a value',
@@ -3061,6 +3064,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.slot.expand': 'Show the right panel',
   'engine.studio.slot.backToChat': 'Back to the conversation',
   'engine.studio.slot.planPending': 'a plan awaits your approval',
+  'engine.studio.slot.pendingCount': '{count} awaiting your approval',
   'engine.studio.slot.openFullPage': 'Open full page',
   'engine.studio.pillar.data': 'Data',
   'engine.studio.pillar.automations': 'Automations',
