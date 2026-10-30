@@ -9,7 +9,7 @@ feat(plugin-detail)!: the record page's related panels lose collapse — the hea
 Clause-②: yes (narrowing)
 Metadata-protocol: none
 
-<!-- adr-0087: not-required (type-surface-only @object-ui/plugin-detail#RelatedArrangement.collapsed, @object-ui/plugin-detail#ResolvedRelatedArrangement.collapsed, @object-ui/plugin-detail#RelatedArrangementEdit) the narrowed members are a reader's per-browser layout preference and its edit vocabulary in a published ui package; no packages/spec schema, no metadata key, no registered node type and no sys_metadata shape names them, so there is nothing for `objectstack migrate meta` to rewrite. The stored preference moves to version 2 and a version-1 record reads as no choice. -->
+<!-- adr-0087: not-required (runtime-interface-only ui/packages/plugin-detail/src/synth/relatedArrangement.ts#RelatedArrangement, ui/packages/plugin-detail/src/synth/relatedArrangement.ts#ResolvedRelatedArrangement, ui/packages/plugin-detail/src/synth/relatedArrangement.ts#RelatedArrangementEdit) a reader's per-browser layout preference and its edit vocabulary: no Zod schema, no spec declaration and no stored metadata reads them, so the compiler is the channel that reaches every caller; the stored preference moves to version 2 and a version-1 record reads as no choice -->
 
 The record page's related column is a stack of same-shaped panels (record page v4).
 
@@ -18,9 +18,6 @@ The record page's related column is a stack of same-shaped panels (record page v
 - **The compact row's first column** skips the foreign key that points back at the record on the page: a product's line items, whose name field is the product, are named by their next column.
 - **The stored arrangement** (`record.related.arrangement`, per reader × object) is `{ v, order, hidden, basedOn, seen }`. `collapsed` is removed with no compatibility read: a reader's earlier record reads as no choice, and the panels show in the default order.
 
-**BREAKING** for a TypeScript consumer of `@object-ui/plugin-detail`'s arrangement API; nothing an author declares changes.
+**BREAKING** (`@object-ui/plugin-detail`, TypeScript only): `RelatedArrangement` and `ResolvedRelatedArrangement` no longer carry `collapsed`, `RelatedArrangementEdit` no longer has the `collapse` kind, and `resolveRelatedArrangement` / `editRelatedArrangement` no longer take a last `defaultCollapsed` argument. The only caller is the console's own arranged column. A caller still passing one gets a compile error naming it; the fix is to drop it, since a panel has no collapsed state to set. `RELATED_ARRANGEMENT_RECORD_VERSION` (2) is new.
 
-- FROM `RelatedArrangement.collapsed` / `ResolvedRelatedArrangement.collapsed` TO nothing: a panel has no collapsed state. Drop the member from any value you build.
-- FROM the `{ kind: 'collapse', id, collapsed }` edit TO `{ kind: 'hide', id }`, or no edit at all.
-- FROM `resolveRelatedArrangement(order, stored, now, defaultCollapsed)` / `editRelatedArrangement(order, stored, edit, now, defaultCollapsed)` TO the same calls without the last argument.
 - The i18n keys `detail.relatedCardMoveUp`, `detail.relatedCardMoveDown`, `detail.relatedCardCollapse` and `detail.relatedCardCount` leave every pack; `detail.relatedPanelViewAll`, `detail.relatedPanelReorder`, `detail.relatedPanelReorderHint` and `detail.relatedEmptyFold` arrive in all ten.
