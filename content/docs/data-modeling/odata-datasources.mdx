@@ -138,9 +138,24 @@ What each piece does on this driver:
 - **`id` is the entity key.** A single-property key is read as text (`'4711'`). A
   composite key is the body of its key predicate (`'OrderID=1,ProductID=7'`), which is
   also what `GET /data/<object>/<id>` takes.
-- **Declare each field by hand.** Nothing generates fields from `$metadata` today.
-  Navigation properties are never followed, so a related entity set is an object of its
-  own.
+- **Or import the objects from `$metadata`.** Once the datasource is saved, Studio's
+  datasource page lists its entity sets on the **Tables** tab. **Import** saves one,
+  and **Import selected** saves several, referenced entity sets first. An MCP client
+  whose token carries `metadata:write` reaches the same import through
+  `list_remote_tables` and `import_object`. The draft maps each EDM type to a field
+  type, makes the key the `id`, and writes `columnMap` for every property whose name is
+  not a snake_case field name (`CategoryID` becomes `category_id`). EDM types with no
+  field type, such as `Edm.Duration` or a service's own enum, are listed for review. An
+  imported object is read-only unless the datasource allows writes and you tick
+  **Allow writes to this object**.
+- **Navigation properties are never followed**, so a related entity set is an object of
+  its own. The import turns a single-valued navigation into a `lookup` on its foreign-key
+  property when its `ReferentialConstraint` is one property pair onto the target's key
+  and the target is already imported on the same datasource. Every other navigation is
+  left out and named in the review, so import the target first. The lookup reads the
+  related record by key, like any other lookup. These rules are what
+  `packages/services/service-datasource/src/__tests__/external-object-draft-odata-metadata.test.ts`
+  asserts, over a recorded Northwind `$metadata`.
 - **The service document is read lazily.** `connect()` asks the service nothing, and
   `$metadata` is read once, at the first request. A wrong `serviceRoot` or an unknown
   entity set shows up on the first read of the object, not at boot.
@@ -266,7 +281,7 @@ as a sharing scope. The full mapping is in
 
 - **OData v2.** Only the v4 dialect ships.
 - **`$expand` and navigation properties.** Bind each related entity set as an object of
-  its own.
+  its own; an imported foreign key becomes a `lookup` onto it.
 - **Actions and functions** of the service. `execute` is refused.
 - **Transactions and `$batch`.** Each write is one request.
 - **More than 1000 matching rows** in one read (the cap above).
