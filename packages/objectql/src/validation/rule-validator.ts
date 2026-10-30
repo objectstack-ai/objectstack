@@ -2911,6 +2911,8 @@ function ruleNeedsPrior(r: unknown): boolean {
  *  CEL predicate is TRUE over the record. */
 interface ConditionalFieldOption {
   value?: unknown;
+  /** Author-declared display label — names a state in a `state_machine` refusal. */
+  label?: string;
   /** Per-option visibility predicate (CEL) — objectui#2284. */
   visibleWhen?: string | Expression;
 }
@@ -2938,6 +2940,9 @@ interface ConditionalFieldDef {
   type?: string;
   /** select/multiselect/radio/checkboxes options; an option may gate itself with `visibleWhen`. */
   options?: Array<ConditionalFieldOption | null | undefined>;
+  /** The shared picklist the field's options are folded from — the bundle
+   *  address of an option label the field itself does not translate. */
+  picklist?: string;
 }
 
 /**
@@ -3848,6 +3853,9 @@ function checkStateMachine(
     code: 'invalid_initial_state' | 'invalid_transition',
     constraint: Record<string, unknown>,
     value?: string,
+    // The built-in sentence's words where they differ from the machine facts —
+    // read only on the built-in path, so an authored message costs no lookup.
+    wording?: () => Record<string, unknown>,
   ): FieldValidationError => {
     const def = ctx?.fields?.[rule.field];
     if (rule.message) {
@@ -3868,6 +3876,18 @@ function checkStateMachine(
         // about the refusal changes; it gains the location it already declares.
         ...(Object.keys(constraint).length > 0 ? { constraint } : {}),
         ...(value !== undefined ? { value } : {}),
+      };
+    }
+    if (wording) {
+      // The sentence is rendered from `wording` over the constraint, and the
+      // constraint is shipped as it is: `buildFieldError` interpolates its
+      // `constraint` over its `messageParams`, so the two cannot ride one call.
+      return {
+        ...buildFieldError(
+          { field: rule.field, code, def, value, messageParams: { ...constraint, ...wording() } },
+          ctx?.messages,
+        ),
+        ...(Object.keys(constraint).length > 0 ? { constraint } : {}),
       };
     }
     return buildFieldError({ field: rule.field, code, def, constraint, value }, ctx?.messages);
@@ -3899,9 +3919,63 @@ function checkStateMachine(
   if (!Array.isArray(allowed)) return null;
 
   if (!allowed.includes(String(to))) {
-    return fallback('invalid_transition', { from: fromKey, to: String(to) });
+    const toKey = String(to);
+    // `constraint` carries the raw option values a client acts on; the
+    // built-in sentence names the same two states the way the user sees them.
+    return fallback('invalid_transition', { from: fromKey, to: toKey }, undefined, () => {
+      const def = ctx?.fields?.[rule.field];
+      return {
+        from: resolveOptionLabel(rule.field, def, fromKey, ctx?.messages),
+        to: resolveOptionLabel(rule.field, def, toKey, ctx?.messages),
+      };
+    });
   }
   return null;
+}
+
+/**
+ * One option of a choice field, named the way the user sees it, in the
+ * caller's locale: the field's own translation
+ * (`objects.<object>.fields.<field>.options.<value>`) → for a picklist-bound
+ * field, the shared list's (`picklists.<name>.options.<value>`) → the option's
+ * declared `label` → the raw value.
+ *
+ * The chain `translateObject` serves a field's options by on `/meta`, so the
+ * refusal names a state with the word the form's dropdown showed. Asked through
+ * the same `ValidationMessageContext.translate` hook `resolveFieldLabel` uses —
+ * no second i18n path. The raw value is the last resort, as the API name is
+ * for a field label: it stays available to clients in `constraint`.
+ */
+function resolveOptionLabel(
+  fieldName: string,
+  def: ConditionalFieldDef | undefined,
+  value: string,
+  ctx: ValidationMessageContext | undefined,
+): string {
+  if (ctx?.translate && ctx.objectName && ctx.locale) {
+    const keys = [`objects.${ctx.objectName}.fields.${fieldName}.options.${value}`];
+    if (typeof def?.picklist === 'string' && def.picklist.length > 0) {
+      keys.push(`picklists.${def.picklist}.options.${value}`);
+    }
+    for (const key of keys) {
+      try {
+        const translated = ctx.translate(key, ctx.locale);
+        // II18nService echoes the key back on a miss.
+        if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
+          return translated;
+        }
+      } catch {
+        // A misbehaving i18n service must not turn a 400 into a 500.
+      }
+    }
+  }
+  // A bare scalar option carries no label of its own.
+  const option = (Array.isArray(def?.options) ? (def.options as unknown[]) : []).find(
+    (o): o is ConditionalFieldOption =>
+      typeof o === 'object' && o !== null && String((o as ConditionalFieldOption).value) === value,
+  );
+  const declared = typeof option?.label === 'string' ? option.label.trim() : '';
+  return declared.length > 0 ? declared : value;
 }
 
 /**
