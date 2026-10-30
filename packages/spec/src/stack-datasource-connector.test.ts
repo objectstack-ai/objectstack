@@ -24,7 +24,10 @@
  *   by an input built with `strict: false`, is refused with the same finding
  *   and envelope, under `last` and `preserve`;
  * - a connector name a later input re-declares is judged against that later
- *   entry, the one the runtime keeps;
+ *   entry, the one the runtime keeps, and that finding names both
+ *   declarations and prescribes the duplicate's fix;
+ * - a nested multi-package input (a `manifest: 'preserve'` artifact) is read
+ *   through its package bodies, where its connectors and datasources live;
  * - CONTROL: a datasource borrowing an instance another input declares
  *   composes, in either order;
  * - CONTROL: the per-stack strict refusal is unchanged, so a strict input
@@ -190,8 +193,61 @@ describe('composeStacks judges external.connector against the connectors of ever
       connectors: [instance()],
     } as never);
     const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
-    expectComposedFinding(composeRefusal([strictPair, owner(descriptor)]), 'which declares no provider');
+    const refused = composeRefusal([strictPair, owner(descriptor)]);
+    expectComposedFinding(refused, 'which declares no provider in the entry the composed artifact keeps');
+    expect(String(refused?.issues?.[0])).toContain(
+      "Connector 'sap_s4' is declared more than once: 'com.acme.orders' (stack #0) declares an instance " +
+        "that can lend, and 'com.acme.sap' (stack #1) declares the later entry, which the runtime keeps. " +
+        'Rename or remove the later entry',
+    );
+    expect(String(refused?.issues?.[0])).not.toContain('Give it the provider');
     expect(composeRefusal([owner(descriptor), strictPair])).toBeUndefined();
+  });
+
+  it('keeps the per-stack prescription when no declaration of the name could lend', () => {
+    const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
+    const refused = composeRefusal([owner(descriptor), owner(instance({ auth: { type: 'none' } })), looseBorrower()]);
+    expectComposedFinding(refused, 'which declares no auth credential — there is nothing to borrow. Declare the');
+  });
+
+  describe('a nested multi-package input, whose collections live only in its package bodies', () => {
+    const other = () => defineStack({ manifest: pluginManifest('com.acme.other') } as never);
+    const nested = (...stacks: unknown[]) => composeStacks([...stacks, other()] as never, { manifest: 'preserve' });
+
+    it('CONTROL: a borrower resolves against an instance a package body of the nested input carries', () => {
+      const inner = nested(owner());
+      expect((inner as Record<string, unknown>).connectors).toBeUndefined();
+      expect(composeRefusal([inner, looseBorrower()], { manifest: 'preserve' })).toBeUndefined();
+      expect(composeRefusal([looseBorrower(), inner])).toBeUndefined();
+    });
+
+    it("judges a datasource a nested input's package body carries", () => {
+      // Hand-assembled: a composition would refuse the dangling name itself.
+      const inner = defineStack(
+        {
+          manifest: pluginManifest('com.acme.bundle'),
+          packages: [{ manifest: { ...pluginManifest('com.acme.orders'), datasources: [sapOrders('sap_missing')] } }],
+        } as never,
+        { strict: false },
+      );
+      const refused = composeRefusal([owner(), inner], { manifest: 'preserve' });
+      expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'STACK_CROSS_REFERENCE_INVALID', status: 422 });
+      expect(refused?.issues).toEqual([
+        expect.stringMatching(
+          /^Datasource 'sap_orders' borrows the credential of connector 'sap_missing' \(external\.connector\), which is not defined in connectors\./,
+        ),
+      ]);
+    });
+
+    it('names the package body that declares a shadowed instance', () => {
+      const strictPair = defineStack({
+        manifest: pluginManifest('com.acme.orders'),
+        datasources: [sapOrders()],
+        connectors: [instance()],
+      } as never);
+      const refused = composeRefusal([nested(strictPair), owner({ name: 'sap_s4', label: 'SAP', type: 'api' })]);
+      expect(String(refused?.issues?.[0])).toContain("package 'com.acme.orders' of 'com.acme.other' (stack #0)");
+    });
   });
 
   it('CONTROL: the per-stack strict refusal is unchanged — a strict input never carries a dangling name in', () => {
