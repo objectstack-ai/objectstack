@@ -92,6 +92,7 @@ function LauncherAppIcon({ app, children }: { app: any; children?: ReactNode }) 
       data-testid={`app-tile-icon-${app.name}`}
       data-branded={colors ? 'true' : undefined}
     >
+      {/* eslint-disable-next-line react-hooks/static-components -- getIcon returns a stable icon component from a static registry, not one created during render */}
       <Icon className="size-[26px]" />
       {children}
     </span>
