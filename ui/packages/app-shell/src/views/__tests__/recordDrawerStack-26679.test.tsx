@@ -2,8 +2,12 @@
 
 /**
  * objectstack#26679 — the record drawer opens a related row or a lookup in
- * place, one level down, and goes back one level at a time; ⤢ carries the
- * path into the page and 「Collapse to drawer」 brings the stack back.
+ * place, one level down, and goes back one level at a time; the record
+ * header's 「Open as full page」 carries the path into the page and
+ * 「Collapse to drawer」 brings the stack back. objectstack#27545: the bar's ⤢
+ * maximizes in place and routes nowhere; the page is opened from the header
+ * `⋯` (`useRecordPane`, below) and from the row's ↗, and 「Collapse to
+ * drawer」 is drawn only on a page the ↗ opened.
  *
  * Every case mounts the real `RelatedRecordActionsBridge` the record body
  * mounts, under the real drawer stack, with a probe standing in for the
@@ -24,7 +28,10 @@ import {
   RecordPageDrawerHost,
   RecordStackDrawer,
   expandedRecordPath,
+  recordDrawerReturnState,
   useRecordDrawerStack,
+  useRecordPane,
+  useTakenRestore,
   type RecordDrawerLevel,
 } from '../recordDrawerStack';
 
@@ -70,6 +77,7 @@ function RecordBody({ level }: { level: { objectName: string; recordId: string }
 
 function Probe() {
   const actions = useRelatedRecordActions();
+  const pane = useRecordPane();
   const [, setSearchParams] = useSearchParams();
   const tasks = actions?.resolve({ objectName: 'crm_task', relationshipField: 'lead', parentId: 'L-1' });
   return (
@@ -83,6 +91,12 @@ function Probe() {
       <button type="button" onClick={() => actions?.openRecord?.('crm_contract', 'K-1')}>
         open contract lookup
       </button>
+      {/* The record header `⋯`'s last host item (objectstack#27545). */}
+      {pane && (
+        <button type="button" onClick={() => pane.openAsPage()}>
+          menu open as full page
+        </button>
+      )}
       <button
         type="button"
         onClick={() =>
@@ -102,17 +116,29 @@ function Probe() {
   );
 }
 
-/** The object list's host shape: a root the URL controls, closed by the host. */
-function ListHost({ onClose, onExpand }: { onClose: () => void; onExpand: (path: RecordDrawerLevel[]) => void }) {
-  const root = React.useMemo(() => ({ objectName: 'crm_lead', recordId: 'L-1' }), []);
-  const stack = useRecordDrawerStack({ root });
+/**
+ * The object list's host shape: a root the URL controls, closed by the host,
+ * and a ↗ return's stack taken out of the history state.
+ */
+function ListHost({ onClose, onOpenAsPage }: { onClose: () => void; onOpenAsPage: (path: RecordDrawerLevel[]) => void }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rootId = searchParams.get('recordId') ?? 'L-1';
+  const root = React.useMemo(() => ({ objectName: 'crm_lead', recordId: rootId }), [rootId]);
+  const [restoredPath] = useTakenRestore();
+  const stack = useRecordDrawerStack({ root, restoredPath });
   return (
     <RecordStackDrawer
       stack={stack}
       open
       objects={OBJECTS}
       onClose={onClose}
-      onExpand={onExpand}
+      onOpenAsPage={onOpenAsPage}
+      // The list the drawer opens over: another of its rows (objectstack#27545).
+      mainContent={
+        <button type="button" onClick={() => setSearchParams({ recordId: 'L-2' })}>
+          list row L-2
+        </button>
+      }
       renderRecord={(level) => <RecordBody level={level} />}
     />
   );
@@ -120,17 +146,17 @@ function ListHost({ onClose, onExpand }: { onClose: () => void; onExpand: (path:
 
 function mountList(initial = `/apps/${APP}/crm_lead?recordId=L-1`) {
   const onClose = vi.fn();
-  const onExpand = vi.fn();
+  const onOpenAsPage = vi.fn();
   render(
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
-        <Route path="/apps/:appName/:objectName" element={<ListHost onClose={onClose} onExpand={onExpand} />} />
+        <Route path="/apps/:appName/:objectName" element={<ListHost onClose={onClose} onOpenAsPage={onOpenAsPage} />} />
         <Route path="*" element={<div data-testid="elsewhere" />} />
       </Routes>
       <RouterLocation />
     </MemoryRouter>,
   );
-  return { onClose, onExpand };
+  return { onClose, onOpenAsPage };
 }
 
 const body = () => screen.getByTestId('record-body').textContent;
@@ -176,6 +202,17 @@ describe('a related row opens in the same drawer, one level down (ruling 5)', ()
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('objectstack#27545 — a click on another list row swaps the root and drops the levels below it', () => {
+    mountList();
+    fireEvent.click(button('open task row'));
+    fireEvent.click(button('open owner lookup'));
+    expect(trail()).toBe('Lead Mira CostaTask Send quoteUser');
+    fireEvent.click(button('list row L-2'));
+    expect(body()).toBe('crm_lead/L-2');
+    expect(trail()).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Go back' })).toBeNull();
+  });
+
   it('control: an object that declares `page` still navigates, and the drawer stays put', () => {
     mountList();
     fireEvent.click(button('open contract lookup'));
@@ -219,17 +256,34 @@ describe('each level keeps its own ?tab=', () => {
   });
 });
 
-describe('⤢ carries the path into the page', () => {
+describe('「Open as full page」 carries the path into the page; ⤢ maximizes in place', () => {
   it('hands the host the path from the root to the record shown', () => {
-    const { onExpand } = mountList();
+    const { onOpenAsPage } = mountList();
     fireEvent.click(button('open task row'));
-    fireEvent.click(button('Open as full page'));
-    const [path] = onExpand.mock.calls[0];
+    fireEvent.click(button('menu open as full page'));
+    const [path] = onOpenAsPage.mock.calls[0];
     expect(path.map((l: RecordDrawerLevel) => `${l.objectName}/${l.recordId}`)).toEqual([
       'crm_lead/L-1',
       'crm_task/T-1',
     ]);
     expect(path[0].title).toBe('Mira Costa');
+  });
+
+  it('objectstack#27545 — the bar draws ⤢ and no page hop; ⤢ keeps the URL and the stack', () => {
+    const { onOpenAsPage } = mountList();
+    fireEvent.click(button('open task row'));
+    expect(screen.queryByRole('button', { name: 'Open as full page' })).toBeNull();
+    fireEvent.click(button('Maximize'));
+    expect(onOpenAsPage).not.toHaveBeenCalled();
+    expect(where()).toBe(`/apps/${APP}/crm_lead?recordId=L-1`);
+    expect(body()).toBe('crm_task/T-1');
+    expect(trail()).toBe('Lead Mira CostaTask');
+    expect(screen.getByRole('dialog').hasAttribute('data-maximized')).toBe(true);
+    // Every level shares the maximize: ← keeps it.
+    fireEvent.click(button('Go back'));
+    expect(screen.getByRole('dialog').hasAttribute('data-maximized')).toBe(true);
+    fireEvent.click(button('Restore size'));
+    expect(screen.getByRole('dialog').hasAttribute('data-maximized')).toBe(false);
   });
 
   it('the page route names the ancestors as its ?from= trail', () => {
@@ -307,15 +361,15 @@ describe('on the record page, a related row opens a drawer over the page (target
     expect(where()).toContain('tab=related');
   });
 
-  it('⤢ opens the page with the path, and 「Collapse to drawer」 restores the stack', async () => {
+  it('「Open as full page」 opens the page with the path, and that page offers no 「Collapse to drawer」', () => {
     mountPage(`/apps/${APP}/crm_lead/record/L-1`);
     fireEvent.click(screen.getAllByRole('button', { name: 'open task row' })[0]);
-    // One more level: the task's owner.
-    // The page beneath is hidden from the accessibility tree while the drawer
-    // is open, so this is the drawer's own lookup.
-    fireEvent.click(button('open owner lookup'));
+    // One more level: the task's owner — the drawer's own lookup.
+    const inDrawer = (name: string) =>
+      screen.getAllByRole('button', { name, hidden: true }).find((el) => screen.getByRole('dialog').contains(el))!;
+    fireEvent.click(inDrawer('open owner lookup'));
     expect(dialogBody()).toBe('sys_user/U-1');
-    fireEvent.click(button('Open as full page'));
+    fireEvent.click(inDrawer('menu open as full page'));
 
     const [path, query] = where().split('?');
     expect(path).toBe(`/apps/${APP}/sys_user/record/U-1`);
@@ -324,16 +378,33 @@ describe('on the record page, a related row opens a drawer over the page (target
       { o: 'crm_task', i: 'T-1', t: 'Send quote' },
     ]);
     expect(screen.queryByRole('dialog')).toBeNull();
+    // objectstack#27545 — 「Collapse to drawer」 is drawn only for a ↗ arrival.
+    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
+  });
+});
 
+describe('「Collapse to drawer」 on a page the row ↗ opened (objectstack#27545)', () => {
+  it('returns to the list with the record open', async () => {
+    const back = recordDrawerReturnState(
+      { pathname: `/apps/${APP}/crm_lead`, search: '?recordId=L-1', state: null },
+      [{ objectName: 'crm_lead', recordId: 'L-1' }],
+    );
+    render(
+      <MemoryRouter initialEntries={[{ pathname: `/apps/${APP}/crm_lead/record/L-1`, state: back }]}>
+        <Routes>
+          <Route path="/apps/:appName/:objectName/record/:recordId" element={<RecordPage />} />
+          <Route path="/apps/:appName/:objectName" element={<ListHost onClose={() => {}} onOpenAsPage={() => {}} />} />
+        </Routes>
+        <RouterLocation />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('page')).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByTestId('record-drawer-return'));
     });
-    expect(where()).toBe(`/apps/${APP}/crm_lead/record/L-1`);
-    expect(dialogBody()).toBe('sys_user/U-1');
-    expect(trail()).toBe('Task Send quoteUser');
+    expect(where()).toBe(`/apps/${APP}/crm_lead?recordId=L-1`);
+    expect(body()).toBe('crm_lead/L-1');
     // The restore is consumed: the history entry no longer carries it.
     expect(screen.getByTestId('router-state').textContent).not.toContain('recordDrawerRestore');
-    fireEvent.click(button('Go back'));
-    expect(dialogBody()).toBe('crm_task/T-1');
   });
 });

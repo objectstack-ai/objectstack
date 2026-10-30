@@ -13,9 +13,9 @@
  * 2026-10-27, objectstack#26677), so the section answers by the mode the host
  * resolved for the object and view:
  *
- *   - `drawer`: two segments, Drawer | Split, each writing the reader's
- *     preference through the host's setter, with the note that the choice is
- *     the reader's own;
+ *   - `drawer`: the segments — Split | Drawer | Full page since
+ *     objectstack#27545 — each writing the reader's preference through the
+ *     host's setter, with the note that the choice is the reader's own;
  *   - `page`: one read-only line — the declaration wins, nothing to choose;
  *   - `new_window` / `none`, or no `recordOpen` at all: no section.
  *
@@ -52,21 +52,30 @@ function openDisplay(recordOpen: ViewSettingsRecordOpen | undefined, language = 
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
 }
 
-const drawer = (preference: 'drawer' | 'split', setPreference = vi.fn()): ViewSettingsRecordOpen => ({
+// The console's host: it offers the full page as the third choice (`selectPage`, objectstack#27545).
+const drawer = (preference: 'drawer' | 'split' | 'page', setPreference = vi.fn(), selectPage = vi.fn()): ViewSettingsRecordOpen => ({
   resolvedMode: 'drawer',
   preference,
   setPreference,
+  selectPage,
 });
 
 describe('ViewSettingsPopover — Open records (objectstack#26681)', () => {
-  it('a drawer object: the two segments, the reader\'s current choice pressed, and the note', async () => {
+  it('a drawer object: the three segments, the reader\'s current choice pressed, and the note', async () => {
     openDisplay(drawer('drawer'));
     const section = await screen.findByTestId('display-record-open');
     expect(section.textContent).toContain('Open records');
     const group = screen.getByRole('radiogroup', { name: 'Open records' });
     expect(group).toBeTruthy();
+    // objectstack#27545 — Split first (the default), then Drawer, then Full page.
+    expect(Array.from(group.querySelectorAll('[role="radio"]')).map((radio) => radio.textContent)).toEqual([
+      'Split',
+      'Drawer',
+      'Full page',
+    ]);
     expect(screen.getByRole('radio', { name: 'Drawer' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('radio', { name: 'Split' }).getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByRole('radio', { name: 'Full page' }).getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('display-record-open-note').textContent).toBe(en.list.recordOpenNote);
     expect(screen.queryByTestId('display-record-open-declared')).toBeNull();
   });
@@ -79,6 +88,31 @@ describe('ViewSettingsPopover — Open records (objectstack#26681)', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Split' }));
     expect(setPreference).toHaveBeenCalledTimes(1);
     expect(setPreference).toHaveBeenCalledWith('split');
+  });
+
+  it('objectstack#27545 — choosing Full page calls the host\'s `selectPage`, never `setPreference`, and a reader who prefers it sees it pressed', async () => {
+    const setPreference = vi.fn();
+    const selectPage = vi.fn();
+    openDisplay(drawer('split', setPreference, selectPage));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Full page' }));
+    expect(selectPage).toHaveBeenCalledTimes(1);
+    expect(setPreference).not.toHaveBeenCalled();
+    cleanup();
+    openDisplay(drawer('page', setPreference, selectPage));
+    expect((await screen.findByRole('radio', { name: 'Full page' })).getAttribute('aria-checked')).toBe('true');
+    // Pressing the pressed segment writes nothing.
+    fireEvent.click(screen.getByRole('radio', { name: 'Full page' }));
+    expect(selectPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('objectstack#27545 CONTROL — a host that passes no `selectPage` draws two segments, now Split then Drawer', async () => {
+    openDisplay({ resolvedMode: 'drawer', preference: 'drawer', setPreference: vi.fn() });
+    const group = await screen.findByRole('radiogroup', { name: 'Open records' });
+    expect(Array.from(group.querySelectorAll('[role="radio"]')).map((radio) => radio.textContent)).toEqual([
+      'Split',
+      'Drawer',
+    ]);
+    expect(screen.queryByRole('radio', { name: 'Full page' })).toBeNull();
   });
 
   it('a reader who prefers the split pane sees Split pressed, and can go back to Drawer', async () => {
@@ -116,6 +150,7 @@ describe('ViewSettingsPopover — Open records (objectstack#26681)', () => {
     // The zh pack loads on demand: wait for its words, not for the section.
     expect(await screen.findByRole('radio', { name: zh.recordOpenDrawer })).toBeTruthy();
     expect(screen.getByRole('radio', { name: zh.recordOpenSplit })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: zh.recordOpenPage })).toBeTruthy();
     expect(screen.getByTestId('display-record-open').textContent).toContain(zh.recordOpen);
     expect(screen.getByTestId('display-record-open-note').textContent).toBe(zh.recordOpenNote);
     cleanup();
