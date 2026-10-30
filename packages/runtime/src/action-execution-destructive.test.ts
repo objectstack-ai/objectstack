@@ -214,6 +214,12 @@ describe('sibling identity actions with a declared destructive signal still read
         const action = actionByName(SysOrganization, 'leave_organization');
         expect(action.variant).toBe('danger');
         expect(action.mode).not.toBe('delete');
+        // ADR-0011's 2026-10-30 addendum exposes it in bucket C, and its declared
+        // `ai.requiresConfirmation: true` is read before the variant — so the
+        // variant leg is read with that override set aside, and the declared
+        // flag is asserted on its own.
+        expect(action.ai?.requiresConfirmation).toBe(true);
+        expect(actionLooksDestructive(deps, { ...action, ai: undefined })).toBe(true);
         expect(actionLooksDestructive(deps, action)).toBe(true);
     });
 });
