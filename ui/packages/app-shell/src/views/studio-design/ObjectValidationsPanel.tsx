@@ -646,6 +646,7 @@ function RuleTypeFields({
   onBlockingIssuesChange,
   missing,
   guardRef,
+  ruleIndex,
 }: {
   rule: ValidationRuleDraft;
   fields: FieldOpt[];
@@ -664,6 +665,12 @@ function RuleTypeFields({
    * preset leaves the condition to the author.
    */
   guardRef?: React.Ref<HTMLDivElement>;
+  /**
+   * objectstack#27644 — the rule's index in the draft's `validations` list, the
+   * index the publish verdict locates its findings by; `-1` for a rule not in
+   * the draft yet, which no verdict has judged.
+   */
+  ruleIndex: number;
 }) {
   const captionId = React.useId();
   const heldHint = <HeldHint locale={locale} />;
@@ -756,6 +763,10 @@ function RuleTypeFields({
            imply a server host — see `RECORD_CONDITION_SUBJECTS`. */
         subjects={{ context: RECORD_CONDITION_SUBJECTS }}
         onBlockingIssuesChange={onBlockingIssuesChange}
+        /* objectstack#27644 — where the draft's served verdict locates this
+           guard (`validations.1.condition`, a conditional's `.when`): what the
+           publish refuses there holds the Data pillar's autosave. */
+        verdictPath={ruleIndex >= 0 ? `validations.${ruleIndex}.${guard}` : undefined}
       />
       {missing === 'rule' && heldHint}
     </div>
@@ -1399,6 +1410,9 @@ export function ObjectValidationsPanel({
               onBlockingIssuesChange={(count) => reportCel(sel.name!, count)}
               missing={selMissing}
               guardRef={guardRef}
+              // The raw list, as the verdict indexes it: a non-rule member
+              // `readRules` skips still takes its place.
+              ruleIndex={Array.isArray(draft.validations) ? draft.validations.indexOf(sel) : -1}
             />
 
             {/* runs-on events: the spec's events, an absent key shown as its default (objectui#11923) */}
