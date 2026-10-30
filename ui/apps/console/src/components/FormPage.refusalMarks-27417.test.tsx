@@ -21,6 +21,7 @@
  * no row and still says what it said before.
  */
 
+import type React from 'react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -270,7 +271,68 @@ describe('#27417 — a refusal naming no field marks none', () => {
     await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText('Name')).not.toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByLabelText('Email')).not.toHaveAttribute('aria-invalid', 'true');
-    expect(screen.queryByText('Company is required')).toBeNull();
+    // No row carries the reason; the banner says it (#28053).
+    expect(document.querySelectorAll('[id$="-error"]')).toHaveLength(0);
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toBe('Company is required');
+  });
+});
+
+/** The banner's list items, as text. */
+function bannerItems(): string[] {
+  return Array.from(document.querySelectorAll('[id^="form-error:"] li')).map((li) => li.textContent ?? '');
+}
+
+/** The last toast's content, drawn, as its list items. */
+function toastItems(): string[] {
+  const content = vi.mocked(toast.error).mock.calls.at(-1)![0] as React.ReactNode;
+  const { container } = render(<>{content}</>);
+  return Array.from(container.querySelectorAll('li')).map((li) => li.textContent ?? '');
+}
+
+describe('#28053 — one entry per failed validation rule', () => {
+  const AMOUNT = 'Amount must be positive.';
+  const TERMS = 'Accept the terms before sending.';
+
+  it('two record-level rules: two banner lines and two toast lines, no joined summary', async () => {
+    stubPublic(['name', 'email', 'company'], {
+      status: 400,
+      body: {
+        error: `${AMOUNT}; ${TERMS}`,
+        code: 'VALIDATION_FAILED',
+        fields: [
+          { field: '_record', code: 'rule_violation', message: AMOUNT },
+          { field: '_record', code: 'rule_violation', message: TERMS },
+        ],
+      },
+    });
+    await fillAndSubmit({ Name: 'Ada', Email: 'ada@example.com' });
+
+    await waitFor(() => expect(bannerItems()).toEqual([AMOUNT, TERMS]));
+    expect(toastItems()).toEqual([AMOUNT, TERMS]);
+    expect(screen.queryByText(/Submit failed/)).toBeNull();
+    expect(document.querySelectorAll('[id$="-error"]')).toHaveLength(0);
+  });
+
+  it('one located + one record-level rule: the row carries its reason, the banner says the other', async () => {
+    stubPublic(['name', 'email', 'company'], {
+      status: 400,
+      body: {
+        error: `Email is not a valid email address; ${AMOUNT}`,
+        code: 'VALIDATION_FAILED',
+        fields: [
+          { field: 'email', code: 'rule_violation', message: 'Email is not a valid email address' },
+          { field: '_record', code: 'rule_violation', message: AMOUNT },
+        ],
+      },
+    });
+    await fillAndSubmit({ Name: 'Ada', Email: 'ada' });
+
+    const email = screen.getByLabelText('Email');
+    await waitFor(() => expect(email).toHaveAttribute('aria-invalid', 'true'));
+    expect(describedText(email)).toContain('Email is not a valid email address');
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toBe(AMOUNT);
+    expect(await screen.findByText(AMOUNT)).toBeInTheDocument();
+    expect(screen.queryByText(/Submit failed/)).toBeNull();
   });
 });
 
