@@ -140,6 +140,13 @@ interface UnifiedSidebarProps {
   activeAppName?: string;
   /** Callback when user switches apps */
   onAppChange?: (name: string) => void;
+  /**
+   * Below the fold width, draw the sidebar as the icon rail that expands over
+   * the content (objectstack#27593). The console layout sets it, and folds
+   * the sidebar with `useResponsiveSidebar`; off, the sidebar is drawn as the
+   * provider says at every width.
+   */
+  railOverlay?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -157,7 +164,7 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
+export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
@@ -176,7 +183,7 @@ export function UnifiedSidebar({ activeAppName }: UnifiedSidebarProps) {
   const resolveNavTargetLabel = useNavTargetLabel();
   // Below the fold width the sidebar is the icon rail and expands over the
   // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
-  const rail = useConsoleSidebarRail();
+  const rail = useConsoleSidebarRail({ enabled: railOverlay });
   const railPanel = useConsoleSidebarRailPanel(rail);
   const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
 

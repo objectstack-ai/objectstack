@@ -115,8 +115,12 @@ export interface ConsoleSidebarRail {
   overlayOpen: boolean;
 }
 
-/** Where the console sidebar stands against the fold. Inside the sidebar provider. */
-export function useConsoleSidebarRail(): ConsoleSidebarRail {
+/**
+ * Where the console sidebar stands against the fold. Inside the sidebar
+ * provider. `enabled: false` answers "no fold" at every width: a sidebar the
+ * console layout does not fold is drawn as the provider says.
+ */
+export function useConsoleSidebarRail({ enabled = true }: { enabled?: boolean } = {}): ConsoleSidebarRail {
   const { isMobile, open } = useSidebar();
   const belowRailWidth = useIsViewportBelow(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH);
   const [keepOpenChoice, setKeepOpenChoice] = useWorkspacePreference(
@@ -128,7 +132,7 @@ export function useConsoleSidebarRail(): ConsoleSidebarRail {
     (keepOpen: boolean) => setKeepOpenChoice(keepOpen ? 'on' : 'off'),
     [setKeepOpenChoice],
   );
-  const narrow = belowRailWidth && !isMobile;
+  const narrow = enabled && belowRailWidth && !isMobile;
   const keepOpen = keepOpenChoice === 'on';
   const railMode = narrow && !keepOpen;
   return { narrow, keepOpen, setKeepOpen, railMode, overlayOpen: railMode && open };
