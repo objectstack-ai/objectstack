@@ -93,7 +93,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Locale",
-        help: "Preferred language for this user's notifications, as a language tag such as zh-CN or ja-JP. When unset, the deployment's default language applies."
+        help: "The language this user sees the interface in and receives notifications in, as a language tag such as zh-CN or ja-JP. When unset, the deployment's default language applies."
       },
       manager_id: {
         label: "Manager",

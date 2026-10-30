@@ -93,7 +93,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "言語",
-        help: "このユーザーへの通知に使用する優先言語。zh-CN や ja-JP のような言語タグで指定します。未設定の場合はデプロイのデフォルト言語が適用されます。"
+        help: "このユーザーの画面表示と通知に使用する言語。zh-CN や ja-JP のような言語タグで指定します。未設定の場合はデプロイのデフォルト言語が適用されます。"
       },
       manager_id: {
         label: "マネージャー",

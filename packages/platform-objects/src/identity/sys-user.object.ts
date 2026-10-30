@@ -1087,8 +1087,8 @@ export const SysUser = ObjectSchema.create({
       maxLength: 35,
       group: 'Profile',
       description:
-        'Preferred language for this user\'s notifications, as a language tag such as zh-CN or ja-JP. ' +
-        'When unset, the deployment\'s default language applies.',
+        'The language this user sees the interface in and receives notifications in, as a language tag ' +
+        'such as zh-CN or ja-JP. When unset, the deployment\'s default language applies.',
     }),
 
     // ── Organization ─────────────────────────────────────────────

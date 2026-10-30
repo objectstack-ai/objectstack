@@ -93,7 +93,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "语言",
-        help: "该用户接收通知时使用的首选语言，填写语言标签，如 zh-CN 或 ja-JP。未设置时采用部署的默认语言。"
+        help: "该用户界面显示和接收通知所用的语言，填写语言标签，如 zh-CN 或 ja-JP。未设置时采用部署的默认语言。"
       },
       manager_id: {
         label: "经理",
