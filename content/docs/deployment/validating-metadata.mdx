@@ -804,15 +804,23 @@ validated after, so the envelope describes the effective item.
 
 `GET /api/v1/meta/diagnostics` sweeps every type and item in one request:
 
-| Query | Default | Effect |
-| :--- | :--- | :--- |
-| `severity` | `error` | `error` returns invalid items only; `warning` also returns warning-only items |
-| `type` | — | One metadata type |
-| `package` | — | One package |
+| Query | Default | Effect | Refused with `400 INVALID_REQUEST` |
+| :--- | :--- | :--- | :--- |
+| `severity` | `error` | `error` returns invalid items only; `warning` also returns warning-only items | Any other value |
+| `type` | every type | One metadata type, singular or plural | A misspelling of a declared type (the message names the accepted spellings), or a name that is neither a declared type nor a type this deployment carries |
+| `package` | every package | One package; `all` sweeps every package | A package that is not installed and that no item is bound to |
+
+An empty value keeps the default. Every refusal answers in the nested
+`{ error: { code, message } }` envelope; a repeated parameter (`?type=view&type=object`)
+is refused the same way with `VALIDATION_ERROR`. An installed package with no items
+answers zero counts, not a refusal.
 
 The response carries `entries` (each `{ type, name, diagnostics }`), `total`,
-`scannedTypes`, `scannedItems` and per-type `stats`. `total === 0` is a usable CI gate
-against a running server; add `severity=warning` to hold warnings to the same bar.
+`scannedTypes`, `scannedItems` and per-type `stats`. `stats` and each entry's `type` use
+the canonical type name: `type=views` answers under `stats.view`, exactly as `type=view`
+does. `total === 0` is a usable CI gate against a running server: a misspelled `type` or
+`package` answers the 400, never an empty sweep that reads as `total === 0`. Add
+`severity=warning` to hold warnings to the same bar.
 Studio shows the same envelope on the metadata directory, each type's list, each
 item's edit page and the governance page (`…/metadata/_diagnostics`).
 
