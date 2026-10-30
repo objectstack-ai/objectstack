@@ -221,3 +221,84 @@ describe('[#27732] the in-process engine refuses a search-field override naming 
     expect(await answered(engine, 'find', { search: 'harbour', searchFields: null })).toEqual(DEFAULT_ANSWER.find);
   });
 });
+
+/**
+ * [#28120] …and an override that names no SEARCHABLE field — every name
+ * unknown, or no entry a field name at all — is refused `400 INVALID_FIELD`,
+ * the code the door answers the same value with (`assertSearchFieldsAreSearchable`,
+ * #4254). `resolveSearchFields` dropped the unknown names and fell back to the
+ * whole default set, so a typo or a renamed field searched every default
+ * column instead of the one the caller meant. An override naming at least one
+ * searchable field keeps the engine's tolerance: the other names are dropped.
+ */
+describe('[#28120] the in-process engine refuses a search-field override naming no searchable field', () => {
+  let engine: ObjectQL;
+  let reads: Array<{ via: string; where: unknown }>;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const made = makeDriver();
+    reads = made.reads;
+    engine.registerDriver(made.driver, true);
+    await engine.init();
+    engine.registry.registerObject(account, 'test-package');
+  });
+
+  describe.each(VERBS)('%s', (verb) => {
+    it('an all-unknown searchFields list is refused 400 INVALID_FIELD, before any driver read', async () => {
+      const answer = await wireAnswer(run(engine, verb, { search: 'harbour', searchFields: ['nmae', 'town'] }));
+      expect(answer).toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'searchFields' });
+      expect(reads).toEqual([]);
+    });
+
+    it('the comma-string and object-form spellings are refused the same way', async () => {
+      expect(await wireAnswer(run(engine, verb, { search: 'harbour', searchFields: 'nmae' })))
+        .toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'searchFields' });
+      expect(await wireAnswer(run(engine, verb, { search: { query: 'harbour', fields: ['nmae'] } })))
+        .toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'search.fields' });
+      expect(reads).toEqual([]);
+    });
+
+    it('a list with no field-name entry at all is refused too', async () => {
+      expect(await wireAnswer(run(engine, verb, { search: 'harbour', searchFields: [42] })))
+        .toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'searchFields' });
+      expect(reads).toEqual([]);
+    });
+
+    it('CONTROL: a partly-known override still narrows to its known names (the tolerance kept)', async () => {
+      expect(await answered(engine, verb, { search: 'harbour', searchFields: ['name', 'nmae'] })).toEqual(NAME_ONLY_ANSWER[verb]);
+    });
+
+    it('CONTROL: a valid override narrows and an absent one searches the default set, as before', async () => {
+      expect(await answered(engine, verb, { search: 'harbour', searchFields: ['name'] })).toEqual(NAME_ONLY_ANSWER[verb]);
+      expect(await answered(engine, verb, { search: 'harbour' })).toEqual(DEFAULT_ANSWER[verb]);
+    });
+  });
+
+  it('the refusal names the field the caller wrote', async () => {
+    const err: any = await engine.find(account.name, { search: 'harbour', searchFields: ['nmae'] }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ field: 'nmae', fields: ['nmae'], object: account.name });
+    expect(err.message).toContain("names no searchable field in 'searchFields'");
+  });
+
+  it('the REST door answers the same status and code for the same override', async () => {
+    const protocol = new ObjectStackProtocolImplementation(engine);
+    const door = await wireAnswer(protocol.findData({ object: account.name, query: { search: 'harbour', searchFields: 'nmae' } as any }));
+    const inProcess = await wireAnswer(engine.find(account.name, { search: 'harbour', searchFields: ['nmae'] }));
+    expect({ status: inProcess.status, code: inProcess.code }).toEqual({ status: door.status, code: door.code });
+    expect(door).toMatchObject({ status: 400, code: 'INVALID_FIELD' });
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: an object with no searchable field keeps its own refusal (#24284), naming that cause', async () => {
+    engine.registry.registerObject({
+      name: 'link_28120',
+      label: 'Link',
+      fields: { id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true } },
+      searchableFields: ['gone'],
+    } as any, 'test-package');
+    const err: any = await engine.find('link_28120', { search: 'harbour', searchFields: ['nmae'] }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'INVALID_FIELD', param: 'search' });
+    expect(err.message).toContain('has no searchable field');
+  });
+});

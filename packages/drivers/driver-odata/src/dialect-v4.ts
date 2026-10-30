@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The OData 4.0 dialect — the one this package ships (maintainer order: v4
- * only; a v2 dialect is a sibling file implementing {@link ODataDialect}).
+ * The OData 4.0 dialect, the default (`version: '4.0'`). Its sibling
+ * `dialect-v2.ts` implements the same {@link ODataDialect} for OData 2.0, and
+ * reuses this file's XML helpers.
  *
  * References: OData Version 4.0 Part 1 (Protocol) §11.2.6.1 (system query
  * options), Part 2 (URL Conventions) §5.1.1 (`$filter` operators and
@@ -22,7 +23,7 @@ import type {
   ODataStringFunction,
 } from './dialect.js';
 
-type XmlNode = Record<string, unknown>;
+export type XmlNode = Record<string, unknown>;
 
 const INTEGER_TYPES: ReadonlySet<string> = new Set(['Edm.Byte', 'Edm.SByte', 'Edm.Int16', 'Edm.Int32', 'Edm.Int64']);
 const DECIMAL_TYPES: ReadonlySet<string> = new Set(['Edm.Decimal', 'Edm.Double', 'Edm.Single']);
@@ -40,24 +41,24 @@ const MEMBER_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;
 
 /** `Collection(X)` → `{ type: X, isCollection: true }`. */
-function unwrapCollection(type: string): { type: string; isCollection: boolean } {
+export function unwrapCollection(type: string): { type: string; isCollection: boolean } {
   const match = /^Collection\((.+)\)$/.exec(type);
   return match ? { type: match[1]!, isCollection: true } : { type, isCollection: false };
 }
 
-const children = (node: unknown, name: string): XmlNode[] => {
+export const children = (node: unknown, name: string): XmlNode[] => {
   if (!node || typeof node !== 'object') return [];
   const value = (node as XmlNode)[name];
   return Array.isArray(value) ? (value as XmlNode[]) : [];
 };
 
-const attr = (node: XmlNode, name: string): string | undefined => {
+export const attr = (node: XmlNode, name: string): string | undefined => {
   const value = node[`@_${name}`];
   return typeof value === 'string' ? value : undefined;
 };
 
 /** The parser: every element an array (so a single child reads like many), attributes kept as text. */
-const xmlParser = new XMLParser({
+export const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   removeNSPrefix: true,
@@ -79,7 +80,7 @@ export function parseCsdlV4(xml: string): ODataServiceModel {
   if (!edmx || !version || !version.startsWith('4.')) {
     throw new Error(
       `driver-odata: the $metadata document is not CSDL 4.x (edmx:Edmx Version="${version ?? 'absent'}"); `
-      + 'this driver ships the OData v4 dialect only',
+      + "this is the v4 dialect only; an OData v2 service is read with `version: '2.0'`",
     );
   }
   const schemas = children(edmx, 'DataServices').flatMap((ds) => children(ds, 'Schema'));
@@ -99,14 +100,6 @@ export function parseCsdlV4(xml: string): ODataServiceModel {
     return isCollection ? `Collection(${resolved})` : resolved;
   };
 
-  interface RawEntityType {
-    fullName: string;
-    name: string;
-    baseType?: string;
-    key: string[];
-    properties: EdmProperty[];
-    navigationProperties: EdmNavigationProperty[];
-  }
   const raw = new Map<string, RawEntityType>();
   const enumTypes = new Set<string>();
   const entitySets = new Map<string, EdmEntitySet>();
@@ -171,7 +164,21 @@ export function parseCsdlV4(xml: string): ODataServiceModel {
     }
   }
 
-  // Flatten inheritance: base type first, keys from the nearest type that declares one.
+  return { version, entityTypes: flattenEntityTypes(raw), entitySets, enumTypes };
+}
+
+/** An entity type as its schema declares it, before inheritance is flattened. */
+export interface RawEntityType {
+  fullName: string;
+  name: string;
+  baseType?: string;
+  key: string[];
+  properties: EdmProperty[];
+  navigationProperties: EdmNavigationProperty[];
+}
+
+/** Flatten inheritance: base type first, keys from the nearest type that declares one. */
+export function flattenEntityTypes(raw: ReadonlyMap<string, RawEntityType>): Map<string, EdmEntityType> {
   const entityTypes = new Map<string, EdmEntityType>();
   const resolve = (fullName: string, seen: Set<string>): EdmEntityType | undefined => {
     const done = entityTypes.get(fullName);
@@ -191,8 +198,7 @@ export function parseCsdlV4(xml: string): ODataServiceModel {
     return resolved;
   };
   for (const fullName of raw.keys()) resolve(fullName, new Set());
-
-  return { version, entityTypes, entitySets, enumTypes };
+  return entityTypes;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
