@@ -1119,8 +1119,9 @@ new ObjectStackAdapter(config: {
 - `connect()` - Establish connection to ObjectStack server
 - `find(resource, params?)` - Query multiple records
 - `findOne(resource, id, params?)` - Get a single record by ID
-- `create(resource, data)` - Create a new record
-- `update(resource, id, data)` - Update an existing record
+- `create(resource, data, opts?)` - Create a new record
+- `update(resource, id, data, opts?)` - Update an existing record; `opts.ifMatch` sends `If-Match`
+- `opts.onMentionsWithheld(ids)` on either - Hear a `sys_comment` write's `withheldMentions`: the ids of the mentioned users the server will not notify, on the author's own write only. Called once after the write succeeded, only when at least one id is named; the call still resolves the record
 - `delete(resource, id)` - Delete a record
 - `bulk(resource, operation, data)` - Batch operations (create/update/delete)
 - `bulkUpdate(resource, ids, patch)` / `bulkDelete(resource, ids)` - One `updateMany` / `deleteMany` request for many ids (`continueOnError: true`). Resolves to `{ succeeded, errors }`: the server's count plus one `{ id, error }` per refused record, with the server's reason
