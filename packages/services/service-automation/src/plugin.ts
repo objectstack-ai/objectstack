@@ -1457,6 +1457,10 @@ export class AutomationServicePlugin implements Plugin {
                         // policy reading `current_user.email` resolves for the
                         // run as it does for the user's own request.
                         ...(grants.email ? { email: grants.email } : {}),
+                        // The rung the request path carries for this user
+                        // (`resolveAuthzContext` copies it off this same
+                        // resolution), derived once there and never here.
+                        ...(grants.posture ? { posture: grants.posture } : {}),
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });
@@ -1470,10 +1474,18 @@ export class AutomationServicePlugin implements Plugin {
                 // argument: the read a request resolves `ExecutionContext.currency`
                 // with, over the same engine and the `settings` service, probed at
                 // run setup so a late-registered settings service is seen.
+                // [#28056] A read that FAILED rejects, as the messaging
+                // channels' reader does (#27257): it learned nothing, so a
+                // hole that then refuses for want of a default is graded a
+                // runtime failure, never "the organization has none".
                 this.engine.setTenantCurrencyResolver(async (tenantId) => {
                     let settings: unknown;
                     try { settings = ctx.getService('settings'); } catch { settings = undefined; }
                     const localization = await resolveLocalizationContext({ ql: engineQl, settings, organizationId: tenantId });
+                    if (localization.readFailed) {
+                        const of = tenantId ? ` of organization '${tenantId}'` : '';
+                        throw new Error(`the localization settings${of} could not be read`);
+                    }
                     return localization.currency;
                 });
 

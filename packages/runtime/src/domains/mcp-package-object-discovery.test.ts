@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: twenty-four in-process kernel boots, one per describe (each shape × registration, package state and artifact fixture), each answering its block's bridge and door reads; slowest CI reading 14.93 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up; read before this file paid each shape's first boot at module scope
 
 /**
  * [#25120] The `/mcp` bridge sees the objects a PACKAGE contributes: listed,
@@ -274,6 +275,13 @@ const REGISTRATIONS = [
     { label: 'registered during the boot', when: 'boot' },
     { label: 'installed after the boot, as marketplace install registers it', when: 'install' },
 ] as const;
+
+// [#23181] Pay each shape's first boot at module scope, never in a hook: vitest
+// clocks a hook as it clocks a test, and each shape's first boot was the slow
+// one (276 and 163 ms against 45 to 131 ms for the rest, isolated). The throwaway kernel is
+// the first describe's own fixture, booted and shut down before any hook runs,
+// so it leaves nothing behind that a later boot does not already inherit.
+for (const { environmentId } of SHAPES) await shutdown(await bootKernel(environmentId, 'boot', packageOf('qa_pkg')));
 
 for (const { shape, environmentId } of SHAPES) {
     for (const { label, when } of REGISTRATIONS) {
