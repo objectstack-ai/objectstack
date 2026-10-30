@@ -65,8 +65,8 @@
  * Which turbo.json: the nearest one upward, through `uiScopedTurboConfig` in
  * `scripts/workspace-root.mjs` (objectstack#25723). Standalone that is this
  * repository's own. Under the objectstack monorepo the objectui tree is `ui/`
- * and its turbo.json is parked (a nested one must `extends` the root), so the
- * root's is read and narrowed to the objectui SUBSET: its `$TURBO_ROOT$/ui/x`
+ * and has no turbo.json of its own (a nested one must `extends` the root), so
+ * the root's is read and narrowed to the objectui SUBSET: its `$TURBO_ROOT$/ui/x`
  * inputs are the re-rooted spelling of `$TURBO_ROOT$/x` and are read as such,
  * and every other `$TURBO_ROOT$` input and `globalDependencies` entry is the
  * monorepo's own and is dropped -- read whole, the rule would widen every
