@@ -450,6 +450,8 @@ describe('RecordDetailView — optimistic comments ride with their own record (#
     expect(dataSource.create).toHaveBeenCalledWith(
       'sys_comment',
       expect.objectContaining({ thread_id: `${OBJECT_NAME}:${REC_B}`, body: 'written on B' }),
+      // The per-call listener for the answer's `withheldMentions` (objectstack#28218).
+      { onMentionsWithheld: expect.any(Function) },
     );
 
     rerender(tree(dataSource, REC_A, [AUTHORED_PAGE_WITH_DISCUSSION]));
