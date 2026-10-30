@@ -2433,10 +2433,15 @@ export function proseBlockerClause(candidates, heldBack = 0) {
       ' They all still read OPEN, so the block itself looks live — what is missing is only the ' +
       'line that would let a machine see it when they close.';
   } else {
+    // Each count is named only when it is non-zero: abandoned beside unresolved
+    // has no open row, and `0 still read OPEN` would say the opposite of held.
+    const counts = [
+      open.length > 0 ? `${open.length} still read${open.length === 1 ? 's' : ''} OPEN` : null,
+      abandoned.length > 0 ? `${abandoned.length} closed UNMERGED (which withholds)` : null,
+      unresolved.length > 0 ? `${unresolved.length} could not be resolved from this install` : null,
+    ].filter(Boolean);
     verdict =
-      ` None of them has released — ${open.length} still read${open.length === 1 ? 's' : ''} OPEN` +
-      (abandoned.length > 0 ? `, ${abandoned.length} closed UNMERGED (which withholds)` : '') +
-      (unresolved.length > 0 ? `, ${unresolved.length} could not be resolved from this install` : '') +
+      ` None of them has released — ${counts.join(', ')}` +
       ' — so the block itself looks live, and what is missing is only the line that would ' +
       'let a machine see it when a target merges or closes.';
   }
@@ -7656,12 +7661,14 @@ export function h28StaleBodyBlockerLine(issue, resolutions, commentBodies, owner
   if (spent.length === 0 || live.length === 0) return null;
 
   return (
-    `\`pm:blocked\` whose BODY names ${spent.length} CLOSED \`Blocked-by:\` target(s) ` +
-    `(${namedTargets(spent)}) while a COMMENT names ${live.length} that ${live.length === 1 ? 'is' : 'are'} ` +
+    `\`pm:blocked\` whose BODY names ${spent.length} \`Blocked-by:\` target(s) no longer OPEN ` +
+    `(${namedTargets(spent)} — an issue reads closed, a PR reads closed by its MERGE, and a PR that ` +
+    'closed UNMERGED is named so: it released nothing, but the body line is spent either way) ' +
+    `while a COMMENT names ${live.length} that ${live.length === 1 ? 'is' : 'are'} ` +
     `still OPEN (${namedTargets(live)}) and appear(s) nowhere in the body — so the body line is ` +
     'STALE: it states a wait that is over, and the wait that is actually running is parked in the ' +
     'channel the body is supposed to be the canonical home for. This is the written half of a ' +
-    'RE-PARK: a seat found the body\'s upstream closed, carded the real prerequisite, and wrote ' +
+    'RE-PARK: a seat found the body\'s upstream closed or merged, carded the real prerequisite, and wrote ' +
     'the new blocker into a comment (the cheaper, safer write) without spending the body line. ' +
     '⚠️ Read what that costs before the migration: until the liveness read was ungated this card ' +
     'resolved ONLY the closed body target and was published as a card whose every blocker had ' +
@@ -25097,6 +25104,9 @@ async function selfTest() {
   t('H4 prose PR: …and says what to do with it: re-point, not release', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('releases nothing'), true);
   t('H4 prose PR: an UNMERGED close beside an OPEN target is neither an expiry nor all-open', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('1 still reads OPEN, 1 closed UNMERGED (which withholds)'), true);
   t('H4 prose PR: …and the mixed count never counts the unmerged close as expired', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
+  const abandonedBesideUnresolved = proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), { ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]);
+  t('H4 prose PR: an UNMERGED close beside an UNRESOLVED target names only the counts it has', abandonedBesideUnresolved.includes('None of them has released — 1 closed UNMERGED (which withholds), 1 could not be resolved from this install —'), true);
+  t('H4 prose PR: …and never says `0 still read OPEN`', abandonedBesideUnresolved.includes('0 still read'), false);
   t('H4 prose PR: a MERGED PR beside an UNMERGED one counts only the merge as expired', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow), proseFromRow(27296, abandonedPrRow)]).includes('1 of 2 is ALREADY CLOSED'), true);
   t('H4 prose: an UNRESOLVED cross-repo candidate claims nothing about the block', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('says NOTHING about whether'), true);
   t('H4 prose: …and renders the cross-repo address, not a bare number', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('`objectstack-ai/objectui#4356` UNRESOLVED'), true);
@@ -30765,8 +30775,16 @@ async function selfTest() {
     [REPARK_COMMENT],
     'objectstack-ai/objectstack',
   ) ?? '');
-  t('H28: two stale body targets are counted', manyStale.includes('names 2 CLOSED'), true);
+  t('H28: two stale body targets are counted', manyStale.includes('names 2 `Blocked-by:` target(s) no longer OPEN'), true);
   t('H28: …and the live one is still named', manyStale.includes('`#11501`'), true);
+  // A body target that is a PR closed UNMERGED (#28033): the body line is spent
+  // either way (the wait it states is over), so the row still fires -- but the
+  // target is named with its unmerged mark, never as a bare close.
+  const abandonedStale = String(h28StaleBodyBlockerLine(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z', unmerged: true }), target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack') ?? '');
+  t('H28: an UNMERGED PR as the spent body target still fires the row', abandonedStale.includes('the body line is '), true);
+  t('H28: …naming it with its unmerged mark, as `namedTargets` renders it', abandonedStale.includes('`#9255` (closed UNMERGED 2026-08-19T11:28:26Z)'), true);
+  t('H28: …and never calls it a CLOSED target', abandonedStale.includes('names 1 CLOSED'), false);
+  t('H28: …while saying it released nothing', abandonedStale.includes('it released nothing'), true);
 
   // -- H32 — a HELD seat idle over a non-empty lane queue (#11706) ------------
   //
