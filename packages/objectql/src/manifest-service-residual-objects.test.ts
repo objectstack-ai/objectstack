@@ -40,6 +40,7 @@ import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core
 import { OWNERSHIP_QUEUE_SERVICE, type IMetadataService } from '@objectstack/spec/contracts';
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
+import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
 
@@ -471,6 +472,14 @@ describe('ADR-0130 D4 — the manifest service registers every other residual ty
     expect(noteViews.length).toBeGreaterThan(1);
     expect(new Set(noteViews.map((v) => v._packageId))).toEqual(new Set([RELEASE_ID]));
     expect((container as { _packageId?: string })._packageId).toBeUndefined();
+  });
+
+  it('a residual view container whose own `name` disagrees with its object is refused, in the body seam\'s words', async () => {
+    const container = { name: 'notes_grid', object: 'acme_note', list: { type: 'grid', columns: ['title'] } };
+    const expected = viewContainerNameRefusal(container, 'manifest', RELEASE_ID);
+    expect(expected).toBeDefined();
+    await expect(boot(registering('app', [residualStack(noteObj(), { views: [container] })])))
+      .rejects.toThrow(expected!.message);
   });
 
   it('a residual queue and assignment rule register when the ownership-queue service is composed', async () => {
