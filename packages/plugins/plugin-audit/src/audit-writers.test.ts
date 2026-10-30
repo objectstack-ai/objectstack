@@ -2638,8 +2638,13 @@ describe('audit writers — the writer reads the session key the engine emits (#
       ...aComment({ mentions: '["user-2","user-3"]' }),
       session: { organizationId: 'org-1', userId: 'user-1' },
     });
+    // `onWithheld` is how the gate hands back whom it withheld (#27703); the
+    // writer forwards that to the write's own listener, pinned beside the real gate.
     expect(asked).toEqual([
-      { mentions: ['user-2', 'user-3'], threadId: 'crm_lead:l-1', actorId: 'user-1', organizationId: 'org-1', commentId: 'c-1' },
+      {
+        mentions: ['user-2', 'user-3'], threadId: 'crm_lead:l-1', actorId: 'user-1', organizationId: 'org-1', commentId: 'c-1',
+        onWithheld: expect.any(Function),
+      },
     ]);
     expect(emits.filter((e) => e.topic === 'collab.mention').map((e) => e.audience)).toEqual([['user-2']]);
   });

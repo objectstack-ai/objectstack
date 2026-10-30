@@ -36,6 +36,13 @@
  * - the `messaging` service, played by a recorder of `emit()` calls (the
  *   inbox materialisation is service-messaging's to pin).
  *
+ * [#27703] The gate's verdict also reaches the AUTHOR: the users it withholds
+ * are handed to the write's own `onMentionsWithheld` listener (the in-process
+ * bag the data protocol's create and update pass, and answer as
+ * `withheldMentions`), ids only, and nothing is stored on the comment. An edit
+ * that adds a mention is judged and notified like one written with it, and an
+ * edit never re-judges a mention the comment already carried.
+ *
  * plugin-security also owns the two grant tables the resolver reads beside
  * `sys_member` (`sys_user_position`, `sys_user_permission_set`). They are
  * registered here with the columns the resolver reads. `sys_user_position`
@@ -397,6 +404,169 @@ describe('@mention notifications reach only mentioned users who can read the com
         { reason: 'no_comment_id', userId: CAROL.id },
         { reason: 'cannot_read_thread', userId: CAROL.id, commentId: 'cmt_never_written' },
       ]);
+    });
+
+    it('[#27703] tells `onWithheld` the id of each withheld user, never the reason, and nothing for an entry that names no user', async () => {
+      const commentId = String((await post(openTask, [])).id);
+      const told: unknown[][] = [];
+      const admitted = await admitMentionRecipients(gate([]), {
+        mentions: [BOB.email, DAVE.id, CAROL.id, 'nobody@nowhere.test', 'role:member'],
+        threadId: `${TASK}:${openTask}`,
+        actorId: ALICE.id,
+        organizationId: ORG_A,
+        commentId,
+        onWithheld: (...args: unknown[]) => { told.push(args); },
+      });
+      expect(admitted).toEqual([CAROL.id]);
+      expect(told).toEqual([[BOB.id], [DAVE.id]]);
+    });
+
+    it('[#27703] a throwing `onWithheld` changes no verdict', async () => {
+      const commentId = String((await post(openTask, [])).id);
+      const admitted = await admitMentionRecipients(gate([]), {
+        mentions: [BOB.id, CAROL.id],
+        threadId: `${TASK}:${openTask}`,
+        actorId: ALICE.id,
+        organizationId: ORG_A,
+        commentId,
+        onWithheld: () => { throw new Error('listener fault'); },
+      });
+      expect(admitted).toEqual([CAROL.id]);
+    });
+  });
+
+  describe('[#27703] the author is told who will not be notified, on their own write only', () => {
+    /** Post as ALICE with a listener on THIS write's options; the ids it was told and the stored row. */
+    const postTold = async (taskId: string, mentions: unknown[]) => {
+      seq += 1;
+      emits.length = 0;
+      const told: string[][] = [];
+      const row = await engine.insert(
+        'sys_comment',
+        { thread_id: `${TASK}:${taskId}`, body: `note ${seq}`, mentions: JSON.stringify(mentions) },
+        { context: authorContext(), onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); } } as any,
+      );
+      return { row, told, events: emits.filter((e) => e.topic === 'collab.mention') };
+    };
+    /** Edit `commentId` as ALICE with a listener on THIS write's options. */
+    const editTold = async (commentId: string, data: Record<string, unknown>) => {
+      emits.length = 0;
+      const told: string[][] = [];
+      await engine.update('sys_comment', data, {
+        where: { id: commentId },
+        context: authorContext(),
+        onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
+      } as any);
+      return { told, events: emits.filter((e) => e.topic === 'collab.mention') };
+    };
+
+    it('a create hands the withheld users\' ids, in the order named, to its own listener once; the reader is still notified', async () => {
+      const { told, events } = await postTold(openTask, [BOB.id, DAVE.id, CAROL.id]);
+      expect(told).toEqual([[BOB.id, DAVE.id]]);
+      expect(audiences(events)).toEqual([[CAROL.id]]);
+    });
+
+    it('a user named by email is reported by id, once however often named', async () => {
+      const { told } = await postTold(openTask, [BOB.email, BOB.id, ' Bob@B.Test ']);
+      expect(told).toEqual([[BOB.id]]);
+    });
+
+    it('control: nobody withheld, the author, an unknown address and an audience expansion → the listener is never called', async () => {
+      expect((await postTold(openTask, [CAROL.id])).told).toEqual([]);
+      expect((await postTold(openTask, [ALICE.id, ALICE.email])).told).toEqual([]);
+      expect((await postTold(openTask, ['nobody@nowhere.test', 'role:member'])).told).toEqual([]);
+      expect((await postTold(openTask, [])).told).toEqual([]);
+    });
+
+    it('nothing is stored: the comment declares no such field, and the stored row carries only what the author wrote', async () => {
+      const { row } = await postTold(openTask, [BOB.id, CAROL.id]);
+      const fields = Object.keys(engine.getSchema('sys_comment')?.fields ?? {});
+      expect(fields.filter((f) => /withheld/i.test(f))).toEqual([]);
+      const [stored] = await engine.find('sys_comment', { where: { id: row.id }, context: SYS });
+      expect(Object.keys(stored).filter((k) => /withheld/i.test(k))).toEqual([]);
+      expect(JSON.parse(String(stored.mentions))).toEqual([BOB.id, CAROL.id]);
+      // CAROL, a reader of the thread, reads exactly the stored row: no verdict about BOB reaches her.
+      const asCarol = await readCommentAs(CAROL, ['org_member', COMMENT_READER_POSITION], String(row.id));
+      expect(Object.keys(asCarol[0]).filter((k) => /withheld/i.test(k))).toEqual([]);
+    });
+
+    it('a comment written by a hook inside another write never reaches the outer write\'s listener', async () => {
+      const told: string[][] = [];
+      let nested = false;
+      engine.registerHook('afterInsert', async (ctx: any) => {
+        if (!nested || ctx.object !== TASK) return;
+        nested = false;
+        // The nested write carries its OWN options — here none — exactly as a hook's write does.
+        await engine.insert(
+          'sys_comment',
+          { thread_id: `${TASK}:${openTask}`, body: 'nested', mentions: JSON.stringify([BOB.id]) },
+          { context: authorContext() },
+        );
+      }, { object: TASK, packageId: HARNESS_PACKAGE });
+      emits.length = 0;
+      nested = true;
+      await engine.insert(TASK, { name: 'outer', organization_id: ORG_A, owner_id: ALICE.id, confidential: false }, {
+        context: authorContext(),
+        onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
+      } as any);
+      expect(nested).toBe(false); // the nested comment WAS written, and its gate DID withhold BOB …
+      expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
+      expect(told).toEqual([]); // … but the outer write was told nothing.
+    });
+
+    it('an edit that ADDS mentions judges only those: a new reader is notified, the withheld new ones are told, the kept one is not re-judged', async () => {
+      const { row } = await postTold(openTask, [CAROL.id]);
+      const { told, events } = await editTold(String(row.id), {
+        body: 'edited',
+        mentions: JSON.stringify([CAROL.id, DAVE.id, BOB.id]),
+      });
+      expect(told).toEqual([[DAVE.id, BOB.id]]);
+      expect(audiences(events)).toEqual([]);
+
+      const first = await postTold(openTask, []);
+      const added = await editTold(String(first.row.id), { mentions: JSON.stringify([CAROL.id]) });
+      expect(audiences(added.events)).toEqual([[CAROL.id]]);
+      expect(added.told).toEqual([]);
+    });
+
+    it('an edit that keeps a withheld mention is not told again, and an edit that does not touch mentions judges nothing', async () => {
+      const { row, told } = await postTold(openTask, [BOB.id, CAROL.id]);
+      expect(told).toEqual([[BOB.id]]);
+      const kept = await editTold(String(row.id), { body: 'reworded', mentions: JSON.stringify([BOB.id, CAROL.id]) });
+      expect(kept.told).toEqual([]);
+      expect(audiences(kept.events)).toEqual([]);
+      const untouched = await editTold(String(row.id), { body: 'reworded again' });
+      expect(untouched.told).toEqual([]);
+      expect(audiences(untouched.events)).toEqual([]);
+    });
+
+    it('an edit by someone other than the author makes the EDITOR the actor: named in the notification, and the one skipped', async () => {
+      const { row } = await postTold(openTask, []);
+      emits.length = 0;
+      const told: string[][] = [];
+      const carol = { userId: CAROL.id, tenantId: ORG_A, positions: ['org_member', COMMENT_READER_POSITION], permissions: [], accessible_org_ids: [ORG_A] };
+      await engine.update('sys_comment', { mentions: JSON.stringify([ALICE.id, CAROL.id, BOB.id]) }, {
+        where: { id: row.id },
+        context: carol,
+        onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
+      } as any);
+      const events = emits.filter((e) => e.topic === 'collab.mention');
+      // ALICE, the author, is now a recipient like anyone else; CAROL, who added the mentions, is not.
+      expect(audiences(events)).toEqual([[ALICE.id]]);
+      expect(events[0]).toMatchObject({ actorId: CAROL.id, payload: { actorName: CAROL.id } });
+      expect(told).toEqual([[BOB.id]]);
+    });
+
+    it('a throwing listener never fails the write and never stops the reader\'s notification', async () => {
+      seq += 1;
+      emits.length = 0;
+      const row = await engine.insert(
+        'sys_comment',
+        { thread_id: `${TASK}:${openTask}`, body: `note ${seq}`, mentions: JSON.stringify([BOB.id, CAROL.id]) },
+        { context: authorContext(), onMentionsWithheld: () => { throw new Error('listener fault'); } } as any,
+      );
+      expect(row.id).toBeTruthy();
+      expect(audiences(emits.filter((e) => e.topic === 'collab.mention'))).toEqual([[CAROL.id]]);
     });
   });
 });

@@ -2642,6 +2642,20 @@ const WRITE_ANSWER_WARNINGS_DESCRIPTION =
   'a hook or a flow made inside this one are not included, and a rule that could not be evaluated is not a hit.';
 
 /**
+ * The `withheldMentions` member the create and update answers declare (#27703)
+ * — one sentence, so the two answers cannot drift apart. Response-only: it is
+ * no field of any object, it is never stored, and a request never sends it.
+ */
+const WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION =
+  'The ids of the users this write @mentioned whose mention notification was WITHHELD by the mention recipient ' +
+  'gate, so they will not be notified: the gate\'s own verdict on THIS write, ids only, never the reason. ' +
+  'Only a `sys_comment` write fills it, and only on the requester\'s own answer to the request that made the write; ' +
+  'on an update, only a mention the update added is judged. The comment was saved with every mention; the ' +
+  'requester is told here that the named users will not be notified. Response-only: never stored on the comment ' +
+  '(a stored member would tell every reader who cannot read the thread). Present ONLY when at least one mention ' +
+  'was withheld; otherwise the key is omitted.';
+
+/**
  * The `notice` member the create and update answers declare (#28000) — one
  * sentence, so the two answers cannot drift apart. Response-only: it is no
  * field of any object, it is never stored, and a request never sends it.
@@ -2674,6 +2688,7 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
     'shape backward-compatible for existing clients.'
   ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
+  withheldMentions: z.array(z.string()).optional().describe(WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION),
   notice: z.string().min(1).optional().describe(WRITE_ANSWER_NOTICE_DESCRIPTION),
 }));
 
@@ -2856,6 +2871,7 @@ export const UpdateDataResponseSchema = lazySchema(() => z.object({
     'clients that only read `record`.'
   ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
+  withheldMentions: z.array(z.string()).optional().describe(WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION),
   notice: z.string().min(1).optional().describe(WRITE_ANSWER_NOTICE_DESCRIPTION),
 }));
 

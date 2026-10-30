@@ -95,6 +95,36 @@ export interface WriteObservabilityOptions {
   onValidationAdvisory?: (event: ValidationAdvisoryEvent) => void;
 
   /**
+   * Called with the ids of the mentioned users whose `@mention` notification
+   * the mention recipient gate WITHHELD on this write (#27703): the users the
+   * writer named who will not be notified, whatever the gate's reason (most
+   * often that they cannot read the comment or its record). Ids only, never
+   * the reason. `metadata-protocol`'s `createData` and `updateData` pass one and
+   * answer the ids as `withheldMentions`, on the requester's own answer to that
+   * request and nowhere else.
+   *
+   * The ENGINE never calls it. It reaches the mention writer (plugin-audit,
+   * on `sys_comment` `afterInsert` / `afterUpdate`) the way every member of
+   * this bag reaches an `after*` hook — on `ctx.input.options`, the caller's
+   * own bag, which `buildDriverOptions` widens and never strips — and the
+   * writer calls it once per written comment that withheld anyone, after the
+   * gate has judged. So it is the gate's own verdict, never a second
+   * derivation of readability. On an update, only a mention the update ADDED
+   * is judged; a mention the comment already carried was judged when it was
+   * written.
+   *
+   * A nested write a hook or a flow makes inside this one carries its own
+   * options, so its verdicts never reach this listener. Nothing is stored: a
+   * stored member would tell every reader of the comment who cannot read its
+   * thread.
+   *
+   * Same constraints as `onFieldsDropped`: in-process only (a function cannot
+   * cross the RPC boundary), and a listener that throws never breaks the write —
+   * the writer catches and logs.
+   */
+  onMentionsWithheld?: (userIds: readonly string[]) => void;
+
+  /**
    * The channel a hook uses to tell the person who made this write what the
    * save set in motion (#28000) — "Sent to your manager for approval", "A
    * renewal opportunity was created". One author-written message, info

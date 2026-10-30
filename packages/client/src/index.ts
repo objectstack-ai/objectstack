@@ -491,6 +491,14 @@ export interface CreateDataResult<T = any> {
    */
   warnings?: ValidateDataIssue[];
   /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
+  /**
    * [#28000] One author-written message a hook on this write set to tell the
    * person who made it what the save set in motion (for example "Sent to your
    * manager for approval"). Info severity, distinct from `warnings`: show it
@@ -552,6 +560,14 @@ export interface UpdateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
   /**
    * [#28000] One author-written message a hook on this write set to tell the
    * person who made it what the save set in motion (for example "Sent to your
