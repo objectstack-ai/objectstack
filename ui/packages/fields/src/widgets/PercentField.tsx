@@ -272,7 +272,9 @@ export function PercentField({ value, onChange, field, readonly, error, classNam
           value={displayValue}
           onChange={handleChange}
           onBlur={handleBlur}
-          placeholder={percentField?.placeholder || '0'}
+          // The field's own placeholder, or none: an empty box must read as
+          // empty, and a `0` stand-in beside the `%` reads as a filled-in 0%.
+          placeholder={percentField?.placeholder}
           disabled={readonly || props.disabled}
           className={cn('pr-8', refusal ? BAD_INPUT_BORDER : '', className)}
           step={Math.pow(10, -scale).toFixed(scale)}

@@ -186,16 +186,19 @@ const ADMIN = { id: 'u1', name: 'Dev Admin', positions: ['org_admin'] };
 const GENERIC_SUBTITLE = 'Please provide the required information to continue.';
 
 type InviteAnswer = { status: number; body: unknown };
+const INVITE_DOOR = '/api/v1/actions/sys_user/invite_user';
 let inviteAnswer: InviteAnswer;
 let fetchSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  // The click goes through the action door (objectstack#27611), which answers
+  // the target's payload as its `data` and a refusal as its own envelope.
   inviteAnswer = {
     status: 200,
-    body: { id: 'inv1', email: 'ada@example.com', role: 'member', status: 'pending' },
+    body: { success: true, data: { id: 'inv1', email: 'ada@example.com', role: 'member', status: 'pending' } },
   };
   fetchSpy = vi.fn(async (url: unknown) => {
-    const answer = String(url).includes('/organization/invite-member')
+    const answer = String(url).includes(INVITE_DOOR)
       ? inviteAnswer
       : { status: 200, body: { data: [] } };
     return new Response(JSON.stringify(answer.body), {
@@ -258,7 +261,7 @@ async function inviteAda(): Promise<void> {
   fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'ada@example.com' } });
   await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' })); });
   await waitFor(
-    () => expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/organization/invite-member'))).toBe(true),
+    () => expect(fetchSpy.mock.calls.some(([u]) => String(u).includes(INVITE_DOOR))).toBe(true),
     { timeout: 5000 },
   );
 }
@@ -271,12 +274,18 @@ describe('objectui#11817 — Invite User says it worked', () => {
     await inviteAda();
 
     expect(await screen.findByText('Invitation sent', undefined, { timeout: 5000 })).toBeInTheDocument();
-    const [, init] = fetchSpy.mock.calls.find(([u]) => String(u).includes('/organization/invite-member'))!;
-    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ email: 'ada@example.com', role: 'member' });
+    const [, init] = fetchSpy.mock.calls.find(([u]) => String(u).includes(INVITE_DOOR))!;
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ params: { email: 'ada@example.com', role: 'member' } });
   });
 
   it('control: a refused invite raises the server\'s message and no success toast', async () => {
-    inviteAnswer = { status: 400, body: { error: { message: 'User is already a member of this organization' } } };
+    inviteAnswer = {
+      status: 400,
+      body: {
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'User is already a member of this organization', httpStatus: 400 },
+      },
+    };
     mountList('sys_user', 'all_users', [sysUser(), ...MEMBERS]);
     await inviteAda();
 

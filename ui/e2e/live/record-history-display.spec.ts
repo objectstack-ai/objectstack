@@ -43,11 +43,7 @@ async function seededUsers(request: APIRequestContext): Promise<{ actor: SysUser
 /**
  * The synthesized record page lays itself out by the width of the view it
  * occupies (objectstack#26678): a column tier at `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH`
- * (`@object-ui/plugin-detail`) and wider, the tab strip below it. The stream
- * is resident in either column tier — the timeline column, or, while the
- * reader's timeline switch is off (the default for showcase_account, which is
- * not a worked object), the Activity card at the related column's foot — and
- * mounted at open, so the spec needs no tab and no switch.
+ * (`@object-ui/plugin-detail`) and wider, the tab strip below it.
  *
  * A 1440 px window is a column tier whatever the console sidebar does: 1184 px
  * of record view with the sidebar expanded (objectstack#27241's three-column
@@ -56,6 +52,19 @@ async function seededUsers(request: APIRequestContext): Promise<{ actor: SysUser
  * at 1000×800 the sidebar came up as its icon rail and the page drew two
  * columns with no tab strip at all, so a spec that waited for a tab there
  * timed out.
+ *
+ * In a column tier the stream is NOT resident by default for this object. The
+ * reader's Timeline switch (the header's Panels control) defaults to off for
+ * an object that is not worked (`recordTimelineDefaultReason`: showcase_account
+ * declares no `stageField`, no lifecycle option `kind` and no `enable.files`),
+ * and a switched-off timeline folds into the Activity (动态) card at the related
+ * column's foot — closed, its blocks not mounted until the reader opens it
+ * (`FoldedTimelineCard`, objectstack#27052). Measured under the nightly harness
+ * (a built Console on a fresh database, so no stored switch): at 1440×900 the
+ * page drew three columns, the Panels control read Timeline unpressed, and the
+ * Activity card was folded, so a spec that waited for the Changes chip at open
+ * timed out. The spec opens that card the way a reader does, and asserts each
+ * step: the switch is off, the card starts closed, the click opens it.
  */
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -83,11 +92,22 @@ test('the timeline stream\'s Changes chip shows display values (localized dates,
     expect(res.ok()).toBeTruthy();
   }
 
-  // 2) Open the synthesized record page and select the timeline stream's
-  //    Changes chip — the field changes alone (the audit entries, plus the
-  //    activity stream's own `created` row).
+  // 2) Open the synthesized record page, open the folded Activity card that
+  //    holds the stream (see the viewport note above), and select the
+  //    stream's Changes chip — the field changes alone (the audit entries,
+  //    plus the activity stream's own `created` row).
   await page.goto(`/apps/showcase_app/showcase_account/record/${id}`);
-  const stream = page.getByRole('region', { name: /^(Timeline|时间线)$/ });
+  const timelineSwitch = page.locator('[data-panel-toggles] [data-panel-toggle="timeline"]');
+  // The page-open wait: the same 15 s budget the spec gives its first element.
+  await expect(timelineSwitch, 'the Timeline switch is off for an object that is not worked').toHaveAttribute('aria-pressed', 'false', { timeout: 15_000 });
+  const activityCard = page.getByRole('region', { name: /^(Activity|动态)$/ });
+  // The toggle is the card heading's button: once open, the stream inside the
+  // card has an "Activity" filter chip of its own.
+  const activityToggle = activityCard.getByRole('heading', { name: /^(Activity|动态)$/ }).getByRole('button');
+  await expect(activityToggle, 'the switched-off timeline is folded into a closed Activity card').toHaveAttribute('aria-expanded', 'false');
+  await activityToggle.click();
+  await expect(activityToggle).toHaveAttribute('aria-expanded', 'true');
+  const stream = activityCard.getByRole('region', { name: /^(Timeline|时间线)$/ });
   const changesChip = stream.locator('[data-stream-filter="changes"]');
   await changesChip.waitFor({ state: 'visible', timeout: 15_000 });
   await changesChip.click();

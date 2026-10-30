@@ -171,6 +171,18 @@ that column. A `count` column never carries `currencyField`. See the
   currency** (another code field, a `fixed` code, an explicit measure code or the tenant
   currency) is refused at compile with `DATASET_INVALID` / 400, whatever the operation.
   A derived measure over a `count`, such as an amount per invoice, stays legal.
+- **A dataset measure whose `currency` differs from its field's `fixed` code** is refused
+  at compile with `DATASET_INVALID` / 400: `currency: 'USD'` over a field fixed to `EUR`
+  would label euros as dollars. Delete the measure's `currency`, and the column takes the
+  field's code. A `currency` that restates the field's code is accepted.
+- **A derived measure whose monetary operands resolve to two different `fixed` codes** is
+  refused at compile with `DATASET_INVALID` / 400, whatever the operation. Derive it from
+  measures in one currency, or drop the operand in the other. A derived `sum` or
+  `difference` over one `fixed` code carries that code, so a measure built on it is judged
+  the same way.
+- **Not judged:** a `fixed` code against the tenant currency, which compile does not know,
+  and a measure `currency` over a `dynamic` field, which wins as the top of the currency
+  chain.
 
 ### In the Console
 

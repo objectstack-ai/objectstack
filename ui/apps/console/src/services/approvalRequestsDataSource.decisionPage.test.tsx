@@ -23,7 +23,8 @@
  *   - its timeline from `GET /approvals/requests/:id/actions`;
  *   - the target record of the `record_id` pointer pair from the adapter, drawn
  *     as A2's card;
- *   - the decision as the declared action's POST, through `ActionParamDialog`.
+ *   - the decision as the declared action's POST through the action door
+ *     (objectstack#27611), collected in `ActionParamDialog`.
  *
  * The page reads through `routeApprovalRecordReads`, the console's adapter
  * with a request's record reads routed, as every surface reads it. The last
@@ -197,6 +198,8 @@ function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
+const APPROVE_DOOR = `/api/v1/actions/${APPROVAL_REQUEST_OBJECT}/approval_approve`;
+
 /** Every request the page sent over HTTP: method, path and query, body. */
 let wire: Array<{ method: string; path: string; body?: unknown }> = [];
 
@@ -209,8 +212,10 @@ const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Pr
   wire.push({ method, path: url.pathname + url.search, body });
   if (method === 'GET' && url.pathname === `/api/v1/approvals/requests/${REQ}`) return json(200, ROW);
   if (method === 'GET' && url.pathname === `/api/v1/approvals/requests/${REQ}/actions`) return json(200, { data: TIMELINE });
-  if (method === 'POST' && url.pathname === `/api/v1/approvals/requests/${REQ}/approve`) {
-    return json(200, { request: ROW, finalized: false });
+  // The decision goes through the action door (objectstack#27611), which
+  // forwards to the approve route and answers its payload as `data`.
+  if (method === 'POST' && url.pathname === APPROVE_DOOR) {
+    return json(200, { success: true, data: { request: ROW, finalized: false } });
   }
   return json(200, { success: true, data: [] });
 });
@@ -292,7 +297,7 @@ describe("an approval request's record page with record:approval_decision (objec
     expect(requestGets().length).toBeGreaterThan(0);
   });
 
-  it('Approve collects a comment and several files in ActionParamDialog, POSTs the request route, then re-reads the request in place', async () => {
+  it('Approve collects a comment and several files in ActionParamDialog, POSTs it through the action door, then re-reads the request in place', async () => {
     openRequestPage();
     const approve = await screen.findByTestId('declared-action-approval_approve', undefined, { timeout: 8000 });
     const before = requestGets().length;
@@ -308,11 +313,11 @@ describe("an approval request's record page with record:approval_decision (objec
     fireEvent.click(within(dialog).getByRole('button', { name: /Confirm/ }));
 
     await waitFor(
-      () => expect(wire.some((w) => w.method === 'POST' && w.path === `/api/v1/approvals/requests/${REQ}/approve`)).toBe(true),
+      () => expect(wire.some((w) => w.method === 'POST' && w.path === APPROVE_DOOR)).toBe(true),
       { timeout: 8000 },
     );
-    const post = wire.find((w) => w.method === 'POST' && w.path === `/api/v1/approvals/requests/${REQ}/approve`);
-    expect(post?.body).toMatchObject({ comment: 'Looks right' });
+    const post = wire.find((w) => w.method === 'POST' && w.path === APPROVE_DOOR);
+    expect(post?.body).toMatchObject({ recordId: REQ, params: { comment: 'Looks right' } });
     await waitFor(() => expect(requestGets().length).toBeGreaterThan(before), { timeout: 8000 });
   });
 

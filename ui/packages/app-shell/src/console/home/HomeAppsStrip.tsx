@@ -22,7 +22,11 @@
  *
  * The strip's look is the Home artboard's apps section (objectui#12601): a
  * 15 px heading with a count pill, 112 px tiles with a 56 px icon on the app's
- * colour and a 13 px name on one line. Three optional parts ride along, all
+ * colour and a 13 px name on one line. The icon square follows the app's own
+ * branding, the way `AppMark` does in the top bar and the switcher: its
+ * `branding.logo` when it declares one, else its `icon` on its
+ * `branding.primaryColor` when that is a hex, else its `icon` on the
+ * name-keyed gradient. A logo that fails to load falls back to the tile. Three optional parts ride along, all
  * off unless the host asks: an 11 px "2 hr. ago" line under a tile's
  * name (`lastOpened`, which Home reads from the recent-items store), a muted
  * "System Settings" link at the heading's right (`settingsHref` — Home moves
@@ -32,7 +36,7 @@
  *
  * @module
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { LayoutGrid, Plus, Settings, Star } from 'lucide-react';
 import { cn } from '@object-ui/components';
@@ -43,12 +47,57 @@ import { timeAgo } from '../../utils/relativeTime.js';
 import { TILE_OPENED_TIME_FORMAT } from './appLastOpened.js';
 import type { FavoriteItem } from '../../hooks/useFavorites.js';
 import { ICON_BOX_CLASSES, TILE_CLASSES, launcherIconGradient } from './launcherTile.js';
+import { BRANDED_TILE_CLASSES, appTileColors, appTileStyle } from '../../layout/appTileColors.js';
 
 const COMPACT_LIMIT = 19;
 
 /** The 12 px links at the heading's right. */
 const HEADER_LINK_CLASSES =
   'inline-flex items-center gap-1.5 rounded-sm text-xs transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/**
+ * One app's 56 px icon square, drawn from the app's branding (see the module
+ * header). `children` is the favourite badge, which rides on every face.
+ */
+function LauncherAppIcon({ app, children }: { app: any; children?: ReactNode }) {
+  const logo = typeof app?.branding?.logo === 'string' && app.branding.logo ? app.branding.logo : undefined;
+  // The URL that failed to load, so a later, different logo is tried afresh.
+  const [failedLogo, setFailedLogo] = useState<string | undefined>(undefined);
+  const box = cn(ICON_BOX_CLASSES, 'shadow-sm transition-transform group-hover:scale-105');
+
+  if (logo && logo !== failedLogo) {
+    return (
+      <span className={cn(box, 'bg-card')} data-testid={`app-tile-logo-${app.name}`}>
+        <img
+          src={logo}
+          alt=""
+          aria-hidden
+          onError={() => setFailedLogo(logo)}
+          className="size-full rounded-[14px] object-contain"
+        />
+        {children}
+      </span>
+    );
+  }
+
+  const Icon = getIcon(app?.icon);
+  const colors = appTileColors(app?.branding?.primaryColor);
+  return (
+    <span
+      className={cn(
+        box,
+        colors ? BRANDED_TILE_CLASSES : cn('bg-gradient-to-br text-white', launcherIconGradient(app.name)),
+      )}
+      style={colors ? appTileStyle(colors) : undefined}
+      data-testid={`app-tile-icon-${app.name}`}
+      data-branded={colors ? 'true' : undefined}
+    >
+      {/* eslint-disable-next-line react-hooks/static-components -- getIcon returns a stable icon component from a static registry, not one created during render */}
+      <Icon className="size-[26px]" />
+      {children}
+    </span>
+  );
+}
 
 export function HomeAppsStrip({
   apps,
@@ -169,10 +218,8 @@ export function HomeAppsStrip({
       {/* `-ml-2` puts the first icon under the heading: a tile pads its icon 8 px. */}
       <div className="-ml-2 flex flex-wrap gap-1">
         {visible.map((app) => {
-          const Icon = getIcon(app.icon);
           const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
           const fav = favNames.has(app.name);
-          const grad = launcherIconGradient(app.name);
           const openedAgo = timeAgo(lastOpened?.get(app.name), displayLocale, TILE_OPENED_TIME_FORMAT);
           return (
             <Link
@@ -183,20 +230,13 @@ export function HomeAppsStrip({
               className={TILE_CLASSES}
               data-testid={`app-tile-${app.name}`}
             >
-              <span
-                className={cn(
-                  ICON_BOX_CLASSES,
-                  'bg-gradient-to-br text-white shadow-sm transition-transform group-hover:scale-105',
-                  grad,
-                )}
-              >
-                <Icon className="size-[26px]" />
+              <LauncherAppIcon app={app}>
                 {fav && (
                   <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 ring-2 ring-background">
                     <Star className="h-2.5 w-2.5 fill-white text-white" />
                   </span>
                 )}
-              </span>
+              </LauncherAppIcon>
               <span className="w-full truncate text-[13px] font-medium">{label}</span>
               {openedAgo && (
                 <span

@@ -679,7 +679,15 @@ export const CEILINGS = new Map([
   // zero headroom to absorb any of it, ceiling +126. Maintainer ruling
   // 2026-09-22 on decision batch #213 (item 1 carries the TOCs: 「四个超长 SKILL.md 按 500 行切,整段示例与 platform 的运维尾段下沉 references/,零删内容;同卡顺手:data 的 description 压到约 700 字符、长参考文件加目录」),
   // verbatim and untranslated: 「1 2 4 同意」.
-  ['skills/objectstack-data/rules/field-types.md', 3158],
+  // 3158 -> 3207 (#27994): the Currency resolution paragraph teaches the two `fixed`
+  // refusals #27991 added (a measure `currency` other than the field's `fixed` code; a
+  // derived measure over two `fixed` codes), each fix, and the not-judged tenant case.
+  // PAID DOWN FIRST by the Formula example's `returnType` comment, which restated the
+  // Calculated table's return types. The file is 12827 bytes -> 3207 tokens, zero
+  // headroom, ceiling +49, pinned AT the measurement. Standing ruling (2026-10-27, tap A,
+  // verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per ruling
+  // record 6513306068.
+  ['skills/objectstack-data/rules/field-types.md', 3207],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
@@ -827,7 +835,15 @@ export const CEILINGS = new Map([
   // follows it down to the new measurement, the ratchet's ordinary direction.
   // 6239 -> 6221 (#26602): LOWERED. The metric-widget bullet teaches the measure's `polarity`,
   // paid inside the file; the ceiling follows the file down to the measurement (24881 bytes).
-  ['skills/objectstack-ui/rules/dashboards.md', 6221],
+  // 6221 -> 6262 (#27994): the dataset currency comment teaches the two `fixed` refusals
+  // #27991 added, each fix, and the two not-judged cases. PAID DOWN FIRST: the metric
+  // example's `colorVariant` comment no longer restates that the measure's `format` /
+  // `currency` drive the number (Widget `options` says it), and the measure example in the
+  // currency comment shrinks to its `currency` key (the dataset above shows the shape).
+  // The file is 25047 bytes -> 6262 tokens, zero headroom, ceiling +41, pinned AT the
+  // measurement. Standing ruling (2026-10-27, tap A, verbatim and untranslated):
+  // 「A:先削重复,余额按实测提高」; recognised path per ruling record 6513306068.
+  ['skills/objectstack-ui/rules/dashboards.md', 6262],
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
@@ -868,7 +884,25 @@ export const CEILINGS = new Map([
   // request body or response, so the derived schema silently loses it):
   // 8705 -> 8814 bytes, 2177 -> 2204.
   //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8814 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2204],
+  // 8814 -> 8942 (card #27982): the "Holds on every recipe" input bullet
+  // re-teaches `connectorConfig.input` as an evaluated value-slot map, with a
+  // record-field example and the not-yet-judged-at-`os validate` note, and
+  // recipe 1's closing sentence teaches `providerConfig.include` (the `mcp`
+  // allowlist meaning, a non-array or unknown entry fatal) instead of denying
+  // the key. Paid down first, three restatements each with a surviving home:
+  // recipe 1's comment "3.x only, … every `$ref` dereferenced offline" (the
+  // same comment says "OpenAPI 3.x document"; the paragraph under the recipe
+  // says to dereference every `$ref` offline), recipe 5's comment ", written
+  // from the vendor's docs" (its heading says write the document by hand),
+  // and the OAuth bullet's "four variants and" (the Holds `auth` bullet lists
+  // them). Arithmetic: 8814 -> 8942 (+128 net) -> ceil(8942 / 4) = 2236;
+  // headroom was 0 tokens, so the ceiling moves +32, pinned AT the
+  // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
+  // ruling record 6513306068 on #27847.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8942 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2236],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching

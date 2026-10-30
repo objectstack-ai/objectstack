@@ -471,7 +471,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 6,
   'the owed face: paths, the Clause-② line, the label — drafts included, nothing else owes': 9,
-  'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 6,
+  'the record: on this head (by whom, as stated), on an earlier head, none, unjudged': 8,
   'the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat': 8,
   'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 5,
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
@@ -550,6 +550,12 @@ export function selfTest() {
   t('⭐ a record on an EARLIER head ⇒ stale, naming the earlier reviewer; the review is owed again', stale.record.state === 'stale' && stale.record.by === TRIAGE && stale.status !== 'DONE');
   t('no record at all ⇒ none', row({}).record.state === 'none');
   t('⛔ an unreadable thread is unjudged, never none', row({ comments: null }).record.state === 'unjudged');
+  // ⭐ #27979, the measured instance (PR #27964, record 6516042954): a DELTA record on an earlier head whose prose
+  // names this head three times. The whole-body span scan read it as `current` here and the queue guard cleared on
+  // it; the `Head-sha:` line alone decides now, through the one locator both share.
+  const deltaRow = { id: 6516042954, created_at: '2026-10-30T05:53:38Z', body: `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${HEAD2}\`\nLocal-runs: none\n\nThis is a DELTA record. The PR has since moved to \`${HEAD.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${HEAD2.slice(0, 8)}\` alone. The runs were cancelled by the push of \`${HEAD.slice(0, 8)}\`; landing waits on \`${HEAD}\` and that head's record.\n\nReviewed-by: \`${TRIAGE}\`\n\n**VERDICT: PASS**` };
+  t('⛔ #27979: a delta record on an EARLIER head whose PROSE names this head is STALE for this head — the review is owed again', (() => { const r = row({ comments: [deltaRow] }); return r.record.state === 'stale' && r.record.id === 6516042954 && r.status !== 'DONE'; })());
+  t('⭐ #27979: …and CURRENT for the head its `Head-sha:` line names', row({ head: { sha: HEAD2, ref: 'claude/project-thread-6d34fw' }, comments: [deltaRow] }).record.state === 'current');
 
   battery('the triggers: (a) hand-off or label the same round, (b) a full round, (c) the lane seat');
   const fresh = '2026-10-28T12:30:00Z';

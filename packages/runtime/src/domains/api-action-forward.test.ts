@@ -31,6 +31,7 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import {
     invokeBusinessAction,
+    apiActionResultOf,
     buildApiActionRequest,
     isHeadlessInvokableAction,
     headlessActionTypeError,
@@ -298,6 +299,29 @@ describe('door 1 — REST `POST /actions/:object/:action` forwards a same-origin
         expect(messageOf(res)).toBe('Platform admin only');
     });
 
+    // [#27918] Today's reading, pinned: the STATUS is the target's verdict, so a
+    // 2xx is relayed as a result even when its body says `success: false`. No
+    // same-origin target in the repository answers that shape (the measured
+    // census is on `apiActionResultOf`'s docblock); one that starts to is fixed
+    // at the target, so a change here is a decision, not a cleanup.
+    it('relays a 2xx `{ success: false, … }` answer as a 200 result, never as a refusal', async () => {
+        const enveloped = boot({ answer: { status: 200, body: { success: false, data: { reason: 'already_banned' } } } });
+        const viaData = await enveloped.dispatcher.handleActions(
+            `/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' }, CTX(),
+        );
+        expect(statusOf(viaData)).toBe(200);
+        expect(viaData?.response?.body?.success).toBe(true);
+        expect(viaData?.response?.body?.data).toEqual({ reason: 'already_banned' });
+
+        const bare = boot({ answer: { status: 200, body: { success: false, message: 'not applied' } } });
+        const viaMessage = await bare.dispatcher.handleActions(
+            `/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' }, CTX(),
+        );
+        expect(statusOf(viaMessage)).toBe(200);
+        expect(viaMessage?.response?.body?.success).toBe(true);
+        expect(viaMessage?.response?.body?.data).toEqual({ success: false, message: 'not applied' });
+    });
+
     it('an OFF-ORIGIN api action is refused 400 before any forward — the browser-only case', async () => {
         const { dispatcher, request } = boot();
 
@@ -339,6 +363,23 @@ describe('door 1 — REST `POST /actions/:object/:action` forwards a same-origin
         expect(injected[0].url).toBe('http://app.example.test/api/v1/data/crm_lead/lead%207');
         expect(injected[0].init.method).toBe('DELETE');
         expect(injected[0].init.body).toBeUndefined();
+    });
+});
+
+describe('apiActionResultOf — a 2xx answer read as the action\'s result', () => {
+    const at200 = (body: unknown) => ({ status: 200, body, headers: {} });
+
+    it('unwraps `data` from a `{ success: false, data }` answer: the 2xx decides, not the flag', () => {
+        expect(apiActionResultOf(at200({ success: false, data: { reason: 'already_banned' } }))).toEqual({ reason: 'already_banned' });
+    });
+
+    it('answers a `{ success: false, message }` answer (no `data`) as the body itself', () => {
+        expect(apiActionResultOf(at200({ success: false, message: 'not applied' }))).toEqual({ success: false, message: 'not applied' });
+    });
+
+    it('still unwraps the ordinary success envelope and passes an unenveloped body through', () => {
+        expect(apiActionResultOf(at200({ success: true, data: { ok: true } }))).toEqual({ ok: true });
+        expect(apiActionResultOf(at200({ status: true }))).toEqual({ status: true });
     });
 });
 

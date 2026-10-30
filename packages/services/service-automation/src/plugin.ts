@@ -742,6 +742,10 @@ export class AutomationServicePlugin implements Plugin {
      * it. A refused value the door does not hold (an environment variable,
      * the host's resolver) is never held: it can change where this process
      * cannot see it, so its instance retries on the backoff.
+     *
+     * [#27992] A degraded instance whose provider answers with a configuration
+     * fault is held the same way, with the configuration reason: only a change
+     * of its declaration or a restart re-attempts it.
      */
     private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string; held?: boolean }>();
     /**
@@ -2355,6 +2359,21 @@ export class AutomationServicePlugin implements Plugin {
                     });
                     continue;
                 }
+                // [#27992] A configuration fault met by an instance that is
+                // degraded — its backoff retry, or a reload — ends the retry:
+                // ADR-0097 does not retry a configuration fault.
+                if (!opts.fatal && this.degradedInstances.has(name)) {
+                    this.failDegradedConnectorInstance(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        hasLive: existing !== undefined,
+                        reason: thrownMessageText(thrown),
+                        cause: thrown,
+                    });
+                    continue;
+                }
                 // #5575 — a provider factory is third-party code ADR-0097 invites
                 // people to write, and the first one that validates its
                 // `providerConfig` with Zod throws a message whose first line is
@@ -2512,6 +2531,52 @@ export class AutomationServicePlugin implements Plugin {
                     ? 'the previously-materialized connector keeps serving'
                     : 'instance registered degraded (no actions)') +
                 `; retrying with backoff, attempt ${attempts}.`,
+            undefined,
+            describeThrownForLog(info.cause),
+        );
+    }
+
+    /**
+     * [#27992] End the retry of a degraded instance whose provider now answers
+     * with a configuration fault (an `include` naming what the upstream does
+     * not offer): ADR-0097 does not retry a configuration fault, and the
+     * "could not reach" reason the husk carried is no longer true. The
+     * instance is held — neither the retry timer nor an unchanged reload
+     * re-attempts it; a change of its declaration or a restart does, as for a
+     * refused credential — and its husk (unless a previously-materialized
+     * connector keeps serving) now carries the configuration reason.
+     */
+    private failDegradedConnectorInstance(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            hasLive: boolean;
+            reason: string;
+            cause: unknown;
+        },
+    ): void {
+        this.degradedInstances.set(info.name, { attempts: 1, signature: info.signature, reason: info.reason, held: true });
+        if (!info.hasLive) {
+            try {
+                engine.registerDegradedConnector(this.buildDegradedHuskDef(info.name, info.entry), info.reason, 'declarative', info.cause);
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
+                        'connector registry until its declaration changes.',
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        // #5575 — the provider's message rides `meta`, never the message.
+        ctx.logger.error(
+            `[Automation] failed to materialize connector instance '${info.name}' via provider '${info.provider}' (ADR-0097): ` +
+                'a configuration fault, so the instance is no longer retried. ' +
+                (info.hasLive ? 'The previously-materialized connector keeps serving. ' : '') +
+                'Fix its declaration; an edit or a restart re-attempts it.',
             undefined,
             describeThrownForLog(info.cause),
         );
