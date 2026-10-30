@@ -3180,6 +3180,7 @@ const ar = {
     starred: "المميزة",
     removeFromFavorites: "إزالة {{name}} من المفضلة",
     allReports: "كل التقارير",
+    keepOpen: "إبقاء الشريط الجانبي مفتوحًا",
   },
   topbar: {
     openAssistant: "فتح مساعد {{name}}",

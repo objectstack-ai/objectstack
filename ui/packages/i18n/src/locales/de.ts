@@ -2950,6 +2950,7 @@ const de = {
     starred: "Markiert",
     removeFromFavorites: "{{name}} aus Favoriten entfernen",
     allReports: "Alle Berichte",
+    keepOpen: "Seitenleiste geöffnet lassen",
   },
   topbar: {
     openAssistant: "Assistent {{name}} öffnen",

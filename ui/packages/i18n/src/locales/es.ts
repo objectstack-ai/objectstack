@@ -3009,6 +3009,7 @@ const es = {
     starred: "Destacados",
     removeFromFavorites: "Quitar {{name}} de favoritos",
     allReports: "Todos los informes",
+    keepOpen: "Mantener la barra lateral abierta",
   },
   topbar: {
     openAssistant: "Abrir el asistente {{name}}",

@@ -2950,6 +2950,7 @@ const ko = {
     starred: "즐겨찾기",
     removeFromFavorites: "즐겨찾기에서 {{name}} 제거",
     allReports: "모든 보고서",
+    keepOpen: "사이드바를 열어 두기",
   },
   topbar: {
     openAssistant: "{{name}} 어시스턴트 열기",
