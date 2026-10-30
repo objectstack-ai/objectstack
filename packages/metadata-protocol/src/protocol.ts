@@ -27156,6 +27156,15 @@ export class ObjectStackProtocolImplementation implements
      * Roll a package back THROUGH every `apply` commit newer than `commitId`
      * (newest first), leaving the package as it was at that commit. Each step is
      * an individual `revertCommit`, so the whole rollback is itself audited.
+     *
+     * `failed[]` carries both kinds of failure a step can have: a step that
+     * THREW (one entry for the commit), and every item a step REFUSED and
+     * reported in its own returned `failed[]` (one entry per item, its `error`
+     * naming the item and quoting the step's client-facing text). Either makes
+     * `success` false — the declared answer's "true exactly when nothing
+     * failed". A refused item stops neither its commit nor the rollback: the
+     * step still reverts the item's neighbours and records its revert commit,
+     * so that commit is also listed in `revertedCommits`.
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
@@ -27192,11 +27201,19 @@ export class ObjectStackProtocolImplementation implements
         const failed: Array<{ commitId: string; error: string }> = [];
         for (const c of toRevert) {
             try {
-                await this.revertCommit({
+                const step = await this.revertCommit({
                     commitId: c.id,
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 revertedCommits.push(c.id);
+                // An item the step refused is returned, never thrown; its
+                // `error` is already client-facing (P11).
+                for (const item of step.failed) {
+                    failed.push({
+                        commitId: c.id,
+                        error: `Item '${item.type}/${item.name}' was not reverted: ${item.error}`,
+                    });
+                }
             } catch (e: any) {
                 // [#8333 · P12] The derivative of P11 — `failed[].error` on the
                 // rollback response. Measured on `origin/main` by failing the
