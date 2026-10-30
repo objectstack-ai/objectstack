@@ -107,7 +107,7 @@ export function actionInvocationBranch(action: any, isDeclarativeUpdate: boolean
  */
 export function actionInvocationFailure(err: unknown): { status: number; errorCode?: string } {
     const { status, code } = resolveThrownHttpError(err, 500);
-    return typeof code === 'string' && code !== '' ? { status, errorCode: code } : { status };
+    return typeof code === 'string' && code.length > 0 ? { status, errorCode: code } : { status };
 }
 
 /**
