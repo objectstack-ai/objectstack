@@ -55,6 +55,12 @@ import {
 import type { AutomationContext, Logger } from '@objectstack/spec/contracts';
 import type { ConnectorOrigin } from '@objectstack/spec/integration';
 import type { ConnectorActionHandler } from './engine.js';
+import {
+    findConnectorActionInputSchema,
+    judgeConnectorInput,
+    TEXT_FOR_SCALAR_HINT,
+    type ConnectorInputSchemaSource,
+} from './connector-input-schema.js';
 
 /** The connector providers a v1 pull reads through (the ruling's "rest / openapi only"). */
 export const CONNECTOR_PULL_PROVIDERS: readonly string[] = Object.freeze(['rest', 'openapi']);
@@ -72,6 +78,7 @@ export type ConnectorPullRefusalReason =
     | 'unsupported_transform'
     | 'watermark_field_unmapped'
     | 'input_query_not_object'
+    | 'input_schema_mismatch'
     | 'mapping_target_refused'
     | 'upstream_not_ok'
     | 'records_not_array'
@@ -108,8 +115,12 @@ export interface ConnectorPullProtocol extends ImportProtocolLike {
     getObjectSchema?(objectName: string, environmentId?: string): Promise<unknown>;
 }
 
-/** The connector registry a pull resolves through — the automation engine's. */
-export interface ConnectorPullRegistry {
+/**
+ * The connector registry a pull resolves through — the automation engine's.
+ * Its descriptor list is where the action's declared `inputSchema` is read
+ * (#28040), the read the `connector_action` node makes.
+ */
+export interface ConnectorPullRegistry extends ConnectorInputSchemaSource {
     resolveConnectorAction(connectorId: string, actionId: string): ConnectorActionHandler | undefined;
     getConnectorOrigin(name: string): ConnectorOrigin | undefined;
     getConnectorDegradedReason(name: string): string | undefined;
@@ -374,6 +385,20 @@ export async function pullConnectorSource(
     const input: Record<string, unknown> = isPlainObject(source.input) ? { ...source.input } : {};
     if (watermark && watermark.from !== undefined) {
         input.query = { ...(isPlainObject(input.query) ? input.query : {}), [watermark.param]: watermark.from };
+    }
+    // [#28040] The input about to be sent — the watermark included — is judged
+    // against the action's declared `inputSchema` by the check the
+    // `connector_action` node runs (#27995), so a pull missing a required
+    // parameter is refused here instead of reaching the remote API.
+    const verdict = judgeConnectorInput(findConnectorActionInputSchema(registry, connector, action), input);
+    if (verdict) {
+        return refuse(
+            'VALIDATION_ERROR', 400, 'input_schema_mismatch',
+            `Mapping "${mappingName}": input for '${connector}.${action}' does not match the action's inputSchema — `
+            + `${verdict.violations}. Nothing was pulled. Fix connectorSource.input so it satisfies the inputSchema `
+            + 'GET /api/v1/automation/connectors lists for this action.'
+            + (verdict.textForScalar ? TEXT_FOR_SCALAR_HINT : ''),
+        );
     }
     logger.info(
         `[Automation] connector pull: mapping "${mappingName}" ← ${connector}.${action}`

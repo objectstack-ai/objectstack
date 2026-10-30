@@ -59,6 +59,8 @@ function harness(opts: {
     provider?: string | undefined;
     result?: unknown;
     stored?: Array<Record<string, unknown>>;
+    /** The `inputSchema` the action declares on `GET /connectors`; absent ⇒ none declared. */
+    inputSchema?: Record<string, unknown>;
 } = {}): Harness {
     const writes: unknown[] = [];
     const handler = vi.fn(async () => (opts.result ?? { status: 200, ok: true, body: [] }) as Record<string, unknown>);
@@ -82,6 +84,10 @@ function harness(opts: {
             getConnectorOrigin: (name) =>
                 name === 'crm_api' ? ('origin' in opts ? opts.origin : 'declarative') : undefined,
             getConnectorDegradedReason: () => opts.degraded,
+            getConnectorDescriptors: () => [{
+                name: 'crm_api', label: 'CRM', type: 'api', origin: 'declarative', state: 'ready',
+                actions: [{ key: 'request', label: 'HTTP Request', inputSchema: opts.inputSchema }],
+            }],
         },
         providerOf: (name) => (name === 'crm_api' ? ('provider' in opts ? opts.provider : 'rest') : undefined),
         logger: silent,
@@ -283,5 +289,103 @@ describe('[#20919] connector pull — one action call, the watermark read from t
         const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
         expect(h.handler.mock.calls[0][0]).toEqual({ path: '/contacts' });
         expect(res.watermark?.from).toBeUndefined();
+    });
+});
+
+/**
+ * [#28040] The pull door judges the input it is about to send against the
+ * action's declared `inputSchema` — the check the `connector_action` node
+ * runs (#27995), through the same helper — and refuses BEFORE dispatch. The
+ * pin is the upstream call count: a refused pull never calls the action.
+ */
+describe('[#28040] connector pull — the input is checked against the action\'s inputSchema before dispatch', () => {
+    /** An action whose `query.since` is required and whose `query.limit` is an integer. */
+    const SINCE_REQUIRED = {
+        type: 'object',
+        properties: {
+            method: { type: 'string' },
+            path: { type: 'string' },
+            query: {
+                type: 'object',
+                properties: { since: { type: 'string' }, limit: { type: 'integer' } },
+                required: ['since'],
+            },
+        },
+        required: ['path', 'query'],
+    };
+
+    it('an input missing a required parameter is VALIDATION_ERROR 400 naming it, and the action is never called', async () => {
+        const h = harness({
+            inputSchema: SINCE_REQUIRED,
+            mapping: baseMapping({
+                connectorSource: { connector: 'crm_api', action: 'request', input: { path: '/contacts', query: {} } },
+            }),
+        });
+        const err = await refusal(h);
+        expectRefused(err, { code: 'VALIDATION_ERROR', status: 400, reason: 'input_schema_mismatch' });
+        expect(err.message).toContain("missing required 'query.since'");
+        expect(h.handler).toHaveBeenCalledTimes(0);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a missing required section names the parameters it requires', async () => {
+        const h = harness({ inputSchema: SINCE_REQUIRED });
+        const err = await refusal(h);
+        expectRefused(err, { code: 'VALIDATION_ERROR', status: 400, reason: 'input_schema_mismatch' });
+        expect(err.message).toContain("missing required 'query' (with 'query.since')");
+        expect(h.handler).toHaveBeenCalledTimes(0);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('a parameter of the wrong type is refused the same way, and text is not converted to the integer', async () => {
+        const h = harness({
+            inputSchema: SINCE_REQUIRED,
+            mapping: baseMapping({
+                connectorSource: {
+                    connector: 'crm_api', action: 'request',
+                    input: { path: '/contacts', query: { since: '2026-01-01', limit: '50' } },
+                },
+            }),
+        });
+        const err = await refusal(h);
+        expectRefused(err, { code: 'VALIDATION_ERROR', status: 400, reason: 'input_schema_mismatch' });
+        expect(err.message).toContain("'query.limit' must be integer, got string");
+        expect(h.handler).toHaveBeenCalledTimes(0);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('the input judged is the one sent: a watermark that supplies the required parameter pulls', async () => {
+        const h = harness({
+            inputSchema: SINCE_REQUIRED,
+            mapping: baseMapping({
+                connectorSource: {
+                    connector: 'crm_api', action: 'request', input: { path: '/contacts', query: { limit: 50 } },
+                    watermark: { field: 'updated_at', param: 'since' },
+                },
+            }),
+            stored: [{ synced_at: '2026-01-02T00:00:00.000Z' }],
+        });
+        const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(h.handler).toHaveBeenCalledTimes(1);
+        expect(h.handler.mock.calls[0][0]).toEqual({
+            path: '/contacts', query: { limit: 50, since: '2026-01-02T00:00:00.000Z' },
+        });
+        expect(res.pulled).toBe(0);
+    });
+
+    it('a valid input still pulls and writes', async () => {
+        const h = harness({
+            inputSchema: SINCE_REQUIRED,
+            mapping: baseMapping({
+                connectorSource: {
+                    connector: 'crm_api', action: 'request', input: { path: '/contacts', query: { since: '2026-01-01' } },
+                },
+            }),
+            result: { status: 200, ok: true, body: [{ id: 'c1', name: 'Ada', updated_at: '2026-01-02' }] },
+        });
+        const res = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(h.handler).toHaveBeenCalledTimes(1);
+        expect(res.pulled).toBe(1);
+        expect(h.writes).toHaveLength(1);
     });
 });
