@@ -388,6 +388,14 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
 
   if (!def) return null;
 
+  // A refusal is listed under the record it refused, named as the confirm
+  // step named it. An entry that is no record of the run (a missing id, a
+  // batch the server answered with a count only) keeps its own id.
+  const refusedRecordName = (id: string): string => {
+    const row = rows.find(r => r.id != null && String(r.id) === id);
+    return row ? affectedRecordName(objectDef, row, id) : id;
+  };
+
   const title = def.label ?? def.name;
   const previewRows = rows.slice(0, 5);
   const restCount = Math.max(0, rows.length - previewRows.length);
@@ -571,7 +579,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                         <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-destructive" />
                         <div className="min-w-0 flex-1">
                           <div className="break-words">
-                            <span className="text-muted-foreground">{e.id}:</span> {e.error}
+                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{refusedRecordName(e.id)}:</span> {e.error}
                           </div>
                         </div>
                         {/* A plain `custom` callout has nothing to re-run, but

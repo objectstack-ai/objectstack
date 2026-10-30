@@ -4,6 +4,8 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationEngine, ConnectorActionContext } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
+import { describeHold } from '../plugin-extension-api.js';
+import { resolveValueSlotMap } from './value-slot-map.js';
 
 /**
  * Connector built-in node — `connector_action` (generic integration dispatch).
@@ -62,17 +64,24 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             const handler = engine.resolveConnectorAction(cfg.connectorId, cfg.actionId);
             if (!handler) {
                 // A degraded declarative instance (#3017) is registered but has no
-                // handlers — say WHY dispatch fails and that recovery is automatic,
-                // instead of the generic wiring hint below. The reason names the
-                // cause: an unreachable upstream, or (#27237) a credential that
-                // is not set.
+                // handlers — say WHY dispatch fails and what recovers it, instead
+                // of the generic wiring hint below. The reason names the cause: an
+                // unreachable upstream, or (#27237) a credential that is not set or
+                // was refused. [#28016] Recovery is automatic only on the backoff:
+                // a held instance (a configuration fault met on a retry, a refused
+                // credential the platform will not re-send) names its fix instead.
                 const degraded = engine.getConnectorDegradedReason(cfg.connectorId);
                 if (degraded) {
+                    const hold = engine.getConnectorDegradedHold(cfg.connectorId);
+                    // A reason that is a full sentence keeps one full stop.
+                    const reason = degraded.replace(/\.\s*$/, '');
                     return {
                         success: false,
                         error:
-                            `connector_action '${node.id}': connector '${cfg.connectorId}' is degraded — ${degraded}. `
-                            + `Dispatch is unavailable until that is resolved; the platform retries automatically.`,
+                            `connector_action '${node.id}': connector '${cfg.connectorId}' is degraded — ${reason}. `
+                            + (hold
+                                ? `Dispatch is unavailable until ${describeHold(hold)} (or the server restarts); the platform does not retry it.`
+                                : `Dispatch is unavailable until that is resolved; the platform retries automatically.`),
                     };
                 }
                 return {
@@ -106,8 +115,17 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // success and the failure path read one value.
             const effect = engine.resolveConnectorActionEffect(cfg.connectorId, cfg.actionId);
 
+            // #27327 — `input` is a value-slot map: a top-level CEL envelope is
+            // evaluated in the run's scope, every other value handed on as a
+            // copy of what was written. Before, the map went to the handler as
+            // written, so an envelope reading a record field reached the
+            // provider as the object it spells. Resolved BEFORE the `try`: an
+            // envelope that faults throws with its source, like every value
+            // slot's, and nothing is sent upstream.
+            const input = resolveValueSlotMap(engine, cfg.input, variables, 'input', context);
+
             try {
-                const output = await handler((cfg.input ?? {}) as Record<string, unknown>, handlerCtx);
+                const output = await handler(input, handlerCtx);
                 return {
                     success: true,
                     output,

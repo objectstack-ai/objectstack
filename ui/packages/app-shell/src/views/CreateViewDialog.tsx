@@ -21,11 +21,12 @@
  * stays open with the user's input when it resolves `false` (objectui#11578).
  * The parent persists the view; this dialog WRITES nothing. It does READ:
  * while open, for the chart type, it lists the datasets through the metadata
- * client (`useDatasetCatalog`, keeping only those whose base `object` is this
- * object) and resolves the chosen dataset's measures and dimensions
- * (`useDatasetSemantics`), the same pair the dashboard widget editor binds
- * with (objectui#11576). A closed dialog, or one with no `objectDef`, fetches
- * nothing.
+ * client and resolves the chosen dataset's measures and dimensions
+ * (`useObjectDatasetBinding`, objectui#11576: `useDatasetCatalog` keeping only
+ * the datasets whose base `object` is this object, and `useDatasetSemantics`,
+ * the pair the dashboard widget editor binds with). The Studio list-view
+ * panel's chart section reads through the same hook (objectstack#27933). A
+ * closed dialog, or one with no `objectDef`, fetches nothing.
  */
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -48,11 +49,7 @@ import {
 import { useObjectTranslation } from '@object-ui/i18n';
 import type { ListViewVisualization } from '@object-ui/core';
 import { slugify } from './metadata-admin/createDerive.js';
-import {
-  useDatasetCatalog,
-  useDatasetSemantics,
-  type DatasetCatalogEntry,
-} from './metadata-admin/previews/useDatasetCatalog.js';
+import { datasetOptionLabel, useObjectDatasetBinding } from './studio-design/objectDatasets.js';
 import {
   deriveFieldOptions,
   isImageLikeField,
@@ -247,14 +244,6 @@ interface PickOption {
   label: string;
 }
 
-/**
- * The catalog a dialog that cannot use one asks for: none. Passed to
- * `useDatasetCatalog` as its pre-resolved list while the dialog is closed or
- * has no object, so mounting it fetches nothing. A module constant, so the
- * hook sees one list rather than a fresh array per render.
- */
-const NO_DATASETS: DatasetCatalogEntry[] = [];
-
 /** The item a held value none of a picker's options carries is shown by. */
 const OUTSIDE_OPTIONS = 'outside';
 
@@ -323,11 +312,6 @@ function ConfigPicker({
       </SelectContent>
     </Select>
   );
-}
-
-/** `LABEL (name)`, or the bare name when the dataset declares no other label. */
-function datasetOptionLabel(d: DatasetCatalogEntry): string {
-  return d.label && d.label !== d.name ? `${d.label} (${d.name})` : d.name;
 }
 
 const CHART_TYPE_OPTIONS = [
@@ -546,20 +530,18 @@ export function CreateViewDialog({
 
   // ── The chart's ADR-0021 dataset binding (objectui#11576) ────────────────
   // Called unconditionally (stable hook order). A closed dialog, or one with
-  // no object to filter by, hands the hook an empty pre-resolved list, so it
-  // fetches nothing; an open one lists the catalog, and the dialog keeps only
-  // the datasets whose base `object` is this object. Never the whole list.
+  // no object to filter by, fetches nothing; an open one lists the catalog,
+  // keeping only the datasets whose base `object` is this object. Never the
+  // whole list. Only a dataset this object exposes is ever resolved, so a
+  // stale or foreign name can never feed the measure and dimension pickers.
   const objectName = objectDef?.name;
-  const catalog = useDatasetCatalog(open && objectName ? undefined : NO_DATASETS);
-  const objectDatasets = useMemo(
-    () => (objectName ? catalog.datasets.filter((d) => d.object === objectName) : []),
-    [catalog.datasets, objectName],
-  );
   const chosenDataset = requiredFieldValues['chart.dataset'] ?? '';
-  // Only a dataset this object exposes is ever resolved, so a stale or foreign
-  // name can never feed the measure and dimension pickers.
-  const boundDataset = objectDatasets.some((d) => d.name === chosenDataset) ? chosenDataset : undefined;
-  const semantics = useDatasetSemantics(boundDataset, catalog);
+  const {
+    catalog,
+    datasets: objectDatasets,
+    bound: boundDataset,
+    semantics,
+  } = useObjectDatasetBinding(objectName, chosenDataset, { enabled: open });
   // What the effects below re-run on: the NAMES offered, never the identity
   // of a memoised list (AGENTS.md #10).
   const datasetKey = objectDatasets.map((d) => d.name).join('\u0000');

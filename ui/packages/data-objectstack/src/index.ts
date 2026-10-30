@@ -939,6 +939,19 @@ const VIEW_LIST_KEY = 'list:view';
 const discoveryCache = new Map<string, Promise<unknown>>();
 
 /**
+ * The server ORIGIN a `baseUrl` names: no trailing slash, and no trailing
+ * `/api/vN`. The adapter, the `ObjectStackClient` it wraps and
+ * `ObjectStackClient`'s conventional routes all join absolute `/api/v1/...`
+ * paths onto this value, so a base already carrying the version suffix (the
+ * form the published `objectui` skill once taught) is accepted and read as its
+ * origin, instead of asking for `/api/v1/api/v1/discovery`
+ * (objectstack-ai/objectstack#27774).
+ */
+function serverOriginOf(baseUrl: string): string {
+  return (baseUrl || '').replace(/\/$/, '').replace(/\/api\/v\d+$/i, '');
+}
+
+/**
  * Fetch the server `discovery` document once per (baseUrl) and reuse the
  * resulting Promise. Used by `ObjectStackAdapter.connect()` (and any caller
  * that wants the discovery payload without spinning up a new client).
@@ -3317,6 +3330,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // rows of other objects' records, so no write leaves it current.
   private inflightRecordPages = new Map<string, Promise<RecordPagePayload | null>>();
   private prefetchedRecordPages = new Map<string, Promise<RecordPagePayload | null>>();
+  // objectstack#27626 — `getRecordFieldAccess` asks, keyed by resource + id.
+  // One record open asked the same projection four times in the same
+  // millisecond (`record:details`, `record:highlights`, the form and the
+  // host), so concurrent asks share one request. A settled projection is not
+  // kept — the scopes re-ask after a save and must reach the server — but "no
+  // answer" is: a record the read answers 404 for stays unanswered until a
+  // write to its resource (both maps are dropped in `dropInflightReads`), and
+  // a server without the route (501) is not asked again for any record.
+  private inflightFieldAccess = new Map<string, Promise<RecordFieldAccess | null>>();
+  private unansweredFieldAccess = new Set<string>();
+  private fieldAccessUnsupported = false;
   // Resources that have responded 404 at least once (collection not installed
   // on this backend). Subsequent find() calls short-circuit to an empty result
   // so optional collections like sys_presence don't hammer the server with
@@ -3370,6 +3394,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   private metadataReadWarningListeners = new Set<MetadataReadWarningListener>();
 
   constructor(config: {
+    /**
+     * The server origin: `''` behind a same-origin proxy, or
+     * `https://api.example.com`. The adapter joins `/api/v1/...` onto it; a
+     * value already ending in `/api/vN` is read as its origin
+     * ({@link serverOriginOf}).
+     */
     baseUrl: string;
     token?: string;
     fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -3393,12 +3423,16 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     const transport = config.fetch || globalThis.fetch.bind(globalThis);
     this.fetchImpl = (input, init) =>
       this.observeServerAnswer(() => transport(input, init), init);
+    // objectstack-ai/objectstack#27774 — one origin for the client and for every
+    // raw read below; the client joins `/api/v1/...` onto its base as given.
+    const baseUrl = serverOriginOf(config.baseUrl);
     // Inject a quiet logger that demotes expected 404s ("HTTP request failed"
     // from probing optional collections like sys_presence/sys_activity) to
     // debug() so they don't pollute the browser console. Other log levels are
     // forwarded to the standard console.
     this.client = new ObjectStackClient({
       ...config,
+      baseUrl,
       fetch: this.fetchImpl,
       logger: createQuietHttpLogger(),
     });
@@ -3411,7 +3445,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     this.autoReconnect = config.autoReconnect ?? true;
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 3;
     this.reconnectDelay = config.reconnectDelay ?? 1000;
-    this.baseUrl = config.baseUrl;
+    this.baseUrl = baseUrl;
     this.token = config.token;
   }
 
@@ -3450,10 +3484,8 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // (or React StrictMode double-mounts) at the same baseUrl share a
       // single network round trip. We inject the result into the client's
       // private `discoveryInfo` field to avoid client.connect() re-fetching.
-      const baseUrl = this.baseUrl || '';
-      const discoveryUrl = baseUrl
-        ? `${baseUrl.replace(/\/$/, '')}/api/v1/discovery`
-        : '/api/v1/discovery';
+      const baseUrl = this.baseUrl;
+      const discoveryUrl = `${baseUrl}/api/v1/discovery`;
 
       const data = await getSharedDiscovery(baseUrl, async () => {
         const res = await this.fetchImpl(discoveryUrl, {
@@ -3783,11 +3815,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       queryParams.set('objects', options.objects.join(','));
     }
 
-    const baseUrl = (this.baseUrl || '').replace(/\/$/, '');
-    // Avoid doubling /api/v1 when baseUrl already carries the version suffix.
-    const hasApiVersionSuffix = /\/api\/v\d+$/i.test(baseUrl);
-    const searchPath = hasApiVersionSuffix ? '/search' : '/api/v1/search';
-    const url = `${baseUrl}${searchPath}?${queryParams.toString()}`;
+    const url = `${this.baseUrl}/api/v1/search?${queryParams.toString()}`;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -3941,6 +3969,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
     this.inflightRecordPages.clear();
     this.prefetchedRecordPages.clear();
+    // objectstack#27626 — the record field projection's shared asks and its
+    // remembered 404s, by the same rule.
+    for (const key of Array.from(this.inflightFieldAccess.keys())) {
+      if (key.startsWith(prefix)) this.inflightFieldAccess.delete(key);
+    }
+    for (const key of Array.from(this.unansweredFieldAccess)) {
+      if (key.startsWith(prefix)) this.unansweredFieldAccess.delete(key);
+    }
   }
 
   /** Hand one event to every mutation subscriber, each isolated. */
@@ -5182,12 +5218,8 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       }
     }
 
-    const baseUrl = this.baseUrl.replace(/\/$/, '');
     const qs = queryParams.toString();
-    // Avoid doubling /api/v1 if baseUrl already includes it
-    const hasApiVersionSuffix = /\/api\/v\d+$/i.test(baseUrl);
-    const dataPath = hasApiVersionSuffix ? '/data' : '/api/v1/data';
-    const url = `${baseUrl}${dataPath}/${resource}${qs ? `?${qs}` : ''}`;
+    const url = `${this.baseUrl}/api/v1/data/${resource}${qs ? `?${qs}` : ''}`;
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -5314,11 +5346,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     queryParams: URLSearchParams,
     extraHeaders?: Record<string, string>,
   ): Promise<Blob> {
-    const baseUrl = this.baseUrl.replace(/\/$/, '');
-    // Avoid doubling /api/v1 if baseUrl already includes the version suffix.
-    const hasApiVersionSuffix = /\/api\/v\d+$/i.test(baseUrl);
-    const dataPath = hasApiVersionSuffix ? '/data' : '/api/v1/data';
-    const url = `${baseUrl}${dataPath}/${encodeURIComponent(resource)}/export?${queryParams.toString()}`;
+    const url = `${this.baseUrl}/api/v1/data/${encodeURIComponent(resource)}/export?${queryParams.toString()}`;
 
     const headers: Record<string, string> = { ...this.getAuthHeaders(), ...extraHeaders };
     // `credentials: 'include'` carries the session cookie for the browser
@@ -5483,12 +5511,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * not expose the request cache mode.
    */
   private async fetchObjectSchemaFresh(objectName: string): Promise<unknown> {
-    const baseUrl = (this.baseUrl || '').replace(/\/$/, '');
-    // Avoid doubling /api/v1 when baseUrl already carries the version suffix
-    // (mirrors rawFindWithPopulate).
-    const hasApiVersionSuffix = /\/api\/v\d+$/i.test(baseUrl);
-    const metaPath = hasApiVersionSuffix ? '/meta' : '/api/v1/meta';
-    const url = `${baseUrl}${metaPath}/object/${encodeURIComponent(objectName)}`;
+    const url = `${this.baseUrl}/api/v1/meta/object/${encodeURIComponent(objectName)}`;
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     // Bearer (server-to-server) callers configure `this.token`; cookie/console
@@ -5549,12 +5572,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   async getObjects(): Promise<Array<{ name: string; label?: string }>> {
     try {
       await this.connect();
-      const baseUrl = (this.baseUrl || '').replace(/\/$/, '');
-      // Avoid doubling /api/v1 when baseUrl already carries the version suffix
-      // (mirrors fetchObjectSchemaFresh).
-      const hasApiVersionSuffix = /\/api\/v\d+$/i.test(baseUrl);
-      const metaPath = hasApiVersionSuffix ? '/meta' : '/api/v1/meta';
-      const url = `${baseUrl}${metaPath}/object`;
+      const url = `${this.baseUrl}/api/v1/meta/object`;
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
@@ -6832,10 +6850,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *   `timeDimensions` to `unknown[]` and `runtimeFilter` to
    *   `Record<string, unknown>`, and it had never grown `dateGranularity` at
    *   all. Pinned in `queryDataset.test.ts`.
+   * @param options - `previewDrafts` asks for the draft world explicitly (the
+   *   draft-overlaid dataset definitions and the pending seed drafts' rows, as
+   *   `?preview=draft` does), the way `listViews({ previewDrafts })` asks for
+   *   draft views. A surface that is a draft window without carrying the URL
+   *   flag passes it: the Studio canvas. When the option is absent, the page
+   *   URL decides (see the body).
    */
   async queryDataset(
     dataset: Record<string, unknown> | string,
     selection: DatasetSelection,
+    options?: { previewDrafts?: boolean },
   ): Promise<{
     rows: Array<Record<string, unknown>>;
     /**
@@ -6889,17 +6914,18 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     totals?: Array<{ dimensions: string[]; rows: Array<Record<string, unknown>> }>;
   }> {
     await this.connect();
-    const base = (this.baseUrl || '').replace(/\/$/, '');
-    const url = `${base}/api/v1/analytics/dataset/query`;
+    const url = `${this.baseUrl}/api/v1/analytics/dataset/query`;
     // ADR-0037 P3 — draft data preview. Preview mode is URL-keyed by design
     // (`?preview=draft` flips the whole document, incl. the Live Canvas
     // iframe), so the adapter reads it straight off the location rather than
     // threading a React context down through every widget package. When set,
     // the server overlays the pending seed draft's rows on the dataset query
-    // and resolves draft-overlaid dataset definitions.
-    const previewDrafts =
-      typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).get('preview') === 'draft';
+    // and resolves draft-overlaid dataset definitions. An explicit
+    // `options.previewDrafts` is the caller's answer and wins over the URL.
+    const previewDrafts = options?.previewDrafts !== undefined
+      ? options.previewDrafts === true
+      : typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('preview') === 'draft';
     const requestBody = typeof dataset === 'string'
       ? { datasetName: dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) }
       : { dataset, selection, ...(previewDrafts ? { previewDrafts: true } : {}) };
@@ -7276,16 +7302,34 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * `null` when there is no answer to give: a record the caller cannot see
    * (the route answers the record read's own 404), or a server with no
    * record-scoped projection (501). Any other failure is thrown, as a read's.
+   *
+   * Concurrent asks for one record share one request, and both kinds of "no
+   * answer" are remembered (objectstack#27626, see `inflightFieldAccess`).
    */
   async getRecordFieldAccess(resource: string, id: string): Promise<RecordFieldAccess | null> {
-    await this.connect();
-    try {
-      const access = await this.client.data.fieldAccess(resource, String(id));
-      return access ?? null;
-    } catch (error: unknown) {
-      if (is404Error(error) || isNotImplementedError(error)) return null;
-      throw error;
-    }
+    const key = `${resource}::${String(id)}`;
+    if (this.fieldAccessUnsupported || this.unansweredFieldAccess.has(key)) return null;
+    const ask: Promise<RecordFieldAccess | null> = this.shareInFlight(this.inflightFieldAccess, key, async () => {
+      await this.connect();
+      try {
+        const access = await this.client.data.fieldAccess(resource, String(id));
+        return access ?? null;
+      } catch (error: unknown) {
+        if (isNotImplementedError(error)) {
+          this.fieldAccessUnsupported = true;
+          return null;
+        }
+        if (is404Error(error)) {
+          // Not remembered when a write to the resource landed while this ask
+          // was on the wire: the write dropped the entry, and the record may
+          // have moved into the caller's sight since.
+          if (this.inflightFieldAccess.get(key) === ask) this.unansweredFieldAccess.add(key);
+          return null;
+        }
+        throw error;
+      }
+    });
+    return ask;
   }
 
   /**

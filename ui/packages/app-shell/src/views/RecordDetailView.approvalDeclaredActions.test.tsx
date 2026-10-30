@@ -413,7 +413,7 @@ describe('record page decision actions — a GROUP approver (objectui#3055)', ()
     expect(decisionButton('approval_resubmit')).toBeNull();
   });
 
-  it('POSTs to the REQUEST, not to the business record it is opened on', async () => {
+  it('dispatches the decision on the REQUEST, not on the business record it is opened on', async () => {
     stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
     renderRecordPage();
     await waitFor(() => expect(decisionButton('approval_send_back')).toBeTruthy());
@@ -423,16 +423,18 @@ describe('record page decision actions — a GROUP approver (objectui#3055)', ()
     await waitFor(() => expect(authFetchSpy).toHaveBeenCalled());
 
     const [url, init] = authFetchSpy.mock.calls[0] as unknown as [string, RequestInit];
-    // `{id}` resolves from the dispatch record — the request row. Resolving it
-    // from the host page's record would have aimed the decision at
+    // A declared same-origin api action goes through the action door
+    // (objectstack#27611), which resolves `{id}` in the target from the
+    // subject row it loads by `recordId` — the request row. Naming the host
+    // page's record would have aimed the decision at
     // `/approvals/requests/QIF202607310002/revise`.
-    expect(url).toContain(`/api/v1/approvals/requests/${REQUEST_ID}/revise`);
+    expect(url).toContain('/api/v1/actions/sys_approval_request/approval_send_back');
     expect(url).not.toContain(RECORD_ID);
-    expect(url).not.toContain('%7B');
     expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body)).recordId).toBe(REQUEST_ID);
   });
 
-  it('folds a declared decision output into the nested `outputs` body', async () => {
+  it('sends a declared decision output as its `outputs.<key>` param, for the door to fold', async () => {
     stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
     renderRecordPage();
     await waitFor(() => expect(decisionButton('approval_send_back')).toBeTruthy());
@@ -443,11 +445,15 @@ describe('record page decision actions — a GROUP approver (objectui#3055)', ()
 
     const [, init] = authFetchSpy.mock.calls[0] as unknown as [string, RequestInit];
     const body = JSON.parse(String(init.body));
-    // The dotted `outputs.<key>` param the bar synthesizes per request must
-    // arrive nested — that is the shape the decide routes read back as
-    // `vars.<node>.<key>` (objectui#2955 / framework#3447).
-    expect(body).toMatchObject({ comment: 'looks good', outputs: { next_reviewer: 'u_plant_mgr' } });
-    expect(body['outputs.next_reviewer']).toBeUndefined();
+    // The dotted `outputs.<key>` param the bar synthesizes per request rides
+    // the params bag to the action door (objectstack#27611), which folds it
+    // into the nested `outputs` the decide routes read back as
+    // `vars.<node>.<key>` (objectui#2955 / framework#3447) when it assembles
+    // the target's body from the declaration.
+    expect(body).toEqual({
+      recordId: REQUEST_ID,
+      params: { comment: 'looks good', 'outputs.next_reviewer': 'u_plant_mgr' },
+    });
   });
 });
 

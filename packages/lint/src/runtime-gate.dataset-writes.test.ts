@@ -38,6 +38,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
+import { validateObjectReferences } from './validate-object-references.js';
 import {
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
@@ -239,6 +240,95 @@ describe('the door refuses each crossed rule s own defect (#19143)', () => {
       cleanDataset({ object: 'no_such_object_xyz', dimensions: [], measures: [] }),
       'object-reference-unknown',
     );
+  });
+});
+
+describe('the base-object fix line names the dependency declaration under a package closure (#27827)', () => {
+  // ADR-0141 D1: at the save door a dataset in a package may name its own
+  // objects, its declared dependencies' objects and platform objects. Under a
+  // stated closure the snapshot's `objects` ARE that closure, so a base object
+  // another package defines lands on rung ② — and the fix that works is the
+  // declaration, the line the flow and view doors print for the same closure.
+  const OWN = 'com.acme.billing';
+  const DEP = 'com.acme.core';
+  const STRANGER = 'com.other.analytics';
+  const owned = (name: string, pkg: string) => ({
+    name,
+    label: name,
+    sharingModel: 'private',
+    fields: { name: { type: 'text', label: 'Name' } },
+    _packageId: pkg,
+  });
+  const objects = [owned('acme_invoice', OWN), owned('acme_account', DEP), owned('other_cube', STRANGER)];
+  const scope = { packageId: OWN, dependencies: [DEP] };
+  const write = (object: string, packageScope?: typeof scope) =>
+    runRuntimeAuthoringRules({
+      type: 'dataset',
+      item: cleanDataset({ object, dimensions: [], measures: [] }),
+      context: { objects },
+      ...(packageScope !== undefined ? { packageScope } : {}),
+    });
+  const unknownOf = (r: ReturnType<typeof write>) => r.errors.filter((f) => f.rule === 'object-reference-unknown');
+  const TODAYS_HINT =
+    'Point it at one of this stack\'s objects, or at a platform object by its full name (the platform ' +
+    'user object is "sys_user", not "user")';
+
+  it('closure in force: an object of an undeclared package is refused with the declaration as the fix', () => {
+    const [f, ...rest] = unknownOf(write('other_cube', scope));
+    expect(rest).toEqual([]);
+    expect(f).toMatchObject({ severity: 'error', rule: 'object-reference-unknown' });
+    expect(f!.path).toBe('datasets.acme_invoice_metrics.object');
+    expect(f!.hint).toBe(
+      'Declare a dependency on the package that defines "other_cube" in the `dependencies` of ' +
+        `"${OWN}"'s manifest, or point it at an object inside that closure`,
+    );
+  });
+
+  it('closure in force: a name that exists nowhere gets the same fix — the closure is all the door sees', () => {
+    const [f] = unknownOf(write('ghost_cube', scope));
+    expect(f).toMatchObject({ severity: 'error' });
+    expect(f!.hint).toContain('`dependencies`');
+    expect(f!.hint).toContain(OWN);
+  });
+
+  it('closure in force: the own package and a declared dependency stay inside it — nothing to fix', () => {
+    expect(unknownOf(write('acme_invoice', scope))).toEqual([]);
+    expect(unknownOf(write('acme_account', scope))).toEqual([]);
+  });
+
+  it('no closure: a write that names no package keeps today s hint, and the stranger s object resolves', () => {
+    // The whole collection is the snapshot, so another package's object is no
+    // miss at all; a name that exists nowhere gets the hint the CLI prints.
+    expect(unknownOf(write('other_cube'))).toEqual([]);
+    const [f] = unknownOf(write('ghost_cube'));
+    expect(f).toMatchObject({ severity: 'error', rule: 'object-reference-unknown' });
+    expect(f!.hint).toBe(TODAYS_HINT);
+    expect(f!.hint).not.toContain('dependencies');
+    // An empty package id narrows nothing, so it states no closure either.
+    const [g] = unknownOf(write('ghost_cube', { packageId: '', dependencies: [] }));
+    expect(g!.hint).toBe(TODAYS_HINT);
+    // The CLI reading (`os validate` / `os build` / `os lint`): no closure is
+    // ever stated there, and the line is the one the door prints without one.
+    const [cli, ...more] = validateObjectReferences({
+      objects,
+      datasets: [cleanDataset({ object: 'ghost_cube', dimensions: [], measures: [] })],
+    });
+    expect(more).toEqual([]);
+    expect({ rule: cli!.rule, severity: cli!.severity, message: cli!.message, hint: cli!.hint }).toEqual({
+      rule: f!.rule,
+      severity: f!.severity,
+      message: f!.message,
+      hint: TODAYS_HINT,
+    });
+  });
+
+  it('the verdict is the same both ways — only the fix line moves', () => {
+    const scoped = unknownOf(write('ghost_cube', scope));
+    const whole = unknownOf(write('ghost_cube'));
+    const verdictOf = (fs: typeof scoped) => fs.map(({ severity, rule, where, path, message }) =>
+      ({ severity, rule, where, path, message }));
+    expect(verdictOf(scoped)).toEqual(verdictOf(whole));
+    expect(scoped.map((f) => f.hint)).not.toEqual(whole.map((f) => f.hint));
   });
 });
 

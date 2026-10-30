@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IntrospectedSchema } from '@objectstack/spec/contracts';
+import type { ConnectorCredentialHandle } from '@objectstack/types';
 
 /**
  * IDatasourceDriverFactory — host-provided capability that builds a live driver
@@ -44,6 +45,16 @@ export interface DatasourceConnectionSpec {
   schemaMode?: 'managed' | 'external' | 'validate-only';
   /** Cleartext secret (password / DSN) injected for this connection only. */
   secret?: string;
+  /**
+   * The credential borrowed from the connector instance the datasource names
+   * in `external.connector` (ADR-0015 amendment D7) — a handle, never a value.
+   * An API-backed driver keeps it for the life of its connection and runs
+   * every request through `callWithBorrowedCredential` (`@objectstack/types`),
+   * which asks it per request, refreshes it on expiry and once on a `401`.
+   * Present only for such a datasource, and then instead of {@link secret}:
+   * the two credential channels are exclusive.
+   */
+  credential?: ConnectorCredentialHandle;
   /** External federation settings (timeouts, allowed schemas, …). */
   external?: Record<string, unknown>;
   /** Connection pool settings. */

@@ -2694,12 +2694,7 @@ export class RestServer {
         // [#24031] The ONE object this gate judges, read by name — never the
         // whole object list, whose decoration diagnosed every object on every
         // request. A protocol with no by-name read is asked the list.
-        const listSource = this.metaListSource(p, environmentId);
-        const getObjectItem = this.objectItemReader(p, environmentId);
-        const obj = await metaReadGate.loadObjectItem(
-            getObjectItem ? { ...listSource, getObjectItem } : listSource,
-            objectName,
-        );
+        const obj = await this.loadObjectItem(p, environmentId, objectName);
         // [#3770] Unknown object → no declared exposure policy to enforce here;
         // the data path's registry gate 404s it. See the doc comment above.
         if (!obj) return false;
@@ -2903,14 +2898,31 @@ export class RestServer {
     }
 
     /**
-     * Load the object metadata items for the current protocol/environment,
-     * coerced to a plain array — `loadObjectItems` in
-     * `./meta-item-read-gate.ts` (fail OPEN and logged, #3545). Shared by
-     * `enforceApiAccess` (one object), the cross-object batch route (all ops,
-     * fetched once) and the nav-servability gate.
+     * The ONE object the API-exposure gate judges for `name`, or `undefined`
+     * when no object is behind it — `loadObjectItem` in
+     * `./meta-item-read-gate.ts` (fail OPEN and logged, #3545), over this
+     * protocol's by-name read where it has one ({@link objectItemReader}),
+     * else its list read.
+     *
+     * [#27899] The one read of every data door's exposure gate:
+     * `enforceApiAccess` asks it for the route's `:object`, the cross-object
+     * batch route for each op's object. The by-name read resolves a legacy
+     * `ns__short` object from its short name as the data door's
+     * `registry.getObject` does, so both doors judge the object the data call
+     * then serves; the batch route used to key the object LIST by declared
+     * name instead, and the list carries no such resolution.
      */
-    private async loadObjectItems(p: RestProtocol, environmentId: string | undefined): Promise<any[]> {
-        return metaReadGate.loadObjectItems(this.metaListSource(p, environmentId));
+    private async loadObjectItem(
+        p: RestProtocol,
+        environmentId: string | undefined,
+        name: string,
+    ): Promise<any | undefined> {
+        const listSource = this.metaListSource(p, environmentId);
+        const getObjectItem = this.objectItemReader(p, environmentId);
+        return metaReadGate.loadObjectItem(
+            getObjectItem ? { ...listSource, getObjectItem } : listSource,
+            name,
+        );
     }
 
     /**
@@ -3651,9 +3663,9 @@ export class RestServer {
      * protocol has no list read at all.
      *
      * [#25783] The `object` list on the protocol's EXECUTION face where it has
-     * one: its readers — the nav-servability gate on `/meta/app`, the batch
-     * route's exposure gate, the by-name gate's list fallback — read each
-     * object's `enable` and serve none of it, and the served face diagnosed
+     * one: its readers — the nav-servability gate on `/meta/app` and the
+     * by-name exposure gate's list fallback — read each object's `enable` and
+     * serve none of it, and the served face diagnosed
      * every object of the registry on every such request (a full schema
      * `safeParse` each). Same sources, merge and governance either way; the
      * `book` and `doc` lists stay on the served face, unchanged.
@@ -6244,7 +6256,7 @@ export class RestServer {
             enforceAuth: (...a) => this.enforceAuth(...a),
             enforceApiAccess: (...a) => this.enforceApiAccess(...a),
             enforceBatchSize: (...a) => this.enforceBatchSize(...a),
-            loadObjectItems: (...a) => this.loadObjectItems(...a),
+            loadObjectItem: (...a) => this.loadObjectItem(...a),
         };
         registerBatchEndpoints.call(host, basePath);
     }

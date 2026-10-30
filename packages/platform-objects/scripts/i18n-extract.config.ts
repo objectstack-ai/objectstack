@@ -187,7 +187,7 @@ import {
 } from '../src/metadata/index.js';
 
 // ── System ────────────────────────────────────────────────────────────────
-import { SysSetting, SysSecret, SysSettingAudit, SysMigration } from '../src/system/index.js';
+import { SysSetting, SysSecret, SysSettingAudit, SysMigration, SysExchangeRate } from '../src/system/index.js';
 
 // ── Existing Setup app + dashboards + translations ────────────────────────
 import { SETUP_APP } from '../src/apps/setup.app.js';
@@ -317,6 +317,7 @@ const config: ObjectStackDefinition = defineStack({
     SysSecret,
     SysSettingAudit,
     SysMigration,
+    SysExchangeRate,
   ] as any,
 
   apps: [SETUP_APP, STUDIO_APP, ACCOUNT_APP] as any,

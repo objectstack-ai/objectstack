@@ -8,6 +8,7 @@ import {
   InvitationStatus,
   MEMBERSHIP_ROLE_MEMBER,
 } from '@objectstack/spec/identity';
+import { INVITE_USER_OUTCOME_MESSAGES, RESEND_INVITATION_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 
 /**
  * sys_invitation — System Invitation Object
@@ -76,6 +77,10 @@ export const SysInvitation = ObjectSchema.create({
       // `{{ result.email }}`: the invitee's address from the invitation row
       // invite-member answers (see sys_user's mirror).
       successMessage: 'Invitation sent to {{ result.email }}',
+      // [#27843] The copy per delivery outcome invite-member answers: `sent`,
+      // or `link_only` when this deployment does not deliver mail. The
+      // `successMessage` above stays the fallback for an answer without one.
+      outcomeMessages: { ...INVITE_USER_OUTCOME_MESSAGES },
       refreshAfter: true,
       params: [
         { field: 'email', required: true },
@@ -118,11 +123,46 @@ export const SysInvitation = ObjectSchema.create({
       // that reach that endpoint — delegated_admin included.
       requiresMembershipReach: 'invite_member',
       successMessage: 'Invitation resent',
+      // [#27843] A resend answers the same delivery `outcome` as an invite.
+      outcomeMessages: { ...RESEND_INVITATION_OUTCOME_MESSAGES },
       refreshAfter: true,
       params: [
         { field: 'email', required: true, defaultFromRow: true },
         { field: 'role', required: true, defaultFromRow: true },
       ],
+    },
+    {
+      // [#27843, ruling E on #27797] The pending invitation's accept link, for
+      // a deployment whose mail is not delivered (invite-member answers
+      // `outcome: 'link_only'` there): the one way the invitee is reached.
+      // The handler is plugin-auth's (`invitation-link-action.ts`), registered
+      // under `target`; it builds the link the invitation mail carries, and
+      // enforces this action's gates itself, because the link is a bearer
+      // credential and `visible` is courtesy.
+      name: 'copy_invitation_link',
+      label: 'Copy Invite Link',
+      icon: 'link',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'script',
+      target: 'copy_invitation_link',
+      // The gates of `resend_invitation` (the organization capability and the
+      // grades that reach invite-member), hidden while cloud-managed as the
+      // invite mirrors are, and offered on a pending row only. `has()` opens
+      // the status operand for the sparse `list_item` face (#8990), as on the
+      // recipient-side actions below.
+      visible: "features.cloudManaged != true && has(record.status) && record.status == 'pending'",
+      requiresFeature: 'organization',
+      requiresMembershipReach: 'invite_member',
+      resultDialog: {
+        title: 'Invite link',
+        description:
+          'Anyone who opens this link can accept the invitation, so share it only with the person you invited. '
+          + 'It stops working once the invitation is accepted, declined, canceled or expires.',
+        format: 'text',
+        fields: [{ path: 'acceptUrl', label: 'Invite link' }],
+        acknowledge: 'Done',
+      },
     },
 
     // ── Recipient-side actions (the invited user) ────────────────────

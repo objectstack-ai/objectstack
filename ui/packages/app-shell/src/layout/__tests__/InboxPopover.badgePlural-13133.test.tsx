@@ -82,15 +82,15 @@ function renderPopover(unread: number, pendingApprovalsCount: number) {
 }
 
 describe('InboxPopover — badge breakdown agrees in number (objectui#13133)', () => {
-  it('reads "1 notification" for one unread topic, and "1 pending approval" for one approval', () => {
+  it('reads "1 unread topic" for one unread topic, and "1 pending approval" for one approval', () => {
     renderPopover(1, 1);
-    expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(/^1 notification$/);
+    expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(/^1 unread topic$/);
     expect(screen.getByTestId('inbox-badge-breakdown-approvals')).toHaveTextContent(/^1 pending approval$/);
   });
 
-  it('reads "3 notifications" and "3 pending approvals" for three', () => {
+  it('reads "3 unread topics" and "3 pending approvals" for three', () => {
     renderPopover(3, 3);
-    expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(/^3 notifications$/);
+    expect(screen.getByTestId('inbox-badge-breakdown-notifications')).toHaveTextContent(/^3 unread topics$/);
     expect(screen.getByTestId('inbox-badge-breakdown-approvals')).toHaveTextContent(/^3 pending approvals$/);
   });
 

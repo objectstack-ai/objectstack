@@ -455,7 +455,8 @@ describe('resolveLocalizationContext — failure-only cross-request cache (#1022
     const second = await resolveLocalizationContext({ ql, organizationId: 'o1' });
     // Functional behavior is unchanged — still the built-in defaults — the
     // second call just doesn't repeat the failing query (and its log line).
-    expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
+    // [#27257] Both say the read failed, the memoized one included.
+    expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined, readFailed: true });
     expect(second).toEqual(first);
     expect(ql.counts.sys_setting).toBe(1);
   });

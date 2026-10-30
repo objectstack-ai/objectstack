@@ -14,7 +14,11 @@ import { describe, it, expect } from 'vitest';
 
 import { FieldType } from './field.zod';
 import { ObjectSchema } from './object.zod';
-import { MASKED_ON_READ_FIELD_TYPES, isMaskedOnReadFieldType } from './masked-field-types';
+import {
+  MASKED_ON_READ_FIELD_TYPES,
+  isCredentialFieldType,
+  isMaskedOnReadFieldType,
+} from './masked-field-types';
 
 const FIELD_TYPES: readonly string[] = FieldType.options;
 const MANAGED_BY_BUCKETS: readonly string[] = (
@@ -94,6 +98,31 @@ describe('isMaskedOnReadFieldType — the one reading of the declaration', () =>
   it('fails closed on managedBy: an unlisted or malformed bucket never exempts', () => {
     for (const managedBy of ['Better-Auth', 'better-auth ', ['better-auth'], 0, true]) {
       expect(isMaskedOnReadFieldType('password', managedBy), String(managedBy)).toBe(true);
+    }
+  });
+});
+
+describe('isCredentialFieldType — the exemption-free reading (the search withhold and the lint check)', () => {
+  it('answers every FieldType: secret and password on any object, nothing else', () => {
+    for (const type of FIELD_TYPES) {
+      expect(isCredentialFieldType(type), type).toBe(type === 'secret' || type === 'password');
+    }
+  });
+
+  it('ignores the read-mask exemption: a type masked on ANY object is a credential type', () => {
+    for (const type of FIELD_TYPES) {
+      const maskedSomewhere = [...MANAGED_BY_BUCKETS, undefined].some((m) => isMaskedOnReadFieldType(type, m));
+      expect(isCredentialFieldType(type), type).toBe(maskedSomewhere);
+    }
+    // The one cell the two predicates disagree on, spelled out.
+    expect(isMaskedOnReadFieldType('password', 'better-auth')).toBe(false);
+    expect(isCredentialFieldType('password')).toBe(true);
+  });
+
+  it('is total over unvalidated input: non-strings, prototype keys and case variants are not credential types', () => {
+    for (const type of [undefined, null, 42, ['secret'], { toString: () => 'secret' }, '', 'constructor',
+      'toString', '__proto__', 'hasOwnProperty', 'SECRET', 'Password']) {
+      expect(isCredentialFieldType(type), String(type)).toBe(false);
     }
   });
 });

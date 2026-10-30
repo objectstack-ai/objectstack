@@ -224,7 +224,20 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // — 0 findings, precision 1.0. The zero is a fact about the corpus AND the
   // door: `rulesRun` read 2 on every one, and the same harness's synthetic
   // probe is refused (`runtime-gate.dataset-writes.test.ts` makes it permanent).
-  { name: 'validateObjectReferences', runtimeTypes: ['flow', 'dataset'], run: validateObjectReferences },
+  //
+  // [#27827] It reads `packageScope` the way `validateListViewFieldRefs` below
+  // does: under a stated closure the snapshot's `objects` are that closure, so
+  // a base object missing from it is outside what the package declared it may
+  // reference, and the `object-reference-unknown` fix line is the closure
+  // prescription the flow and view doors print (declare the dependency,
+  // ADR-0141 D1). Absent — the CLI, or a write that names no package — the
+  // rule prints the hint it always did. The verdict and severity do not move.
+  {
+    name: 'validateObjectReferences',
+    runtimeTypes: ['flow', 'dataset'],
+    run: (stack, ctx) =>
+      validateObjectReferences(stack, ctx?.packageScope ? { packageScope: ctx.packageScope } : {}),
+  },
   // [#9313] `runtimeTypes` gains `view` on this member and its sort sibling:
   // both judge a LIST VIEW's field references, and a standalone list view is
   // written through `PUT /api/v1/meta/view` — the only door a Studio tenant or
@@ -310,7 +323,8 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // crossing is its own adjudication with its own non-vacuity control, and
   // this card was scoped to the two axes its title names.
   //
-  // [#24563] The one member that reads `packageScope`. Under a package
+  // [#24563] A member that reads `packageScope` (#27827: so does
+  // `validateObjectReferences` above, for its fix line only). Under a package
   // closure the snapshot's `objects` are that closure (ruling #9612), so a
   // binding missing from it is outside what the package declared it may
   // reference, or nowhere at all — and the member's skip 1 used to read that as
@@ -769,7 +783,9 @@ export interface ReferenceIntegrityRunOptions {
    * force; ABSENT on the CLI commands and on a write that names no package.
    * Read by `validateListViewFieldRefs` and `validateRelatedListRefs`, which
    * read its absence beside a set `runtimeWriteType` as the whole collection
-   * (#24668).
+   * (#24668), and by `validateObjectReferences`, whose
+   * `object-reference-unknown` fix line names the dependency declaration
+   * under it (#27827).
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
 }

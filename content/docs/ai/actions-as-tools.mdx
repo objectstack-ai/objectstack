@@ -49,7 +49,7 @@ bound to the caller's principal (the API key acts as the user):
 
 | Tool | What it does |
 |:---|:---|
-| `list_actions` | Enumerates the business actions that are **AI-exposed** (`ai.exposed: true`) **and** the caller is permitted to run — name, target object, description, whether it needs a `recordId`, whether it is destructive, and its declared params. |
+| `list_actions` | Enumerates the business actions that are **AI-exposed** (`ai.exposed: true`) **and** the caller is permitted to run — name, target object, description, whether it needs a `recordId`, whether it is destructive, its declared params, and `aiExposed: true` (the author's opt-in, attested by the bridge). |
 | `run_action` | Invokes an action by name with `{ recordId, params }`. Invocation is gated (author opt-in + capabilities); the action body then runs the app's registered logic as trusted code. |
 | `resume_run` | Continues a flow run that `run_action` answered with `status: "paused"` and a `screen`, by submitting that screen's field values as `{ runId, values }`. Only the user who started the run can resume it, behind the same gates as `run_action`. See [Completing a paused screen flow](#completing-a-paused-screen-flow). |
 
@@ -101,14 +101,19 @@ data-layer backstop, is the boundary (#2849).
 
 The bridge walks every registered object's `actions[]` and offers only actions
 that are **AI-exposed** (`ai.exposed: true`), have a headless dispatch path,
-**and** that the caller is permitted to run. System objects (`sys_*`) are held
-back fail-closed.
+**and** that the caller is permitted to run. An action on a system object
+(`sys_*`) is offered only on its own `ai.exposed: true` — the object's name is
+not a second opt-in to clear, and no deployment switch opens one that is not
+flagged — and then runs behind every gate below, as on any other object (#27681).
+The stored-metadata tables (`sys_metadata`, `sys_metadata_history`) are the one
+exception: their actions stay refused even when flagged; read and change those
+through the metadata API.
 
 | `action.type` | Dispatch path | Available where |
 |:---|:---|:---|
 | `script` | `IDataEngine.executeAction(object, target, ctx)` — the same call Studio makes | open (MCP) + ObjectOS |
 | `flow` | automation flow runner — `execute(target, automationContext)` (caller identity forwarded so `runAs` engages) | open (MCP) + ObjectOS; needs the `automation` service registered |
-| `api` | HTTP call to `action.target` via a configured `apiClient` | **ObjectOS** runtime only |
+| `api` | same-origin `target` (a path starting with `/`): forwarded in-process through the action door to that target, after the door's gates, with the caller's own credentials; a credential rotation the target emits comes back as the bearer-lane headers only (`set-auth-token` / `set-admin-session-token`), never a `Set-Cookie` line | open (MCP) + ObjectOS; an `api` action whose `target` is on another origin stays browser-only and is not listed |
 
 Console-only types (`url`, `modal`, `form`) are always skipped.
 

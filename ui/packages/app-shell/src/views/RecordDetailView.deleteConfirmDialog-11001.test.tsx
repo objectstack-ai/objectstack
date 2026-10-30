@@ -89,7 +89,14 @@ const START_PATH = `/apps/crm/${OBJECT_NAME}/${RECORD_ID}`;
 
 type Pack = {
   detail: { delete: string; moreActions: string };
-  objectActions: { deleteConfirm: string; deleteConfirmTitle: string; deleteConfirmButton: string };
+  objectActions: {
+    deleteConfirm: string;
+    deleteConfirmTitle: string;
+    deleteConfirmButton: string;
+    deletedNamed: string;
+    deleteSuccess: string;
+  };
+  console: { objectView: { bulkDeleteConfirm: string } };
   actionConfirm: { title: string; confirm: string; cancel: string };
 };
 /** The packs, read by key — see the header on why nothing is written out. */
@@ -228,6 +235,11 @@ describe('record page Delete asks through the in-app confirm dialog (objectui#11
       fill(EN.objectActions.deleteConfirmTitle, { label: 'Call', name: 'Intro call' }),
     );
     expect(within(dialog).getByText(EN.objectActions.deleteConfirm)).toBeInTheDocument();
+    // objectstack-ai/objectstack#27823 — the question says the delete is
+    // permanent, in the batch question's own words.
+    const permanent = EN.console.objectView.bulkDeleteConfirm.split('? ').pop()!;
+    expect(within(dialog).getByText(EN.objectActions.deleteConfirm).textContent).toContain(permanent);
+    expect(permanent).toBe('This cannot be undone.');
     const confirm = within(dialog).getByRole('button', { name: EN.objectActions.deleteConfirmButton });
     expect(confirm.className).toContain('bg-destructive');
     expect(within(dialog).queryByRole('button', { name: EN.actionConfirm.confirm })).toBeNull();
@@ -249,6 +261,11 @@ describe('record page Delete asks through the in-app confirm dialog (objectui#11
     await waitFor(() => expect(dataSource.delete).toHaveBeenCalledTimes(1));
     expect(dataSource.delete).toHaveBeenCalledWith(OBJECT_NAME, RECORD_ID);
     await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    // objectstack-ai/objectstack#27823 — the toast names the deleted record the
+    // way the confirm title did, not a generic "Record deleted".
+    expect(toast.success).toHaveBeenCalledWith(
+      fill(EN.objectActions.deletedNamed, { label: 'Call', name: 'Intro call' }),
+    );
     // …and leaves the deleted record's page for the object's list.
     await waitFor(() => expect(currentPath()).toBe(`/${OBJECT_NAME}`));
     expect(nativeConfirm).not.toHaveBeenCalled();

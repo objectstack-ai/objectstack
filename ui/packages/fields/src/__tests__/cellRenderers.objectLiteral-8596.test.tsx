@@ -297,6 +297,11 @@ const OBJECT_LITERAL_CENSUS: ReadonlyArray<readonly [type: string, text: string,
   // the text cell's face for it, exactly as `text` does.
   ['object-ref', '[Object]', false],
   ['recipient-picker', '[Object]', false],
+  // ── objectstack#27861: the registry-name read faces ─────────────────────
+  // `{}` names no item, so nothing is asked and both draw the text cell's
+  // face for it, exactly as `text` does.
+  ['position-ref', '[Object]', false],
+  ['permission-ref', '[Object]', false],
 ];
 
 /** A real value per type — the POPULATED half, which refuses the caricature. */
@@ -357,6 +362,8 @@ const POPULATED_CENSUS: ReadonlyArray<readonly [type: string, value: unknown]> =
   ['record_pointer_card', { objectName: 'invoice', recordId: 'inv_1' }],
   ['object-ref', 'crm_account'],
   ['recipient-picker', 'sales_manager'],
+  ['position-ref', 'sales_manager'],
+  ['permission-ref', 'admin_full_access'],
 ];
 
 describe('objectui#8596 — an object literal is not a cell value, and these renderers invented one', () => {

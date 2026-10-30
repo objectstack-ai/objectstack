@@ -48,7 +48,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
-import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer } from '@object-ui/fields';
+import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard } from '@object-ui/fields';
 import {
   buildExpandFields,
   collectPredicateFieldRefs,
@@ -583,15 +583,22 @@ function serverSentence(err: unknown): string | null {
  * the shared fixed sentence and never the server's text (a refused read does
  * not name what it cannot see), unless the producer marked a `userMessage` for
  * the reader; every other failure says the server's sentence when it gave one.
- * Retry for every kind but `api-disabled`, whose verdict a retry cannot change
- * — the ListView precedent.
+ * Retry for every kind but `api-disabled` and `forbidden`, whose verdicts a
+ * retry cannot change — the ListView precedent.
+ *
+ * A `forbidden` read is not a failure of anything the reader did: it is drawn
+ * as a quiet neutral line (`role="status"`, no destructive styling) and always
+ * says the list's no-access sentence. A producer's `userMessage` on a 403 is
+ * the generic action refusal ("...perform this action"), which reads as a
+ * rebuke to someone who only opened the record to read it.
  */
 const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> = ({ error, onRetry }) => {
   const { t } = useDetailTranslation();
   const kind = classifyLoadError(error);
   const copy = LOAD_FAILED_COPY[kind];
+  const refused = kind === 'forbidden';
   const message =
-    declaredUserMessage(error)
+    (refused ? null : declaredUserMessage(error))
     ?? (copy.message
       ? t(copy.message[0], { defaultValue: copy.message[1] })
       : serverSentence(error)
@@ -599,15 +606,18 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
   const Icon = kind === 'network' || kind === 'rejected' ? AlertTriangle : ShieldAlert;
   return (
     <div
-      role="alert"
+      role={refused ? 'status' : 'alert'}
       data-testid="related-list-load-failed"
       data-error-kind={kind}
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm"
+      className={cn(
+        'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-3 py-2 text-sm',
+        refused ? 'border-border bg-muted/40' : 'border-destructive/30 bg-destructive/5',
+      )}
     >
-      <Icon className="h-4 w-4 shrink-0 text-destructive/70" aria-hidden />
+      <Icon className={cn('h-4 w-4 shrink-0', refused ? 'text-muted-foreground' : 'text-destructive/70')} aria-hidden />
       <span className="font-medium">{t(copy.title[0], { defaultValue: copy.title[1] })}</span>
       <span className="min-w-0 text-muted-foreground">{message}</span>
-      {kind !== 'api-disabled' && (
+      {kind !== 'api-disabled' && !refused && (
         <Button
           variant="outline"
           size="sm"
@@ -817,8 +827,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * [ADR-0066 D4 / objectui#9782] The `list_toolbar` set this header may draw,
    * with `requiredPermissions` mirrored as a UI hide.
    *
-   * `@objectstack/spec` declares the key as "enforced with 403 on the platform
-   * action route (script/flow/modal + MCP) and **mirrored as a UI hide**". The
+   * `@objectstack/spec` declares the key as "enforced with 403 on every call the
+   * platform action door (`POST /actions/:object/:action` and MCP `run_action`)
+   * dispatches, and **mirrored as a UI hide**" — a declared same-origin
+   * `type: api` action included (ADR-0066 D4 as amended). The
    * same bridge (`RelatedRecordActionsBridge.deriveActions`) feeds the child
    * object's `list_item` actions and these header buttons, and it filters on
    * `locations` alone — so before this the toolbar honoured `visible` and
@@ -1957,7 +1969,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // returns a falsy renderer — measured over seven spellings, including
       // ones no producer can emit, all of which resolved to `TextCellRenderer`.
       if (!def?.type) return undefined;
-      const rendererType = resolveCellRendererType({ type: def.type, format: def.format }) || def.type;
+      const rendererType = resolveCellRendererType({ type: def.type, format: def.format, widget: def.widget }) || def.type;
       const CellRenderer = getCellRenderer(rendererType);
       if (!CellRenderer) return undefined;
       const isLookup = def.type === 'lookup' || def.type === 'master_detail';
@@ -2002,6 +2014,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency in this list (objectui#12242).
         ...(def.currencyConfig && { currencyConfig: def.currencyConfig }),
+        // A formula's declared result type, which picks its face in the formula
+        // cell: `currency` draws through the currency cell with the
+        // `currencyConfig` above. Without it a money formula read as a bare
+        // number in this list (objectstack#27430).
+        ...(def.returnType && { returnType: def.returnType }),
         ...(def.precision !== undefined && { precision: def.precision }),
         ...((def as any).scale !== undefined && { scale: (def as any).scale }),
         // Beside `scale`, whose scale-0 grouping heuristic it overrides in the
@@ -2955,17 +2972,29 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 className="flex h-8 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
                 data-related-card-row=""
               >
-                {handleRowClick ? (
-                  <button
-                    type="button"
-                    className="min-w-0 truncate text-left text-primary hover:underline"
-                    onClick={(e) => handleRowClick(row, e)}
-                  >
-                    {name}
-                  </button>
-                ) : (
-                  <span className="min-w-0 truncate">{name}</span>
-                )}
+                {/* objectstack#27604 — hovering the name (or Space on it)
+                    shows the record's card; its title opens the record the
+                    way this name does. */}
+                <RecordHoverCard
+                  objectName={api}
+                  recordId={row?.id}
+                  objectSchema={objectSchema}
+                  label={name}
+                  dataSource={dataSource}
+                  onOpen={handleRowClick ? (e) => handleRowClick(row, e) : undefined}
+                >
+                  {handleRowClick ? (
+                    <button
+                      type="button"
+                      className="min-w-0 truncate text-left text-primary hover:underline"
+                      onClick={(e) => handleRowClick(row, e)}
+                    >
+                      {name}
+                    </button>
+                  ) : (
+                    <span className="min-w-0 truncate">{name}</span>
+                  )}
+                </RecordHoverCard>
                 {chipOf(row)}
               </div>
             );

@@ -231,6 +231,16 @@ connect, handshake or `tools/list`) is a configuration fault instead: the
 instance is degraded naming the refusal, as described under *A credential the
 upstream refuses* below.
 
+`include` has the same allowlist meaning as the `openapi` provider's: list the
+tools the instance should expose and every other tool stays out — the way to
+keep a destructive tool away from your flows and agents. It must be an array of
+tool names; any other shape (a string such as `include: 'web_search'`, an
+object) fails the boot before connecting, and never falls back to exposing
+every tool. An entry the server's `tools/list` does not carry — a typo, or a
+tool the server renamed or dropped — fails the boot with an error naming the
+entry and listing the server's tools; it is never ignored. Leave `include` out
+to expose every tool.
+
 <Callout type="warn">
 **Declarative stdio transports are denied by default.** Materializing one
 spawns a local process *from metadata* — which a runtime Studio publish can
@@ -444,6 +454,7 @@ retry):
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
+| A retry of a degraded instance reaches the upstream and meets a configuration fault (an `include` naming a tool or operation the upstream does not offer) | **Not fatal**: the instance stays **degraded**, now with the configuration reason, and is **not retried** — dispatches fail saying to edit its declaration; an edit of the entry (or a restart) re-attempts it |
 | Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
 | A bad entry arrives via **runtime reload** (Studio publish / dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
 

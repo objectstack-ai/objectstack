@@ -144,8 +144,9 @@ describe('the publish drill-in of a flow edit (objectstack#27356)', () => {
     ]);
     expect(within(rows[1]!).getByText('create_task')).toHaveClass('font-mono');
     expect(detail.textContent).not.toContain('~ nodes');
-    // `edges` is still a key row under "Also changed:".
+    // `edges` is still a key row under "Also changed:", by its flow form label
+    // (objectstack#27835).
     expect(within(detail).getByText('Also changed:')).toBeInTheDocument();
-    expect(within(detail).getByText('~ edges')).toBeInTheDocument();
+    expect(within(detail).getByTestId('draft-key-row')).toHaveTextContent('~ Edges');
   });
 });

@@ -71,9 +71,16 @@ import { bindApprovalLockHook, bindDelegationWriteGuard } from './lifecycle-hook
 
 interface FakeRow { [k: string]: any }
 
+/**
+ * The accounts this suite routes `user` approver slots to: a `user` approver
+ * holds a slot only when an account carries it (#27397), so the double's
+ * directory starts with them.
+ */
+const ROUTED_USERS = ['u9'];
+
 /** The same minimal engine shape `approval-service.test.ts` uses. */
 function makeFakeEngine() {
-  const tables: Record<string, FakeRow[]> = {};
+  const tables: Record<string, FakeRow[]> = { sys_user: ROUTED_USERS.map((id) => ({ id })) };
   const ensure = (n: string) => (tables[n] ??= []);
   const hooks: Record<string, Array<{ handler: (ctx: any) => any; object?: string | string[]; packageId?: string }>> = {};
 
@@ -231,6 +238,7 @@ describe('#4839 evidence — a delegation cannot rescue an IN-FLIGHT approval', 
   });
 
   it('the delegation DOES apply to a request opened afterwards — it is an open-time rule, nothing more', async () => {
+    engine._tables['sys_user'].push({ id: 'u7' }); // a delegate routes only when an account carries it (#27752)
     seedDelegation('u9', 'u7');
     const req = await svc.openNodeRequest(staffedInput(), SUBMITTER);
     // Guard the guard: the delegation machinery is wired and working in this
@@ -253,7 +261,7 @@ describe('#4839 evidence — the sanctioned admin path covers an unavailable app
     bindApprovalLockHook(engine as any);
     engine._tables['opportunity'] = [{ id: 'opp1', amount: 100, stage: 'new' }];
     // The substitute has an account: a reassign target must name one (#25485).
-    engine._tables['sys_user'] = [{ id: 'u7' }];
+    engine._tables['sys_user'].push({ id: 'u7' });
   });
 
   /** An ordinary member's edit of the approval's target record. */

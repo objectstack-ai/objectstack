@@ -609,21 +609,6 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
     schema.mode === 'edit' && schema.recordId && initialData && typeof initialData === 'object'
       ? (initialData as Record<string, any>)
       : undefined;
-  // The ONE field-gate step every layout draws through (objectui#10612):
-  // field-level security plus the ADR-0092 D4 managed-object lock, which this
-  // arm's field generator used to stamp on its own — see `gateFormFields`.
-  const gateFields = useCallback(
-    (fields: FormField[]): FormField[] =>
-      gateFormFields(fields, {
-        perms,
-        objectName: schema.objectName,
-        mode: schema.mode,
-        objectSchema,
-        deniedDescription,
-        previousValues,
-      }) as FormField[],
-    [perms, schema.objectName, schema.mode, objectSchema, deniedDescription, previousValues],
-  );
   // objectui#11000 — why `gateFields` locked every field, when the lock is the
   // form-wide one: the affordance for the mode is closed. Rendered above the
   // fields by `ClosedAffordanceNotice`.
@@ -1194,6 +1179,24 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // record. A create save judges a picked owner against exactly this
   // (objectui#12359), so both readers spell it through `formOpeningValues`.
   const finalDefaultValues = formOpeningValues(schemaDefaults, initialData);
+
+  // The ONE field-gate step every layout draws through (objectui#10612):
+  // field-level security plus the ADR-0092 D4 managed-object lock, which this
+  // arm's field generator used to stamp on its own — see `gateFormFields`.
+  const gateFields = useCallback(
+    (fields: FormField[]): FormField[] =>
+      gateFormFields(fields, {
+        perms,
+        objectName: schema.objectName,
+        mode: schema.mode,
+        objectSchema,
+        deniedDescription,
+        previousValues,
+        // What the form opens with stays offered on a create (#27763).
+        openingValues: finalDefaultValues,
+      }) as FormField[],
+    [perms, schema.objectName, schema.mode, objectSchema, deniedDescription, previousValues, finalDefaultValues],
+  );
 
   // Handle form submission
   const handleSubmit = useCallback(async (formData: any, e?: any) => {

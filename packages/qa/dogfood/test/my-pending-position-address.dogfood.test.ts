@@ -69,6 +69,7 @@ describe('"My Pending" lists a position-routed request under position: (#21350; 
         const submitterToken = await stack.signUp(SUBMITTER);
         const reviewerToken = await stack.signUp(REVIEWER);
         const bystanderToken = await stack.signUp(BYSTANDER);
+        await stack.signUp(CO_APPROVER);
         const submitterId = await idOf(SUBMITTER);
         const reviewerId = await idOf(REVIEWER);
         const bystanderId = await idOf(BYSTANDER);

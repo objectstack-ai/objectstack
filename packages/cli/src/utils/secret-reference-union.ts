@@ -133,6 +133,35 @@ export interface SecretReference {
    * `datasource(main).external.credentialsRef`.
    */
   holder: string;
+  /** The same place as data, for a reader that compares coordinates rather than printing them. */
+  column: SecretHolderColumn;
+}
+
+/**
+ * [#27721] The coordinates of the column that holds a reference.
+ *
+ * {@link SecretReference.holder} is for printing; this is for comparing, so a
+ * reader asks "which column holds it" without parsing a printed string back.
+ * Collected at the same read as the reference, and nothing more is read for it.
+ */
+export interface SecretHolderColumn {
+  /** The holding object (`sys_setting`, a business object), or `datasource` for an artefact. */
+  object: string;
+  /** The holding column (`value_enc`, the `secret` field, `external.credentialsRef`). */
+  field: string;
+  /** The holding record: the row id, or the datasource name. `null` when the read returned none. */
+  record: string | null;
+  /**
+   * The `(namespace, key)` its producer records on a `sys_secret` row it mints
+   * FOR this column: the settings row's own pair, or the object and field name
+   * (`encryptSecretFields`).
+   *
+   * `null` when the producer lets its caller choose the pair, so the pair names
+   * no column: the datasource binder records whatever its caller passes
+   * (`SecretInput.namespace` / `key`, and the binder's own `namespace` option),
+   * defaulting only when none is passed.
+   */
+  mintedPair: { namespace: string; key: string } | null;
 }
 
 /** A family whose references were fully enumerated. */
@@ -380,10 +409,10 @@ export async function collectSettingsSecretReferences(
     }
 
     // `sys_platform_setting` has no `scope` and no `user_id`: one row per
-    // `(namespace, key)` for the deployment.
+    // `(namespace, key)` for the deployment. `id` names the holding record.
     const fields = holder === 'sys_setting'
-      ? ['namespace', 'key', 'scope', 'user_id', 'value_enc']
-      : ['namespace', 'key', 'value_enc'];
+      ? ['id', 'namespace', 'key', 'scope', 'user_id', 'value_enc']
+      : ['id', 'namespace', 'key', 'value_enc'];
     let result: unknown;
     try {
       result = await driver.find(holder, { fields });
@@ -405,6 +434,12 @@ export async function collectSettingsSecretReferences(
         holder: `${holder}(namespace=${String(row.namespace)},key=${String(row.key)}`
           + `${row.scope == null ? '' : `,scope=${String(row.scope)}`}`
           + `${row.user_id == null ? '' : `,user_id=${String(row.user_id)}`})`,
+        column: {
+          object: holder,
+          field: 'value_enc',
+          record: row.id == null ? null : String(row.id),
+          mintedPair: { namespace: String(row.namespace), key: String(row.key) },
+        },
       });
     }
   }
@@ -481,6 +516,12 @@ export async function collectObjectFieldSecretReferences(
           handleId,
           family,
           holder: `${objectName}.${field}#${String(row.id)}`,
+          column: {
+            object: objectName,
+            field,
+            record: row.id == null ? null : String(row.id),
+            mintedPair: { namespace: objectName, key: field },
+          },
         });
       }
     }
@@ -535,7 +576,17 @@ export function collectDatasourceSecretReferences(
     const key = JSON.stringify([handleId, holder]);
     if (seen.has(key)) continue; // the same reference, reached through two sources
     seen.add(key);
-    references.push({ handleId, family, holder });
+    references.push({
+      handleId,
+      family,
+      holder,
+      column: {
+        object: 'datasource',
+        field: 'external.credentialsRef',
+        record: artefact.name == null ? null : String(artefact.name),
+        mintedPair: null,
+      },
+    });
   }
 
   return { family, status: 'enumerated', references };

@@ -40,6 +40,12 @@
  * `refuseBeforeInput`), so the 0- and 2-row cases below assert that no dialog
  * opened, beside the toast and the absent request. One row still opens it.
  *
+ * objectstack#27831 moved it once more, onto the button: the header asks the
+ * runner for that same early refusal (`ActionRunner.launchRefusal`) and draws a
+ * launch it would refuse disabled, with the refusal as its reason, so the 0-
+ * and 2-row cases below read the reason off the disabled button instead of a
+ * toast after a click.
+ *
  * "Record-scoped" is a declaration, not a guess: an action is single-record
  * when its `locations` include a record placement (`isRecordScopedAction`). An
  * action declared at `list_toolbar` alone is object-level, so zero rows
@@ -221,13 +227,21 @@ async function launchFromHeader(): Promise<void> {
 }
 
 /**
- * Click the HEADER toolbar's "Add to Campaign" for a launch that is refused for
- * its row count (objectui#13384): the refusal shows, and no dialog opened.
+ * The HEADER toolbar's "Add to Campaign" for a launch that is refused for its
+ * row count. objectui#13384 refused the click before any dialog opened;
+ * objectstack#27831 draws the button disabled with that same refusal as its
+ * reason (its accessible description), so the refusal shows before any click,
+ * a click does nothing, and no dialog opens.
  */
 async function launchRefusedFromHeader(refusal: string): Promise<void> {
   const toolbars = await screen.findAllByRole('toolbar', undefined, { timeout: 5000 });
-  fireEvent.click(await within(toolbars[0]).findByRole('button', { name: /Add to Campaign/ }, { timeout: 5000 }));
-  expect(await screen.findByText(refusal, undefined, { timeout: 5000 })).toBeInTheDocument();
+  const button = await within(toolbars[0]).findByRole('button', { name: /Add to Campaign/ }, { timeout: 5000 });
+  await waitFor(() => {
+    expect(button).toBeDisabled();
+    const reasonId = button.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(reasonId)?.textContent).toBe(refusal);
+  }, { timeout: 5000 });
+  fireEvent.click(button);
   expect(screen.queryByRole('dialog')).toBeNull();
 }
 

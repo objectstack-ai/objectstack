@@ -167,7 +167,7 @@ const SLOW = { timeout: 8000 };
 
 const fieldNamesOf = (body: Record<string, unknown>) => readFields(body.fields).entries.map((e) => e.name);
 const savesRead = () => server.saves.map((s) => [s.name, fieldNamesOf(s.body)]);
-const fieldCount = () => screen.getByText(/^\d+ fields$/);
+const fieldCount = () => screen.getByText(/^\d+ fields?( \(\+\d+ system\))?$/);
 
 async function openTask(): Promise<void> {
   render(
@@ -193,7 +193,7 @@ describe('Data pillar — an object switch inside the autosave debounce (objects
     expect(server.saves).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: /Note/ }));
 
-    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 fields'), SLOW);
+    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 field'), SLOW);
     await pastDebounce();
     // Exactly one save, to Task, carrying the edit; nothing was sent as Note's.
     expect(savesRead()).toEqual([['acme_task', ['title', 'status', 'new_field']]]);
@@ -221,7 +221,7 @@ describe('Data pillar — an object switch inside the autosave debounce (objects
       release();
       await new Promise((r) => setTimeout(r, 0));
     });
-    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 fields'), SLOW);
+    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 field'), SLOW);
     await pastDebounce();
     expect(savesRead()).toEqual([['acme_task', ['title', 'status', 'new_field']]]);
   }, 30000);
@@ -241,14 +241,14 @@ describe('Data pillar — an object switch inside the autosave debounce (objects
     // Agreed to: the edit is dropped and Note opens; nothing more was sent.
     confirmSpy.mockReturnValue(true);
     fireEvent.click(screen.getByRole('button', { name: /Note/ }));
-    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 fields'), SLOW);
+    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 field'), SLOW);
     expect(server.saves).toHaveLength(1);
   }, 30000);
 
   it('a switch with nothing pending opens the next object at once and sends nothing', async () => {
     await openTask();
     fireEvent.click(screen.getByRole('button', { name: /Note/ }));
-    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 fields'), SLOW);
+    await waitFor(() => expect(fieldCount()).toHaveTextContent('1 field'), SLOW);
     await pastDebounce();
     expect(server.saves).toEqual([]);
     expect(confirmSpy).not.toHaveBeenCalled();

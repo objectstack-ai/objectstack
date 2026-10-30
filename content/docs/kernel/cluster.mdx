@@ -298,7 +298,7 @@ they declare scope and strategy, and the runtime does the rest.
 Metadata is the most cache-hot data in the system. Every read path —
 ObjectQL planning, REST routing, UI rendering, permission checks —
 touches it. Making it correct across a cluster needs a well-defined
-invalidation signal per state owner — the three lanes of §6.2 — and, in this
+invalidation signal per state owner — the four lanes of §6.2 — and, in this
 protocol, deliberately **no** per-item version on the wire (§6.1).
 
 ### 6.1 Monotonic version
@@ -326,39 +326,41 @@ cache compare it on receipt.
 ### 6.2 The cluster-invalidation family
 
 Cross-node metadata invalidation is not one channel — it is a **family** of
-three independent PubSub lanes, late-bound by `MetadataClusterBridgePlugin`
+four independent PubSub lanes, late-bound by `MetadataClusterBridgePlugin`
 (`@objectstack/service-cluster`) at `kernel:ready`, one per state owner that
-goes stale when metadata changes on a different node:
+goes stale when a shared record changes on a different node:
 
 | Lane | Channel | Payload type | Package | Converges |
 |---|---|---|---|---|
 | 1 — metadata service cache | `metadata.changed` | `ClusterMetadataChangedPayload` | `@objectstack/metadata` | `MetadataManager`'s registry/list caches |
 | 2 — ObjectQL object registry | `metadata.mutated` (`METADATA_MUTATION_CLUSTER_CHANNEL`, #13331) | `ClusterMetadataMutationPayload` | `@objectstack/metadata-protocol` | ObjectQL's OBJECT registry, from a `sys_metadata` re-read |
 | 3 — ObjectQL driver registry | `datasource.mutated` (`DATASOURCE_MUTATION_CLUSTER_CHANNEL`, #13805) | `ClusterDatasourceMutationPayload` | `@objectstack/service-datasource` | ObjectQL's DRIVER registry, from a shared datasource-record re-read |
+| 4 — declarative connector instances | `connector-credential.mutated` (`CONNECTOR_CREDENTIAL_MUTATION_CLUSTER_CHANNEL`, #27428) | `ClusterConnectorCredentialMutationPayload` (`{ originNode, ref }`) | `@objectstack/service-automation` | the automation service's materialized connectors, from a reconcile that re-reads the shared `sys_connector_credential` rows; published by the credential door (`PUT` / `DELETE /api/v1/automation/connectors/credential-refs/:ref`) after the row is written or cleared |
 
-Lanes 2 and 3 share one contract, stated once here rather than in each
+Lanes 2 to 4 share one contract, stated once here rather than in each
 channel's own doc comment:
 
 - **Address-only signal.** No message body ever rides these channels — the
-  payload names only what changed (a metadata address, or a datasource
-  name), never the changed value.
+  payload names only what changed (a metadata address, a datasource name,
+  or a connector credential reference), never the changed value.
 - **Receipt runs convergence, not trust.** A peer that receives a signal does
   not apply the payload as content; it re-reads its OWN copy of the source of
-  truth (`sys_metadata` for lane 2, the shared datasource record for lane 3)
-  and converges its local registry from that read. A duplicate or re-ordered
+  truth (`sys_metadata` for lane 2, the shared datasource record for lane 3,
+  the shared credential rows for lane 4) and converges its local registry
+  from that read. A duplicate or re-ordered
   delivery converges to the same state as a single one.
 - **`originNode` loopback suppression.** Every payload carries the publishing
   node's id; a peer that receives its own `originNode` drops the message —
-  the write-through or pool rebuild already ran, synchronously, at the door
-  that persisted the change.
+  the write-through, pool rebuild or connector reconcile already ran,
+  synchronously, at the door that persisted the change.
 - **At-most-once, bounded by boot rehydration.** No shipped `IPubSub` driver
   exceeds at-most-once delivery (§4.2), so a lost message is not retried.
   Each lane narrows the staleness window this always had — "until the next
   full reload on restart" — to "one network hop"; it does not promise more.
 
-All three lanes skip their fan-out on the same condition — the in-process
+All four lanes skip their fan-out on the same condition — the in-process
 `memory` cluster driver, described for lane 1 immediately below, applies
-identically to lanes 2 and 3 (#14021).
+identically to lanes 2 to 4 (#14021).
 
 #### Lane 1 — `metadata.changed` (the metadata service cache)
 

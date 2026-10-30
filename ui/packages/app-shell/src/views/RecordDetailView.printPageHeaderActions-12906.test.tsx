@@ -184,7 +184,7 @@ async function openOverflow(scope: HTMLElement): Promise<string[]> {
 }
 
 /** Click the declared action and hand back the one request it sent. */
-async function clickSubmit(scope: HTMLElement): Promise<{ url: string; method: string | undefined }> {
+async function clickSubmit(scope: HTMLElement): Promise<{ url: string; method: string | undefined; body: unknown }> {
   authFetchSpy.mockClear();
   fireEvent.click(within(scope).getByRole('button', { name: 'Submit for Sign-off' }));
   await waitFor(() =>
@@ -194,7 +194,7 @@ async function clickSubmit(scope: HTMLElement): Promise<{ url: string; method: s
     string,
     RequestInit,
   ];
-  return { url: call[0], method: call[1]?.method };
+  return { url: call[0], method: call[1]?.method, body: JSON.parse(String(call[1]?.body)) };
 }
 
 beforeEach(() => {
@@ -262,8 +262,11 @@ describe('RecordDetailView — a print page draws the record’s header actions 
   it('(c) clicking the declared action reaches the record page’s action runtime with the request a non-print record page sends', async () => {
     await mountRecordPage([PRINT_PAGE]);
     const onPrintPage = await clickSubmit(theToolbar());
-    expect(onPrintPage.url.endsWith(`/api/v1/data/${OBJECT_NAME}/${RECORD_ID}/submit`)).toBe(true);
+    // A declared same-origin api action goes through the action door, which
+    // resolves the target's `{id}` from the record named here (objectstack#27611).
+    expect(onPrintPage.url.endsWith(`/api/v1/actions/${OBJECT_NAME}/submit_signoff`)).toBe(true);
     expect(onPrintPage.method).toBe('POST');
+    expect(onPrintPage.body).toEqual({ recordId: RECORD_ID, params: {} });
 
     cleanup();
     await mountRecordPage([]);

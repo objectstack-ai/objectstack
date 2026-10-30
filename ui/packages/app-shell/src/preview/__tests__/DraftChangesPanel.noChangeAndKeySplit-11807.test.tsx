@@ -154,7 +154,7 @@ describe('a draft equal to its published version is not listed as Update (object
     expect(within(row('repairs_repair_ticket')).getByRole('img', { name: NO_CHANGE })).toBeInTheDocument();
     expect(row('repairs_repair_ticket')).toHaveAttribute('title', NO_CHANGE);
     // CONTROL: the drafted change keeps its mark, and its drill-in did load.
-    await waitFor(() => expect(screen.getByText('~ label')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('~ Label')).toBeInTheDocument());
     expect(row('visit').textContent).toContain('Update');
     expect(row('visit')).not.toHaveAttribute('title');
     expect(within(row('visit')).queryByRole('img', { name: NO_CHANGE })).toBeNull();
@@ -211,7 +211,8 @@ describe('the drill-in lists top-level keys as added, changed and removed (objec
     fireEvent.click(row('visit'));
     const detail = await screen.findByTestId('draft-entry-detail');
     const lines = [...detail.querySelectorAll('p')].map((p) => p.textContent);
-    expect(lines).toEqual(['+ status', 'Also changed:', '+ description', '~ label', '− icon']);
+    // objectstack#27835 — each key by its label on the object form.
+    expect(lines).toEqual(['+ status', 'Also changed:', '+ Description', '~ Label', '− Icon']);
   });
 });
 

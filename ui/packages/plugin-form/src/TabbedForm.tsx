@@ -470,6 +470,8 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
         objectSchema,
         // The persisted record a `state_machine` select narrows by (#25933).
         previousValues: schema.mode === 'edit' && schema.recordId ? formData : undefined,
+        // The values a create form opens with, which stay offered (#27763).
+        openingValues: formData,
       }) ?? fields) as FormField[];
     },
     [objectSchema, schema.readOnly, schema.mode, schema.recordId, schema.objectName, schema.customFields, fieldLabel, perms, formData],

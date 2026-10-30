@@ -25,7 +25,6 @@ import {
   rootManifestPath,
   turboConfigPath,
   uiScopedTurboConfig,
-  uiTurboConfigPath,
   virtualStorePath,
   workspaceGlobs,
   workspaceManifestPath,
@@ -88,9 +87,6 @@ const NESTED: Files = {
     },
   }),
   'mono/ui/package.json': JSON.stringify({ name: 'fixture-ui' }),
-  'mono/ui/turbo.objectui.json': JSON.stringify({
-    tasks: { build: { inputs: ['$TURBO_DEFAULT$', '$TURBO_ROOT$/scripts/check-dist.mjs'] } },
-  }),
 };
 
 describe('workspaceRoot() -- rule (a): the tree, else its parent, else a throw', () => {
@@ -182,24 +178,21 @@ describe('parseWorkspaceGlobs() -- the one parser, with the union of the three r
   });
 });
 
-describe('turbo.json -- the nearest one for what turbo hashes, the tree’s own for its task shapes', () => {
+describe('turbo.json -- the nearest one, what turbo hashes, narrowed to the tree', () => {
   it('standalone: every answer is `<root>/turbo.json` and the config comes back unnarrowed', () => {
     withTree(STANDALONE, (tmp) => {
       const ws = path.join(tmp, 'ws');
       expect(turboConfigPath(ws)).toBe(path.join(ws, 'turbo.json'));
-      expect(uiTurboConfigPath(ws)).toBe(path.join(ws, 'turbo.json'));
       expect(uiScopedTurboConfig(ws)).toEqual(JSON.parse(fs.readFileSync(path.join(ws, 'turbo.json'), 'utf8')));
     });
   });
 
-  it('nested: the parent’s turbo.json is nearest, the parked copy carries the tree’s own shapes', () => {
+  it('nested: the parent’s turbo.json is nearest, with no config of the tree’s own', () => {
     withTree(NESTED, (tmp) => {
       const mono = path.join(tmp, 'mono');
       const ui = path.join(mono, 'ui');
+      expect(fs.existsSync(path.join(ui, 'turbo.json'))).toBe(false);
       expect(turboConfigPath(ui)).toBe(path.join(mono, 'turbo.json'));
-      expect(uiTurboConfigPath(ui)).toBe(path.join(ui, 'turbo.objectui.json'));
-      fs.rmSync(path.join(ui, 'turbo.objectui.json'));
-      expect(() => uiTurboConfigPath(ui)).toThrow(/neither turbo\.json nor turbo\.objectui\.json/);
     });
   });
 
@@ -235,7 +228,6 @@ describe('this checkout', () => {
       expect(fs.existsSync(path.join(uiRoot(), glob.slice(0, -2))), glob).toBe(true);
     }
     expect(fs.existsSync(turboConfigPath())).toBe(true);
-    expect(fs.existsSync(uiTurboConfigPath())).toBe(true);
     expect(uiScopedTurboConfig().tasks.build.inputs).toContain('$TURBO_DEFAULT$');
   });
 

@@ -20,7 +20,8 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 // declaration its type names, so the refusal and the type cannot drift apart.
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import type { IHttpServer, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
@@ -99,6 +100,50 @@ export {
 /** A `sys_`-prefixed object is a system table — off-limits to external MCP agents. */
 export function isSystemObjectName(name: string): boolean {
     return /^sys_/i.test(name);
+}
+
+/**
+ * [#27681 / ADR-0011] The `sys_*` gate of the MCP action surface, PER ACTION.
+ * Returns a human-readable refusal for an action on a system object that its
+ * author did not opt into the AI surface, or `null` when the action may pass
+ * (a non-system object, or a system-object action declaring `ai.exposed: true`).
+ *
+ * Maintainer ruling 6513869839 (letter B): a `sys_*` action is reachable over
+ * MCP only when the action itself declares `ai: { exposed: true, description }`.
+ * The guard that stood here refused EVERY action on a `sys_*` object by name,
+ * ahead of the exposure check, so no declaration could open one, while the REST
+ * `/actions` door served the same action to the same principal. The refusal now
+ * yields to the author's opt-in and to nothing else:
+ *
+ *  - no deployment switch reaches it (the MCP package's `allowSystemObjects`
+ *    stays on the tool layer and gains no reach here — ruling parameter 1);
+ *  - every later gate still runs behind it, unchanged: the ADR-0066 D4
+ *    capability gate, the ADR-0126 §8 activation consult, the param contract,
+ *    the `ai.requiresConfirmation` gate and the subject load under RLS.
+ *
+ * ONE predicate for the three MCP sites that ask it — `run_action`
+ * ({@link invokeBusinessAction}), the `list_actions` bridge and the
+ * `resume_run` admission (`domains/mcp.ts`) — so an agent that lists sees
+ * exactly the system-object actions it may run.
+ */
+export function systemObjectActionExposureError(_deps: ActionExecutionDeps, action: any, objectName: string): string | null {
+    if (!isSystemObjectName(objectName)) return null;
+    // [#21594] The stored-metadata family is NOT opened by the flag: the MCP
+    // door never reaches the subject load for one of its tables (a row carries
+    // a stored metadata body, credential material included). That boundary
+    // predates the ruling, which opened identity actions and named no family
+    // table; it held here only because every `sys_*` action was refused.
+    if (isStoredMetadataBodyObject(objectName)) {
+        return (
+            `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') that stores metadata bodies ` +
+            `and is never exposed via MCP — read and change those through the metadata API`
+        );
+    }
+    if (action?.ai?.exposed === true) return null;
+    return (
+        `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') and is not exposed via MCP — ` +
+        `a system object's action is reachable here only when its author declares \`ai: { exposed: true, description: … }\` on it`
+    );
 }
 
 /**
@@ -939,10 +984,12 @@ export function disabledActionRefusal(
 
     // The SENTENCE is the engine's (`describeDisabledAction`), so both doors
     // state one refusal instead of two that agree today; the fallback covers an
-    // engine that answers the boolean but not the prose.
+    // engine that answers the boolean but not the prose. [#27842] Both are
+    // written for the person who clicked: no table, no ADR (the engine logs
+    // those when it is asked for the sentence; the code rides the envelope).
     const message = typeof ql.describeDisabledAction === 'function'
         ? String(ql.describeDisabledAction(name))
-        : `Action '${name}' is disabled for this installation (ADR-0126 §8).`;
+        : 'This action is turned off for this deployment.';
     return { code: ACTION_DISABLED_CODE, status: ACTION_DISABLED_STATUS, message };
 }
 
@@ -1028,6 +1075,10 @@ export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: an
     const type: string = action?.type ?? 'script';
     if (type === 'script') return Boolean(action?.target || action?.body);
     if (type === 'flow') return Boolean(action?.target) && hasAutomation;
+    // [#27506] A same-origin `api` action IS server-dispatched: the door
+    // forwards it in-process to its declared `target` (see
+    // {@link forwardApiAction}). An off-origin one stays browser-only.
+    if (type === 'api') return isSameOriginApiTarget(action?.target);
     return false;
 }
 
@@ -1044,6 +1095,583 @@ export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: an
  * action never has its `type` classified at all.
  */
 const SERVER_DISPATCHED_ACTION_TYPES: ReadonlySet<string> = new Set(['script', 'flow']);
+
+// ── `type: 'api'` — the same-origin forward (#27506) ─────────────────────────
+//
+// Ruling 6499781492 on #27506 (Sales, 2026-10-29, option C in three steps):
+// a `type: 'api'` action whose `target` is a SAME-ORIGIN path is dispatched
+// through the two action doors like every other declared action. The door
+// runs its existing gates — the anonymous floor, the ADR-0066 D4 capability
+// gate, the ADR-0126 §8 activation consult, the param contract, the subject
+// load — and then forwards the request IN-PROCESS to the declared `target`,
+// with the body assembled from the declaration (`recordIdParam` /
+// `recordIdField` / `bodyShape` / `bodyExtra` / `method`, the console's own
+// rules) and the caller's credentials carried across. The target endpoint
+// still authorizes the caller itself (ADR-0066 D4), so the forward adds a
+// consult point, never a privilege.
+//
+// Why this exists: before this change the switch in `sys_metadata_activation`
+// could not reach an api action at all — the console fetched `target`
+// directly, so "Ban User switched off" still banned (#27506), and the MCP
+// `run_action` bridge refused the type outright, so an agent could not do
+// what a human click could (North Star §4: one system for people and
+// agents). ADR-0066 D4's 2026-07 scope note ("fetched by the browser
+// directly and never passes through that route") is amended by #27610; this
+// PR lands after it.
+//
+// What stays browser-only: an api action whose `target` names ANOTHER origin
+// (`https://…`). The platform never sees that request, so the door refuses
+// it (`headlessActionTypeError`), MCP does not list it, and the activation
+// write door refuses to flip it with the reason spelled out
+// (`offOriginApiActivationRefusal`) rather than recording a switch that
+// would never take effect.
+
+/** `true` for a `target` the server can forward to: a path on this origin. */
+export function isSameOriginApiTarget(target: unknown): target is string {
+    if (typeof target !== 'string' || target.length < 2) return false;
+    if (!target.startsWith('/')) return false;
+    // `//host` is protocol-relative (another origin); `/\` is the same thing
+    // spelled for browsers that treat a backslash as a slash.
+    const second = target.charAt(1);
+    return second !== '/' && second !== '\\';
+}
+
+/**
+ * Why the activation ledger cannot switch THIS api action — `null` when it
+ * can (every non-api action, and every same-origin api action).
+ *
+ * An off-origin api action is executed by the browser against a host the
+ * platform never sees, so a ledger row for it would be a switch nobody
+ * consults: the panel would show it off and the click would keep working,
+ * which is exactly the #27506 defect in a second spelling. The write door
+ * refuses the flip with this sentence instead (ADR-0126 §8 item 2 names a
+ * consult point AT DISPATCH; this action has no dispatch on this server).
+ */
+export function offOriginApiActivationRefusal(action: any, objectName?: string): string | null {
+    if (action?.type !== 'api' || isSameOriginApiTarget(action?.target)) return null;
+    const name: string = action?.name ?? 'unknown';
+    const on = objectName ? ` on '${objectName}'` : '';
+    const target: string | undefined = typeof action?.target === 'string' ? action.target : undefined;
+    return (
+        `Action '${name}'${on} is \`type: 'api'\` with an off-origin \`target\`${target ? ` ('${target}')` : ''}: ` +
+        `the browser calls that origin directly and this server never sees the request, so the packaged-metadata ` +
+        `activation ledger (sys_metadata_activation, ADR-0126 §8) has no dispatch point at which to refuse it. ` +
+        `The switch is refused rather than recorded as one that would not take effect. Point the action at a ` +
+        `same-origin path (starting with \`/\`) to make it switchable, or remove the action from the app.`
+    );
+}
+
+/** The request headers the forward carries across from the caller, lower-case. */
+const API_FORWARD_HEADER_ALLOWLIST: ReadonlySet<string> = new Set([
+    // Identity — the target authorizes the SAME principal the door admitted.
+    'authorization', 'cookie', 'x-admin-session-token', 'x-tenant-id', 'x-environment-id', 'x-api-key',
+    // What a browser's own fetch would carry, so a target's origin / CSRF
+    // check sees the caller's browser, not the server talking to itself.
+    'origin', 'referer', 'user-agent', 'accept-language',
+    // Proxy provenance, carried AS THE CALLER SENT IT for a target that
+    // rate-limits or logs by it — the target applies its own `server.trustProxy`
+    // to these, exactly as it does to a direct request. ⛔ This door never
+    // reads them itself: the forwarded URL's host is the `Host` header (see
+    // {@link forwardApiAction}), because a caller-controlled
+    // `X-Forwarded-Host` / `X-Forwarded-Proto` is attacker input unless the
+    // deployment declared `server.trustProxy` (`security/inbound-rate-limit.ts`),
+    // and this seam has no view of that declaration.
+    'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host', 'x-real-ip', 'x-request-id',
+]);
+
+/**
+ * Marks a forwarded request so a `target` that is itself an action door
+ * cannot loop: the door refuses a request already carrying it.
+ */
+export const API_FORWARD_MARK_HEADER = 'x-objectstack-action-forward';
+
+/** The response headers relayed back to the caller — the credential rotations. */
+const API_FORWARD_RELAYED_RESPONSE_HEADERS: readonly string[] = [
+    // better-auth's bearer lane (`bearer()` emits `set-auth-token`; #8243's
+    // rotation emits `set-admin-session-token`).
+    'set-auth-token', 'set-admin-session-token',
+];
+
+export type ApiActionRequest = {
+    method: string;
+    path: string;
+    body?: Record<string, unknown>;
+};
+
+export type ApiActionRequestRefusal = { status: 400; message: string };
+
+/** The token grammar the console's runner resolves (`${scope.path}`), one scope map. */
+function substituteApiTargetTokens(template: string, scopes: Record<string, unknown>): string {
+    if (template.indexOf('${') === -1) return template;
+    const pattern = new RegExp(`\\$\\{(${Object.keys(scopes).join('|')})\\.([\\w.]+)\\}`, 'g');
+    return template.replace(pattern, (match, scope: string, path: string) => {
+        const value = path.split('.').reduce<unknown>(
+            (acc, key) => (acc == null ? undefined : (acc as Record<string, unknown>)[key]),
+            scopes[scope],
+        );
+        // A `ctx` path the server does not carry (`ctx.selection.*`, a page's
+        // own keys) is LEFT IN PLACE so the caller refuses it by name, where
+        // the console blanks it; a missing `param` is blank on both.
+        if (value === undefined && scope === 'ctx') return match;
+        return value == null ? '' : encodeURIComponent(String(value));
+    });
+}
+
+/**
+ * The console's page-variable syntax (`ui/packages/.../resolvePageVarTokens.ts`):
+ * `{{page.<path>}}`, whitespace tolerated inside the braces. Only this spelling
+ * is a browser-only token; any other `{{…}}` is the author's literal text.
+ */
+const PAGE_VAR_TOKEN_RE = /\{\{\s*page\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\}\}/;
+
+/** Does any string in this value still carry a `{{page.x}}` token? */
+function carriesPageToken(value: unknown): boolean {
+    if (typeof value === 'string') return PAGE_VAR_TOKEN_RE.test(value);
+    if (Array.isArray(value)) return value.some(carriesPageToken);
+    if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some(carriesPageToken);
+    return false;
+}
+
+/**
+ * [#3447] The decision-output param family: `outputs.<key>`, one param per
+ * output an approval node declares (`decisionOutputs`), filled in by the
+ * approver while deciding. The key set belongs to the pending request, not to
+ * the action, so no `params` list can declare it. A `type: 'api'` request
+ * folds the family into its body's `outputs` object
+ * ({@link buildApiActionRequest}), the body the approvals decide routes read,
+ * and the param contract admits exactly what folds
+ * ({@link foldsApiDecisionOutputs}; ADR-0104 D2, amended 2026-10-30). The
+ * console's api handler folds the same family by the same rule.
+ */
+const API_DECISION_OUTPUT_PREFIX = 'outputs.';
+
+/** Is `key` a member of the `outputs.<key>` family — the prefix and a non-empty key? */
+export function isApiDecisionOutputParam(key: string): boolean {
+    return key.startsWith(API_DECISION_OUTPUT_PREFIX) && key.length > API_DECISION_OUTPUT_PREFIX.length;
+}
+
+/** The `bodyShape.wrap` key an api request nests its params under, when the declaration names one. */
+function apiBodyWrap(action: any): string | undefined {
+    return action?.bodyShape && typeof action.bodyShape === 'object' && typeof action.bodyShape.wrap === 'string' && action.bodyShape.wrap
+        ? action.bodyShape.wrap
+        : undefined;
+}
+
+/**
+ * [#27738] Does this action's request fold the `outputs.<key>` family? Only a
+ * forwarded `type: 'api'` action whose params sit flat in its body. Under
+ * `bodyShape.wrap` the params are nested and the fold never reaches them, and
+ * a declarative update (`operation: 'update'`, whatever its `type` says)
+ * writes its bag to the row instead of sending it anywhere — so for both, and
+ * for every other type, the family stays an unknown param.
+ */
+export function foldsApiDecisionOutputs(action: any): boolean {
+    return !isDeclarativeUpdateAction(action) && action?.type === 'api' && apiBodyWrap(action) === undefined;
+}
+
+/**
+ * Assemble the request a same-origin `type: 'api'` action makes — method,
+ * path and JSON body — from its DECLARATION and the dispatch inputs, by the
+ * same rules the console's api handler applies at a click
+ * (`useConsoleActionRuntime.tsx` `apiHandler`, kept in step by #27611):
+ *
+ *  1. `target` interpolation: `${param.X}` from the params bag, `${ctx.X}` from
+ *     the caller (`ctx.recordId`, `ctx.user.id`, `ctx.org.id`; `ctx.origin` /
+ *     `ctx.apiBase` are `''` on the server, as they are for a same-origin
+ *     console), values percent-encoded; then `{field}` from the subject row.
+ *  2. The body: the params bag, flat or under `bodyShape.wrap`; the `outputs.*`
+ *     fold (#3447); `recordIdParam` seeded from the subject row's
+ *     `recordIdField` (default `id`) — or REFUSED when the row cannot supply it
+ *     (#8018: a request that names no record is not sent and hoped about);
+ *     `organizationId` for an `/api/v1/auth/` target from the caller's active
+ *     organization; `bodyExtra` merged LAST.
+ *  3. `method` (default `POST`); no body on `DELETE`.
+ *
+ * Two things a click can resolve and the server cannot are REFUSED, not
+ * blanked: a `${ctx.selection.*}` / unknown token left in the path, and a
+ * `{{page.<var>}}` token in the params or `bodyExtra` — those are page
+ * variables that exist only in the browser. The refusal names them so the
+ * author (or #27611's console path) knows what to supply.
+ */
+export function buildApiActionRequest(
+    action: any,
+    input: {
+        recordId?: string;
+        record?: Record<string, unknown> | null;
+        params: Record<string, unknown>;
+        ec: any;
+    },
+): ApiActionRequest | ApiActionRequestRefusal {
+    const name: string = action?.name ?? 'unknown';
+    const target: string = action.target;
+    const ec = input.ec ?? {};
+    const organizationId: string | undefined =
+        typeof ec.tenantId === 'string' && ec.tenantId ? ec.tenantId
+        : typeof ec.organizationId === 'string' && ec.organizationId ? ec.organizationId
+        : undefined;
+
+    // ── 1. the path ──
+    let path = substituteApiTargetTokens(target, {
+        param: input.params,
+        ctx: {
+            origin: '',
+            apiBase: '',
+            recordId: input.recordId ?? (input.record as any)?.id,
+            user: { id: ec.userId, email: ec.email },
+            org: { id: organizationId },
+        },
+    });
+    if (input.record && /\{[a-z_][a-z0-9_]*\}/i.test(path)) {
+        const row = input.record;
+        path = path.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (_m, k: string) => {
+            const v = row[k];
+            return v == null ? '' : encodeURIComponent(String(v));
+        });
+    }
+    if (/\$\{[\w.]+\}|\{\{/.test(path)) {
+        return {
+            status: 400,
+            message:
+                `Action '${name}' has a \`target\` ('${target}') carrying a token this door cannot resolve ` +
+                `(the server interpolates \`\${param.*}\`, \`\${ctx.recordId}\`, \`\${ctx.user.id}\`, ` +
+                `\`\${ctx.org.id}\` and \`{field}\` from the subject row; a selection or page-variable token ` +
+                `exists only in the browser). Pass the value as a param, or call the target from the console.`,
+        };
+    }
+    if (!isSameOriginApiTarget(path)) {
+        return { status: 400, message: `Action '${name}' interpolated its \`target\` to '${path}', which is not a same-origin path.` };
+    }
+
+    // ── 2. the body ──
+    if (carriesPageToken(input.params) || carriesPageToken(action?.bodyExtra)) {
+        return {
+            status: 400,
+            message:
+                `Action '${name}' carries a \`{{page.<var>}}\` token in its params or \`bodyExtra\` — a page variable ` +
+                `exists only in the browser, so this door cannot resolve it. Pass the value as a plain param, or run ` +
+                `the action from the page that owns the variable.`,
+        };
+    }
+    const wrap = apiBodyWrap(action);
+    const body: Record<string, unknown> = wrap ? { [wrap]: { ...input.params } } : { ...input.params };
+    // [#3447] decision outputs: `outputs.<key>` params fold into `outputs`.
+    for (const k of Object.keys(body)) {
+        if (isApiDecisionOutputParam(k)) {
+            const value = body[k];
+            delete body[k];
+            if (value === undefined || value === '') continue;
+            ((body.outputs ??= {}) as Record<string, unknown>)[k.slice(API_DECISION_OUTPUT_PREFIX.length)] = value;
+        }
+    }
+    // [#8018] `recordIdParam`, seeded from the row or refused — never silently
+    // left out. Without a row (a record-less dispatch) only `id` can be seeded,
+    // from the routed `recordId`; anything else has no source and the request
+    // goes without it, exactly as a console click from a record-less location.
+    const recordIdParam: string | undefined = typeof action?.recordIdParam === 'string' && action.recordIdParam ? action.recordIdParam : undefined;
+    if (recordIdParam) {
+        const field: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+        const row: Record<string, unknown> | undefined =
+            input.record && typeof input.record === 'object' ? input.record
+            : input.recordId && field === 'id' ? { id: input.recordId }
+            : undefined;
+        if (row) {
+            const label: string = action?.label || name;
+            if (!(field in row)) {
+                return {
+                    status: 400,
+                    message:
+                        `Action "${label}" identifies its record by "${field}", but that field is not present on the ` +
+                        `record — running without it would send a request that names no record.`,
+                };
+            }
+            const value = row[field];
+            if (value == null) {
+                return {
+                    status: 400,
+                    message:
+                        `Action "${label}" identifies its record by "${field}", but this record has no value for it — ` +
+                        `running without it would send a request that names no record.`,
+                };
+            }
+            body[recordIdParam] = value;
+        }
+    }
+    if (/\/api\/v1\/auth\//.test(path) && body.organizationId === undefined && organizationId) {
+        body.organizationId = organizationId;
+    }
+    if (action?.bodyExtra && typeof action.bodyExtra === 'object' && !Array.isArray(action.bodyExtra)) {
+        Object.assign(body, action.bodyExtra);
+    }
+
+    // ── 3. the method ──
+    const method = String(action?.method || 'POST').toUpperCase();
+    return method === 'GET' || method === 'DELETE' ? { method, path } : { method, path, body };
+}
+
+/** What the in-process forward answered — status, parsed JSON body, relayed headers. */
+export type ApiActionForwardAnswer = {
+    status: number;
+    /**
+     * The target's JSON body (`null` for an empty one). A 2xx answer that is
+     * not JSON is turned into the door's own 502 refusal before it gets here
+     * (see {@link forwardApiAction}); a non-2xx non-JSON answer carries its
+     * text as `{ raw }` so the refusal can quote it.
+     */
+    body: any;
+    /**
+     * Response headers relayed to the caller (credential rotations).
+     * `set-cookie` is a `string[]` — one line per cookie, never comma-joined.
+     */
+    headers: Record<string, string | string[]>;
+};
+
+/**
+ * Resolve the in-process request injector: the host server's framework-native
+ * app behind `IHttpServer.getRawApp()` (Hono's `app.request(url, init)` — the
+ * same seam `@objectstack/verify`'s harness drives every test request
+ * through). `null` on a kernel with no `http.server` (a hosted tenant kernel
+ * that owns no socket) or an adapter that does not expose its app: the
+ * forward then answers 503, never a silent pass.
+ */
+export async function resolveInProcessRequest(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    envId?: string,
+): Promise<((url: string, init: RequestInit) => Promise<Response>) | null> {
+    let server: IHttpServer | undefined;
+    try {
+        server = await deps.resolveService(requestContext, 'http.server', envId);
+    } catch {
+        return null;
+    }
+    // `getRawApp` is the contract's one declared framework-specific escape
+    // hatch and returns `any` on purpose (its docblock says why).
+    const app = typeof server?.getRawApp === 'function' ? server.getRawApp() : undefined;
+    if (app && typeof app.request === 'function') return (url, init) => app.request(url, init);
+    if (app && typeof app.fetch === 'function') return (url, init) => app.fetch(new Request(url, init));
+    return null;
+}
+
+/** The 503 for a kernel that cannot forward (no raw app to inject into). */
+export function apiActionForwardUnavailableError(action: any): string {
+    return (
+        `Action '${action?.name ?? 'unknown'}' is a same-origin \`type: 'api'\` action whose \`target\` ` +
+        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, ` +
+        `but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). ` +
+        `Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.`
+    );
+}
+
+/**
+ * The 502 for a target that answered 2xx with something other than JSON (a
+ * file, HTML, a stream): the door's answer is a JSON envelope and the console's
+ * direct fetch read such a body as `{}` — a silent loss this door refuses by name.
+ */
+export function apiActionNonJsonAnswerError(actionName: string, status: number, contentType: string | null): string {
+    return (
+        `Action '${actionName}' — its target answered HTTP ${status} with ` +
+        `${contentType ? `content-type '${contentType}'` : 'no content-type'}, not JSON. The action doors relay JSON ` +
+        `answers only; a target that serves a file or a page is not a \`type: 'api'\` action this door can carry.`
+    );
+}
+
+/**
+ * The subset of a forward's relayed headers an MCP tool result may carry: the
+ * bearer lane's pair ({@link API_FORWARD_RELAYED_RESPONSE_HEADERS}), which are
+ * JS-visible by design. ⛔ Never `Set-Cookie`: the MCP door admits cookie
+ * sessions too, and a tool result is JSON text that whatever script receives
+ * it can read — an `HttpOnly` session cookie's value must not travel in it.
+ * The REST door relays cookies on the response, where only the browser sees them.
+ */
+export function mcpRelayableForwardHeaders(headers: Record<string, string | string[]>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const name of API_FORWARD_RELAYED_RESPONSE_HEADERS) {
+        const v = headers[name];
+        if (typeof v === 'string' && v) out[name] = v;
+    }
+    return out;
+}
+
+/** The refusal for a forwarded request arriving back at an action door (a loop). */
+export function apiActionForwardLoopError(action: any, mark: string): string {
+    return (
+        `Action '${action?.name ?? 'unknown'}' was reached by the forward of action '${mark}' — a \`type: 'api'\` ` +
+        `action whose \`target\` is itself an action door would loop. Point the target at the endpoint that ` +
+        `does the work.`
+    );
+}
+
+/**
+ * Forward the assembled request to the declared target, in-process, with the
+ * caller's own credentials, and bring the answer back.
+ *
+ * The URL is `http://<Host header><path>` — the URL the direct request has at
+ * this process (the in-process server builds its own requests from `Host`;
+ * TLS terminates upstream), so a target that reads `request.url` sees what
+ * it would have seen had the browser called it. ⛔ `X-Forwarded-Host` /
+ * `X-Forwarded-Proto` are NOT consulted for it: they are caller input unless
+ * `server.trustProxy` says otherwise, and this seam cannot see that
+ * declaration — they cross to the target as headers, where its own trust
+ * rule judges them. Only the allow-listed caller headers cross
+ * ({@link API_FORWARD_HEADER_ALLOWLIST}); `Content-Length` / `Host` are the
+ * injector's to set. The forward is marked ({@link API_FORWARD_MARK_HEADER})
+ * so a door reached by it refuses instead of looping.
+ *
+ * Relayed back: the status, the JSON body, and the credential-rotation
+ * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
+ * `set-admin-session-token` (the bearer lane) and `Set-Cookie` (the cookie
+ * lane). Everything else about the answer stays the target's business. A 2xx
+ * answer that is not JSON is refused as 502 here: this door answers JSON
+ * envelopes (the console's direct fetch read such an answer as `{}`, which
+ * is a silent loss, not a result), and a declaration whose target streams a
+ * file is not an action this door can carry.
+ */
+export async function forwardApiAction(
+    inject: (url: string, init: RequestInit) => Promise<Response>,
+    requestContext: HttpProtocolContext,
+    req: ApiActionRequest,
+    mark: { objectName: string; actionName: string },
+): Promise<ApiActionForwardAnswer> {
+    const incoming: Record<string, unknown> =
+        requestContext?.request?.headers && typeof requestContext.request.headers === 'object'
+            ? requestContext.request.headers
+            : {};
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(incoming)) {
+        const key = k.toLowerCase();
+        if (!API_FORWARD_HEADER_ALLOWLIST.has(key) || v == null) continue;
+        headers[key] = Array.isArray(v) ? v.join(', ') : String(v);
+    }
+    headers.accept = 'application/json';
+    headers[API_FORWARD_MARK_HEADER] = `${mark.objectName}/${mark.actionName}`;
+    const init: RequestInit = { method: req.method, headers };
+    if (req.body !== undefined) {
+        headers['content-type'] = 'application/json';
+        init.body = JSON.stringify(req.body);
+    }
+    const host = typeof incoming.host === 'string' && incoming.host ? incoming.host : 'localhost';
+    const res = await inject(`http://${host}${req.path}`, init);
+
+    const text = await res.text();
+    let body: any;
+    let isJson = true;
+    if (text.length === 0) {
+        body = null;
+    } else {
+        try {
+            body = JSON.parse(text);
+        } catch {
+            isJson = false;
+            body = { raw: text };
+        }
+    }
+    if (!isJson && res.status >= 200 && res.status < 300) {
+        return {
+            status: 502,
+            body: {
+                success: false,
+                error: {
+                    code: standardErrorCodeForHttpStatus(502),
+                    message: apiActionNonJsonAnswerError(mark.actionName, res.status, res.headers.get('content-type')),
+                },
+            },
+            headers: {},
+        };
+    }
+    const relayed: Record<string, string | string[]> = {};
+    for (const name of API_FORWARD_RELAYED_RESPONSE_HEADERS) {
+        const value = res.headers.get(name);
+        if (value) relayed[name] = value;
+    }
+    // The cookie lane: `/admin/impersonate-user` answers SIX `Set-Cookie`
+    // lines (measured 2026-10-29: session_token, session_data, dont_remember,
+    // admin_session, and the deletions of the old ones). They go back as an
+    // array, one line each — `Headers.get('set-cookie')` would comma-join
+    // them into one unparseable cookie.
+    const cookies: string[] =
+        typeof (res.headers as any).getSetCookie === 'function' ? (res.headers as any).getSetCookie() : [];
+    if (cookies.length > 0) relayed['set-cookie'] = cookies;
+    return { status: res.status, body, headers: relayed };
+}
+
+/**
+ * The payload a successful forward answers as the action's RESULT: the
+ * target's `data` when it answered the ObjectStack `{ success, data }`
+ * envelope (the console's `apiHandler` unwraps the same way, so a
+ * `resultDialog` path reads identically on both paths), else the body itself
+ * (a stock better-auth answer is not enveloped).
+ *
+ * [#27918] A 2xx is read as success whatever its body says: `success: false`
+ * on a 2xx is not a refusal here, so `{ success: false, data }` answers `data`
+ * and `{ success: false, message }` answers the body itself. The status is
+ * the target's verdict and this door relays it rather than sniffing a body.
+ * Measured 2026-10-30 against every same-origin `type: 'api'` target declared
+ * in this repository (the `sys_*` identity actions over better-auth and the
+ * plugin-auth mounts, the approvals routes, the datasource admin routes, the
+ * data door, the showcase's flow endpoint, print and form routes, and the
+ * objectui declarations): none answers a 2xx with a top-level
+ * `success: false`. Each refusal is non-2xx, and the nested
+ * `{ success: true, data: { success: false } }` that a flow endpoint's
+ * unclassified result or a zero-row delete can answer comes back through
+ * this door as the same bytes. A target that starts answering 2xx
+ * `success: false` has the defect itself (failures speak HTTP, #3962), and
+ * the fix goes in that target, never in a body check here (PD #12).
+ */
+export function apiActionResultOf(answer: ApiActionForwardAnswer): unknown {
+    const body = answer.body;
+    return body && typeof body === 'object' && !Array.isArray(body) && 'data' in body && 'success' in body
+        ? (body as { data: unknown }).data
+        : body;
+}
+
+/**
+ * [#27738] The members the target's refusal ENVELOPE carries beside `code`,
+ * `message` and `httpStatus` — `details`, `userMessage`, `declaredCode`, any
+ * other — exactly as the target wrote them; `undefined` when the target did
+ * not envelope its refusal (`{ success: false, error: { code, … } }`): a stock
+ * better-auth `{ code, message }`, a non-JSON or an empty body.
+ *
+ * Both doors relay these WHOLE. The REST door used to rebuild the envelope
+ * from `code` alone, which dropped everything a caller branches on beside
+ * the code: a flow endpoint's `details.innerRefusal` and `userMessage`, an
+ * entitlement refusal's `details` (`upgrade_url`, `contact_url`, `plan`,
+ * `current`, `limit`). The forward carries the caller's own credentials
+ * through the same HTTP stack, so this is the answer the caller gets by
+ * calling the target itself: relaying it whole discloses nothing new, and
+ * the target's own boundary has already applied its message discipline.
+ */
+export function apiActionRefusalMembers(answer: ApiActionForwardAnswer): Record<string, unknown> | undefined {
+    const body = answer.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body) || body.success !== false) return undefined;
+    const error = body.error;
+    if (!error || typeof error !== 'object' || Array.isArray(error) || typeof error.code !== 'string' || !error.code) return undefined;
+    const members: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(error as Record<string, unknown>)) {
+        if (key !== 'code' && key !== 'message' && key !== 'httpStatus') members[key] = value;
+    }
+    return members;
+}
+
+/**
+ * The thrown shape for a forward the target REFUSED (a non-2xx), for the MCP
+ * bridge: `code` + `status` ride the error so `resolveThrownHttpError` serves
+ * the target's own status and the agent reads the target's own sentence.
+ * [#27738] The envelope's `details` ride it too ({@link apiActionRefusalMembers}),
+ * which `run_action` renders beside the code, as the REST door relays them.
+ */
+export function apiActionForwardRefusal(action: any, answer: ApiActionForwardAnswer): Error {
+    const body = answer.body;
+    const message: string =
+        (body && typeof body === 'object' && typeof body.error?.message === 'string' && body.error.message) ||
+        (body && typeof body === 'object' && typeof body.message === 'string' && body.message) ||
+        `Action '${action?.name ?? 'unknown'}' — its target answered HTTP ${answer.status}`;
+    const code: string =
+        (body && typeof body === 'object' && typeof body.error?.code === 'string' && body.error.code) ||
+        (body && typeof body === 'object' && typeof body.code === 'string' && body.code) ||
+        standardErrorCodeForHttpStatus(answer.status);
+    const details = apiActionRefusalMembers(answer)?.details;
+    return Object.assign(new Error(message), { code, status: answer.status, ...(details !== undefined ? { details } : {}) });
+}
 
 /**
  * Explain why a declared action has NO server-side dispatch — `null` when it
@@ -1068,13 +1696,21 @@ export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any,
     if (isDeclarativeUpdateAction(action)) return null;
     const type: string = action?.type ?? 'script';
     if (SERVER_DISPATCHED_ACTION_TYPES.has(type)) return null;
+    if (type === 'api' && isSameOriginApiTarget(action?.target)) return null;
     const name: string = action?.name ?? 'unknown';
     const on = objectName ? ` on '${objectName}'` : '';
     const target: string | undefined = typeof action?.target === 'string' ? action.target : undefined;
     if (type === 'api') {
+        // [#27506] Same-origin api actions ARE dispatched here (the door
+        // forwards them in-process, {@link forwardApiAction}); the predicate
+        // above already answered `null` for them. What reaches this line is an
+        // api action whose `target` names ANOTHER origin, or no path at all:
+        // the platform never sees that request, so there is nothing to run.
         return (
-            `Action '${name}'${on} is \`type: 'api'\` — it dispatches on \`target\`, ` +
-            `not through the action registry. Call ${target ? `\`${target}\`` : 'its `target` endpoint'} directly` +
+            `Action '${name}'${on} is \`type: 'api'\` with an off-origin \`target\`` +
+            `${target ? ` ('${target}')` : ''} — the browser calls that origin directly and the server cannot ` +
+            `forward to it. Only a same-origin \`target\` (a path starting with \`/\`) is dispatched through ` +
+            `this door. Call ${target ? `\`${target}\`` : 'its `target` endpoint'} directly` +
             `${typeof action?.method === 'string' ? ` (${action.method})` : ''}.`
         );
     }
@@ -1667,6 +2303,12 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
         ...(declarativeUpdate ? { operation: DECLARATIVE_UPDATE_OPERATION } : {}),
         requiresRecord: Boolean(requiresRecord),
         requiresConfirmation: actionLooksDestructive(deps, action),
+        // [#27681] The author's AI opt-in, attested by the bridge that read the
+        // declaration. The MCP tool layer reads it to let a `sys_*` action
+        // through its own fail-closed filter (`allowSystemObjects` off): it
+        // never sees the declaration, so this is the only way the per-action
+        // flag reaches it. Emitted only when declared, like `operation`.
+        ...(action?.ai?.exposed === true ? { aiExposed: true } : {}),
         ...(params.length > 0 ? { params } : {}),
     };
 }
@@ -1837,6 +2479,26 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
 }
 
 /**
+ * The bag ADR-0104 D2 judges: the request's own, less its UNDECLARED
+ * `outputs.<key>` decision outputs when this action's request folds them
+ * ({@link foldsApiDecisionOutputs}; D2 amended 2026-10-30, #27738). Those
+ * keys are per request, so no declaration can name them; the forwarded target
+ * (the approvals decide route) judges their values against the request's own
+ * `decisionOutputs`. A declared param stays judged as declared, whatever its
+ * name, and every other undeclared key is refused exactly as before.
+ */
+function paramBagUnderContract(action: any, resolved: ResolvedActionParam[], bag: Record<string, unknown>): Record<string, unknown> {
+    if (!foldsApiDecisionOutputs(action)) return bag;
+    const declared = new Set(resolved.map((p) => p.name));
+    const judged: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(bag)) {
+        if (isApiDecisionOutputParam(key) && !declared.has(key)) continue;
+        judged[key] = value;
+    }
+    return judged;
+}
+
+/**
  * Enforce an action's declared param contract against the request bag
  * BEFORE the handler runs (ADR-0104 D2). Returns a `400`-worthy error message
  * when the contract is violated, `null` when the bag conforms.
@@ -1869,6 +2531,13 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
  * built-ins: the same message, the same 400 at the REST door, the same
  * `OS_ALLOW_LAX_ACTION_PARAMS` escape hatch a declared-params action gets. No
  * switch of its own.
+ *
+ * ## One undeclared family a forwarded api action admits (#27738)
+ *
+ * A `type: 'api'` action whose request folds the `outputs.<key>` decision
+ * outputs is judged without them ({@link paramBagUnderContract}), so an
+ * Approve or Reject carrying the approver's decision outputs reaches the fold
+ * instead of a 400. Every other key is judged as above.
  */
 export function enforceActionParams(deps: ActionExecutionDeps,
     action: any,
@@ -1879,7 +2548,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
     if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
     const resolved = resolveDeclaredActionParams(deps, action, obj);
-    const issues = validateActionParams(resolved, bag);
+    const issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
     if (issues.length === 0) return null;
     const summary = issues.map((i) => i.message).join('; ');
     if (!laxActionParams()) {
@@ -2700,10 +3369,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     }
     const { action, objectName, obj } = resolved;
 
-    // Fail-closed on system-object actions (mirrors the object-tool guard).
-    if (isSystemObjectName(objectName)) {
-        throw new Error(`Action '${name}' is on a system object and is not exposed via MCP`);
-    }
+    // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
+    // action passes only on its author's `ai.exposed` opt-in, and every gate
+    // below still runs for it.
+    const systemObjectError = systemObjectActionExposureError(deps, action, objectName);
+    if (systemObjectError) throw new Error(systemObjectError);
     const hasAutomation = Boolean(await resolveAutomationService(deps, requestContext, envId));
     if (!isHeadlessInvokableAction(deps, action, hasAutomation)) {
         throw new Error(
@@ -2816,6 +3486,44 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     //    when the refusal lands. `ok: true` on a row the caller cannot read is
     //    the defect; refusing after the run was created would only describe it.
     refuseDeniedSubjectLoad(objectName, recordId, subject);
+
+    // ── api forward (#27506) ── a same-origin `type: 'api'` action is
+    // forwarded in-process to its declared `target` with the caller's own
+    // credentials, AFTER every gate above (exposure, D4, the activation
+    // consult, the param contract, confirmation, the subject load) and
+    // BEFORE the trusted-mode plumbing below, which an api action never gets:
+    // the target endpoint authorizes the caller itself (ADR-0066 D4). The
+    // REST `/actions` door runs the identical sequence (`domains/actions.ts`).
+    if (action?.type === 'api') {
+        const mark = requestContext?.request?.headers?.[API_FORWARD_MARK_HEADER];
+        if (typeof mark === 'string' && mark.length > 0) {
+            throw Object.assign(new Error(apiActionForwardLoopError(action, mark)), {
+                code: standardErrorCodeForHttpStatus(400), status: 400,
+            });
+        }
+        const inject = await resolveInProcessRequest(deps, requestContext, envId);
+        if (!inject) {
+            throw Object.assign(new Error(apiActionForwardUnavailableError(action)), {
+                code: standardErrorCodeForHttpStatus(503), status: 503,
+            });
+        }
+        const built = buildApiActionRequest(action, { recordId, record, params, ec });
+        if ('message' in built) {
+            throw Object.assign(new Error(built.message), { code: standardErrorCodeForHttpStatus(built.status), status: built.status });
+        }
+        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name });
+        if (answer.status < 200 || answer.status >= 300) throw apiActionForwardRefusal(action, answer);
+        return {
+            ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}),
+            result: apiActionResultOf(answer),
+            // A credential rotation the target emitted (impersonation) — the
+            // bearer caller's own new tokens, which only a header could carry
+            // over HTTP; over MCP the tool result is the one channel there is.
+            // Bearer pair ONLY — see {@link mcpRelayableForwardHeaders} for why
+            // no `Set-Cookie` line may enter a tool result.
+            ...(() => { const h = mcpRelayableForwardHeaders(answer.headers); return Object.keys(h).length > 0 ? { headers: h } : {}; })(),
+        };
+    }
 
     // [#5372] One shared producer for the user shape (`security/actor-user.ts`),
     // the same one the REST `/actions` route and the AI routes use. What stood

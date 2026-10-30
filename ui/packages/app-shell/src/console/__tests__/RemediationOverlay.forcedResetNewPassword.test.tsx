@@ -46,8 +46,11 @@ function submit(current: string, next: string, labels: { current: string; next: 
   fireEvent.submit(screen.getByLabelText(labels.next).closest('form') as HTMLFormElement);
 }
 
-const EN = { current: 'Current password', next: 'New password', confirm: 'Confirm new password' };
-const ZH = { current: '当前密码', next: '新密码', confirm: '确认新密码' };
+// A forced reset names the field for the password an administrator issued;
+// an expiry keeps "Current password".
+const EN = { current: 'Temporary password', next: 'New password', confirm: 'Confirm new password' };
+const EN_EXPIRED = { ...EN, current: 'Current password' };
+const ZH = { current: '临时密码', next: '新密码', confirm: '确认新密码' };
 const FORCED: Gate = { code: 'PASSWORD_RESET_REQUIRED', message: 'You must change your password before continuing.' };
 
 beforeEach(() => {
@@ -81,7 +84,7 @@ describe('RemediationOverlay — a forced reset asks for a new password', () => 
 
   it('leaves an expiry to the server: the same password is sent on', async () => {
     renderWith({ code: 'PASSWORD_EXPIRED', message: '' }, 'en');
-    submit('Same!Passw0rd-1', 'Same!Passw0rd-1', EN);
+    submit('Same!Passw0rd-1', 'Same!Passw0rd-1', EN_EXPIRED);
     await vi.waitFor(() => expect(changePassword).toHaveBeenCalledWith('Same!Passw0rd-1', 'Same!Passw0rd-1'));
     expect(screen.queryByText('Choose a new password that is different from your temporary password.')).toBeNull();
   });

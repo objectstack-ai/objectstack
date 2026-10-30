@@ -91,7 +91,7 @@ const result = AnalyticsEndpoint.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **cube** | `string` | ✅ | Target cube name |
+| **cube** | `string` | ✅ | Target cube name — the cube to query, as `GET /analytics/meta` lists them, or a registered object name (read as an auto-inferred cube). Required and non-empty: an empty string names no cube and is refused at the schema. |
 | **measures** | `string[]` | ✅ | List of metrics to calculate |
 | **dimensions** | `string[]` | optional | List of dimensions to group by |
 | **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition). An authored `FilterArray` is lowered by `parseFilterAST` on the client before the wire; this field admits only the lowered `FilterCondition` (see `FilterArray` in `data/filter.zod.ts`). |

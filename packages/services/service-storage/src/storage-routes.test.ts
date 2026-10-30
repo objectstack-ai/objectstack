@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+import { InitiateChunkedUploadRequestSchema } from '@objectstack/spec/api';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
@@ -254,6 +255,78 @@ describe('Storage REST Routes', () => {
       expect(progressRes._status).toBe(200);
       expect(progressRes._json.data.uploadedChunks).toBe(0);
       expect(progressRes._json.data.status).toBe('in_progress');
+    });
+
+    // [#27549] The init body is parsed with `InitiateChunkedUploadRequestSchema`:
+    // declared is enforced. `totalSize` was checked for truthiness only, so a
+    // negative or string total minted a session no chunk could ever complete,
+    // and a `chunkSize` under the declared minimum was clamped up instead of
+    // refused. Each refusal names its field and writes neither row.
+    it.each<[string, Record<string, unknown>, string]>([
+      ['a negative totalSize', { totalSize: -5 }, 'totalSize'],
+      ['a numeric-string totalSize', { totalSize: '100' }, 'totalSize'],
+      ['a zero totalSize', { totalSize: 0 }, 'totalSize'],
+      ['a fractional totalSize', { totalSize: 1.5 }, 'totalSize'],
+      ['a chunkSize below the declared minimum', { totalSize: 100, chunkSize: 1024 }, 'chunkSize'],
+      ['a numeric-string chunkSize', { totalSize: 100, chunkSize: '5242880' }, 'chunkSize'],
+      ['a metadata value that is not a string', { totalSize: 100, metadata: { tag: 1 } }, 'metadata'],
+    ])('REFUSED 400 INVALID_REQUEST: %s, with no sys_file or upload-session row written', async (_label, fields, named) => {
+      const initHandler = httpServer._getHandler('POST', '/api/v1/storage/upload/chunked')!;
+      const createFile = vi.spyOn(store, 'createFile');
+      const createSession = vi.spyOn(store, 'createSession');
+      const res = createMockRes();
+      await initHandler(createMockReq({ body: { filename: 'b.bin', mimeType: 'application/octet-stream', ...fields } }), res);
+
+      expect(res._status, JSON.stringify(res._json)).toBe(400);
+      expect(res._json.success).toBe(false);
+      expect(res._json.error.code).toBe('INVALID_REQUEST');
+      expect(res._json.error.message).toContain(named);
+      expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
+      expect(createSession, 'no upload-session row').not.toHaveBeenCalled();
+    });
+
+    // [#27801] An empty `filename` or `mimeType` is refused at the door, and
+    // the declared request schema refuses the same body: declared and
+    // enforced agree on `''`.
+    it.each(['filename', 'mimeType'] as const)(
+      'REFUSED 400 INVALID_REQUEST: an empty %s, which the declared schema refuses too, with no row written',
+      async (key) => {
+        const initHandler = httpServer._getHandler('POST', '/api/v1/storage/upload/chunked')!;
+        const createFile = vi.spyOn(store, 'createFile');
+        const createSession = vi.spyOn(store, 'createSession');
+        const body = { filename: 'b.bin', mimeType: 'application/octet-stream', totalSize: 100, [key]: '' };
+        const res = createMockRes();
+        await initHandler(createMockReq({ body }), res);
+
+        expect(res._status, JSON.stringify(res._json)).toBe(400);
+        expect(res._json.success).toBe(false);
+        expect(res._json.error.code).toBe('INVALID_REQUEST');
+        expect(InitiateChunkedUploadRequestSchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
+        expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
+        expect(createSession, 'no upload-session row').not.toHaveBeenCalled();
+      },
+    );
+
+    it.each<[string, number | undefined, number, number]>([
+      ['an omitted chunkSize takes the declared default', undefined, 5242880, 3],
+      ['a chunkSize at the declared minimum', 5242880, 5242880, 3],
+      ['a chunkSize above the declared minimum', 10485760, 10485760, 2],
+    ])('CONTROL: %s and mints a session with the same total_chunks', async (_label, chunkSize, servedChunkSize, totalChunks) => {
+      const initHandler = httpServer._getHandler('POST', '/api/v1/storage/upload/chunked')!;
+      const totalSize = 12_000_000;
+      const res = createMockRes();
+      await initHandler(
+        createMockReq({ body: { filename: 'b.bin', mimeType: 'application/octet-stream', totalSize, chunkSize } }),
+        res,
+      );
+
+      expect(res._status, JSON.stringify(res._json)).toBe(200);
+      expect(res._json.data.chunkSize).toBe(servedChunkSize);
+      expect(res._json.data.totalChunks).toBe(totalChunks);
+      const session = await store.getSession(res._json.data.uploadId);
+      expect(session!.total_chunks).toBe(totalChunks);
+      expect(session!.chunk_size).toBe(servedChunkSize);
+      expect((await store.getFile(res._json.data.fileId))!.size).toBe(totalSize);
     });
   });
 

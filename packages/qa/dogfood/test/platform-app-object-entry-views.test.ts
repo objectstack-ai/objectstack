@@ -66,6 +66,14 @@
  *   - The roster below mirrors check-app-nav-i18n's `CONTRIBUTORS`. A
  *     contributor added there and not here is one this file does not see, so
  *     the two move together.
+ *   - The one kind of entry that has no counterpart there is an OBJECT-ONLY
+ *     registrant (`apps: []`): a plugin that registers an object an entry
+ *     names and lands no nav id itself. `PlatformObjectsPlugin` is one — it
+ *     registers `sys_exchange_rate`, which the Setup contribution
+ *     `nav_exchange_rates` (shipped by `@objectstack/setup`) opens. That
+ *     gate's roster is a NAV roster that holds every entry to at least one
+ *     nav id and judges labels, not objects, so such a plugin is added here
+ *     only.
  *   - plugin-auth's `nav_sso_providers` is contributed only when an external
  *     IdP is wired, so no composition this file boots merges it.
  *   - An object that declares ONLY caller-scoped list views cannot meet (a)
@@ -76,6 +84,7 @@
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import * as IdentityObjects from '@objectstack/platform-objects/identity';
+import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { createSetupAppPlugin } from '@objectstack/setup';
 import { createAccountAppPlugin } from '@objectstack/account';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -147,6 +156,10 @@ const CONTRIBUTORS: readonly Contributor[] = [
       manifests: [CLOUD_CONNECTION_UI_BUNDLE, MARKETPLACE_BROWSE_UI_BUNDLE, MARKETPLACE_INSTALLED_UI_BUNDLE] as Manifest[],
     }),
   },
+  // Object-only: registers `sys_exchange_rate` (Setup → `nav_exchange_rates`)
+  // and lands no nav id, so it lands in no app and has no entry in
+  // check-app-nav-i18n's NAV roster (see "Reach" above).
+  { source: '@objectstack/platform-objects', apps: [], load: () => ({ plugin: new PlatformObjectsPlugin() }) },
 ];
 
 type NavItem = { id?: string; type?: string; objectName?: string; viewName?: string; children?: NavItem[] };
@@ -367,7 +380,8 @@ describe('the merged Setup and Account apps are booted whole', () => {
 
   it('every object an entry names is declared by the composition or by the identity barrel', () => {
     // Remedy for a red here: add the plugin that registers the object to the
-    // roster above (and to check-app-nav-i18n's), never a fallback.
+    // roster above (and to check-app-nav-i18n's when it also lands a nav id;
+    // an object-only registrant goes here alone, `apps: []`), never a fallback.
     expect(UNRESOLVED, 'named objects neither source declares').toEqual([]);
   });
 

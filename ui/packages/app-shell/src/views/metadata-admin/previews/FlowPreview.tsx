@@ -336,6 +336,17 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
   // refused or unregistered flow's status (the stored `status` stays as read).
   const registration = React.useContext(FlowRegistrationContext);
   const runStatus = deriveFlowRunStatus(runtime, d.status, registration);
+  // The node cards name the object a node works on by its label.
+  const objectCatalog = useObjectCatalog();
+  const objectLabels = React.useMemo(
+    () =>
+      new Map(
+        (objectCatalog.status === 'loaded' ? objectCatalog.data : NO_OBJECTS).flatMap((o) =>
+          o.label ? [[o.name, o.label] as const] : [],
+        ),
+      ),
+    [objectCatalog],
+  );
   // objectui#12454 — a host that carries the meta and the tab row itself.
   const chrome = React.useContext(FlowPreviewChromeContext);
 
@@ -482,6 +493,7 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
       selectedId={selectedId}
       selectedEdgeId={selectedEdgeId}
       locale={locale}
+      objectLabels={objectLabels}
       activeNodeId={runHL?.activeNodeId ?? null}
       visitedNodeIds={runHL?.visitedNodeIds}
       traversedEdgeIds={runHL?.traversedEdgeIds}

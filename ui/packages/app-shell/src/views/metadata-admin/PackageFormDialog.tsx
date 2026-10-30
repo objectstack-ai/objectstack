@@ -25,19 +25,28 @@
  * `ManifestSchema` accepts — the rule `POST /api/v1/packages` refuses by.
  *
  * Create mode opens on the display name (objectui#12512): the id, namespace
- * and version below it in the same card are filled in for the author, each
- * says so until edited, and focusing one selects its whole value so typing
- * replaces it.
+ * and version are filled in for the author, each says so until edited, and
+ * focusing one selects its whole value so typing replaces it.
+ *
+ * The first step asks only for the name (objectstack#27833). The id,
+ * namespace, version and type sit behind one collapsed Advanced disclosure,
+ * and a line under the name says what was filled in. The disclosure opens by
+ * itself whenever one of its rows is what keeps Create disabled, so a name
+ * that derives no id never leaves the author at a disabled button with the
+ * reason folded away.
  */
 
 import * as React from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { ManifestSchema, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { useAuth } from '@object-ui/auth';
 import { NAMESPACE_RE, isSpecPackageId } from '../studio-design/packages-io.js';
 import { PackageIdInput } from '../studio-design/PackageIdInput.js';
 import {
   Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -71,14 +80,23 @@ const CREATE_HIDDEN_FIELDS = ['id', 'dependencies'];
 const HIDDEN_FIELDS = ['dependencies'];
 
 /**
- * The fields create mode lays out itself, in one Basics card and in this
- * order (objectui#12512): the display name first, because the id, namespace
- * and version are filled in from it, then those three, then the rest of the
- * curated Basics fields. Every row except the id is still the spec form's
- * own field, taken from {@link getPackageForm} by name.
+ * The fields create mode lays out itself. The Basics card holds what a person
+ * answers in plain words, the display name and the description
+ * (objectstack#27833); the id, namespace and version are filled in from the
+ * name (objectui#12512) and sit with the type behind Advanced, followed by the
+ * spec form's own Advanced rows. Every row except the id is still the spec
+ * form's own field, taken from {@link getPackageForm} by name.
  */
-const CREATE_BASICS_TAIL = ['type', 'description'] as const;
-const CREATE_HOSTED_FIELDS: readonly string[] = ['name', 'id', 'namespace', 'version', ...CREATE_BASICS_TAIL];
+const CREATE_BASICS_TAIL = ['description'] as const;
+const CREATE_ADVANCED_TAIL = ['type'] as const;
+const CREATE_HOSTED_FIELDS: readonly string[] = [
+  'name',
+  'id',
+  'namespace',
+  'version',
+  ...CREATE_ADVANCED_TAIL,
+  ...CREATE_BASICS_TAIL,
+];
 
 function fieldName(f: string | FormFieldSpec): string {
   return typeof f === 'string' ? f : f.field;
@@ -109,12 +127,17 @@ function pickFormFields(form: FormViewSpec, names: readonly string[]): FormViewS
   return { type: form.type, sections: [{ columns: 1, fields }] };
 }
 
-/** `form` without the sections whose fields create mode hosts in its Basics card. */
+/**
+ * The rows of `form`'s sections that host none of the create-mode fields
+ * (today the spec form's own Advanced section), flattened into one section so
+ * they join the create dialog's Advanced disclosure instead of opening a
+ * second collapsible of the same name.
+ */
 function withoutHostedSections(form: FormViewSpec): FormViewSpec {
-  const sections = (form.sections ?? []).filter(
-    (s) => !s.fields || !s.fields.some((f) => CREATE_HOSTED_FIELDS.includes(fieldName(f))),
-  );
-  return { type: form.type, sections };
+  const names = (form.sections ?? [])
+    .filter((s) => !s.fields || !s.fields.some((f) => CREATE_HOSTED_FIELDS.includes(fieldName(f))))
+    .flatMap((s) => (s.fields ?? []).map(fieldName));
+  return pickFormFields(form, names);
 }
 
 /**
@@ -377,6 +400,9 @@ export function PackageFormDialog({
   });
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // objectstack#27833 — whether the author opened create mode's Advanced
+  // disclosure. It also shows while one of its rows blocks Create.
+  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   // objectui#13278 — false while a dependencies row has an empty or duplicate
   // package name; the editor flags the row and save waits for it.
   const [dependenciesValid, setDependenciesValid] = React.useState(true);
@@ -398,6 +424,7 @@ export function PackageFormDialog({
     setError(null);
     setBusy(false);
     setDependenciesValid(true);
+    setAdvancedOpen(false);
   }, [open, createMode, manifest]);
 
   const handleDependenciesChange = React.useCallback((dependencies: DependencyMap, valid: boolean) => {
@@ -512,6 +539,10 @@ export function PackageFormDialog({
     createMode && !touched.id && !idStr && nameOk && !toIdSegment(String(draft.name ?? ''));
   const nsMissing =
     createMode && !String(draft.namespace ?? '').trim() && (touched.namespace || !!idStr);
+  // objectstack#27833 — once a name is in, every other create gate is a row
+  // behind Advanced (id, namespace, version), so a failing one opens it.
+  const advancedNeeded = createMode && nameOk && !(idOk && nsOk && versionOk);
+  const showAdvanced = advancedOpen || advancedNeeded;
 
   const createForms = React.useMemo(
     () =>
@@ -521,6 +552,7 @@ export function PackageFormDialog({
             namespace: pickFormFields(form, ['namespace']),
             version: pickFormFields(form, ['version']),
             tail: pickFormFields(form, CREATE_BASICS_TAIL),
+            advancedTail: pickFormFields(form, CREATE_ADVANCED_TAIL),
             rest: withoutHostedSections(form),
           }
         : null,
@@ -672,7 +704,7 @@ export function PackageFormDialog({
           <DialogTitle>{title}</DialogTitle>
           {mode === 'create' ? (
             <DialogDescription>
-              {tFormat('engine.packages.create.description', locale, { example: 'com.acme.crm' })}
+              {t('engine.packages.create.description', locale)}
             </DialogDescription>
           ) : (
             <DialogDescription className="font-mono text-xs">
@@ -696,66 +728,105 @@ export function PackageFormDialog({
                 <div className={FLUSH_SECTION}>
                   <SchemaForm {...formProps} form={createForms.name} />
                 </div>
-                <DerivedField
-                  derived={!touched.id && !idNotDerived}
-                  hint={t('engine.packages.idRule.derived', locale)}
-                  testId="package-form-id"
-                >
-                  <Label htmlFor={idInputId} className="text-sm font-medium">
-                    {t('engine.packages.create.id', locale)}
-                    <span className="ml-0.5 text-destructive" aria-hidden="true">
-                      *
-                    </span>
-                  </Label>
-                  <PackageIdInput
-                    id={idInputId}
-                    value={String(draft.id ?? '')}
-                    onChange={handleIdChange}
-                    placeholder="com.acme.crm"
-                    locale={locale}
-                    inputClassName="h-10 px-3 py-2 text-base md:text-sm"
-                    testId="package-form-id-input"
-                  />
-                  {idMissing && (
-                    <p className="text-xs text-destructive" data-testid="package-form-id-missing">
-                      {tFormat(
-                        idNotDerived ? 'engine.packages.idRule.notDerived' : 'engine.packages.idRule.formatHint',
-                        locale,
-                        { example: 'com.acme.crm' },
-                      )}
-                    </p>
-                  )}
-                  {idHelp && <p className="text-xs text-muted-foreground">{idHelp}</p>}
-                </DerivedField>
-                <DerivedField
-                  derived={!touched.namespace}
-                  hint={t('engine.packages.nsRule.derived', locale)}
-                  testId="package-form-namespace"
-                >
-                  <div className={FLUSH_SECTION}>
-                    <SchemaForm {...formProps} form={createForms.namespace} />
-                  </div>
-                  {nsMissing && (
-                    <p className="text-xs text-destructive" data-testid="package-form-namespace-missing">
-                      {t('engine.packages.nsRule.required', locale)}
-                    </p>
-                  )}
-                </DerivedField>
-                <DerivedField
-                  derived={!touched.version}
-                  hint={t('engine.packages.versionRule.default', locale)}
-                  testId="package-form-version"
-                >
-                  <div className={FLUSH_SECTION}>
-                    <SchemaForm {...formProps} form={createForms.version} />
-                  </div>
-                </DerivedField>
+                {idOk && nsOk && (
+                  <p className="text-xs text-muted-foreground" data-testid="package-form-derived-summary">
+                    {tFormat('engine.packages.create.derivedSummary', locale, {
+                      id: idStr,
+                      namespace: String(draft.namespace ?? '').trim(),
+                    })}
+                  </p>
+                )}
                 <div className={FLUSH_SECTION}>
                   <SchemaForm {...formProps} form={createForms.tail} />
                 </div>
               </section>
-              <SchemaForm {...formProps} form={createForms.rest} />
-              {dependenciesEditor}
+              {/* objectstack#27833 — the technical rows. The content stays
+                  mounted while closed (`forceMount` plus `hidden`) so the id
+                  input keeps its own state across a collapse. */}
+              <Collapsible
+                open={showAdvanced}
+                onOpenChange={setAdvancedOpen}
+                className="rounded-md border border-border/40 bg-card/30"
+                data-testid="package-form-advanced"
+              >
+                <CollapsibleTrigger
+                  className="group flex w-full items-center justify-between gap-2 p-4 text-left"
+                  data-testid="package-form-advanced-toggle"
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-foreground/90">
+                      {t('engine.packages.form.advanced', locale)}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {t('engine.packages.create.advancedHint', locale)}
+                    </span>
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90" />
+                </CollapsibleTrigger>
+                <CollapsibleContent forceMount hidden={!showAdvanced} className="space-y-4 px-4 pb-4">
+                  <DerivedField
+                    derived={!touched.id && !idNotDerived}
+                    hint={t('engine.packages.idRule.derived', locale)}
+                    testId="package-form-id"
+                  >
+                    <Label htmlFor={idInputId} className="text-sm font-medium">
+                      {t('engine.packages.create.id', locale)}
+                      <span className="ml-0.5 text-destructive" aria-hidden="true">
+                        *
+                      </span>
+                    </Label>
+                    <PackageIdInput
+                      id={idInputId}
+                      value={String(draft.id ?? '')}
+                      onChange={handleIdChange}
+                      placeholder="com.acme.crm"
+                      locale={locale}
+                      inputClassName="h-10 px-3 py-2 text-base md:text-sm"
+                      testId="package-form-id-input"
+                    />
+                    {idMissing && (
+                      <p className="text-xs text-destructive" data-testid="package-form-id-missing">
+                        {tFormat(
+                          idNotDerived ? 'engine.packages.idRule.notDerived' : 'engine.packages.idRule.formatHint',
+                          locale,
+                          { example: 'com.acme.crm' },
+                        )}
+                      </p>
+                    )}
+                    {idHelp && <p className="text-xs text-muted-foreground">{idHelp}</p>}
+                  </DerivedField>
+                  <DerivedField
+                    derived={!touched.namespace}
+                    hint={t('engine.packages.nsRule.derived', locale)}
+                    testId="package-form-namespace"
+                  >
+                    <div className={FLUSH_SECTION}>
+                      <SchemaForm {...formProps} form={createForms.namespace} />
+                    </div>
+                    {nsMissing && (
+                      <p className="text-xs text-destructive" data-testid="package-form-namespace-missing">
+                        {t('engine.packages.nsRule.required', locale)}
+                      </p>
+                    )}
+                  </DerivedField>
+                  <DerivedField
+                    derived={!touched.version}
+                    hint={t('engine.packages.versionRule.default', locale)}
+                    testId="package-form-version"
+                  >
+                    <div className={FLUSH_SECTION}>
+                      <SchemaForm {...formProps} form={createForms.version} />
+                    </div>
+                  </DerivedField>
+                  <div className={FLUSH_SECTION}>
+                    <SchemaForm {...formProps} form={createForms.advancedTail} />
+                  </div>
+                  <div className={FLUSH_SECTION}>
+                    <SchemaForm {...formProps} form={createForms.rest} />
+                  </div>
+                  {dependenciesEditor}
+                </CollapsibleContent>
+              </Collapsible>
             </div>
           ) : (
             <div className="space-y-4">

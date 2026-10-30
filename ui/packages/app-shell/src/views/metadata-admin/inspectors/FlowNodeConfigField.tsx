@@ -31,6 +31,7 @@ import {
 } from '@objectstack/spec/automation';
 import { FlowKeyValueField, type FlowKeyValueFieldProps } from './FlowKeyValueField.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
+import { FlowFieldHelp } from './FlowFieldHelp.js';
 import {
   isEditableValueEnvelope,
   isValueEnvelopeSlot,
@@ -79,59 +80,160 @@ const FLOW_TRIGGER_CONTEXT_SUBJECTS: ReadonlyArray<{ value: string; label?: stri
  * engine-published `configSchema` (`additionalProperties` → `keyValue`) both
  * emit this path, so the picker holds whichever of the two drew the field.
  * Only the key cell changes; the value cell keeps the slot's own dialect.
+ *
+ * objectstack#27834 — `update_record` picks its keys by label (`byLabel`): the
+ * key cell shows a field's label and stores its API name, for the field values
+ * and for the `filter` that names the record(s) to update, whose keys are
+ * fields of the same object. The other record nodes keep the suggested text box.
  */
-const FIELD_VALUE_MAPS: ReadonlyArray<{ nodeType: string; path: readonly string[] }> = [
+const FIELD_VALUE_MAPS: ReadonlyArray<{ nodeType: string; path: readonly string[]; byLabel?: boolean }> = [
   { nodeType: 'create_record', path: ['config', 'fields'] },
-  { nodeType: 'update_record', path: ['config', 'fields'] },
+  { nodeType: 'update_record', path: ['config', 'fields'], byLabel: true },
+  { nodeType: 'update_record', path: ['config', 'filter'], byLabel: true },
 ];
 
 /**
  * The target object whose fields key the map at `path` on `node`: its
- * `config.objectName` ('' while none is chosen), or `null` when `path` is not a
- * field-value map.
+ * `config.objectName` ('' while none is chosen) and whether the keys are picked
+ * by label, or `null` when `path` is not a field-keyed map.
  */
 function fieldValueMapObject(
   node: Record<string, unknown> | null | undefined,
   path: readonly string[],
-): string | null {
+): { objectName: string; byLabel: boolean } | null {
   const type = node?.type;
   if (typeof type !== 'string') return null;
-  const hit = FIELD_VALUE_MAPS.some(
+  const hit = FIELD_VALUE_MAPS.find(
     (m) => m.nodeType === type && m.path.length === path.length && m.path.every((seg, i) => path[i] === seg),
   );
   if (!hit) return null;
-  const cfg = node?.config;
-  const objectName =
-    cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? (cfg as Record<string, unknown>).objectName : undefined;
-  return typeof objectName === 'string' ? objectName.trim() : '';
+  const objectName = configOf(node).objectName;
+  return { objectName: typeof objectName === 'string' ? objectName.trim() : '', byLabel: hit.byLabel === true };
 }
 
 /** A record node's field-value map: the key-value editor with the object's fields as key suggestions. */
 function FieldValueMapField({
   objectName,
+  byLabel,
   locale,
   ...kv
-}: FlowKeyValueFieldProps & { objectName: string; locale?: string }) {
+}: FlowKeyValueFieldProps & { objectName: string; byLabel: boolean; locale?: string }) {
   // The same field source the reference picker's `object-field` kind reads.
   const { fields } = useObjectFields(objectName || undefined);
   const keyOptions = React.useMemo(
     () =>
       fields.map((f) => ({
         value: f.name,
-        label: f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name,
+        // The picker shows the API name beside the label itself; the text
+        // box's suggestion list carries both in the one label.
+        label: byLabel ? f.label || f.name : f.label && f.label !== f.name ? `${f.label} (${f.name})` : f.name,
       })),
-    [fields],
+    [fields, byLabel],
   );
   return (
     <FlowKeyValueField
       {...kv}
       keyOptions={keyOptions}
+      keysByLabel={byLabel}
       keyHint={
         objectName
           ? tFormat('engine.inspector.reference.fieldsOf', locale, { object: objectName })
           : t('engine.inspector.fieldMap.chooseObject', locale)
       }
     />
+  );
+}
+
+/**
+ * objectstack#27834 — the update's target on a record-triggered flow: the
+ * record that started it. The engine binds that record as `record` for the
+ * whole run, so the filter naming it is the id match the spec's own guidance
+ * prescribes for a CRUD node (`filter: { id: { dialect: 'cel', source:
+ * 'record.id' } }`, `UpdateRecordConfigSchema`'s `recordId` guidance) — no
+ * expression syntax of this surface's own.
+ */
+const TRIGGERING_RECORD_ID_SOURCE = 'record.id';
+
+/**
+ * Whether `path` on `node` is an `update_record` filter that can target the
+ * triggering record: the trigger record is in scope at the node and the
+ * node's object is the trigger's, so `record.id` names a row of it.
+ */
+function isTriggeringRecordSite(
+  node: Record<string, unknown> | null | undefined,
+  path: readonly string[],
+  objectName: string,
+  triggerScope: TriggerScope | undefined,
+): boolean {
+  return (
+    node?.type === 'update_record' &&
+    path.length === 2 &&
+    path[0] === 'config' &&
+    path[1] === 'filter' &&
+    !!triggerScope &&
+    !!objectName &&
+    objectName === triggerScope.objectName
+  );
+}
+
+/** Whether `value` is exactly the triggering-record filter. */
+function isTriggeringRecordFilter(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== 'id') return false;
+  const id = (value as Record<string, unknown>).id;
+  return isEditableValueEnvelope(id) && id.source.trim() === TRIGGERING_RECORD_ID_SOURCE;
+}
+
+/** Whether `value` is a filter with no rows. */
+function isEmptyFilter(value: unknown): boolean {
+  if (isUnsetFieldValue(value)) return true;
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0;
+}
+
+/**
+ * The "Triggering record" target above an `update_record` filter: on an empty
+ * filter, one press writes the id match; on a filter that is exactly that
+ * match, a line says so. Any other filter is the author's own and is left as
+ * it stands — the target is offered again once its rows are removed.
+ */
+function TriggeringRecordTarget({
+  objectName,
+  value,
+  onCommit,
+  disabled,
+  locale,
+}: {
+  objectName: string;
+  value: unknown;
+  onCommit: (value: Record<string, unknown>) => void;
+  disabled?: boolean;
+  locale?: string;
+}) {
+  if (isTriggeringRecordFilter(value)) {
+    return (
+      <p className="text-[11px] leading-snug text-muted-foreground" data-testid="flow-triggering-record-target">
+        {tFormat('engine.inspector.flowNode.triggeringRecord.active', locale, { object: objectName })}
+      </p>
+    );
+  }
+  if (!isEmptyFilter(value)) return null;
+  return (
+    <div className="space-y-1" data-testid="flow-triggering-record-target">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-7 w-full text-xs"
+        onClick={() => onCommit({ id: writeValueEnvelope(undefined, TRIGGERING_RECORD_ID_SOURCE) })}
+        disabled={disabled}
+      >
+        {t('engine.inspector.flowNode.triggeringRecord.use', locale)}
+      </Button>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {tFormat('engine.inspector.flowNode.triggeringRecord.hint', locale, { object: objectName })}
+      </p>
+    </div>
   );
 }
 
@@ -621,6 +723,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
             ? {
                 toggleLabel: t('engine.inspector.flowNode.kv.asExpression', locale),
                 expressionPlaceholder: t('engine.inspector.flowNode.kv.expressionPlaceholder', locale),
+                blankExpressionMessage: t('engine.inspector.flowNode.kv.expressionNeeded', locale),
               }
             : undefined,
           // objectui#12101 — a map whose every value is a flow text slot (http
@@ -631,11 +734,23 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
         // objectui#11788 — a record node's field-value map: its keys are fields
         // of the node's own target object, so the key cell lists them. The
         // value cell is untouched.
-        const fieldMapObject = fieldValueMapObject(context?.node, field.path);
-        return fieldMapObject !== null ? (
-          <FieldValueMapField {...kv} objectName={fieldMapObject} locale={locale} />
+        const fieldMap = fieldValueMapObject(context?.node, field.path);
+        if (fieldMap === null) return <FlowKeyValueField {...kv} />;
+        const map = <FieldValueMapField {...kv} objectName={fieldMap.objectName} byLabel={fieldMap.byLabel} locale={locale} />;
+        // objectstack#27834 — the update's target: the record that started the flow.
+        return isTriggeringRecordSite(context?.node, field.path, fieldMap.objectName, triggerScope) ? (
+          <div className="space-y-2">
+            <TriggeringRecordTarget
+              objectName={fieldMap.objectName}
+              value={value}
+              onCommit={(v) => onCommit(v)}
+              disabled={disabled}
+              locale={locale}
+            />
+            {map}
+          </div>
         ) : (
-          <FlowKeyValueField {...kv} />
+          map
         );
       }
       case 'stringList':
@@ -983,9 +1098,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           {describeUnknownRefs(unknownRefs, locale)}
         </p>
       )}
-      {field.help && !exprIssue && unknownRefs.length === 0 && (
-        <p className="text-[11px] leading-snug text-muted-foreground">{field.help}</p>
-      )}
+      {field.help && !exprIssue && unknownRefs.length === 0 && <FlowFieldHelp text={field.help} />}
     </div>
   );
 }

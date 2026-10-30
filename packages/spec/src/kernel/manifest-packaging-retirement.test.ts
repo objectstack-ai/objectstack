@@ -253,6 +253,14 @@ describe('tree-scoped absence: nothing inside the declared radius still authors 
     'packages/spec/src/shared/retired-key-removal-version.pin.test.ts',
     // The build door's own pin authors it to assert `os plugin build` refuses it.
     'packages/cli/test/plugin-build-bundled-only.test.ts',
+    // The install door's own pin authors it to assert `os plugin install` refuses it before unpacking.
+    'packages/cli/src/commands/plugin/install.integration.test.ts',
+    // The publish door's own pin authors it to assert `os plugin publish` refuses it before any upload.
+    'packages/cli/test/plugin-publish.test.ts',
+    // The boot loader's own pin authors it to assert a pre-retirement install is refused by name.
+    'packages/runtime/src/installed-plugin-loader.test.ts',
+    // The `os serve` boot pin authors it to assert a pre-retirement install is refused at boot, not imported.
+    'packages/cli/test/serve-installed-plugins.integration.test.ts',
     // The D3 entry's `surface` names the value it retires.
     'packages/spec/src/migrations/entries/semantic/18.manifest-packaging-manifest-deps-retired.ts',
   ]);

@@ -33,7 +33,10 @@ function hashStr(s: string): number {
   return Math.abs(h);
 }
 
-/** The icon gradient for a tile, chosen by a stable key (an app's `name`). */
+/**
+ * The icon gradient for a tile, chosen by a stable key (an app's `name`). An
+ * app tile draws it only when the app declares no branding (`HomeAppsStrip`).
+ */
 export function launcherIconGradient(key: string): string {
   return ICON_GRADIENTS[hashStr(key) % ICON_GRADIENTS.length];
 }

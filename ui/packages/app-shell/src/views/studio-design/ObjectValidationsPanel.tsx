@@ -100,7 +100,7 @@ import {
 } from '@object-ui/components';
 import { ConditionBuilder, RECORD_CONDITION_SUBJECTS } from '../metadata-admin/inspectors/ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from '../metadata-admin/inspectors/expression-envelope.js';
-import { readFields } from '../metadata-admin/previews/object-fields-io.js';
+import { readFields, toFieldNameOrEmpty } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import type { ExpressionInput } from '@objectstack/spec/shared';
 import { ScriptValidationSchema, type ScriptValidationParsed } from '@objectstack/spec/data';
@@ -347,6 +347,22 @@ function nextRuleName(existing: string[]): string {
   let name = `validation_${i}`;
   const taken = new Set(existing);
   while (taken.has(name)) name = `validation_${++i}`;
+  return name;
+}
+
+/** The longest rule name {@link ruleNameFromMessage} derives, before a suffix. */
+const DERIVED_RULE_NAME_MAX = 48;
+
+/**
+ * A rule name read off its message (`Hours over 40` → `hours_over_40`), made
+ * unique against `taken`; `null` when the message yields no machine name (a
+ * message in a non-Latin script), so the minted name stays.
+ */
+function ruleNameFromMessage(message: string, taken: ReadonlySet<string>): string | null {
+  const base = toFieldNameOrEmpty(message).slice(0, DERIVED_RULE_NAME_MAX).replace(/_+$/, '');
+  if (!base) return null;
+  let name = base;
+  for (let i = 2; taken.has(name); i++) name = `${base}_${i}`;
   return name;
 }
 
@@ -630,6 +646,7 @@ function RuleTypeFields({
   onBlockingIssuesChange,
   missing,
   guardRef,
+  ruleIndex,
 }: {
   rule: ValidationRuleDraft;
   fields: FieldOpt[];
@@ -648,6 +665,12 @@ function RuleTypeFields({
    * preset leaves the condition to the author.
    */
   guardRef?: React.Ref<HTMLDivElement>;
+  /**
+   * objectstack#27644 — the rule's index in the draft's `validations` list, the
+   * index the publish verdict locates its findings by; `-1` for a rule not in
+   * the draft yet, which no verdict has judged.
+   */
+  ruleIndex: number;
 }) {
   const captionId = React.useId();
   const heldHint = <HeldHint locale={locale} />;
@@ -729,6 +752,7 @@ function RuleTypeFields({
         fields={fields}
         disabled={disabled}
         scope="record"
+        labelSubjects
         /* objectui#9855 — the SUBJECT dropdown's half of the narrowing the
            `scope` above buys for the autocomplete. objectql's rule validator
            evaluates this guard against `{ record, previous }` and nothing else
@@ -739,6 +763,10 @@ function RuleTypeFields({
            imply a server host — see `RECORD_CONDITION_SUBJECTS`. */
         subjects={{ context: RECORD_CONDITION_SUBJECTS }}
         onBlockingIssuesChange={onBlockingIssuesChange}
+        /* objectstack#27644 — where the draft's served verdict locates this
+           guard (`validations.1.condition`, a conditional's `.when`): what the
+           publish refuses there holds the Data pillar's autosave. */
+        verdictPath={ruleIndex >= 0 ? `validations.${ruleIndex}.${guard}` : undefined}
       />
       {missing === 'rule' && heldHint}
     </div>
@@ -1013,6 +1041,23 @@ export function ObjectValidationsPanel({
     setUnsaved((prev) => prev.map((r) => (r.name === name ? next : r)));
   };
 
+  // The names this panel minted for rules it added: such a name follows the
+  // rule's message until the author edits the name, never an authored one.
+  const derivedNames = React.useRef(new Set<string>());
+  const patchMessage = (name: string, message: string) => {
+    const next = derivedNames.current.has(name)
+      ? ruleNameFromMessage(message, new Set(listed.map((r) => r.name ?? '').filter((n) => n !== name)))
+      : null;
+    if (!next || next === name) {
+      patchRule(name, { message });
+      return;
+    }
+    derivedNames.current.delete(name);
+    derivedNames.current.add(next);
+    patchRule(name, { message, name: next });
+    setSelected(next);
+  };
+
   const patchRule = (name: string, patch: Partial<ValidationRuleDraft>) => {
     const pending = unsaved.find((r) => r.name === name);
     if (pending) {
@@ -1024,6 +1069,7 @@ export function ObjectValidationsPanel({
 
   /** Put a new rule in place: written when it lacks nothing, held otherwise (objectui#11820, objectstack#26731). */
   const placeNewRule = (rule: ValidationRuleDraft) => {
+    if (rule.name) derivedNames.current.add(rule.name);
     if (missingPart(rule) === null) commit([...rules, rule]);
     else setUnsaved((prev) => [...prev, rule]);
     setSelected(rule.name ?? null);
@@ -1039,8 +1085,9 @@ export function ObjectValidationsPanel({
    * and the editor opens on the condition.
    */
   const addPreset = (preset: ValidationPreset, plan: Extract<PresetPlan, { ready: true }>) => {
+    const taken = listed.map((r) => r.name ?? '');
     const rule: ValidationRuleDraft = {
-      ...newRule(preset.type, nextRuleName(listed.map((r) => r.name ?? '')), firstField),
+      ...newRule(preset.type, ruleNameFromMessage(plan.message, new Set(taken)) ?? nextRuleName(taken), firstField),
       message: plan.message,
     };
     if (plan.fields) rule.fields = plan.fields;
@@ -1323,6 +1370,7 @@ export function ObjectValidationsPanel({
                 disabled={disabled}
                 onChange={(e) => {
                   const name = e.target.value;
+                  derivedNames.current.delete(sel.name!);
                   patchRule(sel.name!, { name });
                   setSelected(name);
                 }}
@@ -1344,7 +1392,7 @@ export function ObjectValidationsPanel({
                 <input
                   value={sel.message ?? ''}
                   disabled={disabled}
-                  onChange={(e) => patchRule(sel.name!, { message: e.target.value })}
+                  onChange={(e) => patchMessage(sel.name!, e.target.value)}
                   placeholder={t('engine.studio.rules.messagePlaceholder', locale)}
                   className={`w-full rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
                 />
@@ -1362,6 +1410,9 @@ export function ObjectValidationsPanel({
               onBlockingIssuesChange={(count) => reportCel(sel.name!, count)}
               missing={selMissing}
               guardRef={guardRef}
+              // The raw list, as the verdict indexes it: a non-rule member
+              // `readRules` skips still takes its place.
+              ruleIndex={Array.isArray(draft.validations) ? draft.validations.indexOf(sel) : -1}
             />
 
             {/* runs-on events: the spec's events, an absent key shown as its default (objectui#11923) */}

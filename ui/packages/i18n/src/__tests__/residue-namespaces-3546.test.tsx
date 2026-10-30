@@ -304,10 +304,10 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     }
   });
 
-  it('the fifteen literal en values are byte-identical to their inline defaultValue', () => {
+  it('the fourteen literal en values are byte-identical to their inline defaultValue', () => {
     // Two paths must not diverge: with the pack present i18next answers, and
     // before this slice the inline default did — a user must not be able to tell
-    // which ran. 15 keys here; `dashboard.loading` and the two families are the
+    // which ran. 14 keys here; `dashboard.loading` and the two families are the
     // three shapes a byte compare cannot reach, each pinned in its own case.
     //
     // ⚠️ It was SIXTEEN until objectui#9170. `kanban.columns` left this table
@@ -315,6 +315,10 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     // composes a description at all, so there is no inline default to compare
     // against. ⛔ The key itself was NOT retired here — that is the dead-key
     // gate's call, not this suite's, and the case below states what it reports.
+    // ⚠️ FIFTEEN until objectstack#27823: `detail.deleted` left for the same
+    // reason. The record page's delete toast now names the record through the
+    // shared `recordDelete.successText` (`objectActions.deletedNamed`), so the
+    // generic "Record deleted" call site and its inline default are gone.
     const EXPECTED: Array<[key: string, source: string, value: string]> = [
       ['common.done', INVITE_DIALOG, 'Done'],
       ['common.editInStudio', PAGE_VIEW, 'Edit in studio'],
@@ -322,7 +326,6 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
       ['common.retry', APP_CONTENT, 'Retry'],
       ['detail.add', RELATED_LIST, 'Add'],
       ['detail.concurrentUpdateRecordLabel', SAVE_BAR, 'this record'],
-      ['detail.deleted', RECORD_DETAIL, 'Record deleted'],
       ['detail.historyEmpty', DETAIL_VIEW, 'No history yet'],
       ['empty.appNotAvailable', APP_CONTENT, 'App not available'],
       [
@@ -345,12 +348,14 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
       ['layout.systemNav.documentation', UNIFIED_SIDEBAR, 'Documentation'],
       ['workspace.multiOrgDisabled', CREATE_WORKSPACE, 'Creating new organizations is disabled on this instance.'],
     ];
-    expect(EXPECTED).toHaveLength(15);
-    // …and the sixteenth is accounted for rather than merely absent: a row that
-    // silently disappears from a table like this is how a slice stops covering
-    // something without anyone noticing.
+    expect(EXPECTED).toHaveLength(14);
+    // …and the sixteenth and fifteenth are accounted for rather than merely
+    // absent: a row that silently disappears from a table like this is how a
+    // slice stops covering something without anyone noticing.
     expect(MEASURED_KEYS).toContain('kanban.columns');
     expect(EXPECTED.map(([key]) => key)).not.toContain('kanban.columns');
+    expect(MEASURED_KEYS).toContain('detail.deleted');
+    expect(EXPECTED.map(([key]) => key)).not.toContain('detail.deleted');
     const cache = new Map<string, string>();
     for (const [key, rel, value] of EXPECTED) {
       if (!cache.has(rel)) cache.set(rel, sourceOf(rel));

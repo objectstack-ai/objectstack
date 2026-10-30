@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // Which one the author meant is not recorded, and the platform does not guess.
 export const entry: SemanticMigration = {
   id: 'visibility-predicate-has-argument-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'visibleWhen on a page component and on a form view\'s sections and section fields — a has() call whose '
     + 'argument is not a field selection: a name alone, has(status), an index as the last step, '

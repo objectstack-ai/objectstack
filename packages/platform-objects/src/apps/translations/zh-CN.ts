@@ -90,6 +90,7 @@ export const zhCN: TranslationData = {
 
         nav_settings_hub: { label: '全部设置' },
         nav_settings_localization: { label: '本地化' },
+        nav_exchange_rates: { label: '汇率' },
         nav_settings_company: { label: '公司信息' },
         nav_settings_mail: { label: '邮件' },
         nav_settings_branding: { label: '品牌' },

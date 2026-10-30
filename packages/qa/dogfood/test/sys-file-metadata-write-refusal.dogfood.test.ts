@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#11076] REFUSAL PIN — a non-admin cannot write `sys_file.mime_type` / `size`
-// through the data API; a platform admin still can.
+// through the data API; a platform admin's write reaches the row, and (since
+// #27399) the two columns still keep what the storage service wrote.
 //
 // ── What this file is, and what it deliberately is NOT ──────────────────────
 //
@@ -18,12 +19,13 @@
 // explicit-allow platform baseline `member_default` (#5491) NAMES no `sys_file`
 // grant, and object access comes from OWDs plus profile / permission-set
 // declarations only — so the refusal is produced by the baseline's SILENCE
-// about this object. `sys_file` reinforces that from the schema side: it
-// declares no ADR-0103 `managedBy` bucket at all (seven sibling platform
-// objects in `platform-objects/src/audit` do — `sys_attachment` names
-// `platform` outright, the rest name `engine-owned` / `append-only` / `config`),
-// and neither `mime_type` nor `size` carries `readonly`, though `id` on the same
-// object does. So nothing on the object itself is holding this line.
+// about this object. `sys_file` declares no ADR-0103 `managedBy` bucket at all
+// (seven sibling platform objects in `platform-objects/src/audit` do —
+// `sys_attachment` names `platform` outright, the rest name `engine-owned` /
+// `append-only` / `config`). [#27399] Since then `mime_type` and `size` (with
+// `key`, `status` and `etag`) are `readonly` storage-owned columns, so a
+// non-system UPDATE keeps the stored values whoever sends it; the 403 below is
+// still the RBAC answer, which comes before any column is judged.
 //
 // An absence has no gate. A baseline change that hands members a `sys_file`
 // grant — the shape a "while we are here" widening naturally takes — would
@@ -31,12 +33,10 @@
 // maxSize re-check reads these columns) with every suite still green. This file
 // is what reddens instead.
 //
-// ⛔ It does NOT decide whether `sys_file` SHOULD be engine-owned, or whether
-// these columns should become readonly / system-managed. That is an un-ruled
-// platform posture call — it removes an affordance from app authors — and this
-// pin is written to survive every outcome of it: if the posture tightens the
-// refusal stays a refusal, and if it never does, this file is what tells you
-// when the absence stops holding.
+// ⛔ It does NOT decide whether `sys_file` SHOULD be engine-owned. The columns'
+// own posture was decided on #27399 (triage: read-only to the data door), and
+// this pin survived it as it was written to: the refusal stays a refusal, and
+// only the contrast control's read-back moved.
 //
 // ── Three assertions, and why each one is load-bearing ──────────────────────
 //
@@ -45,7 +45,9 @@
 //   server rejects for everyone.
 //
 //   The PLATFORM-ADMIN CONTRAST CONTROL, on the SAME row and the SAME two
-//   columns, is part of the pin and not optional. Without it the refusal cases
+//   columns, is part of the pin and not optional: the admin's write answers 200
+//   and LANDS (a writable column in the same payload changes), so the request
+//   reaches the row. Without it the refusal cases
 //   pass just as well when the fixture never reaches the endpoint at all —
 //   which is how a refusal pin rots into a tautology. This lane has the scar:
 //   a `get-session` pin that answered `200` for anonymous (#10954).
@@ -232,16 +234,21 @@ describe('[#11076] `sys_file.mime_type` / `size` are not writable by a non-admin
   // row and the SAME two columns they did. Without it, all four cases above pass
   // unchanged if the fixture stops reaching the endpoint — a request that never
   // arrives is refused by nothing and looks exactly like a gate holding.
-  it('a platform admin still succeeds on the same row and the same columns', async () => {
+  it('a platform admin\'s write on the same row and the same columns reaches it, and the storage-owned columns keep their values', async () => {
     const ADMIN_WRITE = { mime_type: 'text/x-admin-11076', size: 777 } as const;
-    expect(ADMIN_WRITE, 'the control must actually move the columns').not.toEqual({ ...SEEDED });
+    expect(ADMIN_WRITE, 'the control must actually try to move the columns').not.toEqual({ ...SEEDED });
+    const ADMIN_NAME = 'pin-admin-11076.bin';
 
-    const answer = await write(adminTok, { ...ADMIN_WRITE });
+    const answer = await write(adminTok, { ...ADMIN_WRITE, name: ADMIN_NAME });
     expect(answer.status, `admin status — body: ${answer.body}`).toBe(200);
 
-    // Persisted, read back the same way the refusals were: the control proves a
-    // write of these columns REACHES and LANDS, so the 403s above are a verdict
-    // about the caller and not about the request.
-    expect(await stored()).toEqual({ ...ADMIN_WRITE });
+    // Read back the same way the refusals were. The writable column in the
+    // same payload LANDED, so the request reached the row and the 403s above
+    // are a verdict about the caller, not about the request. [#27399] The two
+    // storage-owned columns keep what the storage service wrote: the engine's
+    // readonly strip takes a non-system caller's value off, an admin's too.
+    const row = await ql.findOne(OBJECT, { where: { id: ROW_ID }, context: SYS });
+    expect(row?.name, 'the admin write reached and landed').toBe(ADMIN_NAME);
+    expect(await stored()).toEqual({ ...SEEDED });
   });
 });

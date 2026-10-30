@@ -363,7 +363,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `chatbot.plan.iterateOrNew.question` and `.extend`, the plan card's
     // extend-or-new question and its choice that name the existing app
     // („{{app}}“) — one interpolated span each, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(100);
+    // 101 once objectstack-ai/objectstack#27823 added
+    // `objectActions.deletedNamed`, the delete toast that names the record
+    // („{{name}}“) — one interpolated span, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(101);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -433,7 +436,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // added `preview.changes.draftedByMcpClient`, one more matched pair.
     // 100 / 100 / 0 after objectstack-ai/objectstack#27480 added
     // `chatbot.plan.iterateOrNew.question` and `.extend`, one matched pair each.
-    expect({ open, close, rdq }).toEqual({ open: 100, close: 100, rdq: 0 });
+    // 101 / 101 / 0 after objectstack-ai/objectstack#27823 added
+    // `objectActions.deletedNamed`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 101, close: 101, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
