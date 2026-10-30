@@ -194,8 +194,9 @@ ADR-0126 §7.4 chose Setup as the first surface for the packaged-flow toggle and
   platform operator. Studio pre-judges that verdict from the two served facts the console already reads for the walled
   catalog doors (`features.tenancyPosture` through `ui/packages/app-shell/src/hooks/useTenancyPosture.ts#useTenancyPosture`,
   and `user.isPlatformAdmin` on the session —
-  `ui/packages/app-shell/src/views/metadata-admin/catalog-scope.ts#walledCatalogReadOnly`): the switch draws **disabled, in the console's own
-  words**, for a principal those facts refuse, and the server's refusal is shown verbatim after any attempt, as Setup's
+  `ui/packages/app-shell/src/views/metadata-admin/catalog-scope.ts#walledCatalogReadOnly` — the posture-and-rung half of
+  that verdict, without its catalog-type filter, because the ledger gate has no type input): the switch draws
+  **disabled, in the console's own words**, for a principal those facts refuse, and the server's refusal is shown verbatim after any attempt, as Setup's
   page shows it today — never a live control that always answers 403, and never a client copy of the gate's sentence.
 - The item's ⋯ menu offers **Clone** (`POST /api/v1/automation/<name>/clone`, a new machine name required, the server's
   notice shown verbatim with the "switch the original off" offer, objectui#13270's shape); the clone lands in the
@@ -235,8 +236,9 @@ Maintainer, verbatim: 「「Edit {app} in Studio」代码包/已安装包一律�
 
 Administration reached through Setup's metadata pages today gets a page of its own under Setup before those routes
 retire: **position holders** (`PositionHoldersSection`) and **permission-set assignment** (`AssignedUsersSection`) are
-the two live sections the move re-homes; **queue membership** has no section at this head and arrives as a Setup page
-with ADR-0142 D2's landing, never inside a metadata page. Each is a people-and-organization page (the scope of
+the two live sections the move re-homes; **queue membership** has no section at this head; its Setup page is a child of
+ADR-0142's landing (a row for its console step at that record's acceptance), not of this record's epic — never inside a
+metadata page either way. Each is a people-and-organization page (the scope of
 `setup.access` and the delegated-administrator gate), not a metadata page. ⛔ Phase 3 does not retire a
 Setup → Metadata route whose administrative action has no Setup home yet.
 
@@ -259,8 +261,8 @@ Setup → Metadata route whose administrative action has no Setup home yet.
 
 ## Rollout
 
-Tracked by epic [#28130](https://github.com/objectstack-ai/objectstack/issues/28130), blocked on this record's merge,
-which carries the phase 2 and phase 3 child-card plan. Cut as cards after this record merges; nothing below binds a
+Tracked by epic [#28130](https://github.com/objectstack-ai/objectstack/issues/28130), which carries the phase 2 and
+phase 3 child-card plan and was blocked on this record's merge. Cut as cards after this record merges; nothing below binds a
 seat before that. Each card cites this record and the epic.
 
 1. **Now** (#27356 row 19, letter **A1**, independent of this record): Studio deletes a writable package's flow from
@@ -274,7 +276,7 @@ seat before that. Each card cites this record and the epic.
    this record.
 3. **Phase 3 — the catalog moves** ([D1](#d1), [D7](#d7)): `views/metadata-admin` directory, lists, item page,
    history and diagnostics re-homed under Studio's All-metadata area (per package and across packages); the two Setup
-   administration pages [D7](#d7) names (queue membership arrives with ADR-0142 D2); Setup → Metadata routes redirect; QA checklist and e2e door rewrites.
+   administration pages [D7](#d7) names (queue membership's Setup page is a child of ADR-0142's landing, not of this epic); Setup → Metadata routes redirect; QA checklist and e2e door rewrites.
 4. **Phase 4 — as pulled**: app, action, dataset (today a create dialog, no designer), translation, email template,
    documentation and the AI types gain pillar-grade designers in Studio one card at a time; until then the All-metadata
    area's generic page is their editor.
