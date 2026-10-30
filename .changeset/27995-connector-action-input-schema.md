@@ -1,5 +1,6 @@
 ---
 '@objectstack/service-automation': patch
+'@objectstack/connector-openapi': patch
 ---
 
 fix(service-automation)!: a `connector_action` call whose evaluated input breaks the action's declared `inputSchema` fails the step before dispatch, naming each missing or mistyped parameter, and nothing is sent (#27995)
@@ -19,6 +20,8 @@ Metadata-protocol: none
 - Not judged, so never refused here: `$ref`, `oneOf` / `anyOf` / `allOf`, `enum`, `format`, bounds, `pattern`, `additionalProperties`, and any `type` name outside the JSON Schema seven. The remote still judges those, as before. An action that declares no `inputSchema` dispatches whatever it is given.
 - A failing call fails the step with `code: 'VALIDATION_ERROR'` on `$error`. The error names each problem by its dotted path (`missing required 'path' (with 'path.petId')`, `'query.verbose' must be boolean, got string`, `'tags[1]' must be string, got number`), says nothing was sent, and points at `GET /api/v1/automation/connectors`, which lists the action's schema. The handler is never called.
 - The failure is a `runtime` one, not a guard refusal: the input can come from run data, so a `fault` edge or a `try_catch` region can handle it.
+
+**`@objectstack/connector-openapi`.** So that the check never demands what a caller cannot supply, an OpenAPI action's `inputSchema` no longer lists the `Accept`, `Content-Type` and `Authorization` header parameters (OAS 3.0.3 §4.7.12.1 says they SHALL be ignored; the transport and `auth` set them), nor the header or query parameter the connector's `api-key` `auth` fills (`headerName`, default `X-API-Key`, or `paramName`). The credential reaches the request from `auth` as before; a flow never writes it into `connectorConfig.input`. `GET /api/v1/automation/connectors` lists the action without them.
 
 **Who sees it.** A flow or agent whose `connector_action` input omits a parameter the action declares `required`, or sends one of a type the action does not declare: that step now fails before the call instead of the remote answering it. For example, an OpenAPI path parameter declared `type: integer` sent as the string `"7"` (a text field holding an id is the usual source) is refused, where the provider used to interpolate it into the path; the error then says to cast it.
 
