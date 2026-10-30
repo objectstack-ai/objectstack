@@ -22,7 +22,7 @@
     {
       "id": 2,
       "prompt": "I want to build my ObjectUI frontend before the backend is deployed. I have a Todo object with title, completed, and dueDate fields. How do I get a working API locally?",
-      "expected_output": "Runs the real server locally with os dev (the Todo object in objectstack.config) and proxies /api to it from the Vite dev server; no MSW plugin.",
+      "expected_output": "Runs the server with os dev (Todo in objectstack.config), proxies /api from Vite, hands ObjectStackAdapter the origin ''; no MSW.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -32,7 +32,8 @@
         ],
         "must_not_contain": [
           "enableBrowser",
-          "setupWorker"
+          "setupWorker",
+          "baseUrl: '/api/v1"
         ]
       }
     },
