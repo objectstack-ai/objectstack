@@ -93,7 +93,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "言語",
-        help: "このユーザーへの通知に使用する優先言語。zh-CN や ja-JP のような言語タグで指定します。未設定の場合はデプロイのデフォルト言語が適用されます。"
+        help: "このユーザーの画面表示と通知に使用する言語。zh-CN や ja-JP のような言語タグで指定します。未設定の場合はデプロイのデフォルト言語が適用されます。"
       },
       manager_id: {
         label: "マネージャー",
@@ -195,13 +195,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "ユーザーを作成しました",
-          description: "一時パスワードが生成された場合は今すぐコピーしてください。表示は一度きりで、保存されません。",
           acknowledge: "完了",
           fields: {
             "user.email": "メールアドレス",
             "user.phoneNumber": "電話番号",
             permissionSet: "権限セット",
-            temporaryPassword: "一時パスワード"
+            temporaryPassword: "一時パスワード：今すぐコピーしてください。表示は一度きりで、保存されません"
           }
         }
       },
@@ -222,10 +221,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "パスワードを更新しました",
-          description: "一時パスワードが生成された場合は今すぐコピーしてください。表示は一度きりで、保存されません。",
           acknowledge: "完了",
           fields: {
-            temporaryPassword: "一時パスワード"
+            temporaryPassword: "一時パスワード：今すぐコピーしてください。表示は一度きりで、保存されません"
           }
         }
       },

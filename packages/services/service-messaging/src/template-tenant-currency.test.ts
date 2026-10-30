@@ -8,7 +8,7 @@
  * the render refuses such a hole (`TEMPLATE_INVALID`) instead of guessing.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { createEmailChannel } from './email-channel.js';
 import { createInboxChannel } from './inbox-channel.js';
@@ -335,4 +335,58 @@ describe('a failed settings read is retried; a read that finds no default is per
             });
         });
     }
+
+    // [#27733] The read can fail one step earlier: a delivery that names no
+    // organization, where no wall stands, reads the rows of the organization
+    // the `sys_organization` probe derives. A store fault there read no row,
+    // so it is graded like a failed settings read: retryable, never TEMPLATE_*.
+    describe('a failed organization probe (#27733)', () => {
+        afterEach(() => {
+            vi.unstubAllEnvs();
+        });
+
+        /** The plugin's `data` engine: the `sys_organization` probe throws while `broken`, else holds `org_apex` with `CNY`. */
+        function probeEngine(state: { broken: boolean }) {
+            const base = fakeData();
+            const reads: string[] = [];
+            const find = async (object: string, query: any) => {
+                if (object === 'sys_organization') {
+                    reads.push(object);
+                    if (state.broken) throw Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+                    return [{ id: 'org_apex' }].slice(0, query?.limit ?? 1);
+                }
+                if (object !== 'sys_setting') return [];
+                reads.push(object);
+                const where = query?.where ?? {};
+                const rows = [{ namespace: 'localization', key: 'currency', scope: 'tenant', organization_id: 'org_apex', value: 'CNY' }];
+                const matched = rows.filter((r) => r.organization_id === where.organization_id && where.key?.$in?.includes(r.key));
+                // Hold the caller's bound, after the filter and by presence.
+                return typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+            };
+            return { reads, engine: { ...base, find } };
+        }
+
+        it('email channel: a delivery with no organization whose probe fails is graded retryable, never TEMPLATE_*', async () => {
+            vi.stubEnv('OS_TENANCY_POSTURE', 'single');
+            const state = { broken: true };
+            const data = probeEngine(state);
+            const mail = mailService({ refuses: 'missing-currency' });
+            const { ctx, messaging } = await bootPlugin(data.engine, mail.service);
+            const channel = messaging.getChannel('email')!;
+            const r = await channel.send(ctx, templateDelivery('email'));
+            expect(data.reads).toEqual(['sys_organization']);
+            expect(mail.calls[0]).not.toHaveProperty('currency');
+            expect(mail.calls[1].currency).toBe('XXX');
+            expect(mail.sent()).toBe(0);
+            expect(r.ok).toBe(false);
+            expect(r.error).not.toMatch(/TEMPLATE_/);
+            expect(channel.classifyError?.(r.error)).toBe('retryable');
+
+            // No memo was written: once the probe answers, the next delivery reads the default.
+            state.broken = false;
+            const again = await channel.send(ctx, templateDelivery('email'));
+            expect(again.ok).toBe(true);
+            expect(mail.calls[mail.calls.length - 1].currency).toBe('CNY');
+        });
+    });
 });

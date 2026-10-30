@@ -215,6 +215,11 @@ export async function seedRunGrants(
                     runContext.positions = Array.isArray(grants.positions) ? grants.positions : [];
                     runContext.permissions = Array.isArray(grants.permissions) ? grants.permissions : [];
                     if (grants.tenantId && !runContext.tenantId) runContext.tenantId = grants.tenantId;
+                    // The rung the resolver derived from these same grants,
+                    // as the user's request carries it. Seeded with them and
+                    // only with them: carried grants keep the rung they came
+                    // with, so a narrowed ceiling never gains a wider rung.
+                    if (grants.posture) (runContext as SeededRunContext).posture = grants.posture;
                 }
                 if (needsPeers && Array.isArray(grants.org_user_ids)) {
                     (runContext as SeededRunContext).org_user_ids = grants.org_user_ids;
@@ -309,6 +314,10 @@ async function deciderSegmentContext(
     delete switched.positions;
     delete switched.permissions;
     delete switched.org_user_ids;
+    // The trigger user's rung is theirs: kept under the decider's id, a
+    // platform administrator's submission would hand a member's decision
+    // segment the deployment-level rows. Seeded for the decider below.
+    delete switched.posture;
     // The trigger user's email is theirs too: kept under the decider's id,
     // it would admit the decider to every row an email-keyed policy grants
     // the submitter. Removed on both postures, and seeded for the decider

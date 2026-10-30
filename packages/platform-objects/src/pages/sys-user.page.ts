@@ -51,9 +51,8 @@ const TWO_FACTOR_OFFERED = P`has(features.twoFactor) && features.twoFactor == tr
  *    of them: it is drawn only in the Security tab, behind the
  *    deployment's `twoFactor` gate (see {@link TWO_FACTOR_OFFERED}).
  *  - The FIRST tab is the details grid: a `record:details` that
- *    re-groups remaining fields into sections and hides admin-internal
- *    audit columns. Banned / ban metadata is still editable from the
- *    header actions — we just don't show it in every user's body.
+ *    re-groups remaining fields into sections (locale on Identity, the ban
+ *    state and reason in Account Status) and hides admin-internal columns.
  *  - The other tabs are **explicitly curated** to the related lists
  *    that matter on a user profile (Positions / Permission Sets / Business
  *    Units / Sessions / Linked Accounts / Organizations / OAuth Apps / API
@@ -199,9 +198,10 @@ export const SysUserDetailPage: Page = {
               {
                 // ── Body / details grid ───────────────────────────────
                 // Re-groups the remaining fields into sections and hides
-                // admin-internal columns. Banned / ban metadata is still
-                // editable from the header actions — it is just not shown in
-                // every user's body.
+                // admin-internal columns. The renderer draws only the
+                // authored sections, so a field none of them names is not on
+                // the page: `locale` rides Identity, and the ban state has its
+                // own section, so a banned user does not read as active.
                 label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
                 icon: 'file-text',
                 children: [
@@ -210,9 +210,6 @@ export const SysUserDetailPage: Page = {
                     properties: {
                       hideFields: [
                         'id',
-                        'banned',
-                        'ban_reason',
-                        'ban_expires',
                         // already promoted to highlights:
                         'email',
                         'phone_number',
@@ -223,7 +220,11 @@ export const SysUserDetailPage: Page = {
                       sections: [
                         {
                           label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad' },
-                          fields: ['name', 'image'],
+                          fields: ['name', 'image', 'locale'],
+                        },
+                        {
+                          label: { en: 'Account Status', 'zh-CN': '账号状态', 'ja-JP': 'アカウントの状態', 'es-ES': 'Estado de la cuenta' },
+                          fields: ['banned', 'ban_reason', 'ban_expires'],
                         },
                         {
                           label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría' },

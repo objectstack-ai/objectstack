@@ -96,6 +96,7 @@ import {
     type MetadataActivationStoreEngine,
     type MetadataActivationWriteOptions,
 } from '@objectstack/core';
+import { describeTurnedOffPackagedItem } from '@objectstack/types';
 
 /**
  * The ledger table. A NAME, not an import: this package does not depend on
@@ -307,11 +308,13 @@ export class ActionActivationProjection {
      * The name is not in the sentence: the caller named the action it asked
      * for, and a machine name read in a toast is not plain language. The
      * parameter stays so the doors' call is unchanged.
+     *
+     * [#27966] The sentence itself is `describeTurnedOffPackagedItem`
+     * (`@objectstack/types`), the one the flow refusal reads as too, so the
+     * two switched-off packaged items are stated in one shape, not two that
+     * agree today.
      */
     describeDisabled(_name: string): string {
-        return (
-            'This action is turned off for this deployment. An administrator can turn it on again under ' +
-            'Setup › Packaged automation, or you can use another action.'
-        );
+        return describeTurnedOffPackagedItem('action');
     }
 }

@@ -93,7 +93,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Idioma",
-        help: "Idioma preferido para las notificaciones de este usuario, como una etiqueta de idioma, por ejemplo zh-CN o ja-JP. Si no se define, se aplica el idioma predeterminado del despliegue."
+        help: "Idioma en el que este usuario ve la interfaz y recibe las notificaciones, como una etiqueta de idioma, por ejemplo zh-CN o ja-JP. Si no se define, se aplica el idioma predeterminado del despliegue."
       },
       manager_id: {
         label: "Gerente",
@@ -195,13 +195,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Usuario creado",
-          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
           acknowledge: "Hecho",
           fields: {
             "user.email": "Correo electrónico",
             "user.phoneNumber": "Número de teléfono",
             permissionSet: "Conjunto de permisos",
-            temporaryPassword: "Contraseña temporal"
+            temporaryPassword: "Contraseña temporal: cópiela ahora, se muestra una sola vez y no se almacena"
           }
         }
       },
@@ -222,10 +221,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Contraseña actualizada",
-          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
           acknowledge: "Hecho",
           fields: {
-            temporaryPassword: "Contraseña temporal"
+            temporaryPassword: "Contraseña temporal: cópiela ahora, se muestra una sola vez y no se almacena"
           }
         }
       },
