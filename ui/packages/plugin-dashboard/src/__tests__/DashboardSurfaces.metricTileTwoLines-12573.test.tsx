@@ -26,9 +26,15 @@
  * surfaces instead of the shared line; the width rules are
  * `metricTileLayout-12623.test.tsx`'s.
  *
+ * objectstack#27430 draws an authored description as the caption under the
+ * value in place of the measure label, so the first pin below renders a metric
+ * that declares none (its caption is the measure label), and the second keeps
+ * only the tooltip; the caption itself is
+ * `DashboardSurfaces.metricTileCaption-27430.test.tsx`'s.
+ *
  * Pins:
  *  - both surfaces: the metric draws the title alone before the value and the
- *    measure label after it, the label once, the title once, the description
+ *    measure label after it, the label once, the title once; the description
  *    then the label as the title's tooltip;
  *  - CONTROL, both surfaces: a dataset-bound table and chart keep the card
  *    header and draw no metric heading;
@@ -80,6 +86,9 @@ const METRIC = {
   values: ['total_amount'],
 };
 
+// The same tile with no description: its caption is the measure label.
+const METRIC_UNDESCRIBED = { ...METRIC, description: undefined };
+
 const TABLE = {
   id: 'by_stage_table',
   type: 'table',
@@ -114,7 +123,7 @@ const renderOn = (surface: Surface, schema: DashboardComponentSchema) =>
 
 describe.each(SURFACES)('%s — a dataset-bound metric tile on two lines (objectui#12573)', (_name, surface) => {
   it('draws the title alone above the value and the measure label under it, each once (objectui#12623)', async () => {
-    const { container } = renderOn(surface, dashboard([METRIC]));
+    const { container } = renderOn(surface, dashboard([METRIC_UNDESCRIBED]));
     // The answered tile: only the answer names the measure label.
     const value = await screen.findByText('1964500');
     const heading = screen.getByTestId('dataset-metric-heading');
@@ -129,12 +138,11 @@ describe.each(SURFACES)('%s — a dataset-bound metric tile on two lines (object
     expect(screen.getAllByText('Total Pipeline')).toHaveLength(1);
   });
 
-  it('carries the description, then the measure label, as the title tooltip, the description drawn nowhere else', async () => {
-    const { container } = renderOn(surface, dashboard([METRIC]));
+  it('carries the description, then the measure label, as the title tooltip', async () => {
+    renderOn(surface, dashboard([METRIC]));
     await screen.findByText('1964500');
 
     expect(screen.getByTestId('dataset-metric-title')).toHaveAttribute('title', 'Sum of open opportunity value\nTotal Amount');
-    expect(container.textContent).not.toContain('Sum of open opportunity value');
   });
 
   it.each([
