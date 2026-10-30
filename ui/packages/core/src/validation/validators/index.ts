@@ -31,6 +31,7 @@ export {
 } from './object-validation-engine.js';
 
 // Not part of the deprecated engine: a presentation read of a declared
-// `state_machine` transition map, so a choice control offers only the moves
-// the server would accept (#25933). It imports nothing from the engine.
-export { stateMachineNextValues } from './state-machine-next-values.js';
+// `state_machine` transition map and entry point, so a choice control offers
+// only the moves (#25933) and initial states (#27763) the server would accept.
+// It imports nothing from the engine.
+export { stateMachineNextValues, stateMachineInitialValues } from './state-machine-next-values.js';

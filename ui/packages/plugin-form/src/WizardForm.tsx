@@ -739,9 +739,11 @@ export const WizardForm: React.FC<WizardFormProps> = ({
         objectSchema,
         // The persisted record a `state_machine` select narrows by (#25933).
         previousValues: schema.mode === 'edit' ? persistedRecord : undefined,
+        // The values a create form opens with, which stay offered (#27763).
+        openingValues: formData,
       }) ?? fields) as FormField[];
     },
-    [objectSchema, schema.readOnly, schema.mode, schema.recordId, schema.objectName, schema.customFields, fieldLabel, perms, persistedRecord],
+    [objectSchema, schema.readOnly, schema.mode, schema.recordId, schema.objectName, schema.customFields, fieldLabel, perms, persistedRecord, formData],
   );
 
   // objectui#11000 — the affordance the lock above found CLOSED for this
