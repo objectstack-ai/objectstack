@@ -53,6 +53,67 @@ import { maskComments, scanSource } from '../js-comment-mask.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+/**
+ * objectstack#27449 — the whole-repository readings, each taken ONCE per file.
+ *
+ * One `scan()` of this repository, or one run of the gate's CLI over it, costs
+ * seconds, and three cases that each took their own inside the 15 s budget sat
+ * at 5.4–6 s idle and 6.9–7.7 s loaded. So each `describe` that reads the real
+ * tree asks for these in its BODY, which runs at collection, and no test or hook
+ * timeout bounds collection (`ui/AGENTS.md`, 测试纪律: a `beforeAll` would sit
+ * under the narrower 10 s hook budget instead). The cases only read the values;
+ * arrays and plain objects are frozen so a case that sorted or spliced one in
+ * place would throw rather than leak into the next case. Same shape as
+ * objectstack#27423.
+ */
+function frozen<T>(value: T): T {
+  if (Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype) {
+    for (const member of Object.values(value as object)) {
+      if (member !== null && typeof member === 'object') frozen(member);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * A reading that THREW is held too, and thrown again to each case that reads it:
+ * a red CLI fails the case that asserts on it, as it did when the case ran it,
+ * instead of killing the whole file at collection.
+ */
+function once<T>(read: () => T): () => T {
+  let held: { value: T } | { error: unknown } | undefined;
+  return () => {
+    if (!held) {
+      try {
+        held = { value: frozen(read()) };
+      } catch (error) {
+        held = { error };
+      }
+    }
+    if ('error' in held) throw held.error;
+    return held.value;
+  };
+}
+
+/** Take a reading at collection; a failure stays held for the case that reads it. */
+function warm(reading: () => unknown) {
+  try {
+    reading();
+  } catch {
+    // held by `once()`; the case that reads it fails with this error
+  }
+}
+
+const realTree = {
+  /** The gate's own verdict over this tree, every covered specifier. */
+  gate: once(() => scan(repoRoot)),
+  /** The gate's CLI over this tree, as `pnpm check:vi-mock-inherit` runs it. */
+  cli: once(() => execFileSync('node', ['scripts/check-vi-mock-inherit.mjs'], { cwd: repoRoot, encoding: 'utf8' })),
+  /** The `@object-ui/i18n` sweep's census (`I18N` is bound by the time its describe collects). */
+  i18n: once(() => scan(repoRoot, { covered: [I18N], floors: {} })),
+};
+
 /** A quote, from its code point — see "Fixture discipline" above. */
 const Q = String.fromCharCode(39);
 
@@ -985,7 +1046,9 @@ describe('non-vacuity — the population refuses to collapse', () => {
 // ---------------------------------------------------------------------------
 
 describe('repo state — the gate is green on this tree', () => {
-  const result = scan(repoRoot);
+  // Read at collection, never inside a case (objectstack#27449).
+  const result = realTree.gate();
+  warm(realTree.cli);
 
   it('has no frozen and no unreadable factory on a covered specifier', () => {
     expect(
@@ -1076,7 +1139,7 @@ describe('repo state — the gate is green on this tree', () => {
     // named only the members would claim less than the run actually checked --
     // the same over-claim in the other direction.
     expect(line).toMatch(new RegExp(`\\d+ call site\\(s\\) on ${escapeRe(named)} and their subpaths judged`));
-    const out = execFileSync('node', ['scripts/check-vi-mock-inherit.mjs'], { cwd: repoRoot, encoding: 'utf8' });
+    const out = realTree.cli();
     expect(out).toMatch(/check-vi-mock-inherit: OK/);
     expect(out).toContain(`${result.census.covered} call site(s) on ${named} and their subpaths judged`);
   });
@@ -1215,10 +1278,11 @@ describe('the sweep — every `@object-ui/i18n` factory inherits, and the specif
    * they are the census the ratchet is computed over.
    */
 
-  const swept = () => scan(repoRoot, { covered: [I18N], floors: {} });
+  // Read at collection, never inside a case (objectstack#27449).
+  warm(realTree.i18n);
 
   it('no `@object-ui/i18n` factory freezes the surface', () => {
-    const result = swept();
+    const result = realTree.i18n();
     expect(
       result.frozen.map((f: { file: string; line: number }) => `${f.file}:${f.line}`),
       'convert these to the obtain-and-spread form — the specifier is covered, so the gate reds too',
@@ -1229,7 +1293,7 @@ describe('the sweep — every `@object-ui/i18n` factory inherits, and the specif
   it('walked a real population — a collapsed scan cannot read as a swept one', () => {
     // Same discipline as `FLOORS`: this describe's green is a claim about 92
     // call sites, so the count is asserted rather than assumed.
-    const census = swept().census;
+    const census = realTree.i18n().census;
     expect(census.covered).toBeGreaterThan(60);
     expect(census.inherits).toBeGreaterThan(60);
     expect(census.covered - census.inherits - census.automock).toBe(0);
