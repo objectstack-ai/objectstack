@@ -920,6 +920,41 @@ const actionDisabledReason = () => z.union([
 ]);
 
 /**
+ * [#27944] `submitText` — the verb on the submit button of the dialog an action
+ * opens to collect its `params` ("Send", "Log Call"), in place of the dialog's
+ * default "Confirm".
+ *
+ * An I18nLabel (a plain string translated at
+ * `objects.OBJECT._actions.ACTION.submitText`, or an inline locale map), the
+ * route `description` — the same dialog's line under its title — takes. The
+ * name is the protocol's existing word for a submit button's copy:
+ * `object-form`'s `submitText` (`component.zod.ts`), beside its `cancelText`.
+ * `submitLabel` is the spelling the platform retired twice in favour of that
+ * one (the `element:form` prop and the page component-copy translation key),
+ * so it is an alias here, not the key.
+ *
+ * It is not `confirmText`. That one is the MESSAGE of the confirm dialog a
+ * param-LESS action opens; this one is the BUTTON of the param dialog, the
+ * dialog an action with params opens instead. The two never meet on one
+ * registered action: `confirmText` beside a non-empty `params` is refused
+ * below, and so is `submitText` without one — an action with no params opens
+ * no param dialog, so the text would parse clean and never show (ADR-0078).
+ *
+ * A blank string is refused for the reason `disabledReason`'s is: it would
+ * replace the default label with an empty button. Omitting the key keeps
+ * "Confirm". The rule is {@link NON_BLANK_STRING}, so the published JSON Schema
+ * carries it too.
+ */
+const SUBMIT_TEXT_BLANK =
+  'a blank `submitText` would replace the param dialog\'s default button label, "Confirm", with '
+  + 'an empty button. Write the verb the button performs (e.g. "Send", "Log Call"), or omit the '
+  + 'key to keep the default.';
+const actionSubmitText = () => z.union([
+  z.string().refine(NON_BLANK_STRING, { message: SUBMIT_TEXT_BLANK }),
+  InlineLocaleMapSchema,
+]);
+
+/**
  * The object half of {@link ActionSchema}, before its refinements.
  *
  * A factory rather than a schema so `lazySchema`'s deferral still holds — the
@@ -953,6 +988,12 @@ const actionObject = () => strictObject({
     // by the copy keys' `*Message` family.
     disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
     disabledHint: 'disabledReason', disabledText: 'disabledReason',
+    // [#27944] The two spellings of the param dialog's button copy that are
+    // measured on a neighbouring surface: `submitLabel`, the form copy key the
+    // platform retired in favour of `submitText`, and `confirmLabel`, the
+    // spelling of the same button on a view's `bulkActionDefs` dialog. Neither
+    // is reachable by distance from `submitText`.
+    submitLabel: 'submitText', confirmLabel: 'submitText',
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
@@ -1057,6 +1098,12 @@ const actionObject = () => strictObject({
    * copy and is never sent to a model.
    */
   description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing `ai.description`.'),
+
+  /**
+   * The param dialog's submit button label — the contract is on
+   * {@link actionSubmitText}.
+   */
+  submitText: actionSubmitText().optional().describe('Label of the submit button in the action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"), in place of the default "Confirm" (declared ahead of its console reader: no renderer shows it yet) — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action). Only on an action with a non-empty `params`: without one no param dialog opens, so it is refused. Not `confirmText`, which is the message of a param-less action\'s confirm dialog. A blank label is refused.'),
 
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),
@@ -2167,6 +2214,24 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
     + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
   path: ['confirmText'],
+}).refine((data) => {
+  // [#27944] The mirror of the rule above, for the param dialog's button copy.
+  // The console's action runner opens the param dialog only for a non-empty
+  // `params` array (objectui `ActionRunner.execute`), so `submitText` on any
+  // other action parses clean and is never drawn — the ADR-0078 shape. Scoped
+  // by schema boundary like the rule above: `InlineActionSchema` does not pick
+  // the key at all.
+  if (data.submitText != null && !(Array.isArray(data.params) && data.params.length > 0)) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    '`submitText` labels the submit button of the dialog an action opens to collect its `params`, '
+    + 'and this action declares no `params`, so it opens no such dialog and the label would never '
+    + 'show. Declare the `params` the dialog collects, or drop `submitText`. A param-less action '
+    + 'that asks first opens a confirm dialog instead, whose message is `confirmText`.',
+  path: ['submitText'],
 }).superRefine((data, ctx) => {
   // #9566/#9474 — `onSuccess` is scoped to the action types whose success
   // carries a result for `${result.*}` to read: `api` (the `target` call's

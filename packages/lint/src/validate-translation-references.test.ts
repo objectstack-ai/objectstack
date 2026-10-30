@@ -3851,6 +3851,23 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     });
   });
 
+  describe('submitText — the param dialog\'s button (#27944)', () => {
+    it('errors on a `submitText` under an action that declares no params, at both addresses', () => {
+      const findings = validateTranslationReferences(
+        actionStack({ ...onEnv({ plain_env: { submitText: '发送' } }), globalActions: { mint_token: { submitText: '生成' } } }),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.submitText`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.mint_token.submitText`],
+      ]);
+      expect(findings[0].message).toMatch(/^Translations carry a param dialog `submitText`, but action "plain_env" declares no `params`/);
+    });
+
+    it('accepts it under an action that collects params (the control)', () => {
+      expect(validateTranslationReferences(actionStack(onEnv({ archive_env: { submitText: '归档' } })))).toEqual([]);
+    });
+  });
+
   describe('params.<name>.options.<value>', () => {
     it('warns on an option key a declared param does not declare, as the field `options` leg does', () => {
       const findings = validateTranslationReferences(
@@ -3927,7 +3944,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     };
 
     type Address = 'bound' | 'global';
-    type Host = 'outcome' | 'dialog' | 'noDialog';
+    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams';
     /**
      * Which declared action a ghost is written under, per address. `noDialog`
      * names an action that declares no `resultDialog`: the dialog's leaves
@@ -3937,6 +3954,10 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       outcome: { bound: 'archive_env', global: 'check_updates' },
       dialog: { bound: 'rotate_secret', global: 'mint_token' },
       noDialog: { bound: 'plain_env', global: 'check_updates' },
+      // [#27944] An action with no `params` opens no param dialog, so its
+      // `submitText` has no button to land on (`coverageStack` gives
+      // `check_updates` params, so the global host is `mint_token`).
+      noParams: { bound: 'plain_env', global: 'mint_token' },
     };
     type Coverage =
       | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
@@ -3948,6 +3969,13 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       confirmText: { kind: 'leaf-copy', why: 'prose' },
       successMessage: { kind: 'leaf-copy', why: 'prose' },
       disabledReason: { kind: 'leaf-copy', why: 'prose' },
+      submitText: {
+        kind: 'reference-checked',
+        host: 'noParams',
+        ghost: { submitText: 'x' },
+        suffix: '.submitText',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
       outcomeMessages: {
         kind: 'reference-checked',
         host: 'outcome',
@@ -4050,6 +4078,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
             description: 'x',
             confirmText: 'x',
             successMessage: 'x',
+            submitText: 'x',
             outcomeMessages: address === 'bound' ? { archived: 'x' } : { up_to_date: 'x' },
             params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
           },

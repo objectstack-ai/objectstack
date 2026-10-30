@@ -2573,14 +2573,18 @@ interface ActionEntryContext {
  *   | `outcomeMessages.<outcome>`         | the action's `outcomeMessages` keys  | `resolveActionOutcomeMessages`  |
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
+ *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
  *
  * A dialog leaf under a DECLARED dialog is read whether or not the dialog
  * authors that leaf itself — the resolver overlays a translated `title` onto a
  * dialog that declares none — so declaring the dialog is the whole condition.
  *
- * The leaf keys beside them (`label`, `description`, `confirmText`,
- * `successMessage`, `disabledReason`) are prose on a node that resolved, read
- * whenever the action is, as on the object branch.
+ * `submitText` is the param dialog's button, the one leaf with a host of its
+ * own: the dialog opens only for a non-empty `params`, and `translateAction`
+ * overlays the key only then (#27944). The leaf keys beside them (`label`,
+ * `description`, `confirmText`, `successMessage`, `disabledReason`) are prose
+ * on a node that resolved, read whenever the action is, as on the object
+ * branch.
  *
  * ⛔ One vocabulary: a key naming a target the action does not declare is
  * `translation-target-unknown` at `params`' severity; an OPTION key keyed off
@@ -2593,6 +2597,32 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionOutcomeMessages(findings, ctx);
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
+  checkActionSubmitText(findings, ctx);
+}
+
+/**
+ * [#27944] `submitText` — the label of the param dialog's submit button. The
+ * dialog opens only for an action with a non-empty `params`, and
+ * `translateAction` overlays the key only for such an action, so under any
+ * other action the translation is read by nothing: the result-dialog leaves'
+ * rule (declaring the dialog is the whole condition), with `params` as the
+ * declaration.
+ */
+function checkActionSubmitText(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  if (!isRec(ctx.rawAction) || ctx.rawAction.submitText === undefined) return;
+  if (Array.isArray(ctx.action.params) && ctx.action.params.length > 0) return;
+  findings.push({
+    severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+    rule: TRANSLATION_TARGET_UNKNOWN,
+    where: `${ctx.where} · submit button`,
+    path: `${ctx.path}.submitText`,
+    message:
+      `Translations carry a param dialog \`submitText\`, but ${ctx.subject} declares no ` +
+      `\`params\`, so it opens no param dialog and nothing reads this label.`,
+    hint:
+      `Move the \`submitText\` translation under the action that collects the params, declare ` +
+      `\`params\` on this action first if it should open a dialog, or drop it.`,
+  });
 }
 
 /** Action-parameter translations are keyed by the param's `name`. */
