@@ -43,7 +43,13 @@
  * overlay the URL did not carry — `modal`, `split`, `popover` — until
  * objectstack#26677 retired those modes: every record overlay a list opens is
  * now the drawer, or the split pane a reader prefers, and both are carried by
- * `?recordId=`.) An app item
+ * `?recordId=`.) The record drawer reads it BESIDE the route's scope, never
+ * instead of it (objectstack#27626): the route keeps its scope and is not
+ * held for the registry, which `AppContent` joins to the scope once it has
+ * landed. Dropping the scope for the registry had swapped the list for the
+ * route skeleton on every first open (remounting it, and re-reading its
+ * rows), and handed it new object documents on every open and close. The
+ * record form overlay still reads the whole registry instead. An app item
  * without a package id has no package to scope by.
  *
  * Two readers ask the same question with the same answer: `AppContent`, which
@@ -57,7 +63,7 @@ import { isRecordPageOf, useMetadata, type MetadataContextValue } from '@object-
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
-import { COMMAND_PALETTE_PARAM, RECORD_DRAWER_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_PARAM } from '../urlParams.js';
+import { COMMAND_PALETTE_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_PARAM } from '../urlParams.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 export type AppObjectScope = ReturnType<ReadObjectScope>;
@@ -268,10 +274,14 @@ function declaredRecordPage(pages: readonly unknown[], objectName: string, pageN
   return isRecord(page) && page.kind !== 'slotted' ? page : null;
 }
 
-/** A record overlay the URL carries: the detail drawer, or the record form. */
-function hasRecordOverlay(search: string): boolean {
+/**
+ * The record form overlay the URL carries. The record drawer (`?recordId=`)
+ * is not one here (objectstack#27626): the route under it keeps its scope,
+ * and `AppContent` reads the whole registry for the drawer beside it.
+ */
+function hasRecordFormOverlay(search: string): boolean {
   const sp = new URLSearchParams(search);
-  return sp.has(RECORD_DRAWER_PARAM) || sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
+  return sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
 }
 
 /** The objects an object's lookup and master-detail fields point at. */
@@ -318,7 +328,7 @@ function appRequiredObjectNames(app: Record<string, unknown> | undefined): strin
 }
 
 export interface AppObjectScopeRead {
-  /** The route reads a scope when its app names a package: an app route on the scope list, no record overlay. */
+  /** The route reads a scope when its app names a package: an app route on the scope list, no record form overlay. */
   candidate: boolean;
   /** The app's object scope, or `null` when this route reads the whole registry. */
   scope: AppObjectScope | null;
@@ -361,7 +371,7 @@ export function readAppObjectScope(
   readPages?: () => PagesRead,
 ): AppObjectScopeRead {
   const route = matchObjectScopeRoute(subPath, hostPaths);
-  const candidate = !!route && !!readObjectScope && !hasRecordOverlay(search);
+  const candidate = !!route && !!readObjectScope && !hasRecordFormOverlay(search);
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   if (candidate && readObjectScope && route && route.recordId !== undefined && route.objectName) {
     // objectui#13046 — a record route: the app list, then the page list, then

@@ -11,8 +11,10 @@
  * asks the scope as soon as the app list names the app: the package list,
  * then by name the route object's lookup targets outside the package.
  *
- * CONTROLs: a route outside an app, a record overlay and an app item with no
- * package id ask nothing here (`AppContent` reads the whole registry there).
+ * CONTROLs: a route outside an app, a record form overlay and an app item
+ * with no package id ask nothing here (`AppContent` reads the whole registry
+ * there). A record drawer (`?recordId=`) asks the scope of the list under it,
+ * as `AppContent` does (objectstack#27626).
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -88,9 +90,15 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
   });
 
-  it('CONTROL: outside an app, on a record overlay, or for an app without a package id, it asks nothing', async () => {
+  it('objectstack#27626 — under a record drawer it asks the scope of the list the drawer opens over', async () => {
+    const calls = mount('/apps/crm/crm_account?recordId=r1', APPS);
+    await waitFor(() => expect(calls).toContain('object/sys_user'));
+    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+  });
+
+  it('CONTROL: outside an app, on a record form overlay, or for an app without a package id, it asks nothing', async () => {
     const outside = mount('/home', APPS);
-    const overlay = mount('/apps/crm/crm_account?recordId=r1', APPS);
+    const overlay = mount('/apps/crm/crm_account?form=new', APPS);
     const noPackage = mount('/apps/crm/crm_account', [{ name: 'crm', navigation: [] }]);
     await waitFor(() => expect(overlay).toContain('view'));
     await waitFor(() => expect(noPackage).toContain('view'));

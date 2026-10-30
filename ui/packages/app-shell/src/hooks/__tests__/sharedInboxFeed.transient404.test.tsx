@@ -235,9 +235,9 @@ describe('#4289 — a transient missing-resource answer does not cost the sessio
 
   it('resumes its normal cadence once revived, rather than staying on probes', async () => {
     // Recovery is not a one-shot read: a feed that answers is a live feed
-    // again, polling at the bell's 10s (ADR-0030 L5) like one that never
-    // failed. Pinned because "it came back once" and "it is working" are
-    // different claims, and only the second one is a bell.
+    // again, polling at the bell's cadence like one that never failed.
+    // Pinned because "it came back once" and "it is working" are different
+    // claims, and only the second one is a bell.
     let reads = 0;
     inboxBehaviour = () => {
       reads += 1;
@@ -249,11 +249,13 @@ describe('#4289 — a transient missing-resource answer does not cost the sessio
     await advance(UNAVAILABLE_PROBE_MS);
     const atRevival = inboxReads();
 
-    // Half the probe cadence at the foreground poll rate is many ticks; the
-    // exact number is the cadence's business, that there ARE more is this
-    // case's.
-    await advance(UNAVAILABLE_PROBE_MS / 2);
-    expect(inboxReads()).toBeGreaterThan(atRevival + 1);
+    // A feed still on probes reads at most `UNAVAILABLE_PROBE_LIMIT` more
+    // times, ever; a live one keeps reading. objectstack#27626 slowed the
+    // foreground poll to the probe cadence (60 s), so the two are told apart
+    // by the budget, not by the rate: the exact number is the cadence's
+    // business, that there are MORE than the budget is this case's.
+    await advance((UNAVAILABLE_PROBE_LIMIT + 3) * UNAVAILABLE_PROBE_MS);
+    expect(inboxReads()).toBeGreaterThan(atRevival + UNAVAILABLE_PROBE_LIMIT + 1);
   });
 });
 
