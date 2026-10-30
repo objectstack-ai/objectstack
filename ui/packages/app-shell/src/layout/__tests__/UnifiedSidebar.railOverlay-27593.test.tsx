@@ -130,7 +130,10 @@ function Trigger() {
 let navigateTo: (path: string) => void = () => {};
 function RouteProbe() {
   const location = useLocation();
-  navigateTo = useNavigate();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    navigateTo = navigate;
+  }, [navigate]);
   return <div data-testid="route">{location.pathname}</div>;
 }
 
