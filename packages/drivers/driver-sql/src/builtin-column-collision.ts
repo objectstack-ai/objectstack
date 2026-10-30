@@ -147,6 +147,7 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   lookupFilters: 'presentation',
   dependsOn: 'presentation',
   allowCreate: 'presentation',
+  lookupAutofill: 'presentation', // a lookup's pick autofill pairs (#27945), read by the form and grid on pick — never by `createColumn`
   // Read by the WRITE path, never by the DDL: `initObjects` registers an
   // autonumber generator off `type: 'auto_number'` without skipping builtin
   // names, so the format an author declares is honoured rather than discarded.
