@@ -13,14 +13,27 @@ import { ErrorHttpStatusMap } from '../api/errors.zod';
  * spec-side default: absence means today, which is what every calendar stored
  * before the key did, so the parsed output of an existing view is unchanged.
  *
- * Pinned here: the three accepted values on both doors that carry the block
- * (the list view's `calendar` and the `object-calendar` node's `calendar`,
- * which is the same member by reference), the absence behaviour, and the
- * refusal of a value outside the closed set — a fixed calendar date included,
- * which the set leaves out on purpose.
+ * Two forms are accepted: a record anchor (`first_record`, `next_record`), or a
+ * wrapped, KNOWN date-macro token — the formula vocabulary of
+ * `date-macros.zod.ts`, fixed, period and parameterised tokens alike, so a
+ * stored value is resolved when the calendar opens and never goes stale.
+ *
+ * Pinned here: the accepted values on both doors that carry the block (the
+ * list view's `calendar` and the `object-calendar` node's `calendar`, which is
+ * the same member by reference), the absence behaviour, and the refusal of
+ * everything else — a fixed calendar date included, which is left out on
+ * purpose because it goes stale.
  */
 
-const ACCEPTED = ['today', 'first_record', 'next_record'] as const;
+const ACCEPTED = [
+  'first_record',
+  'next_record',
+  '{today}',
+  '{next_month_start}',
+  '{current_quarter_start}',
+  '{3_months_from_now}',
+  '{2_weeks_ago}',
+] as const;
 
 const binding = { startDateField: 'renewal_date', titleField: 'name' } as const;
 
@@ -73,29 +86,51 @@ describe('calendar.initialDate — refused values', () => {
   it.each([
     ['a fixed ISO calendar date', '2026-11-01'],
     ['a fixed ISO timestamp', '2026-11-01T00:00:00Z'],
-    ['a near-miss spelling', 'first'],
-    ['the camelCase spelling of a member', 'firstRecord'],
-    ['an upper-cased member', 'TODAY'],
-    ['a date-macro token', '{today}'],
-  ])('%s (%s) is refused with invalid_value at calendar.initialDate', (_label, value) => {
+    ['the bare `today` (its one spelling is `{today}`)', 'today'],
+    ['a bare known period token', 'next_month_start'],
+    ['an unknown wrapped token', '{next_moon}'],
+    ['a malformed parameterised token', '{3_fortnights_from_now}'],
+    ['a near-miss anchor spelling', 'first'],
+    ['the camelCase spelling of an anchor', 'firstRecord'],
+    ['an upper-cased anchor', 'NEXT_RECORD'],
+  ])('%s (%s) is refused at calendar.initialDate, naming both forms', (_label, value) => {
     const view = calendarView({ ...binding, initialDate: value });
     const r = ListViewSchema.safeParse(view);
     expect(r.success).toBe(false);
     const issues = r.error!.issues;
     expect(issues).toHaveLength(1);
     const [issue] = issues;
-    expect(issue.code).toBe('invalid_value');
+    expect(issue.code).toBe('custom');
     expect(issue.path).toEqual(['calendar', 'initialDate']);
-    // The message names every accepted value, so the author's next move is a member.
-    for (const member of ACCEPTED) expect(issue.message).toContain(`"${member}"`);
+    // The message names the value, both accepted forms and the vocabulary to read.
+    expect(issue.message.startsWith(`${JSON.stringify(value)} is not a calendar \`initialDate\`.`)).toBe(true);
+    expect(issue.message).toContain('`first_record` or `next_record`');
+    expect(issue.message).toContain('`{today}`');
+    expect(issue.message).toContain('`DATE_MACRO_TOKENS`');
 
     // The wire envelope a save door answers with: the field and its catalog code,
     // under the validation class's HTTP status.
     const fields = zodIssuesToFields(issues, view);
     expect(fields).toEqual([
-      expect.objectContaining({ field: 'calendar.initialDate', code: 'invalid_option' }),
+      expect.objectContaining({ field: 'calendar.initialDate', code: 'invalid_value' }),
     ]);
     expect(ErrorHttpStatusMap.validation).toBe(400);
+  });
+
+  it.each([
+    ['today', '{today}'],
+    ['next_month_start', '{next_month_start}'],
+    ['3_months_from_now', '{3_months_from_now}'],
+  ])('a bare known token (%s) is told the wrapped spelling to write, %s', (bare, wrapped) => {
+    const r = CalendarConfigSchema.safeParse({ ...binding, initialDate: bare });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0].message).toContain(`write \`${wrapped}\``);
+  });
+
+  it('a value that is no token at all gets no wrapped-spelling hint', () => {
+    const r = CalendarConfigSchema.safeParse({ ...binding, initialDate: '2026-11-01' });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0].message).not.toContain('without its braces');
   });
 
   it('a non-string value is refused at the same path', () => {

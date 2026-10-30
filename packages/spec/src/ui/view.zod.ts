@@ -71,6 +71,7 @@ import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 // docblock for the measurement and for the two routes that were not taken.
 import { MAX_RENDERABLE_SCALE, SCALE_UPPER_BOUND_MESSAGE } from '../shared/scale-ceiling';
 import { FieldType, InlineGridColumnSchema, SelectOptionSchema } from '../data/field.zod';
+import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
 // [#19514] The text-comparand door the Filter Protocol publishes for the
 // case-insensitive contains operator — the discrimination `FILTER_TEXT_CASES`'
 // two REJECTION rows are about, and the reason text that answers them. Imported
@@ -2116,6 +2117,36 @@ export const ListChartConfigSchema = lazySchema(() => strictObject({
   values: z.array(z.string()).min(1).describe('Measure names — Y (at least one)'),
 }).describe('List chart view configuration'));
 
+/** The record anchors `calendar.initialDate` accepts beside a date-macro token. */
+const CALENDAR_INITIAL_DATE_RECORD_ANCHORS = ['first_record', 'next_record'] as const;
+
+/**
+ * The `calendar.initialDate` value check: a record anchor, or a wrapped, KNOWN
+ * date-macro token (`{today}`, `{next_month_start}`, `{3_months_from_now}`).
+ * The token half is the date-macro vocabulary's own predicate pair, the one a
+ * dashboard date filter's `defaultValue` check uses — no second grammar. A bare
+ * known token (`today`) is refused with the wrapped spelling to write instead.
+ */
+function checkCalendarInitialDate(value: string, ctx: z.RefinementCtx): void {
+  if ((CALENDAR_INITIAL_DATE_RECORD_ANCHORS as readonly string[]).includes(value)) return;
+  const wrapped = value.match(DATE_MACRO_WRAPPED_RE);
+  if (wrapped && isDateMacroToken(wrapped[1])) return;
+
+  const bareToken = !wrapped && isDateMacroToken(value)
+    ? ` \`${value}\` is a date-macro token written without its braces: write \`{${value}}\`.`
+    : '';
+  ctx.addIssue({
+    code: 'custom',
+    message:
+      `${JSON.stringify(value)} is not a calendar \`initialDate\`.${bareToken} ` +
+      'Write one of two forms: a record anchor, `first_record` or `next_record`; or a wrapped ' +
+      'date-macro token such as `{today}`, `{next_month_start}` or `{3_months_from_now}`, ' +
+      'resolved each time the calendar opens (the full vocabulary is `DATE_MACRO_TOKENS` in ' +
+      '`@objectstack/spec/data`). Omit the key to open on today. A fixed date is not accepted: ' +
+      'it goes stale as time passes, while a macro does not.',
+  });
+}
+
 /**
  * Calendar Settings
  *
@@ -2174,7 +2205,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
    *
    * Why it lives on this block and not beside `defaultView` (the initial view
    * MODE, an `object-calendar` component prop): a stored list view has no
-   * other authorable home, and two of the three values are defined in terms of
+   * other authorable home, and the two record anchors are defined in terms of
    * this block's own `startDateField` binding — the anchor is a question about
    * the view's records, not a widget preference.
    *
@@ -2183,20 +2214,27 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
    * where the calendar OPENS, and avoids the `default*` prefix, which on this
    * platform also reads as "fallback value" (`defaultValue`).
    *
-   * A CLOSED set of relative anchors. ⛔ No fixed calendar date: a date stored
-   * on a view goes stale as time passes — the same view opens on an ever older
-   * month — and no producer asking for one was found. A fixed date is refused
-   * with the enum's own `invalid_value` issue.
+   * Two forms, and only two (see {@link checkCalendarInitialDate}): a record
+   * anchor, or a wrapped, KNOWN date-macro token — the formula vocabulary the
+   * platform already resolves in filter values and in a dashboard date
+   * filter's `defaultValue` (`DATE_MACRO_TOKENS` / `DATE_MACRO_PARAM_RE`,
+   * judged by the same `DATE_MACRO_WRAPPED_RE` + `isDateMacroToken` pair, so
+   * there is no second grammar). ⛔ No fixed calendar date: a date stored on a
+   * view goes stale as time passes — the same view opens on an ever older
+   * month — while a macro such as `{next_month_start}` is resolved each time
+   * the calendar opens, so it says the same thing tomorrow. ⛔ No bare
+   * `'today'`: `{today}` is its one spelling, and an omitted key already
+   * means today.
    *
-   * ⛔ No spec-side `.default('today')`, for the reason the gantt `viewMode`
-   * gives: a materialized default would write the key onto every parsed
-   * calendar and read as an author choice. Absence means today, which is what
-   * every calendar stored before this key did.
+   * ⛔ No spec-side `.default()`, for the reason the gantt `viewMode` gives: a
+   * materialized default would write the key onto every parsed calendar and
+   * read as an author choice. Absence means today, which is what every
+   * calendar stored before this key did.
    *
    * Lands ahead of its reader: the renderer seeds its current date from the
    * clock until the console half reads this key where it seeds that date.
    */
-  initialDate: z.enum(['today', 'first_record', 'next_record']).optional().describe("Where the calendar opens. 'today' (also what an omitted key does) opens on the period containing today; 'first_record' on the period containing the earliest start date (the startDateField value) among the records the view selects; 'next_record' on the period containing the earliest start date on or after today among those records. When no record qualifies, the calendar opens on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: a date stored on a view goes stale as time passes"),
+  initialDate: z.string().superRefine(checkCalendarInitialDate).optional().describe("Where the calendar opens. Two forms. A record anchor: `first_record` opens on the period containing the earliest start date (the startDateField value) among the records the view selects, `next_record` on the period containing the earliest start date on or after today among those records; when no record qualifies, the calendar opens on today. Or a wrapped date-macro token, resolved each time the calendar opens: `{today}`, `{next_month_start}`, `{current_quarter_start}`, `{3_months_from_now}` (the full vocabulary is `DATE_MACRO_TOKENS` and the parameterised `DATE_MACRO_PARAM_RE` grammar in `@objectstack/spec/data`). Omit the key to open on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: it goes stale as time passes, while a macro does not"),
 }));
 
 /**
