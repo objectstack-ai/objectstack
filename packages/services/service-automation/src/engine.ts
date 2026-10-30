@@ -165,6 +165,7 @@ import {
     forgetSuspendedRun,
     evictConsumedSuspension,
     takeSubflowParentStrand,
+    type GatedResumeContinuation,
 } from './run-resume.js';
 // [#25222] The dispatch and suspension claims' bodies: claiming, settling and
 // reading a dispatch, pruning the expired in-process claims, minting a run id,
@@ -1547,7 +1548,7 @@ export function isRetryableResumeRefusal(code: AutomationResult['code']): boolea
 const ENGINE_BUILT_SIGNAL = Symbol('objectstack.automation.resume.engineBuilt');
 
 /** Tag a signal the engine constructed for its own continuation. */
-function engineBuilt(signal: ResumeSignal): ResumeSignal {
+export function engineBuilt(signal: ResumeSignal): ResumeSignal {
     return Object.assign(signal, { [ENGINE_BUILT_SIGNAL]: true });
 }
 
@@ -6467,6 +6468,13 @@ export class AutomationEngine implements IAutomationService {
      * still suspended answers a coded refusal naming that child's run id, and
      * nothing moves. Resuming the child is the door; the map continues when it
      * completes. See {@link refuseGatedResume}.
+     *
+     * **A cancelled item is recorded, never skipped (#27971).** When the item's
+     * run was cancelled (`cancelRun`, which leaves the parent parked), resuming
+     * the map's run advances it and the item keeps its slot in the results as
+     * `{ $status: 'cancelled', $itemRunId }`, outside `count`. An item whose
+     * suspension is gone WITHOUT a `cancelled` history row is refused with the
+     * same code: the map has nothing true to record for it.
      */
     resume(runId: string, signal?: ResumeSignal): Promise<AutomationResult> {
         // The body lives in ./run-resume.ts (#25222).
@@ -6503,7 +6511,10 @@ export class AutomationEngine implements IAutomationService {
      * Authority is judged first, so a service-owned item keeps its 403; an item
      * open to this route is refused with a coded 409 naming the child run id to
      * resume instead, before any state is touched. A `subflow` link is not a
-     * skip — the signal is delegated to the child — and is unchanged.
+     * skip — the signal is delegated to the child — and is unchanged. A map
+     * whose item row is gone answers by that item's run history (#27971):
+     * `cancelled` hands {@link resume} a continuation that records the item's
+     * marker; anything else is refused with the same code.
      *
      * **An UNDECLARED node type is refused, not deferred** (#5561 step two). It
      * used to be let through on the schema default's inherited `'any'`; a pause
@@ -6517,13 +6528,14 @@ export class AutomationEngine implements IAutomationService {
      * never declared — the failure mode this whole issue is about, restated as a
      * log line.
      */
-    private refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
+    private refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | GatedResumeContinuation | null> {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof refuseGatedResume> = {
             resolveSuspensionChain: (...a) => this.resolveSuspensionChain(...a),
             resolveSuspendedNodeType: (...a) => this.resolveSuspendedNodeType(...a),
             resolveResumeAuthority: (...a) => this.resolveResumeAuthority(...a),
             resolveDeclaredResumeAuthority: (...a) => this.resolveDeclaredResumeAuthority(...a),
+            getRun: (...a) => this.getRun(...a),
             logger: this.logger,
         };
         return refuseGatedResume.call(host, runId, signal);
