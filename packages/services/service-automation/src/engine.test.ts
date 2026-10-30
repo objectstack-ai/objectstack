@@ -1348,7 +1348,9 @@ describe('AutomationEngine - Execution History', () => {
 
             const result = await engine.execute('test_flow');
             expect(result.success).toBe(false);
-            expect(result.error).toContain('disabled');
+            expect(result.code).toBe('FLOW_DISABLED');
+            // [#27966] The switched-off packaged flow sentence.
+            expect(result.error).toContain('turned off');
         });
 
         it('should enable a disabled flow', async () => {
@@ -3260,7 +3262,8 @@ describe('#9378 — execute() classifies terminal exits for the trigger transpor
         await engine.toggleFlow('disabled_flow', false);
         const disabled = await engine.execute('disabled_flow');
         expect(disabled.success).toBe(false);
-        expect(disabled.error).toContain('is disabled');
+        // [#27966] The toggle's refusal reads as the switched-off packaged flow sentence.
+        expect(disabled.error).toContain('is turned off for this deployment');
         expect(disabled.status).toBeUndefined();
 
         // 3. Malformed definition: no start node. Registration accepts it —

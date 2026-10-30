@@ -5,7 +5,7 @@ import { coerceRow, type CoerceContext, type RefResolver, type RefMatch } from '
 import type { ExportFieldMeta } from './import-field-meta.js';
 import type { ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
-  canServeApiOperation, isMultiValueField, isVirtualSearchField, resolveDisplayField, STRUCTURED_JSON_TYPES,
+  canServeApiOperation, isMultiValueField, isUniqueDeclared, isVirtualSearchField, resolveDisplayField, STRUCTURED_JSON_TYPES,
   type DisplayNameObjectMeta, type DroppedFieldsEvent, type EnableLike, type SearchFieldMeta,
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -639,11 +639,32 @@ async function servesReferenceTarget(p: ImportProtocolLike, target: string): Pro
   }
   if (!canServeApiOperation(item?.enable, REFERENCE_TARGET_OPERATION)) return null;
   if (!item || typeof item !== 'object') return {};
+  const fields = item.fields as ServedReferenceTarget['fields'];
   return {
     titleField: resolveDisplayField(item),
-    fields: item.fields as ServedReferenceTarget['fields'],
+    fields,
+    uniqueFields: Object.keys(fields ?? {}).filter((f) => isUniqueReferenceField(fields?.[f])),
   };
 }
+
+/**
+ * [#27947] Does this target field name at most one record, so a cell holding
+ * its value identifies the record? Yes when its `unique` declares a constraint
+ * (`isUniqueDeclared`: `true`, `'organization'`, `'global'`), and for an
+ * `autonumber` that omits `unique`: the spec makes that field
+ * `unique: 'organization'` by contract (`FieldSchema`'s autonumber default),
+ * and the default is applied here too in case the declaration was read
+ * unparsed. An autonumber that writes `unique: false` has opted out (a
+ * display-only ordinal) and is not an identifier.
+ */
+function isUniqueReferenceField(meta: ReferenceTargetFieldMeta | undefined): boolean {
+  if (!meta) return false;
+  if (isUniqueDeclared(meta.unique)) return true;
+  return meta.type === 'autonumber' && meta.unique === undefined;
+}
+
+/** The slice of a lookup target's field declaration the reference resolution reads. */
+type ReferenceTargetFieldMeta = SearchFieldMeta & { unique?: unknown };
 
 /** The slice of a lookup target's declaration the reference resolution reads. */
 type ReferenceTargetDeclaration = DisplayNameObjectMeta & { enable?: EnableLike | null };
@@ -662,11 +683,18 @@ interface ServedReferenceTarget {
    */
   titleField?: string;
   /**
-   * The target's declared field map. It is read for one question only: which
+   * The target's declared field map. It is read for two questions: which
    * candidate fields are virtual ({@link isVirtualSearchField}), because a
-   * `where` over a virtual field is refused by the engine's filter seam.
+   * `where` over a virtual field is refused by the engine's filter seam, and
+   * which are unique ({@link ServedReferenceTarget.uniqueFields}).
    */
-  fields?: Readonly<Record<string, SearchFieldMeta | undefined>>;
+  fields?: Readonly<Record<string, ReferenceTargetFieldMeta | undefined>>;
+  /**
+   * [#27947] The target's unique fields ({@link isUniqueReferenceField}), in
+   * declared order: the last candidates a cell is asked by, so an export file
+   * written before a record's title changed still resolves by its autonumber.
+   */
+  uniqueFields?: readonly string[];
 }
 
 /** Upper bound on rows in one createManyData batch (framework#2678 suggests 100-500). */
@@ -821,7 +849,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     // Try an exact id first (authoritative + unique when the user pasted an id),
     // then the configured display field, then the target's own title field
     // (#24981: ADR-0079's rule, the field the list export writes the cell by),
-    // then the usual human identifiers. De-dupe so a field isn't queried twice.
+    // then the usual human identifiers, then the target's unique fields in
+    // declared order (#27947: an autonumber included, so a cell naming the
+    // record by its number resolves after a title change). De-dupe so a field
+    // isn't queried twice.
     // The first candidate field to match wins; if that field matches >1 record
     // we stop and report ambiguity rather than silently linking the first.
     //
@@ -836,6 +867,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       ...(meta.displayField ? [meta.displayField] : []),
       ...(target.titleField ? [target.titleField] : []),
       'name', 'title', 'label', 'full_name', 'email', 'username',
+      ...(target.uniqueFields ?? []),
     ])].filter((f) => !isVirtualSearchField(target.fields?.[f]));
     const lookup = async (): Promise<RefMatch> => {
       let match: RefMatch = {};

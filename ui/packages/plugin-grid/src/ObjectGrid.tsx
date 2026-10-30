@@ -160,17 +160,23 @@ function isAvatarColumn(column: { accessorKey?: string; type?: string }, fieldTy
  * The columns of a list a record pane has narrowed to its `columns` face
  * (objectstack#27545): its first {@link RECORD_LIST_NARROW_COLUMN_COUNT} view
  * columns that are not avatars, in the view's order, and its row actions.
+ *
+ * The row-actions column keeps its header's name for assistive technology but
+ * draws no label: the column is as wide as its widest cell, and beside a pane
+ * the label alone (wider than a row's ⋮) pushed the third column under it.
  */
-function narrowListColumns<C extends { accessorKey?: string; type?: string }>(
+function narrowListColumns<C extends { accessorKey?: string; type?: string; header?: string; headerIcon?: React.ReactNode }>(
   columns: readonly C[],
   fieldTypeOf: (key: string) => unknown,
 ): C[] {
   let kept = 0;
-  return columns.filter((column) => {
-    if (column.accessorKey === '_actions') return true;
-    if (isAvatarColumn(column, fieldTypeOf) || kept >= RECORD_LIST_NARROW_COLUMN_COUNT) return false;
+  return columns.flatMap((column) => {
+    if (column.accessorKey === '_actions') {
+      return [{ ...column, header: '', headerIcon: <span className="sr-only">{column.header}</span> }];
+    }
+    if (isAvatarColumn(column, fieldTypeOf) || kept >= RECORD_LIST_NARROW_COLUMN_COUNT) return [];
     kept += 1;
-    return true;
+    return [column];
   });
 }
 

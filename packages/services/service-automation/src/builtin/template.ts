@@ -141,3 +141,60 @@ export function renderTextSlot(value: unknown, variables: VariableMap, currency?
     const text = String(result.value);
     return text === '' ? undefined : text;
 }
+
+/**
+ * [#28056] The run contexts whose tenant-currency read FAILED, each with the
+ * read's error text. Run setup notes a context here when the
+ * `FlowTenantCurrencyResolver` rejects, so a text slot's refusal can tell "the
+ * organization has no default" from "the read learned nothing". Held beside the
+ * context, never on it: `AutomationContext` has no member for it, and a
+ * persisted context must not carry one run's transient fault into the next.
+ */
+const tenantCurrencyReadFaults = new WeakMap<object, string>();
+
+/**
+ * Stands in for the tenant default when a refusal is probed. `XXX` is ISO
+ * 4217's "no currency" code, so a hole formats with it. Never shown: the probe
+ * only renders.
+ */
+const NO_CURRENCY_PROBE = 'XXX';
+
+/** Record that `context`'s run could not read its organization's default currency. */
+export function noteTenantCurrencyReadFault(context: object, err: unknown): void {
+    tenantCurrencyReadFaults.set(context, err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * [#28056] Grade a node's thrown failure against a failed tenant-currency read.
+ *
+ * A {@link FlowTextTemplateError} is a guard refusal. That is right when the
+ * read succeeded: the organization has no default, and only a setting or the
+ * hole's own code cures it. When the read FAILED for this run's `context`, the
+ * slot is rendered once more with {@link NO_CURRENCY_PROBE} as the default:
+ *
+ * - The probe renders: the only refusal was the missing default, which the read
+ *   would have supplied. A plain `Error` is returned instead, without the guard
+ *   brand, so a `fault` edge routes it like any runtime failure, and the run
+ *   can succeed once the read does.
+ * - The probe still refuses: a default cannot cure the slot, and the refusal is
+ *   returned as it stands.
+ *
+ * Any other failure, and every refusal after a read that succeeded, is returned
+ * unchanged. The messaging channels grade the same refusal the same way
+ * (#27257).
+ */
+export function gradeAfterTenantCurrencyReadFault(err: unknown, variables: VariableMap, context: unknown): unknown {
+    if (!(err instanceof FlowTextTemplateError) || typeof context !== 'object' || context === null) return err;
+    const fault = tenantCurrencyReadFaults.get(context);
+    if (fault === undefined) return err;
+    try {
+        renderTextSlot(err.source, variables, NO_CURRENCY_PROBE);
+    } catch {
+        return err;
+    }
+    return new Error(
+        `flow text template \`${err.source}\`: a hole formats in the tenant default currency, and the ` +
+        `organization's \`localization.currency\` setting could not be read (${fault}), so the text was not ` +
+        'rendered. The read failure is transient: the run can succeed once the setting can be read.',
+    );
+}

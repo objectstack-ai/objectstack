@@ -837,10 +837,16 @@ export type FlowUserGrantsResolver = (
  * `{{ amount | currency }}` hole with no argument formats in it. Injected by
  * the host — the automation plugin bridges it to `@objectstack/core`'s
  * `resolveLocalizationContext`, the read a request resolves
- * `ExecutionContext.currency` with. Returns `undefined` (or throws, tolerated)
- * when the organization has none; run setup then leaves
+ * `ExecutionContext.currency` with. Returns `undefined` when the read succeeded
+ * and the organization has none; run setup then leaves
  * {@link AutomationContext.currency} unset, and such a hole refuses the node by
- * name. When unwired, the same: nothing is guessed.
+ * name, a guard refusal. When unwired, the same: nothing is guessed.
+ *
+ * [#28056] Rejects when the read FAILED: it learned nothing, so it is never
+ * read as `undefined`. Run setup leaves `currency` unset and notes the failure
+ * for that run, and a hole that then refuses for want of a default fails its
+ * node as a runtime failure instead: a `fault` edge routes it, and the run can
+ * succeed once the read does (`gradeAfterTenantCurrencyReadFault`).
  */
 export type FlowTenantCurrencyResolver = (
   tenantId: string | undefined,
@@ -4997,8 +5003,24 @@ export class AutomationEngine implements IAutomationService {
      * The `FLOW_DISABLED` refusal MESSAGE, which is where the ledger-vs-status
      * distinction rides (ADR-0126 §7.2 reuses the CODE deliberately, so the
      * message is the only channel left).
+     *
+     * [#27966] The ledger sentence is written for the caller, in the shape
+     * the switched-off action refusal reads as (`describeTurnedOffPackagedItem`,
+     * `@objectstack/types`), so it names no table and no ADR. Those, with the
+     * code and the flow's name, go to the log line written here: both refusal
+     * exits ask for this message exactly when they refuse, so this is the one
+     * place every ledger refusal passes that holds the logger. It is `info`,
+     * not `warn`: the refusal is handed to the caller, and nothing is degraded
+     * (AGENTS.md "Degradation log levels").
      */
     private describeDisabledFlow(flowName: string): string {
+        if (this.flowLedgerDisabled.has(flowName)) {
+            this.logger.info(
+                `FLOW_DISABLED: packaged flow '${flowName}' refused — it is switched off in the activation ledger ` +
+                    '(sys_metadata_activation, ADR-0126 §7.2).',
+                { flow: flowName, refusal: 'FLOW_DISABLED' },
+            );
+        }
         // The body lives in ./subflow-guards.ts (#25222).
         const host: ThisParameterType<typeof describeDisabledFlow> = {
             flowLedgerDisabled: this.flowLedgerDisabled,
@@ -6697,10 +6719,12 @@ export class AutomationEngine implements IAutomationService {
      * and each `map:` link with a successor is an item still parked under it
      * (#27877). Empty when nothing is suspended under that id; stops at the
      * last resolvable link when a child row is gone (that run is where
-     * `resumeInternal` will continue).
+     * `resumeInternal` will continue). The caller's own id is seen before the
+     * walk starts, so a corrupt correlation cycle back to it ends the chain
+     * there instead of listing the caller's run again as its own child.
      */
     private async resolveSuspensionChain(runId: string): Promise<SuspendedRun[]> {
-        const seen = new Set<string>();
+        const seen = new Set<string>([runId]);
         const chain: SuspendedRun[] = [];
         let run = await this.loadSuspendedRun(runId);
         for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {

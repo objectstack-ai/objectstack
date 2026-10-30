@@ -11,10 +11,11 @@
 // live on exactly the door that matters.
 //
 // An object's validator is folded and judged HERE (`audienceFolds`), not in the
-// protocol, so this file also pins the 304 half: a read that carries the key is
-// answered in full whatever `If-None-Match` says, because an administrator's
-// switch moves no byte the validator hashes; and the unjudged control still is
-// answered 304.
+// protocol, so this file also pins the 304 half (#28044): the served
+// `disabledActions` is folded into that validator, so an unchanged object under
+// an unchanged switch set is answered 304, a switch flipped off or on answers
+// 200 under a new ETag, and an object no ledger answered for keeps the ETag it
+// had before.
 //
 // The protocol double answers `getMetaItemCached` the way `metadata-protocol`'s
 // producer does: the document under `data`, its ETag, and — where a ledger
@@ -112,20 +113,62 @@ describe('the default cached `GET /meta/object/:name` carries `disabledActions` 
         expect(res.body.item.actions).toHaveLength(2);
     });
 
-    it('a read that carries the key is never answered 304; control: the unjudged read still is', async () => {
-        // The validator this door issues for the document, read off a first
-        // answer and sent back as `If-None-Match`.
-        const first = await getItem(setup(undefined).rest, 'object', 'showcase_task');
-        const etag = first.headers.ETag;
+});
+
+// #28044 — the switched-off names are folded into the validator this door
+// issues, so a cached object read that carries `disabledActions` revalidates
+// like any other: `304` while neither the document nor the switch set moved,
+// `200` under a new ETag once an administrator switches an action off or on.
+describe('the cached `GET /meta/object/:name` folds `disabledActions` into its ETag (#28044)', () => {
+    /** Read once, then revalidate with the ETag that answer issued — against `next` as the ledger then answers. */
+    async function revalidate(first: string[] | undefined, next: string[] | undefined) {
+        const served = await getItem(setup(first).rest, 'object', 'showcase_task');
+        expect(served.statusCode).toBe(200);
+        const etag = served.headers.ETag;
         expect(typeof etag).toBe('string');
+        const again = await getItem(setup(next).rest, 'object', 'showcase_task', { 'if-none-match': etag });
+        return { etag, again };
+    }
 
-        const judged = await getItem(setup(['showcase_mark_done']).rest, 'object', 'showcase_task', { 'if-none-match': etag });
-        expect(judged.statusCode).toBe(200);
-        expect(judged.body.disabledActions).toEqual(['showcase_mark_done']);
-        // The validator itself is unchanged by the key: the same document, the same ETag.
-        expect(judged.headers.ETag).toBe(etag);
+    it('an unchanged object under an unchanged switch set is answered 304', async () => {
+        const { again } = await revalidate(['showcase_mark_done'], ['showcase_mark_done']);
+        expect(again.statusCode).toBe(304);
+        expect(again.body).toBeUndefined();
+    });
 
-        const unjudged = await getItem(setup(undefined).rest, 'object', 'showcase_task', { 'if-none-match': etag });
-        expect(unjudged.statusCode).toBe(304);
+    it('an action switched OFF moves the ETag: 200 with the new list under a new validator', async () => {
+        const { etag, again } = await revalidate(['showcase_mark_done'], ['showcase_mark_done', 'showcase_snooze']);
+        expect(again.statusCode).toBe(200);
+        expect(again.body.disabledActions).toEqual(['showcase_mark_done', 'showcase_snooze']);
+        expect(again.headers.ETag).not.toBe(etag);
+    });
+
+    it('an action switched back ON moves the ETag: 200 with `[]` under a new validator', async () => {
+        const { etag, again } = await revalidate(['showcase_mark_done'], []);
+        expect(again.statusCode).toBe(200);
+        expect(again.body.disabledActions).toEqual([]);
+        expect(again.headers.ETag).not.toBe(etag);
+    });
+
+    it('absent and `[]` fold differently: a ledger attaching (or detaching) moves the ETag', async () => {
+        const attached = await revalidate(undefined, []);
+        expect(attached.again.statusCode).toBe(200);
+        expect(attached.again.body.disabledActions).toEqual([]);
+        expect(attached.again.headers.ETag).not.toBe(attached.etag);
+
+        const detached = await revalidate([], undefined);
+        expect(detached.again.statusCode).toBe(200);
+        expect(detached.again.body).not.toHaveProperty('disabledActions');
+        expect(detached.again.headers.ETag).not.toBe(detached.etag);
+    });
+
+    it('control: an object with no switched-off action keeps its 304, under the validator it had before', async () => {
+        const none = await revalidate(undefined, undefined);
+        expect(none.again.statusCode).toBe(304);
+        // No ledger answered → nothing folds: the ETag is the document's own.
+        expect(none.etag).toBe('"etag_task"');
+
+        const empty = await revalidate([], []);
+        expect(empty.again.statusCode).toBe(304);
     });
 });

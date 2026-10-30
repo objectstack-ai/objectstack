@@ -19,6 +19,7 @@
 import { ActionRunner, type ActionDef, type ActionContext, type ActionResult } from './ActionRunner.js';
 import { toPredicateInput } from '../evaluator/predicateInput.js';
 import { hasDeclaredPredicate } from '../evaluator/declaredPredicate.js';
+import { isActionSwitchedOff } from '../utils/action-activation.js';
 
 /**
  * Action location types — re-exported from `@objectstack/spec/ui` so the
@@ -228,6 +229,9 @@ export class ActionEngine {
     const evaluator = this.runner.getEvaluator();
     return Array.from(this.actions.values())
       .filter(ra => ra.locations.includes(location))
+      // [objectstack#27504] An action this installation switched off is not
+      // offered (the served activation state — see `utils/action-activation`).
+      .filter(ra => !isActionSwitchedOff(ra.action))
       .filter(ra => {
         // [ADR-0066 D4] Capability gate (UI half — the server enforces the
         // source of truth). Hide an action whose `requiredPermissions` are not
@@ -304,7 +308,7 @@ export class ActionEngine {
   /** Get actions that support bulk operations */
   getBulkActions(): ActionDef[] {
     return Array.from(this.actions.values())
-      .filter(ra => ra.bulkEnabled)
+      .filter(ra => ra.bulkEnabled && !isActionSwitchedOff(ra.action))
       .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
       .map(ra => ra.action);
   }
