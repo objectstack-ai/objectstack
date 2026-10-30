@@ -100,8 +100,15 @@ import { UnifiedSidebar } from '../UnifiedSidebar';
 import { useResponsiveSidebar } from '../../hooks/useResponsiveSidebar';
 import { RAIL_OVERLAY_FRAME_KEEPS_GAP, RAIL_OVERLAY_PANEL } from '../consoleSidebarRail';
 
+/**
+ * Size the test window: happy-dom's own viewport, so `innerWidth`, the
+ * `resize` event and every media query answer the same width.
+ */
 function setViewportWidth(width: number) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+  (window as unknown as { happyDOM: { setViewport: (v: { width: number; height: number }) => void } }).happyDOM.setViewport({
+    width,
+    height: 900,
+  });
 }
 
 /** The console layout's fold, as `ConsoleLayoutInner` runs it. */

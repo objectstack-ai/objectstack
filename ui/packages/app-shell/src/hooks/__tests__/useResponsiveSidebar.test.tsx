@@ -18,19 +18,21 @@ import {
 } from '../../layout/consoleSidebarRail';
 import { writeWorkspacePreference } from '../../utils/workspacePreference';
 
+/**
+ * Size the test window: happy-dom's own viewport, so `innerWidth`, the
+ * `resize` event and every media query answer the same width.
+ */
 function setViewportWidth(width: number) {
-  Object.defineProperty(window, 'innerWidth', {
-    configurable: true,
-    writable: true,
-    value: width,
+  (window as unknown as { happyDOM: { setViewport: (v: { width: number; height: number }) => void } }).happyDOM.setViewport({
+    width,
+    height: 900,
   });
 }
 
-/** Resize a mounted window: the width, then the `resize` its media queries answer. */
+/** Resize a mounted window; happy-dom dispatches the `resize` its media queries answer. */
 function resizeTo(width: number) {
   act(() => {
     setViewportWidth(width);
-    window.dispatchEvent(new Event('resize'));
   });
 }
 

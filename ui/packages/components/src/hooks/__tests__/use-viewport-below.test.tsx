@@ -18,14 +18,20 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useIsViewportBelow } from '../use-viewport-below';
 
+/**
+ * Size the test window: happy-dom's own viewport, so `innerWidth`, the
+ * `resize` event and every media query answer the same width.
+ */
 function setViewportWidth(width: number) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+  (window as unknown as { happyDOM: { setViewport: (v: { width: number; height: number }) => void } }).happyDOM.setViewport({
+    width,
+    height: 900,
+  });
 }
 
 function resizeTo(width: number) {
   act(() => {
     setViewportWidth(width);
-    window.dispatchEvent(new Event('resize'));
   });
 }
 
