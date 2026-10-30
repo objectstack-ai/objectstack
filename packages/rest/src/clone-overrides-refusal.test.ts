@@ -98,3 +98,35 @@ describe('[#27489] clone — object overrides and absent bodies keep their answe
         expect(out.cloneData.mock.calls[0][0]).toMatchObject({ object: 'account', id: 'a1' });
     });
 });
+
+/**
+ * [#27669] A body that carries `overrides` beside other top-level keys is
+ * refused, instead of reading `overrides` alone and dropping the rest with a
+ * `201`. The refusal names the stray keys and both accepted shapes, and points
+ * a record with a real field named `overrides` at the nested shape.
+ */
+describe('[#27669] clone — overrides beside other top-level keys is refused before cloneData', () => {
+    it.each([
+        ['one stray key', '{"overrides":{"name":"Copy"},"status":"draft"}', ['"status"']],
+        ['two stray keys', '{"overrides":{"name":"Copy"},"status":"draft","owner":"u2"}', ['"status"', '"owner"']],
+        ['an empty overrides with a stray key', '{"overrides":{},"status":"draft"}', ['"status"']],
+    ])('%s → 400 VALIDATION_ERROR naming the stray keys and both shapes, cloneData never called', async (_label, body, strays) => {
+        const out = await clone(body);
+
+        expect(out.status).toBe(400);
+        expect(out.body?.error?.code).toBe('VALIDATION_ERROR');
+        const message: string = out.body?.error?.message ?? '';
+        for (const key of strays) expect(message).toContain(key);
+        expect(message).toContain('{ "overrides": {...} }');
+        expect(message).toContain('a bare field map');
+        expect(message).toContain('{ "overrides": { "overrides": ... } }');
+        expect(out.cloneData).not.toHaveBeenCalled();
+    });
+
+    it('a field named overrides set through the nested shape → 201, cloneData receives it', async () => {
+        const out = await clone('{"overrides":{"overrides":"x","name":"Copy"}}');
+
+        expect(out.status).toBe(201);
+        expect(out.cloneData.mock.calls[0][0]).toMatchObject({ overrides: { overrides: 'x', name: 'Copy' } });
+    });
+});

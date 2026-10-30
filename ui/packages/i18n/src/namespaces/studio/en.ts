@@ -118,6 +118,10 @@ const STUDIO_EN: Record<string, string> = {
   // CEL authoring safety for RLS predicates (objectui#2413).
   'perm.cel.valid': 'Valid CEL',
   'perm.cel.suggestions': 'Field and scope suggestions',
+  // The CEL editor's field picker: fields by label, inserting the CEL reference.
+  'perm.cel.insertField': 'Insert field',
+  'perm.cel.searchFields': 'Search fields…',
+  'perm.cel.noMatchingFields': 'No matching fields.',
   'perm.cel.type': 'Result type:',
   'perm.cel.type.number': 'Number',
   'perm.cel.type.text': 'Text',
@@ -654,6 +658,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
   'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  // objectstack#27834 — the Update Records filter's "Triggering record" target.
+  'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -1407,6 +1415,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.timeline': 'Timeline',
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
+  'engine.inspector.view.type.tree': 'Tree',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -1995,6 +2004,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.externalDatasource.browser.colColumns': 'Columns',
   'engine.externalDatasource.browser.colRows': 'Rows (est.)',
   'engine.externalDatasource.browser.import': 'Import',
+  'engine.externalDatasource.browser.selectAll': 'Select all tables',
+  'engine.externalDatasource.browser.selectRow': 'Select {table}',
+  'engine.externalDatasource.browser.importSelected': 'Import selected ({count})',
+  'engine.externalDatasource.browser.importingSelected': 'Importing {done} of {count}…',
+  'engine.externalDatasource.browser.batchDoneOne': 'Imported {count} of {total} tables as an object.',
+  'engine.externalDatasource.browser.batchDoneOther': 'Imported {count} of {total} tables as objects.',
   'engine.externalDatasource.browser.unavailable':
     'Federation is not enabled on this server. The {service} service must be registered for table browsing, drafting, and validation to work.',
   'engine.externalDatasource.check.unavailable':
@@ -2033,6 +2048,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.externalDatasource.import.reviewOther': '{count} columns need review',
   'engine.externalDatasource.import.source': 'Generated source',
   'engine.externalDatasource.import.importing': 'Importing…',
+  'engine.externalDatasource.import.writable': 'Allow writes to this object (read-only otherwise)',
   'engine.studio.data.tab.advanced': 'Advanced',
   'engine.studio.data.nameLabel': 'Object name',
   'engine.studio.data.idLabel': 'Identifier',
@@ -3035,6 +3051,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27785 — a report's chart held until its axes are picked; `input`
   // is the chart panel's own label for the axis it still needs.
   'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
+  // objectstack#27895 — a list view held until a required setting of its type's own block is picked again;
+  // `input` is the setting's label in the panel's type settings section.
+  'engine.studio.held.listViewTypeNeedsInput': '{input} in the view’s {type} settings needs a value',
   // objectstack#27461 — a roll-up held until it is set up; `input` is the field
   // inspector's own label for the roll-up input it still needs.
   'engine.studio.held.fieldNeedsInput': '{input} on the field “{field}” needs a value',
@@ -3836,6 +3855,10 @@ const STUDIO_EN: Record<string, string> = {
   // host binds. `Unknown variable: …` is the runtime's own fault text and stays
   // as written. (An RLS clause the runtime cannot lower has no row here: it
   // ships `@objectstack/lint`'s own message, objectui#13061.)
+  // The plain sentence the CEL editors lead the catch-all CEL refusal with
+  // (`invalid-cel`); the engine's own fault and source excerpt follow it as written.
+  'engine.celLint.invalidCel':
+    "This expression can't be worked out as written: something is missing, extra, out of place, or doesn't fit the values beside it. The ^ mark below points to the spot.",
   'engine.celLint.notTheRow':
     '`{identifier}` is not the row on this surface: a row predicate binds the record as `{canonical}` and nothing else. The CEL scope vocabulary still accepts `{identifier}`, so nothing here blocks the save, but at runtime the expression faults with `Unknown variable: {identifier}` and the rule never fires. Re-root the reference on `{canonical}`.',
   'engine.pageBlockCanvas.renderFailed':
@@ -4082,6 +4105,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kanbanCard.mode.none': "Don't open",
   'engine.studio.inspector.listView.kanbanCard.groupBy': 'Group by field',
   'engine.studio.inspector.listView.kanbanCard.pickField': 'Pick a field',
+  // objectstack#27895 — the section of a view type's own settings (calendar, gallery, timeline, …).
+  'engine.studio.inspector.listView.typeSettings': '{type} settings',
+  'engine.studio.inspector.listView.typeSettings.intro': 'The settings this type of view has. A setting that names a field is picked from the object’s fields.',
   'engine.studio.inspector.designersMissing':
     'No metadata designers are registered in this session, so there is nothing to edit here.',
   'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',

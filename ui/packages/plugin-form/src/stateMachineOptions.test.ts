@@ -8,7 +8,8 @@
 
 /**
  * #25933 — an edit form's `state_machine` select offers the persisted value
- * plus its declared next states, through the one field gate every layout draws
+ * plus its declared next states, and #27763 — a create form's offers the
+ * machine's `initialStates`, through the one field gate every layout draws
  * through (`gateFormFields`).
  */
 
@@ -157,5 +158,103 @@ describe('gateFormFields narrows a state-machine select (#25933)', () => {
   it('offers every option when no persisted record is handed in', () => {
     const [status] = gate('edit');
     expect(values(status.options)).toEqual(values(STATUS_OPTIONS));
+  });
+});
+
+// #27763 — a create form offers a machine's `initialStates`. The showcase
+// project's rule (examples/app-showcase project.object.ts).
+const PROJECT_OPTIONS = [
+  { value: 'planned', label: 'Planned', default: true },
+  { value: 'active', label: 'Active' },
+  { value: 'on_hold', label: 'On Hold' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+const projectSchema = (rule: Record<string, unknown> = {}) => ({
+  name: 'showcase_project',
+  fields: { status: { type: 'select', options: PROJECT_OPTIONS } },
+  validations: [
+    {
+      type: 'state_machine',
+      name: 'project_status_flow',
+      field: 'status',
+      events: ['insert', 'update'],
+      initialStates: ['planned'],
+      transitions: {
+        planned: ['active', 'cancelled'],
+        active: ['on_hold', 'completed', 'cancelled'],
+      },
+      ...rule,
+    },
+  ],
+});
+const projectStatus = () => ({
+  name: 'status',
+  type: 'field:select',
+  options: PROJECT_OPTIONS,
+  field: { type: 'select', options: PROJECT_OPTIONS },
+});
+
+describe('narrowStateMachineOptions on a create form (#27763)', () => {
+  it('keeps only the declared initialStates, on both carriers', () => {
+    const [status] = narrowStateMachineOptions([projectStatus()], {
+      objectSchema: projectSchema(),
+      mode: 'create',
+    });
+    expect(values(status.options)).toEqual(['planned']);
+    expect(values(status.field.options)).toEqual(['planned']);
+  });
+
+  it('keeps the value the form opens with, even outside initialStates', () => {
+    const [status] = narrowStateMachineOptions([projectStatus()], {
+      objectSchema: projectSchema(),
+      mode: 'create',
+      openingValues: { status: 'active' },
+    });
+    expect(values(status.options)).toEqual(['planned', 'active']);
+  });
+
+  it('ignores the persisted record — a create has no from-state', () => {
+    const [status] = narrowStateMachineOptions([projectStatus()], {
+      objectSchema: projectSchema(),
+      mode: 'create',
+      previousValues: { status: 'active' },
+    });
+    expect(values(status.options)).toEqual(['planned']);
+  });
+
+  it('CONTROL: a machine that declares no initialStates leaves the create form unconstrained', () => {
+    const field = projectStatus();
+    const [status] = narrowStateMachineOptions([field], {
+      objectSchema: projectSchema({ initialStates: undefined }),
+      mode: 'create',
+    });
+    expect(status).toBe(field);
+  });
+
+  it('CONTROL: an edit still narrows from the stored value, not to initialStates', () => {
+    const [status] = narrowStateMachineOptions([projectStatus()], {
+      objectSchema: projectSchema(),
+      mode: 'edit',
+      previousValues: { status: 'active' },
+      openingValues: { status: 'active' },
+    });
+    expect(values(status.options)).toEqual(['active', 'on_hold', 'completed', 'cancelled']);
+  });
+
+  it('passes a view form through', () => {
+    const fields = [projectStatus()];
+    expect(narrowStateMachineOptions(fields, { objectSchema: projectSchema(), mode: 'view' })).toBe(fields);
+  });
+
+  it('narrows through gateFormFields', () => {
+    const [status] = gateFormFields<Record<string, any>>([projectStatus()], {
+      perms: null,
+      objectName: 'showcase_project',
+      mode: 'create',
+      objectSchema: projectSchema() as any,
+      openingValues: { status: 'planned' },
+    })!;
+    expect(values(status.options)).toEqual(['planned']);
   });
 });

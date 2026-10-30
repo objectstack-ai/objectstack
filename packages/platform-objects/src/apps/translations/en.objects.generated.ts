@@ -140,6 +140,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -577,6 +581,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -664,6 +672,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -794,6 +806,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -813,7 +829,22 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Resend Invitation",
-        successMessage: "Invitation resent"
+        successMessage: "Invitation resent",
+        outcomeMessages: {
+          sent: "Invitation resent to ${result.email}",
+          link_only: "Invitation renewed for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        }
+      },
+      copy_invitation_link: {
+        label: "Copy Invite Link",
+        resultDialog: {
+          title: "Invite link",
+          description: "Anyone who opens this link can accept the invitation, so share it only with the person you invited. It stops working once the invitation is accepted, declined, canceled or expires.",
+          acknowledge: "Done",
+          fields: {
+            acceptUrl: "Invite link"
+          }
+        }
       },
       accept_invitation: {
         label: "Accept Invitation",

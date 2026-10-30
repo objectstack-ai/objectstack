@@ -162,14 +162,17 @@ describe('[#17265] a nested sandboxed hook refusal keeps its business message', 
         expect(err.innerMessage).not.toContain('SandboxError:');
     });
 
-    it('the wire answer matches /data: 400 VALIDATION_ERROR with the sentence', async () => {
+    it('the wire answer matches /data: 400 HOOK_ABORTED with the sentence', async () => {
         // /data answers this refusal `400` with `error.innerMessage` verbatim
         // (`error-response.ts`'s sandbox unwrap door, `declared ?? 400`). The
         // action route must not answer a second thing for one refusal.
         const response = await wireAnswer(await escapeOf(nestedHookRefusal));
 
         expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        // [#27672] FLIPPED on purpose from `VALIDATION_ERROR`, which /data
+        // stopped answering in #27597: the undeclared abort is `HOOK_ABORTED`
+        // at both doors now, so this pin matches /data again.
+        expect(response.body.error.code).toBe('HOOK_ABORTED');
         // [#22588] `toBe`, not `toContain`: a `toContain` pin stayed green
         // while the wire carried the hook's debug wrapper in front of it.
         expect(response.body.error.message).toBe(REFUSAL);

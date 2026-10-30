@@ -3,8 +3,9 @@
 /**
  * objectui#12707 — the read-only link at the end of an item's tab row folds to
  * its layers glyph when the row cannot hold it whole, instead of being cut to
- * "Rea" at the row's scrolled edge. Folded, its text stays its accessible name
- * and its title stays its tooltip; it links to the same place in both forms.
+ * "Rea" at the row's scrolled edge. Folded, its text stays in the DOM (visually
+ * hidden) and its title stays its tooltip. A flow takes no environment overlay,
+ * so on a flow the mark reads "Read-only" and links nowhere (#27356 row 13).
  * The tab labels keep `nowrap` and the row keeps its sideways scroll
  * (objectui#12611).
  *
@@ -97,9 +98,8 @@ failOnAbsorbedFetchError();
 registerMetadataPreview('flow', FlowPreview);
 registerMetadataInspector('flow', FlowInspector);
 
-const LINK = t('engine.studio.pkg.readonlyLink', 'en');
+const LINK = t('engine.studio.pkg.readonly', 'en');
 const HINT = t('engine.studio.pkg.readonlyHint', 'en');
-const HREF = `/apps/setup/metadata?package=${PKG}`;
 
 /** Stubbed widths: a tab is as wide as its label suggests; the link by its form. */
 const TAB_WIDTH = 80;
@@ -194,19 +194,18 @@ describe('the read-only link at the tab row’s end folds to its glyph (objectui
     expect(link).not.toHaveAttribute('data-folded');
     expect(labelOf(link)).toHaveTextContent(LINK);
     expect(labelOf(link)).not.toHaveClass('sr-only');
-    expect(link).toHaveAttribute('href', HREF);
-    expect(link).toHaveAccessibleName(LINK);
+    expect(link).not.toHaveAttribute('href');
+    expect(link).toHaveTextContent(LINK);
   });
 
-  it('at a 560 px tab row it is its glyph alone; its text is its accessible name, its title the tooltip, its target the same', async () => {
+  it('at a 560 px tab row it is its glyph alone; its text stays in the DOM, its title the tooltip', async () => {
     layout.row = 560;
     const link = await renderReadOnlyFlow();
     expect(link).toHaveAttribute('data-folded', 'true');
     expect(link.querySelector('svg')).not.toBeNull();
     expect(labelOf(link)).toHaveClass('sr-only');
-    expect(link).toHaveAccessibleName(LINK);
+    expect(link).toHaveTextContent(LINK);
     expect(link).toHaveAttribute('title', HINT);
-    expect(link).toHaveAttribute('href', HREF);
   });
 
   it('it follows the row: folds when the row narrows, unfolds when it widens again', async () => {
@@ -216,7 +215,6 @@ describe('the read-only link at the tab row’s end folds to its glyph (objectui
     expect(link).toHaveAttribute('data-folded', 'true');
     resizeRow(800);
     expect(link).not.toHaveAttribute('data-folded');
-    expect(link).toHaveAttribute('href', HREF);
   });
 
   it('at a 560 px tab row the tab labels stay whole on one line and the row still scrolls sideways', async () => {

@@ -5075,6 +5075,44 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0029 D9.2a, #27559] The packaged base a served object is compared
+   * against: the {@link getPackagedObjectOwner} declaration, with the
+   * `validations` of every CODE `extend` contributor appended in fold order.
+   *
+   * The packaged message of a rule is the message of whichever code layer
+   * ships that rule name — the owner or a code extender — because the catalog
+   * translates exactly what those layers ship. Reading the owner alone left an
+   * extender's rule with nothing to compare a tenant's rewrite with, so the
+   * catalog won over it on `/meta` and on the refusal alike. Both readers take
+   * their packaged rules from here (`getPackagedObjectBase` in
+   * `@objectstack/metadata-protocol`, `packagedRuleLookup` in this package),
+   * so they cannot split again.
+   *
+   * ⛔ ONLY `validations` widens. The scalars stay the owner's: an extension's
+   * `label` / `description` must keep reading as diverged from the packaged
+   * one, or the catalog takes back the case #8037 filed.
+   *
+   * Returns the owner's definition BY REFERENCE when no code extender ships a
+   * rule, and `undefined` exactly where {@link getPackagedObjectOwner} does.
+   */
+  getPackagedObjectBase(name: string): ServiceObject | undefined {
+    const owner = this.getPackagedObjectOwner(name);
+    if (!owner) return undefined;
+    const fqn = this.resolveObjectKey(name);
+    let rules: unknown[] | undefined;
+    for (const contrib of (fqn === undefined ? undefined : this.objectContributors.get(fqn)) ?? []) {
+      if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+      const list = contrib.definition.validations;
+      if (!Array.isArray(list) || list.length === 0) continue;
+      rules ??= [...(owner.definition.validations ?? [])];
+      rules.push(...list);
+    }
+    return rules === undefined
+      ? owner.definition
+      : { ...owner.definition, validations: rules as ServiceObject['validations'] };
+  }
+
+  /**
    * [ADR-0029 D9.7] Remove the tenant OVERLAY layer of an object, leaving the
    * packaged owner exactly where it is — the layer-addressed sibling of
    * #6818's name-addressed {@link unregisterObject}.

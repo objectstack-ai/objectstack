@@ -319,21 +319,26 @@ function importUndoFailure(id: string, action: ImportUndoFailure['action'], erro
 }
 
 /**
- * [#27501] Refuse an import job for an object nothing is behind, with the data
- * door's own answer for that name: `objectNotFoundError` (`@objectstack/core`),
- * the one factory the protocol's existence gate and the engine's verbs throw,
- * classified by the same `handleRouteError` — 404 `OBJECT_NOT_FOUND`, the same
- * envelope `POST /data/OBJ` answers.
+ * [#27501, #27728] Refuse an import for an object nothing is behind, with the
+ * data door's own answer for that name: `objectNotFoundError`
+ * (`@objectstack/core`), the one factory the protocol's existence gate and the
+ * engine's verbs throw, classified by the same `handleRouteError` — 404
+ * `OBJECT_NOT_FOUND`, the same envelope `POST /data/OBJ` answers. Both import
+ * doors ask it, the synchronous one (`POST /data/OBJ/import`) and the job door
+ * (`POST /data/OBJ/import/jobs`), right after the exposure gate and before the
+ * body is parsed, so a refused request writes no row and no job.
  *
  * The object is read by name as the exposure gate reads it (the execution face
- * where the protocol has one, else `getMetaItem`), and counts only under its
- * own name. A read the protocol refuses `OBJECT_PACKAGE_DISABLED` (its
- * by-name read's answer for an object of a disabled package, and the data
- * door's code for it too) propagates as thrown. Any other thrown read fails
- * OPEN and logs, as the exposure gate's same read does (`loadObjectItem`,
- * #3545): it is no answer about existence, and each row's data call still
- * gives the data door's own. A protocol with no by-name read cannot answer,
- * and is not asked.
+ * where the protocol has one, else `getMetaItem`). [#27729] Whatever item that
+ * read serves counts, under whichever name it carries: the by-name read
+ * resolves a legacy `ns__short` object from its short name exactly as the data
+ * door's `registry.getObject` does, so this answer is the data door's for every
+ * name. A read the protocol refuses `OBJECT_PACKAGE_DISABLED` (its by-name
+ * read's answer for an object of a disabled package, and the data door's code
+ * for it too) propagates as thrown. Any other thrown read fails OPEN and logs,
+ * as the exposure gate's same read does (`loadObjectItem`, #3545): it is no
+ * answer about existence, and each row's data call still gives the data door's
+ * own. A protocol with no by-name read cannot answer, and is not asked.
  */
 async function assertImportObjectExists(p: any, objectName: string, environmentId: string | undefined): Promise<void> {
     const byName = typeof p.getMetaItemForExecution === 'function'
@@ -345,12 +350,12 @@ async function assertImportObjectExists(p: any, objectName: string, environmentI
         envelope = await byName.call(p, { type: 'object', name: objectName, ...(environmentId ? { environmentId } : {}) });
     } catch (err) {
         if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') throw err;
-        logWarn('[REST] import job: object metadata read failed — not refused up front '
+        logWarn('[REST] import: object metadata read failed — not refused up front '
             + '(each row\'s data call still answers for the object)', (err as Error)?.message ?? err);
         return;
     }
     const item = envelope?.item;
-    if (item !== null && typeof item === 'object' && item.name === objectName) return;
+    if (item !== null && typeof item === 'object') return;
     throw objectNotFoundError(objectName);
 }
 
@@ -369,7 +374,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // object's `enable.clone` capability, default on). Optional JSON body
     // `{ overrides?: {...} }` (or a bare field map) is applied on top of
     // the copied values, e.g. to set a new name or clear a unique field.
-    // Any other `overrides` (or bare body) is a 400.
+    // Any other `overrides` (or bare body), or `overrides` beside other
+    // top-level keys, is a 400.
     // Distinct path segment (`/clone`) keeps it clear of the greedy
     // `/data/:object/:id` matchers.
     this.routeManager.register({
@@ -392,6 +398,21 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // callers can POST overrides directly without nesting.
                 const nested = isFieldMap(body) && 'overrides' in body;
                 const overrides = nested ? body.overrides : body;
+                // [#27669] Refused, not dropped: `overrides` beside other
+                // top-level keys used to clone with `overrides` alone and
+                // answer `201`, the other keys silently ignored. A record
+                // with a real field named `overrides` sets it through the
+                // nested shape.
+                if (nested) {
+                    const strays = Object.keys(body).filter((key) => key !== 'overrides');
+                    if (strays.length > 0) {
+                        sendEnvelopeError(res, 400, 'VALIDATION_ERROR',
+                            `The clone body carries "overrides" beside other keys (${strays.map((key) => `"${key}"`).join(', ')}). `
+                            + 'Send either { "overrides": {...} } or a bare field map, not both. '
+                            + 'To set a field named "overrides", nest it: { "overrides": { "overrides": ... } }.');
+                        return;
+                    }
+                }
                 // [#27489] Refused, not dropped: a non-object `overrides`
                 // (`"x"`, `1`, `true`, `null`) used to be skipped and answer
                 // `201` with a plain copy, and an array passed the `typeof`
@@ -517,6 +538,14 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     return;
                 }
                 if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context)) return;
+
+                // [#27728] The object must exist before any row is read. The
+                // exposure gate above passes an unknown object through by design
+                // (#3770), and the data door's existence refusal used to fire only
+                // inside each row's write, so a misspelled name answered 200 with
+                // every row refused. Refused here, with the data door's answer.
+                await assertImportObjectExists(p, objectName, environmentId);
+
                 const body = req.body ?? {};
 
                 // [#24348] Who may take the object's declared controls off this

@@ -56,6 +56,7 @@ import { NODE_W, NODE_H, type Point, type LabeledRegion, type FlowDesignerNode }
 import { FlowRegionView } from './flow-region-view.js';
 import { EXPANDED_REGION_MAX_W, NODE_REGION_GAP, REGION_PANEL_PAD } from './flow-region-metrics.js';
 import { useFlowPaletteRecents } from '../../../context/FlowPaletteRecentsProvider.js';
+import { recordTriggerObjectName } from '../inspectors/flow-scope.js';
 
 export function nodeIcon(type: string): LucideIcon {
   switch (type) {
@@ -427,9 +428,16 @@ export function flowEdgeDisplayName(
  * `@objectstack/spec` — a seed the loader rejects makes the designer's own
  * output unpublishable the moment the author saves. Pinned by
  * `flow-canvas-seeds.spec-parse.test.tsx` (#3316).
+ *
+ * `nodes` is the draft the node joins: on a record-triggered flow an
+ * `update_record` node starts on the trigger's object (objectstack#27834).
  */
-export function defaultNodeExtras(type: string): Record<string, unknown> {
+export function defaultNodeExtras(type: string, nodes?: readonly unknown[]): Record<string, unknown> {
   switch (type) {
+    case 'update_record': {
+      const objectName = recordTriggerObjectName(nodes);
+      return objectName ? { config: { objectName } } : {};
+    }
     case 'start':
       return {};
     case 'wait':

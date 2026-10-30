@@ -841,6 +841,7 @@ jobs:
           }
           run_self_test node scripts/ts-parse.mjs --self-test
           run_self_test node scripts/invoked-as.mjs --self-test
+          run_self_test node ui/scripts/invoked-as.mjs --self-test
           run_self_test node scripts/js-comment-mask.mjs --self-test
           run_self_test node scripts/import-prerequisite.mjs --self-test
           if [ -n "$failed" ]; then

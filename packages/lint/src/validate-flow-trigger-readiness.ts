@@ -177,7 +177,7 @@ import {
   apiTriggerSecretRefOf,
   resolveFlowTriggerKind,
 } from '@objectstack/spec/automation';
-import { recordsOf, suggestName } from './object-graph.js';
+import { closureDependencyRemedy, recordsOf, suggestName } from './object-graph.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
 
@@ -496,9 +496,8 @@ export function validateFlowTriggerReadiness(
         `objects, the objects of the packages its manifest declares in \`dependencies\`, and platform ` +
         `objects), so the package may not bind a flow to it.` +
         suggestName(objectName, objectNames),
-      hint:
-        `Declare a dependency on the package that defines '${objectName}' in the manifest \`dependencies\` ` +
-        `of package '${pkg}', or set ${at.key} to an object inside that closure`,
+      // [#27827] The one closure prescription the view and dataset doors print too.
+      hint: closureDependencyRemedy(objectName, pkg, `set ${at.key} to an object inside that closure`),
     };
   };
 

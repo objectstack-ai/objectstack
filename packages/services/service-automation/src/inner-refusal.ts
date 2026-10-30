@@ -132,6 +132,11 @@ export function refusalCarriedBy(err: unknown): CarriedRefusal {
  *    a new returned failure too, and carries the members its LAST failed
  *    attempt's throw carried (`readCarriedRefusal`), so a retry ladder reports
  *    the last attempt's refusal and never an earlier one's.
+ *  - A `try_catch` whose CATCH region itself fails (#27876) re-words the
+ *    handler's failure the same way, and carries the members the CATCH
+ *    region's throw carried (`readCarriedRefusal`): the refusal the handler
+ *    met, never the try region's refusal it handled. A handler that met a
+ *    fault carries none, even after a refused try region.
  *  - A `subflow` child that PAUSED and then fails on resume, resumed at the
  *    parent's run id (the delegated leg in `run-resume.ts`): the parent's
  *    re-worded failure carries the child's result's members
@@ -141,10 +146,9 @@ export function refusalCarriedBy(err: unknown): CarriedRefusal {
  *    terminal result, which carries the members; the ancestors that leg fails
  *    record no member, and no caller reads their result.
  *
- * Not a carrier: a `try_catch` whose CATCH region itself fails builds its
- * failure from the handler's error and carries no member; the run's result
- * then carries none, which the spec's "present only when a refusal was met"
- * allows and which never invents one.
+ * On every carrier, a failure that met no refusal carries no member, which the
+ * spec's "present only when a refusal was met" allows and which never invents
+ * one.
  */
 export const CARRIED_REFUSAL: unique symbol = Symbol.for(
     'objectstack.automation.carriedRefusal',

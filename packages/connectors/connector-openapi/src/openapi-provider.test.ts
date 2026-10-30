@@ -465,3 +465,104 @@ describe('openapi provider — providerConfig.include', () => {
         });
     });
 });
+
+// ── Path-item-level `parameters` (OpenAPI 3.x Path Item Object) ─────────────
+//
+// A Path Item's `parameters` apply to every operation under that path, and an
+// operation entry with the same `name` + `in` overrides the path-level one.
+// The generator read the operation's own array only, so an id declared once on
+// the path (the common vendor shape for GET / PATCH / DELETE on one resource)
+// was missing from every action's input schema. One pin per shape, each read
+// off the materialized action an author or the flow designer is shown.
+describe('openapi provider — path-item-level parameters', () => {
+    const ok = { '200': { description: 'ok' } };
+    async function inputSchemaOf(paths: Record<string, unknown>, key: string) {
+        const spec = { openapi: '3.0.3', info: { title: 'Pets', version: '1.0.0' }, servers: [{ url: 'https://pets.example.com' }], paths };
+        const { def } = await createOpenApiProviderFactory()(ctx({ providerConfig: { spec } }));
+        return def.actions?.find((a) => a.key === key)?.inputSchema;
+    }
+
+    it('a path-level parameter reaches every operation under the path, and stays required', async () => {
+        const paths = {
+            '/pets/{petId}': {
+                parameters: [{ name: 'petId', in: 'path', required: true }],
+                get: { operationId: 'getPet', responses: ok },
+                delete: { operationId: 'deletePet', responses: ok },
+            },
+        };
+        for (const key of ['getPet', 'deletePet']) {
+            expect(await inputSchemaOf(paths, key), key).toEqual({
+                type: 'object',
+                properties: { path: { type: 'object', properties: { petId: { type: 'string' } }, required: ['petId'] } },
+                required: ['path'],
+            });
+        }
+    });
+
+    it('an operation entry with the same name + in replaces the path-level one whole', async () => {
+        const schema = await inputSchemaOf({
+            '/pets': {
+                parameters: [
+                    { name: 'limit', in: 'query', required: true, schema: { type: 'string' } },
+                    { name: 'offset', in: 'query', schema: { type: 'integer' } },
+                ],
+                get: {
+                    operationId: 'listPets',
+                    parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer' } }],
+                    responses: ok,
+                },
+            },
+        }, 'listPets');
+        // The operation's entry wins: its schema, and its (absent) `required` —
+        // a concatenation would keep the path-level `required: ['limit']`. The
+        // path-level `offset` nobody overrides still arrives.
+        expect(schema).toEqual({
+            type: 'object',
+            properties: { query: { type: 'object', properties: { offset: { type: 'integer' }, limit: { type: 'integer' } } } },
+        });
+    });
+
+    it('a path-level and an operation-level parameter that share a name but not `in` both appear', async () => {
+        const schema = await inputSchemaOf({
+            '/pets/{id}': {
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'integer' } }],
+                get: {
+                    operationId: 'getPet',
+                    parameters: [{ name: 'id', in: 'header', schema: { type: 'string' } }],
+                    responses: ok,
+                },
+            },
+        }, 'getPet');
+        expect(schema).toEqual({
+            type: 'object',
+            properties: {
+                path: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] },
+                header: { type: 'object', properties: { id: { type: 'string' } } },
+            },
+            required: ['path'],
+        });
+    });
+
+    it('an operation with no path-level parameters keeps exactly its own (control)', async () => {
+        const schema = await inputSchemaOf({
+            '/pets/{petId}': {
+                get: {
+                    operationId: 'getPet',
+                    parameters: [
+                        { name: 'petId', in: 'path', required: true, schema: { type: 'integer' } },
+                        { name: 'detail', in: 'query', schema: { type: 'string' } },
+                    ],
+                    responses: ok,
+                },
+            },
+        }, 'getPet');
+        expect(schema).toEqual({
+            type: 'object',
+            properties: {
+                path: { type: 'object', properties: { petId: { type: 'integer' } }, required: ['petId'] },
+                query: { type: 'object', properties: { detail: { type: 'string' } } },
+            },
+            required: ['path'],
+        });
+    });
+});

@@ -4053,13 +4053,13 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
   // legitimately-empty registry stays silent — so a persistent outage, during
   // which the gate silently allows every op, is no longer invisible.
   describe('metadata-unavailable fail-open observability (#3545)', () => {
-    it('loadObjectItems fails OPEN (returns []) AND logs a THROWN metadata read', async () => {
+    it('loadObjectItem fails OPEN (no object) AND logs a THROWN metadata read', async () => {
       const { rest, protocol } = setup(undefined);
       protocol.getMetaItems = vi.fn().mockRejectedValue(new Error('metadata store down'));
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const items = await (rest as any).loadObjectItems(protocol, undefined);
-        expect(items).toEqual([]); // fail-open preserved: gate abstains
+        const item = await (rest as any).loadObjectItem(protocol, undefined, 'widget');
+        expect(item).toBeUndefined(); // fail-open preserved: gate abstains
         expect(warnSpy).toHaveBeenCalled();
         expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('api-exposure gate');
       } finally {
@@ -4067,13 +4067,13 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
       }
     });
 
-    it('loadObjectItems stays SILENT on a legitimately-empty registry (no false alarm)', async () => {
+    it('loadObjectItem stays SILENT on a legitimately-empty registry (no false alarm)', async () => {
       const { rest, protocol } = setup(undefined);
       protocol.getMetaItems = vi.fn().mockResolvedValue([]); // empty, not thrown
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const items = await (rest as any).loadObjectItems(protocol, undefined);
-        expect(items).toEqual([]);
+        const item = await (rest as any).loadObjectItem(protocol, undefined, 'widget');
+        expect(item).toBeUndefined();
         expect(warnSpy).not.toHaveBeenCalled(); // distinguishes real fault from empty
       } finally {
         warnSpy.mockRestore();

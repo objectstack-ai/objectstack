@@ -120,6 +120,8 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_invitation.actions.invite_user',
       'sys_invitation.actions.cancel_invitation',
       'sys_invitation.actions.resend_invitation',
+      // [#27843] The pending invitation's accept link — same gates as resend.
+      'sys_invitation.actions.copy_invitation_link',
       'sys_team.actions.create_team',
       'sys_team.actions.update_team',
       'sys_team.actions.remove_team',
@@ -248,6 +250,8 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_member.actions.invite_user',
       'sys_invitation.actions.invite_user',
       'sys_organization.actions.invite_user',
+      // [#27843] The invitation's accept link: no invitation is handed out here.
+      'sys_invitation.actions.copy_invitation_link',
       'sys_user.actions.create_user',
       // Hidden in the console only: the server keeps answering it on an
       // `env_native` row, so the break-glass admin stays editable.

@@ -38,6 +38,12 @@ import {
   ScreenConfigSchema,
   UpdateRecordConfigSchema,
 } from '@objectstack/spec/automation';
+// objectstack#27834 — an `update_record` filter's keys are the object's
+// fields, read through this hook; these cases judge the value cells only.
+vi.mock('../previews/useObjectFields', () => ({
+  useObjectFields: () => ({ fields: [], loading: false, error: null }),
+}));
+
 import { FlowNodeConfigField } from './FlowNodeConfigField';
 import { fieldsForNodeType, mergeServerFlowFields, type FlowConfigField } from './flow-node-config';
 import { jsonSchemaToFlowFields } from './json-schema-to-fields';

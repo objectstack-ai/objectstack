@@ -225,3 +225,8 @@ export type {
 // `rest-server.ts`, beside the doors that read it (its docblock is the
 // authority); this entry already loads that module.
 export { metaItemPackageBinding } from './rest-server.js';
+
+// [#27745] The two capabilities the federation routes gate on, exported so the
+// MCP federation tools (`list_remote_tables` / `import_object`) refuse a caller
+// exactly where `GET …/external/tables` and `POST …/tables/:remote/import` do.
+export { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from './external-datasource-routes.js';

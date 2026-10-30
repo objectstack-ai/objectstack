@@ -140,6 +140,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -577,6 +581,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -664,6 +672,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -794,6 +806,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Invitar usuario",
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitación enviada a ${result.email}",
+          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        },
         params: {
           role: {
             options: {
@@ -813,7 +829,22 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Reenviar invitación",
-        successMessage: "Invitación reenviada"
+        successMessage: "Invitación reenviada",
+        outcomeMessages: {
+          sent: "Invitación reenviada a ${result.email}",
+          link_only: "Invitación renovada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+        }
+      },
+      copy_invitation_link: {
+        label: "Copiar enlace de invitación",
+        resultDialog: {
+          title: "Enlace de invitación",
+          description: "Cualquiera que abra este enlace puede aceptar la invitación, así que compártelo solo con la persona que invitaste. Deja de funcionar cuando la invitación se acepta, se rechaza, se cancela o caduca.",
+          acknowledge: "Hecho",
+          fields: {
+            acceptUrl: "Enlace de invitación"
+          }
+        }
       },
       accept_invitation: {
         label: "Aceptar invitación",

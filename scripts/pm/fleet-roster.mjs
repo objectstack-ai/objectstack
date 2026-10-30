@@ -52,8 +52,16 @@
  *   last activity    the newest `updated_at` of the post and its in-flight
  *                    cards. A seated seat older than `STALE_HOURS` with no
  *                    wall note is flagged 「疑似撞墙」.
- *   mailbox          open `pm:mailbox` pulls of the seat's account, by head
- *                    `mailbox/<login>` or the body's `Mailbox-of: <login>`.
+ *   mailbox          open `pm:mailbox` pulls of the SEAT, whichever account
+ *                    holds it: the seat on the body's first line
+ *                    `Mailbox-of: <seat> · <login>`, or the head
+ *                    `mailbox/<login>/<seat-slug>` (`mailboxOwner`, the
+ *                    opener's one reading). A legacy per-login mailbox names
+ *                    no seat, and an account holds several seats, so which of
+ *                    them reads it cannot be told: it is listed under the
+ *                    table as assigned to no seat, ⛔ never shown on the
+ *                    login's rows. So is a per-seat one whose seat no post
+ *                    carries.
  *
  * The footer names the generation time and every read made, so a reader can
  * re-run each one.
@@ -88,10 +96,11 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { validateStroke } from './fleet-write/validate.mjs';
 import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
-// The mailbox label, its ledger exclusion and its branch prefix have ONE owner,
-// the mailbox opener (#25417); this file reads them, never re-spells them.
+// The mailbox label, its ledger exclusion, its branch prefix and the reading of
+// whose mailbox a pull is have ONE owner, the mailbox opener (#25417, keyed by
+// seat since #27637); this file reads them, never re-spells them.
 import * as mailboxOpen from './mailbox-open.mjs';
-import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL } from './mailbox-open.mjs';
+import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL, mailboxOwner, seatKey } from './mailbox-open.mjs';
 // The seat record's heading and verdict have ONE reading, shared with H69 in
 // check-half-states; this file asks it, never re-spells the heading.
 import * as seatRecord from './seat-record.mjs';
@@ -232,12 +241,30 @@ export function hasLandingVerdict(comments) {
   });
 }
 
-/** The login whose mailbox a `pm:mailbox` pull is, or null. Pure. */
-export function mailboxLogin(pr) {
-  if (!labelNames(pr).includes(MAILBOX_LABEL)) return null;
-  const ref = String(pr?.head?.ref ?? '');
-  if (ref.startsWith(MAILBOX_BRANCH_PREFIX)) return ref.slice(MAILBOX_BRANCH_PREFIX.length);
-  return /^Mailbox-of: (\S+)/m.exec(String(pr?.body ?? ''))?.[1] ?? null;
+/** A seat row's mailbox slug — its `LANE#N` as the opener spells it in a ref — or null. Pure. */
+const seatSlugOf = (row) => seatKey(`${row.lane}#${row.seat}`)?.slug ?? null;
+
+/** Every open `pm:mailbox` pull in the snapshot, with whose it is (`mailboxOwner`), ordered by ref. Pure. */
+export function readMailboxes(snapshot) {
+  const out = [];
+  for (const repo of Object.keys(snapshot?.repos ?? {}).sort()) {
+    for (const pr of snapshot.repos[repo]?.pulls ?? []) {
+      const owner = pr?.state === 'closed' ? null : mailboxOwner(pr);
+      if (owner !== null) out.push({ ref: ref(repo, pr.number), ...owner });
+    }
+  }
+  return out.sort((a, b) => byRef(a.ref, b.ref));
+}
+
+/**
+ * The mailboxes no seat row reads — flagged under the table, ⛔ never attributed: a legacy per-login mailbox
+ * (it names no seat, and its login holds several), or a per-seat one whose seat no seat post carries. Pure.
+ */
+export function unassignedMailboxes(snapshot, rows) {
+  const read = new Set(rows.map(seatSlugOf).filter(Boolean));
+  return readMailboxes(snapshot)
+    .filter((m) => m.slug === null || !read.has(m.slug))
+    .map((m) => ({ ...m, why: m.slug === null ? 'legacy per-login, names no seat' : 'no seat post carries this seat' }));
 }
 
 const cardLaneMatch = (card, row) => {
@@ -275,16 +302,12 @@ export function buildRows(snapshot, { now }) {
   rows.sort((a, b) => (a.repo !== b.repo ? (a.repo < b.repo ? -1 : 1) : a.lane !== b.lane ? (a.lane < b.lane ? -1 : 1) : a.seat !== b.seat ? a.seat - b.seat : a.post - b.post));
 
   const landing = new Map(); // card key → [pull refs]
-  const mailboxes = [];
   for (const { repo, pr, comments } of pulls) {
-    const owner = mailboxLogin(pr);
-    if (owner !== null) {
-      mailboxes.push({ login: lc(owner), ref: ref(repo, pr.number) });
-      continue;
-    }
-    if (labelNames(pr).includes(MAILBOX_LABEL) || !String(pr?.head?.ref ?? '').startsWith(CARD_BRANCH_PREFIX) || !hasLandingVerdict(comments)) continue;
+    // Every `pm:mailbox` pull is a mailbox, whosever it reads as, and ⛔ never counts as landing.
+    if (mailboxOwner(pr) !== null || !String(pr?.head?.ref ?? '').startsWith(CARD_BRANCH_PREFIX) || !hasLandingVerdict(comments)) continue;
     for (const k of closingRefs(pr.body, repo)) landing.set(k, [...(landing.get(k) ?? []), ref(repo, pr.number)]);
   }
+  const mailboxes = readMailboxes(snapshot);
 
   const out = rows.map((row) => {
     const acct = lc(row.account);
@@ -304,7 +327,8 @@ export function buildRows(snapshot, { now }) {
       awaitingLanding: awaitingLanding.sort(byRef),
       lastActivity,
       suspectedWall: row.status === 'seated' && row.wallNote === null && ageHours !== null && ageHours > STALE_HOURS,
-      mailbox: row.account ? mailboxes.filter((m) => m.login === acct).map((m) => m.ref).sort(byRef) : [],
+      // Per seat, never per account: one account holds several seats, and each seat opens its own.
+      mailbox: mailboxes.filter((m) => m.slug !== null && m.slug === seatSlugOf(row)).map((m) => m.ref),
     };
   });
 
@@ -341,8 +365,8 @@ export function readsFor(repos) {
   ]);
 }
 
-/** The roster body, markdown. Pure. */
-export function renderBody(rows, { now, repos, session = null }) {
+/** The roster body, markdown; `unassigned` is `unassignedMailboxes`' list. Pure. */
+export function renderBody(rows, { now, repos, session = null, unassigned = [] }) {
   const lines = [
     ROSTER_MARKER,
     '# 车队总表 — fleet roster',
@@ -365,6 +389,9 @@ export function renderBody(rows, { now, repos, session = null }) {
   lines.push(
     '',
     `${rows.length} seat posts · ${seated.length} seated · ${rows.filter((r) => r.suspectedWall).length} ${SUSPECTED_WALL} (seated, no \`Wall:\` line, last activity older than ${STALE_HOURS} h).`,
+    ...(unassigned.length
+      ? ['', `⚠️ ${unassigned.length} mailbox PR(s) on no seat row — never attributed to an account's seats; close a legacy one and open one per seat: ${unassigned.map((m) => `${shortRef(m.ref)} (${[m.seat ?? m.slug, m.login].filter(Boolean).join(' · ') || 'no owner'}: ${m.why})`).join(' · ')}.`]
+      : []),
     '',
     `Generated ${now} by \`node scripts/pm/fleet-roster.mjs --repos ${repos.join(',')}\` from:`,
     ...readsFor(repos).map((q) => `- \`${q}\``),
@@ -424,7 +451,7 @@ function readLive(repos) {
   const dispatched = new Set(Object.entries(snapshot.repos).flatMap(([repo, s]) => s.dispatched.map((i) => `${repo}#${i.number}`)));
   for (const [repo, s] of Object.entries(snapshot.repos)) {
     for (const p of s.pulls) {
-      if (mailboxLogin(p) !== null || labelNames(p).includes(MAILBOX_LABEL) || !String(p.head?.ref ?? '').startsWith(CARD_BRANCH_PREFIX)) continue;
+      if (mailboxOwner(p) !== null || !String(p.head?.ref ?? '').startsWith(CARD_BRANCH_PREFIX)) continue;
       if (!closingRefs(p.body, repo).some((k) => dispatched.has(k))) continue;
       s.comments[String(p.number)] = need(`/repos/${repo}/issues/${p.number}/comments?per_page=100`);
     }
@@ -478,12 +505,13 @@ export async function main(argv, { env = process.env } = {}) {
   }
   const now = new Date(opts.now ?? snapshot.now ?? Date.now()).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const rows = buildRows(snapshot, { now });
+  const unassigned = unassignedMailboxes(snapshot, rows);
   if (opts.json) {
-    console.log(JSON.stringify({ now, repos, rows }, null, 2));
+    console.log(JSON.stringify({ now, repos, rows, unassignedMailboxes: unassigned }, null, 2));
     return EXIT_OK;
   }
   const session = env.OS_FLEET_SESSION || env.CLAUDE_CODE_REMOTE_SESSION_ID || null;
-  const body = renderBody(rows, { now, repos, session });
+  const body = renderBody(rows, { now, repos, session, unassigned });
   if (opts.write === null) {
     console.log(body);
     return EXIT_OK;
@@ -523,10 +551,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 9,
   'seat titles: lane, seat, repo, status, account, project': 13,
   'wall notes, closing refs, verdicts and mailboxes': 13,
-  'the fixture snapshot: rows for the three repos': 15,
-  'the rendered body: marker, columns, footer, determinism': 8,
+  'the fixture snapshot: rows for the three repos': 17,
+  'the rendered body: marker, columns, footer, determinism': 9,
   'refusing to overwrite what is not the roster': 6,
-  'the CLI: fixture runs offline, usage errors are exit 2': 5,
+  'the CLI: fixture runs offline, usage errors are exit 2': 6,
   'paging: a three-page read through the loop equals the slurped array': 4,
 });
 const SELF_TEST_BATTERY_FLOOR = 8;
@@ -601,7 +629,7 @@ async function selfTest() {
   t('⛔ an ACCEPT line ABOVE the heading is not the record\'s verdict', hasLandingVerdict([{ body: 'ACCEPT\n\n## 席位核对\n\nREWORK · rework' }]), false);
   t('the heading is H69\'s marker, imported not re-spelled: the three measured bodies read record alike', ['## 席位核对\n\n**ACCEPT** · x', '## 席位核对 — ACCEPT · x', '## Contract review\n\n**VERDICT: PASS**'].map((b) => `${seatRecord.SEAT_RECORD_MARKER.test(b)}/${hasLandingVerdict([{ body: b }])}`), ['true/true', 'true/true', 'false/true']);
   t('the mailbox constants are the opener\'s own, imported not re-spelled', [MAILBOX_LABEL, LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX], [mailboxOpen.MAILBOX_LABEL, mailboxOpen.LEDGER_EXCLUSION, mailboxOpen.MAILBOX_BRANCH_PREFIX]);
-  t('a mailbox is read by head, then by body line; no label ⇒ none', [mailboxLogin({ labels: ['pm:mailbox'], head: { ref: 'mailbox/os-bill' } }), mailboxLogin({ labels: ['pm:mailbox'], head: { ref: 'claude/x' }, body: 'Mailbox-of: os-sales\n' }), mailboxLogin({ labels: [], head: { ref: 'mailbox/os-bill' } })], ['os-bill', 'os-sales', null]);
+  t('whose mailbox a pull is, and a seat row\'s slug, are the opener\'s own readings — imported, not re-spelled', [mailboxOwner === mailboxOpen.mailboxOwner, seatKey === mailboxOpen.seatKey, seatSlugOf({ lane: 'domain:ui', seat: 4 }), seatSlugOf({ lane: 'triage', seat: 1 })], [true, true, 'ui-4', 'triage-1']);
 
   battery('the fixture snapshot: rows for the three repos');
   const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
@@ -628,7 +656,10 @@ async function selfTest() {
   t('a PR with no verdict does not count', row(1353, 'objectstack-ai/hotcrm').awaitingLanding, []);
   t('an unassigned ruling sits on the lane’s lowest seated seat', [row(6023).awaitingRuling, row(20163).awaitingRuling], [[{ repo: 'objectstack-ai/objectstack', number: 25373 }], []]);
   t('a ruling assigned to seat 2’s account sits on seat 2', row(19287).awaitingRuling, [{ repo: 'objectstack-ai/objectstack', number: 25344 }]);
-  t('the mailbox column is the account’s pm:mailbox PR', [row(6023).mailbox, row(20163).mailbox], [[{ repo: 'objectstack-ai/objectstack', number: 25392 }], []]);
+  const os = (number) => ({ repo: 'objectstack-ai/objectstack', number });
+  t('⭐ the mailbox column is the SEAT\'s pm:mailbox PR — by body line on a --head branch, by head slug, by both', [row(6023).mailbox, row(19287).mailbox, row(20163).mailbox], [[os(25392)], [os(25393)], [os(25394)]]);
+  t('⛔ one login on three seats: each seat shows only its own mailbox, and a seat that opened none shows none', [row(6023).mailbox.length, row(19287).mailbox.length, row(1353, 'objectstack-ai/hotcrm').mailbox], [1, 1, []]);
+  t('⛔ a legacy per-login mailbox and a seat no post carries sit on no row — flagged, never attributed to the login\'s seats', [unassignedMailboxes(fixture, rows).map((m) => [m.ref.number, m.seat, m.login, m.why]), [row(5560, 'objectstack-ai/objectui').mailbox, row(10243, 'objectstack-ai/objectui').mailbox]], [[[25395, null, 'os-sales', 'legacy per-login, names no seat'], [25396, 'domain:spec#5', 'os-tesla', 'no seat post carries this seat']], [[], []]]);
   t('stale and no wall note ⇒ 疑似撞墙; a wall note silences it; vacant never', [row(20163).suspectedWall, row(5560, 'objectstack-ai/objectui').suspectedWall, row(5560, 'objectstack-ai/objectui').wallNote, row(7623).suspectedWall], [true, false, 'limit reached, resets at 15:00Z', false]);
   t('last activity is the newest of post and in-flight cards', row(6023).lastActivity, '2026-10-23T13:28:00Z');
   t('one account on two seats of a lane: cards on the lowest seat, the other reads = seat 1', [row(5560, 'objectstack-ai/objectui').inFlight.length, row(10243, 'objectstack-ai/objectui').sharesWith, row(10243, 'objectstack-ai/objectui').inFlight, row(10243, 'objectstack-ai/objectui').suspectedWall], [1, 1, [], true]);
@@ -641,6 +672,10 @@ async function selfTest() {
   t('the footer names the generation time and each read', [body.includes(`Generated ${fixture.now}`), body.includes('`GET /repos/objectstack-ai/hotcrm/issues?state=open&labels=pm:seat`')], [true, true]);
   t('the suspected wall is spelled in the row', body.includes(`⚠️ ${SUSPECTED_WALL}`), true);
   t('a shared seat reads = seat N in the in-flight cell', body.includes('| = seat 1 |'), true);
+  t('the mailboxes on no seat row are flagged under the table, each with its owner and why', (() => {
+    const flagged = renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort(), unassigned: unassignedMailboxes(fixture, rows) });
+    return [flagged.includes('⚠️ 2 mailbox PR(s) on no seat row'), flagged.includes('objectstack#25395 (os-sales: legacy per-login, names no seat)'), flagged.includes('objectstack#25396 (domain:spec#5 · os-tesla: no seat post carries this seat)'), body.includes('on no seat row')];
+  })(), [true, true, true, false]);
   t('the attribution footer closes the body', body.endsWith('\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ABC)_'), true);
   const shuffled = { ...fixture, repos: Object.fromEntries(Object.entries(fixture.repos).reverse().map(([k, v]) => [k, { ...v, seats: [...v.seats].reverse() }])) };
   t('the same facts in another read order render the same body', renderBody(buildRows(shuffled, { now: fixture.now }), { now: fixture.now, repos: Object.keys(fixture.repos).sort() }), renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort() }));
@@ -683,6 +718,7 @@ async function selfTest() {
   } catch {}
   t('--fixture --json exits 0 with no gh on PATH (nothing reached for)', jsonRun.status, EXIT_OK);
   t('the printed rows are the built rows', parsed?.rows?.length, rows.length);
+  t('the printed JSON carries the mailboxes on no seat row', parsed?.unassignedMailboxes?.map((m) => m.ref.number), [25395, 25396]);
   t('--fixture prints the markdown table', cli(['--fixture', FIXTURE_PATH]).stdout.split('\n')[0], ROSTER_MARKER);
   t('a usage error is exit 2', cli(['--write', 'x']).status, EXIT_USAGE);
   t('a missing fixture is exit 3', cli(['--fixture', join(PM_DIR, 'no-such-fixture.json')]).status, EXIT_PREREQUISITE);

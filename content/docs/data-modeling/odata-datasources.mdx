@@ -43,7 +43,6 @@ The plugin builds the driver from its options and publishes it as the service
 ```typescript
 import { defineStack } from '@objectstack/spec';
 import { createODataDriverPlugin } from '@objectstack/driver-odata';
-import { erpSecretStore } from './secrets';   // your host's secret store; see Credentials
 
 export default defineStack({
   // …the datasource and objects of step 2…
@@ -51,8 +50,7 @@ export default defineStack({
     createODataDriverPlugin({
       name: 'erp',                                         // = the datasource name
       serviceRoot: 'https://erp.example.com/odata/v4/sales/',
-      auth: { scheme: 'bearer' },
-      secrets: erpSecretStore,
+      auth: { scheme: 'bearer' },                          // under os serve, no `secrets`: see Credentials
     }),
   ],
 });
@@ -64,7 +62,7 @@ export default defineStack({
 | `serviceRoot` | (required) | The service root URL, http or https, with no credentials and no query string. |
 | `version` | `4.0` | The protocol version. `4.0` is the only value. |
 | `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. |
-| `secrets` | (none) | Where `credentialsRef` is resolved: an object with `resolve(credentialsRef)`. Required for `bearer` and `basic`. |
+| `secrets` | (none) | Where `credentialsRef` is resolved: an object with `resolve(credentialsRef)`. When absent, the host's `datasource-secret-resolver` service is used; `os serve` registers one. |
 | `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
 | `requestTimeoutMs` | `30000` | The timeout of each request. |
 
@@ -138,9 +136,24 @@ What each piece does on this driver:
 - **`id` is the entity key.** A single-property key is read as text (`'4711'`). A
   composite key is the body of its key predicate (`'OrderID=1,ProductID=7'`), which is
   also what `GET /data/<object>/<id>` takes.
-- **Declare each field by hand.** Nothing generates fields from `$metadata` today.
-  Navigation properties are never followed, so a related entity set is an object of its
-  own.
+- **Or import the objects from `$metadata`.** Once the datasource is saved, Studio's
+  datasource page lists its entity sets on the **Tables** tab. **Import** saves one,
+  and **Import selected** saves several, referenced entity sets first. An MCP client
+  whose token carries `metadata:write` reaches the same import through
+  `list_remote_tables` and `import_object`. The draft maps each EDM type to a field
+  type, makes the key the `id`, and writes `columnMap` for every property whose name is
+  not a snake_case field name (`CategoryID` becomes `category_id`). EDM types with no
+  field type, such as `Edm.Duration` or a service's own enum, are listed for review. An
+  imported object is read-only unless the datasource allows writes and you tick
+  **Allow writes to this object**.
+- **Navigation properties are never followed**, so a related entity set is an object of
+  its own. The import turns a single-valued navigation into a `lookup` on its foreign-key
+  property when its `ReferentialConstraint` is one property pair onto the target's key
+  and the target is already imported on the same datasource. Every other navigation is
+  left out and named in the review, so import the target first. The lookup reads the
+  related record by key, like any other lookup. These rules are what
+  `packages/services/service-datasource/src/__tests__/external-object-draft-odata-metadata.test.ts`
+  asserts, over a recorded Northwind `$metadata`.
 - **The service document is read lazily.** `connect()` asks the service nothing, and
   `$metadata` is read once, at the first request. A wrong `serviceRoot` or an unknown
   entity set shows up on the first read of the object, not at boot.
@@ -152,7 +165,7 @@ What each piece does on this driver:
 
 ⛔ Never put a credential in the stack, in the plugin options, or in the `serviceRoot`
 URL. The secret is the datasource's `external.credentialsRef`, and the plugin resolves it
-through the `secrets` store you pass:
+through the host's secret store:
 
 - **`bearer`** sends `Authorization: Bearer <secret>`.
 - **`basic`** takes `username` from the options and the password from the secret.
@@ -165,20 +178,23 @@ old token fails. The driver does not obtain or refresh tokens itself. A service 
 issues short-lived OAuth2 access tokens needs something that keeps the stored secret
 current.
 
-`secrets` is any object with `resolve(credentialsRef)`, answering the secret or
-`undefined`:
+Which store resolves it:
 
-- **A host that composes its own kernel** passes the same binder it gives
-  `DatasourceAdminServicePlugin`. A `sys_secret:<id>` handle that the Add Datasource
-  wizard minted then resolves, as on any federated datasource
+- **Under `os serve`**, pass no `secrets`. The server publishes its own datasource secret
+  store as the kernel service `datasource-secret-resolver`, and the plugin reads it at the
+  first request. A `sys_secret:<id>` handle that the Add Datasource wizard minted
+  resolves, as on any federated datasource
   ([Credentials](/docs/data-modeling/external-datasources#4-credentials)).
-- **`os serve`** builds its secret store internally and does not hand it to a stack's
-  plugins. Pass a `resolve` backed by your host's own secret handling instead, and
-  declare `credentialsRef` as a handle that it resolves.
+- **A host that composes its own kernel** passes `secrets`: the same binder it gives
+  `DatasourceAdminServicePlugin`, or any object with `resolve(credentialsRef)` answering
+  the secret or `undefined`. It can instead register that `resolve` as the
+  `datasource-secret-resolver` service (`DATASOURCE_SECRET_RESOLVER_SERVICE` in
+  `@objectstack/types`), which every plugin driver reading a `credentialsRef` uses the
+  same way. A `secrets` option passed to the plugin always wins over the service.
 
 Resolution fails closed. Each of these refuses the request rather than send it without
-the credential: an auth scheme with no `credentialsRef`, a `credentialsRef` with no
-`secrets`, and a handle that does not resolve. The caller is answered
+the credential: an auth scheme with no `credentialsRef`, a `credentialsRef` with neither
+`secrets` nor the service, and a handle that does not resolve. The caller is answered
 `503 ERR_DATASOURCE_UNAVAILABLE`, and the cause goes to the server log.
 
 ## 4. What the service is asked
@@ -266,7 +282,7 @@ as a sharing scope. The full mapping is in
 
 - **OData v2.** Only the v4 dialect ships.
 - **`$expand` and navigation properties.** Bind each related entity set as an object of
-  its own.
+  its own; an imported foreign key becomes a `lookup` onto it.
 - **Actions and functions** of the service. `execute` is refused.
 - **Transactions and `$batch`.** Each write is one request.
 - **More than 1000 matching rows** in one read (the cap above).

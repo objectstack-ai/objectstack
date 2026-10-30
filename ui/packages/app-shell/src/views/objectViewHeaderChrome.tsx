@@ -10,12 +10,12 @@ import type { Dispatch, SetStateAction } from 'react';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { Plus, Lock } from 'lucide-react';
 import type { ActionBarSchema, UIActionSchema } from '@object-ui/types';
-import { SchemaRenderer } from '@object-ui/react';
 import type { useObjectTranslation } from '@object-ui/i18n';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import type { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
 import { declaredPrimaryToolbarAction, MOBILE_FAB_LIST_CLEARANCE } from './objectViewHelpers.js';
+import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewListUrlState } from './objectViewListUrlState.js';
@@ -152,9 +152,9 @@ export function useObjectViewHeaderChrome({
                 `md` (`mobileMaxVisible: 0`), which would send the primary into
                 a second `⋯` beside the menu's. */}
             {primaryToolbarAction && (
-                <SchemaRenderer schema={{ ...toolbarBar, actions: [primaryToolbarAction], maxVisible: 1, mobileMaxVisible: 1 }} />
+                <ListHeaderActionBar schema={{ ...toolbarBar, actions: [primaryToolbarAction], maxVisible: 1, mobileMaxVisible: 1 }} />
             )}
-            <SchemaRenderer schema={foldedMenuBar} />
+            <ListHeaderActionBar schema={foldedMenuBar} />
         </>
     ) : undefined;
 
