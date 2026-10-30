@@ -93,7 +93,7 @@ vi.mock('./useMetadata', async (importOriginal) => {
           allowEnvironmentOverlay: true,
           allowRuntimeCreate: true,
           schema: PERMISSION_JSON_SCHEMA,
-          createSeed: { ...getMetadataCreateSeed('permission'), ...seedExtra.current },
+          createSeed: { ...(getMetadataCreateSeed('permission') as Record<string, unknown>), ...seedExtra.current },
         },
       ],
     }),
