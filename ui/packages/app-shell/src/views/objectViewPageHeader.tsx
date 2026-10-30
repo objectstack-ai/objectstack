@@ -1,6 +1,7 @@
 /**
  * The page header of the Console `ObjectView` (`./ObjectView.tsx`): the
- * object's plural title, managed-by badge, description and icon, with the
+ * title (the view switcher, or the object's plural), managed-by badge,
+ * description and icon, with the
  * header's actions (the create button, Import, the schema-driven toolbar and
  * the overflow menu with favorites and "Reset view") and their folded face,
  * moved out of `ObjectViewInner`'s JSX verbatim (objectstack#25992, slice 10).
@@ -8,7 +9,7 @@
  */
 
 import { createElement } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import {
   Button,
   DropdownMenu,
@@ -33,6 +34,7 @@ import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 export function ObjectViewPageHeader({
     objectDef,
+    titleSwitcher,
     objectPluralLabel,
     objectDesc,
     createButton,
@@ -51,6 +53,8 @@ export function ObjectViewPageHeader({
     foldedHeaderActions,
 }: {
     objectDef: ConsoleObjectViewProps['objects'][number];
+    /** The list's view switcher (`./objectViewTitleSwitcher.tsx`), or `null` with no view to switch. */
+    titleSwitcher: ReactNode;
     objectPluralLabel: ReturnType<typeof useObjectLabel>['objectPluralLabel'];
     objectDesc: ReturnType<typeof useObjectLabel>['objectDescription'];
     createButton: ReturnType<typeof useObjectViewHeaderChrome>['createButton'];
@@ -71,10 +75,14 @@ export function ObjectViewPageHeader({
     return (
              <div className="hidden sm:block">
              <PageHeader
-                 // The page lists the object's records, so it is titled with
-                 // the plural, as the nav entry that opens it is
+                 // The title is the view switcher, 「VIEW ▾ · COUNT」
+                 // (objectstack#27594); the object stays named by the
+                 // sidebar's active entry and this header's icon. A view with
+                 // no label is called by the plural (objectui#12774); with no
+                 // view to switch, the page lists the object's records and is
+                 // titled with the plural, as the nav entry that opens it is
                  // (objectui#11696); the record page keeps the singular.
-                 title={objectPluralLabel(objectDef)}
+                 title={titleSwitcher ?? objectPluralLabel(objectDef)}
                  // The kind chip, in the header's own slot after the title
                  // (objectui#12606).
                  badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}

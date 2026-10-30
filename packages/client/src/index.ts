@@ -5947,6 +5947,8 @@ export class ObjectStackClient {
        * and the pause is gone for good. The refusals that leave the suspension
        * intact keep their own codes and stay retryable — `INVALID_SIGNAL` /
        * `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409),
+       * `RESUME_CHILD_PENDING` (409: the run waits on a `map` item run that is
+       * still suspended; the message names that run, resume it instead),
        * `STORE_UNAVAILABLE` (503).
        */
       resume: async <T extends AutomationResult = AutomationResult>(

@@ -254,7 +254,8 @@ export function useObjectViewViewCrud({
 
     // Mobile view switcher — registers our view list with the AppHeader so
     // the topbar can render a `<viewName> ▾` dropdown instead of the static
-    // page label. Desktop ignores this (ViewTabBar handles switching there).
+    // page label. Desktop ignores this (the page title switches there,
+    // objectstack#27594).
     const mobileViewSwitcherItems = useMemo<MobileViewSwitcherItem[]>(() => {
         return (views || []).map((view: any) => {
             const Icon = VIEW_TYPE_ICONS[view.type as keyof typeof VIEW_TYPE_ICONS];

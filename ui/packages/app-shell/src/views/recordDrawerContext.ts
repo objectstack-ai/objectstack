@@ -39,6 +39,23 @@ export function useRecordDrawer(): RecordDrawerApi | null {
 }
 
 /**
+ * What the record a pane shows offers about the pane itself
+ * (objectstack#27545): 「Open as full page」 for the level it shows — the last
+ * item of the record header's `⋯` menu, the way to the page now that the
+ * pane's `⤢` maximizes in place. `null` outside a pane.
+ */
+export interface RecordPaneApi {
+  openAsPage(): void;
+}
+
+export const RecordPaneContext = createContext<RecordPaneApi | null>(null);
+
+/** The pane the record is drawn in, or `null` on its own page. */
+export function useRecordPane(): RecordPaneApi | null {
+  return useContext(RecordPaneContext);
+}
+
+/**
  * Whether a record of this object opens in the drawer: its object's own way
  * of opening, the drawer unless it declares another (objectstack#26677 — the
  * spec's `NavigationModeSchema` defaults to `drawer`; `page`, `new_window` and

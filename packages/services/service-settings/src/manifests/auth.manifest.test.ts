@@ -244,10 +244,16 @@ describe('authSettingsManifest', () => {
     expect(signup.visible).toBe('${data.email_password_enabled !== false}');
 
     // The help names every posture the select declares, read from the option
-    // table, so a posture added later reds here until the help covers it.
+    // table, so a posture added later reds here until the help covers it. It
+    // names each one the way the page shows it, by the option's label, never
+    // by the stored key (#27853).
     expect(typeof signup.description).toBe('string');
-    for (const value of posture.options.map((o: any) => o.value)) {
-      expect(signup.description, `signup_enabled help names posture ${value}`).toContain(value);
+    for (const option of posture.options as Array<{ value: string; label: string }>) {
+      const shown = option.label.split(' — ')[0].replace(/ only$/, '');
+      expect(signup.description, `signup_enabled help names posture ${option.value}`).toContain(shown);
+      expect(signup.description, `signup_enabled help spells no key ${option.value}`).not.toMatch(
+        new RegExp(`\\b${option.value}\\b`),
+      );
     }
     expect(signup.description).toContain(posture.label);
   });
@@ -255,8 +261,9 @@ describe('authSettingsManifest', () => {
   // plugin-auth registers Google only when the toggle is on AND a client ID and
   // secret both resolve, from the stored keys or from GOOGLE_CLIENT_ID /
   // GOOGLE_CLIENT_SECRET, which the settings service cannot see. The page can
-  // only say so; the help is where it does.
-  it('google_enabled keeps the runtime default and names the env credentials that complete it', () => {
+  // only say so; the help is where it does — in an administrator's words, the
+  // server configuration, not the env var names (#27853).
+  it('google_enabled keeps the runtime default and says the server configuration completes it', () => {
     const specs = authSettingsManifest.specifiers as any[];
     const google = specs.find((s) => s.key === 'google_enabled');
 
@@ -264,8 +271,8 @@ describe('authSettingsManifest', () => {
     // default would read OFF on a deployment that signs in with Google through
     // the env credentials, and hide its stored credentials behind `visible`.
     expect(google.default).toBe(true);
-    expect(google.description).toContain('GOOGLE_CLIENT_ID');
-    expect(google.description).toContain('GOOGLE_CLIENT_SECRET');
+    expect(google.description).toContain('server configuration');
+    expect(google.description).not.toContain('GOOGLE_CLIENT_');
   });
 
   // The console resolves `settings.auth.keys.<key>.label` / `.help` from the

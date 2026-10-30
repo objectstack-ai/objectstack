@@ -56,6 +56,7 @@ import {
   DataEmptyState, EmptyStateLink, resolveIcon,
   HorizontalOverflowBox,
   toast,
+  useRecordListFace, ActiveListRow, listRecordIdOf, RECORD_LIST_NARROW_COLUMN_COUNT,
 } from '@object-ui/components';
 import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -145,6 +146,38 @@ export function parseSchemaSort(sort: unknown): TableSortItem[] {
     }
   }
   return items;
+}
+
+/**
+ * Whether a column draws an avatar: by its own type, or by its field's
+ * declared type (a column's `type` is only the type its editor needs).
+ */
+function isAvatarColumn(column: { accessorKey?: string; type?: string }, fieldTypeOf: (key: string) => unknown): boolean {
+  return column.type === 'avatar' || (!!column.accessorKey && fieldTypeOf(column.accessorKey) === 'avatar');
+}
+
+/**
+ * The columns of a list a record pane has narrowed to its `columns` face
+ * (objectstack#27545): its first {@link RECORD_LIST_NARROW_COLUMN_COUNT} view
+ * columns that are not avatars, in the view's order, and its row actions.
+ *
+ * The row-actions column keeps its header's name for assistive technology but
+ * draws no label: the column is as wide as its widest cell, and beside a pane
+ * the label alone (wider than a row's ⋮) pushed the third column under it.
+ */
+function narrowListColumns<C extends { accessorKey?: string; type?: string; header?: string; headerIcon?: React.ReactNode }>(
+  columns: readonly C[],
+  fieldTypeOf: (key: string) => unknown,
+): C[] {
+  let kept = 0;
+  return columns.flatMap((column) => {
+    if (column.accessorKey === '_actions') {
+      return [{ ...column, header: '', headerIcon: <span className="sr-only">{column.header}</span> }];
+    }
+    if (isAvatarColumn(column, fieldTypeOf) || kept >= RECORD_LIST_NARROW_COLUMN_COUNT) return [];
+    kept += 1;
+    return [column];
+  });
 }
 
 /**
@@ -661,6 +694,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const metadata = useMetadata();
   const [objectSchema, setObjectSchema] = useState<any>(null);
   const [useCardView, setUseCardView] = useState(false);
+  // objectstack#27545 — the face a record pane beside this list narrowed it
+  // to: `full` under no pane.
+  const listFace = useRecordListFace();
   const [refreshKey, setRefreshKey] = useState(0);
   // Optimistic concurrency for the default inline-edit saves (objectui#12292).
   // Per record, the version this grid's last landed write returned — see
@@ -775,6 +811,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    */
   const objectFields: Record<string, any> | undefined =
     objectSchema?.fields ?? hostObjectFields ?? undefined;
+  /** A field's declared type, for the narrowed faces' avatar rule (objectstack#27545). */
+  const fieldTypeOf = (key: string): unknown => objectFields?.[key]?.type;
   /**
    * Are this grid's OBJECT field types still unknown (objectui#10657, which
    * folded objectui#10706)? True while an object definition is expected (an
@@ -2502,7 +2540,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // and the whole block failed to render.
     caption: resolveInlineI18nLabel(schema.label, displayLocale)
       || resolveInlineI18nLabel(schema.title, displayLocale),
-    columns: tableColumns,
+    columns: listFace === 'columns' ? narrowListColumns(tableColumns, fieldTypeOf) : tableColumns,
     data,
     pagination: paginationEnabled,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
@@ -3051,8 +3089,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // views: the plain list below, and a grouped list on a phone (the grouped
   // `gridContent`), which draws each group's band followed by its rows as
   // these same cards rather than keeping the desktop table.
-  const buildMobileCardRenderer = () => {
-    const displayColumns = generateColumns().filter((c) => c.accessorKey !== '_actions');
+  const buildMobileCardRenderer = ({ compact = false }: { compact?: boolean } = {}) => {
+    const displayColumns = generateColumns().filter((c) => c.accessorKey !== '_actions' && !(compact && isAvatarColumn(c, fieldTypeOf)));
 
     // Build a lookup of column metadata for smart rendering
     const colMap = new Map<string, ObjectGridColumnDraft>();
@@ -3166,6 +3204,61 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const str = String(value);
       return { label: /^[a-z0-9]+(_[a-z0-9]+)+$/.test(str) ? humanizeLabel(str) : str };
     };
+
+    // objectstack#27545 — the card row of a list a record pane narrowed below
+    // its columns face: the name and two chips, the open record highlighted
+    // and kept in view as the pane steps.
+    if (compact) {
+      const chipColumns = bodyColumns.slice(0, 2);
+      return (row: any, idx: number) => {
+        const recordId = listRecordIdOf(row);
+        return (
+          <ActiveListRow<HTMLDivElement> key={recordId ?? idx} recordId={recordId}>
+            {(active, activeRef) => (
+              <div
+                ref={activeRef}
+                role="button"
+                tabIndex={0}
+                data-testid="grid-compact-card"
+                data-active-record={active ? '' : undefined}
+                aria-current={active ? 'true' : undefined}
+                className="cursor-pointer rounded-md border bg-card px-3 py-2 transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[active-record]:border-primary/40 data-[active-record]:bg-primary/10"
+                onClick={(e) => navigation.handleClick(row, e)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  e.preventDefault();
+                  navigation.handleClick(row);
+                }}
+              >
+                {titleKey !== undefined && (
+                  <div data-testid="grid-card-title" className="truncate text-sm font-medium">
+                    {isMaskedCardColumn(titleKey)
+                      ? (titleCol ? titleCol.cell?.(row[titleKey], row) : <MaskedCellRenderer value={row[titleKey]} />)
+                      : (coerceToSafeValue(row[titleKey]) ?? '—')}
+                    {rowAdornment ? <span className="ml-1.5 inline-flex align-middle">{rowAdornment(row)}</span> : null}
+                  </div>
+                )}
+                <div className="mt-1 flex min-w-0 flex-wrap gap-1 empty:hidden">
+                  {chipColumns.map((col: any) => {
+                    const val = row[col.accessorKey];
+                    if ((val == null || val === '') && !isMaskedCardColumn(col.accessorKey)) return null;
+                    return (
+                      <span
+                        key={col.accessorKey}
+                        data-testid="grid-compact-card-chip"
+                        className="inline-flex min-w-0 max-w-full items-center truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                      >
+                        {col.cell ? col.cell(val, row) : String(coerceToSafeValue(val) ?? '')}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </ActiveListRow>
+        );
+      };
+    }
 
     return (row: any, idx: number) => {
       // Collect secondary fields (skip the title column)
@@ -3349,8 +3442,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     };
   };
 
-  if (useCardView && data.length > 0 && !isGrouped) {
-    const renderMobileCard = buildMobileCardRenderer();
+  // A phone draws its own cards; a list a record pane narrowed draws card rows.
+  const cardFace = useCardView || listFace === 'cards';
+  if (cardFace && data.length > 0 && !isGrouped) {
+    const renderMobileCard = buildMobileCardRenderer({ compact: !useCardView });
 
     // objectui#13134 — the card list scrolls in a box of its own, as the
     // table does in its own body. Its host bounds it (`ListView`'s view area
@@ -3725,7 +3820,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // server-grouped group's pager), in one vertical scroller like the plain
   // card list's. A band keeps its toggle and count, `groupedPager` still
   // pages whole groups, and the desktop table's columns never reach a phone.
-  const gridContent = isGrouped && useCardView ? (
+  const gridContent = isGrouped && cardFace ? (
     <div className="flex flex-col flex-1 min-h-0">
       <div
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
@@ -3733,7 +3828,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         data-testid="grouped-grid-card-scroller"
       >
         {(() => {
-          const renderMobileCard = buildMobileCardRenderer();
+          const renderMobileCard = buildMobileCardRenderer({ compact: !useCardView });
           return groupBandsOf(pagedGroups).map((group) => (
             <div key={group.key} data-testid="grouped-grid-card-band">
               {group.band}

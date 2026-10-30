@@ -307,7 +307,9 @@ if (result.success) {
 `AutomationResult` fields: `success`, `output?`, `error?`, `durationMs?`, `code?`,
 `status?`, `runId?`, `screen?`, `successMessage?`, `errorMessage?`, `summary?`. The
 machine-readable classification is `code` (not `errorCode`) — resume refusals such as
-`RUN_NOT_FOUND`, `STORE_UNAVAILABLE`, `RESUME_IN_PROGRESS`, plus the trigger-time
+`RUN_NOT_FOUND`, `STORE_UNAVAILABLE`, `RESUME_IN_PROGRESS`, `RESUME_CHILD_PENDING` (a
+parent-id resume of a `map` whose item run is still suspended; resume the item run the
+message names), plus the trigger-time
 `FLOW_DISABLED` / `FLOW_NO_START_NODE`.
 
 ⚠️ `runAs` on `AutomationContext` is derived by the engine from the flow definition —

@@ -49,6 +49,15 @@ export interface PkgEntry {
    * so authoring surfaces can prefix object names before publish rejects them.
    */
   namespace: string | null;
+  /**
+   * #27356 row 12 — set (only ever `true`) on a row the registry half serves
+   * flat with a kernel `scope` (`system` / `cloud`) at the top level. Such a
+   * row stays in the list (the switcher's visibility reads the manifest's
+   * `scope` alone, see {@link parsePackages}), but the app → Studio entries
+   * draw nothing for it (`useStudioEntryGate`), as for the manifest-scoped
+   * kernel packages this list leaves out.
+   */
+  kernel?: true;
 }
 
 /**
@@ -98,7 +107,9 @@ export function parsePackages(payload: unknown): PkgEntry[] {
     const declaredName =
       (typeof m.name === 'string' && m.name.trim() ? m.name : undefined) ??
       (typeof p.name === 'string' && p.name.trim() ? p.name : undefined);
-    out.push({ id, name: declaredName ?? id, writable, namespace });
+    const flatScope = typeof p.scope === 'string' ? p.scope : '';
+    const kernel = flatScope === 'system' || flatScope === 'cloud';
+    out.push({ id, name: declaredName ?? id, writable, namespace, ...(kernel ? { kernel: true as const } : {}) });
   }
   return out;
 }

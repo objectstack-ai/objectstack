@@ -11,7 +11,7 @@ import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuild
 import type { SortItem } from '@object-ui/components';
 import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
+import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion, useRecordListFace } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
@@ -1015,6 +1015,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordCount': '{{count}} records',
   'list.recordCount_one': '{{count}} record',
   'list.recordCount_other': '{{count}} records',
+  'list.calendarRecordCount': '{{count}} records loaded for these dates',
+  'list.calendarRecordCount_one': '{{count}} record loaded for these dates',
+  'list.calendarRecordCount_other': '{{count}} records loaded for these dates',
   'list.noItems': 'No items found',
   'list.noItemsMessage': 'There are no records to display. Try adjusting your filters or adding new data.',
   // First-run (truly empty, no filter/search) vs filtered-to-empty. Showing
@@ -1166,7 +1169,8 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordOpen': 'Open records',
   'list.recordOpenDrawer': 'Drawer',
   'list.recordOpenSplit': 'Split',
-  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. Both expand to the full page.',
+  'list.recordOpenPage': 'Full page',
+  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
   'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
   // Heading of the record-detail overlay this view opens when a child view's
   // row is clicked (objectui#3426). Borrowed from the `detail.*` namespace
@@ -5472,6 +5476,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // not take the summaries down with the count.
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
+  // objectstack#27545 — beside a record pane (a narrowed face) the host prints
+  // the count under the list it handed over, so the bar does not print it a
+  // second time. The rest of the row (the cap warning, the summaries) stays.
+  const recordListFace = useRecordListFace();
+  const recordCountInBar = recordCountShown && recordListFace === 'full';
+  const dataLimitWarningShown =
+    recordCountShown && dataLimitReached && !(paginate && serverTotal != null);
   // objectui#12619 — a board that pages its own lanes draws every record of the
   // view, a page per lane at a time, so the footer counts the VIEW: the total
   // this component's own query answered, which is the sum of the board's lane
@@ -6750,7 +6761,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountShown || boardRecordCountShown || footerSummaryText) && (
+      {listChromeShown && (recordCountInBar || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -6760,21 +6771,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {t('list.recordCount', { count: fetchedTotal })}
           </span>
           )}
-          {recordCountShown && (
+          {recordCountInBar && (
           <span className="shrink-0 font-medium text-foreground/80">
             {/* Under server pagination `data` is only the current page, so the
                 honest record count is the server's grand total (#586). When the
                 whole result set is in memory, serverTotal is null and data.length
                 already IS the total. */}
             {/* One count family (objectui#11445): i18next picks the CLDR slot. */}
-            {t('list.recordCount', { count: serverTotal ?? data.length })}
+            {/* A windowed calendar's rows are the dates it draws, not the view
+                (objectstack#27355): its count says so rather than read as the
+                view's total. */}
+            {calendarWindowed
+              ? t('list.calendarRecordCount', { count: data.length })
+              : t('list.recordCount', { count: serverTotal ?? data.length })}
           </span>
           )}
           {/* The cap warning is about rows the user CANNOT REACH. A paged grid
               with a known total can reach them all through its pager, so the
               warning stays off there — the gate the fetch used to apply when it
               wrote this flag (objectui#7394). */}
-          {recordCountShown && dataLimitReached && !(paginate && serverTotal != null) && (
+          {dataLimitWarningShown && (
             <span className="text-amber-600" data-testid="data-limit-warning">
               {t('list.dataLimitReached', { limit: effectivePageSize })}
             </span>

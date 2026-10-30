@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#25083] `isCloudManaged`: the ONE accessor the cloud-managed doors below ask.
-import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveLocalizationContext, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
   AuthConfig,
@@ -23,7 +23,7 @@ import {
 import { isHumanUserRow, OPEN_POSTURE_VERIFICATION_OFF_WARNING } from './audience-posture.js';
 // [#14157] The dev-admin seed's own precondition — "does a login exist?".
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
-import { withMailTenantCurrency } from './mail-tenant-currency.js';
+import { localizationMailCurrencyResolver, withMailTenantCurrency } from './mail-tenant-currency.js';
 import {
   // ADR-0048 — the Setup/Studio/Account apps moved to their own packages
   // (@objectstack/{setup,studio,account}); plugin-auth no longer registers them.
@@ -1118,13 +1118,14 @@ export class AuthPlugin implements Plugin {
           // A mail template's no-argument `currency` hole formats in the
           // tenant default: added once here for the six auth mail call sites
           // (see mail-tenant-currency.ts), read the way a request reads it.
-          this.authManager.setEmailService(withMailTenantCurrency(emailSvc, async (organizationId) => {
+          // A failed read is not "no default" (#27710).
+          this.authManager.setEmailService(withMailTenantCurrency(emailSvc, localizationMailCurrencyResolver(() => {
             let settings: unknown;
             try { settings = ctx.getService('settings'); } catch { settings = undefined; }
             let ql: unknown;
             try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
-            return (await resolveLocalizationContext({ ql, settings, organizationId })).currency;
-          }));
+            return { ql, settings };
+          })));
           ctx.logger.info('Auth: email service wired (transactional mail enabled)');
         } else {
           // No email service. The verification / password-reset callbacks now

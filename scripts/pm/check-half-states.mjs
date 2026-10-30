@@ -2433,10 +2433,15 @@ export function proseBlockerClause(candidates, heldBack = 0) {
       ' They all still read OPEN, so the block itself looks live — what is missing is only the ' +
       'line that would let a machine see it when they close.';
   } else {
+    // Each count is named only when it is non-zero: abandoned beside unresolved
+    // has no open row, and `0 still read OPEN` would say the opposite of held.
+    const counts = [
+      open.length > 0 ? `${open.length} still read${open.length === 1 ? 's' : ''} OPEN` : null,
+      abandoned.length > 0 ? `${abandoned.length} closed UNMERGED (which withholds)` : null,
+      unresolved.length > 0 ? `${unresolved.length} could not be resolved from this install` : null,
+    ].filter(Boolean);
     verdict =
-      ` None of them has released — ${open.length} still read${open.length === 1 ? 's' : ''} OPEN` +
-      (abandoned.length > 0 ? `, ${abandoned.length} closed UNMERGED (which withholds)` : '') +
-      (unresolved.length > 0 ? `, ${unresolved.length} could not be resolved from this install` : '') +
+      ` None of them has released — ${counts.join(', ')}` +
       ' — so the block itself looks live, and what is missing is only the line that would ' +
       'let a machine see it when a target merges or closes.';
   }
@@ -7656,12 +7661,14 @@ export function h28StaleBodyBlockerLine(issue, resolutions, commentBodies, owner
   if (spent.length === 0 || live.length === 0) return null;
 
   return (
-    `\`pm:blocked\` whose BODY names ${spent.length} CLOSED \`Blocked-by:\` target(s) ` +
-    `(${namedTargets(spent)}) while a COMMENT names ${live.length} that ${live.length === 1 ? 'is' : 'are'} ` +
+    `\`pm:blocked\` whose BODY names ${spent.length} \`Blocked-by:\` target(s) no longer OPEN ` +
+    `(${namedTargets(spent)} — an issue reads closed, a PR reads closed by its MERGE, and a PR that ` +
+    'closed UNMERGED is named so: it released nothing, but the body line is spent either way) ' +
+    `while a COMMENT names ${live.length} that ${live.length === 1 ? 'is' : 'are'} ` +
     `still OPEN (${namedTargets(live)}) and appear(s) nowhere in the body — so the body line is ` +
     'STALE: it states a wait that is over, and the wait that is actually running is parked in the ' +
     'channel the body is supposed to be the canonical home for. This is the written half of a ' +
-    'RE-PARK: a seat found the body\'s upstream closed, carded the real prerequisite, and wrote ' +
+    'RE-PARK: a seat found the body\'s upstream closed or merged, carded the real prerequisite, and wrote ' +
     'the new blocker into a comment (the cheaper, safer write) without spending the body line. ' +
     '⚠️ Read what that costs before the migration: until the liveness read was ungated this card ' +
     'resolved ONLY the closed body target and was published as a card whose every blocker had ' +
@@ -12680,8 +12687,16 @@ export const CONTRACT_REVIEW_HEAD_SHA_LINE = new RegExp(
  * open fence (a nested ``` inside a ```` block, a ~~~ inside a ``` block), and
  * reading past either would read fenced content as the record's line. An
  * unclosed fence runs to the end of the body, as it renders.
+ *
+ * An OPENING fence may carry an info string after the run (```md); a CLOSING
+ * fence may not — a run followed by anything but whitespace is content of the
+ * open fence, not its close (`FENCE_CLOSE_LINE`), as CommonMark renders it.
+ * Measured in the delta review of the fence-tracking reader (2026-10-30): a
+ * ``` followed by prose closed the fence here while the renderer kept it open,
+ * so a `Head-sha:` line after it was read; 0 of 713 live records carry one.
  */
 const FENCE_LINE = /^[ ]{0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE_LINE = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/;
 
 /**
  * The head a contract-review record names — the span on the first `Head-sha:`
@@ -12695,14 +12710,17 @@ const FENCE_LINE = /^[ ]{0,3}(`{3,}|~{3,})/;
  * ABOVE the record's own line — read as the head, so the record was found at
  * the cited head and absent at the real one. None is prose to a first-line
  * reader, and all four shapes are what a quotation looks like. So: lines
- * before the first UNQUOTED heading-marker line are skipped — the heading is
- * read with `CONTRACT_REVIEW_HEADING_MARKER`, but a blockquoted heading opens
- * nothing here, because a fully quoted record (heading, head line and
- * signature all under `>`) followed by a plain line opening `Head-sha:` would
- * otherwise hand the quoted record's signature to the plain line's head; the
- * locator still finds such a comment as a record, and it then names no head.
- * A fenced line is skipped, fence boundaries included, with the fence closed
- * only by its own character and length (`FENCE_LINE`); and
+ * before the first UNQUOTED, UNINDENTED heading-marker line are skipped — the
+ * heading is read with `CONTRACT_REVIEW_HEADING_MARKER`, but a blockquoted
+ * heading opens nothing here, because a fully quoted record (heading, head
+ * line and signature all under `>`) followed by a plain line opening
+ * `Head-sha:` would otherwise hand the quoted record's signature to the plain
+ * line's head; nor does a heading indented four spaces or a tab, which is an
+ * indented code block to the renderer, held to the same three-space bound as
+ * the key line itself; the locator still finds such a comment as a record,
+ * and it then names no head. A fenced line is skipped, fence boundaries
+ * included, with the fence closed only by its own character and length on a
+ * line of its own (`FENCE_LINE`, `FENCE_CLOSE_LINE`); and
  * `CONTRACT_REVIEW_HEAD_SHA_LINE` itself refuses the blockquote, the bullet
  * and an indented-code line. Among the lines that remain, the FIRST wins, as
  * `readServedTier` reads its key: a record is one comment and names one head,
@@ -12722,15 +12740,18 @@ export function contractReviewHeadSha(body) {
   let fence = null; // the OPEN fence — its character and run length — or null outside one
   let belowHeading = false;
   for (const line of String(body ?? '').split(/\r?\n/)) {
-    const f = FENCE_LINE.exec(line);
-    if (f !== null) {
-      if (fence === null) fence = { ch: f[1][0], len: f[1].length };
-      else if (f[1][0] === fence.ch && f[1].length >= fence.len) fence = null;
+    if (fence !== null) {
+      const c = FENCE_CLOSE_LINE.exec(line);
+      if (c !== null && c[1][0] === fence.ch && c[1].length >= fence.len) fence = null;
       continue;
     }
-    if (fence !== null) continue;
+    const f = FENCE_LINE.exec(line);
+    if (f !== null) {
+      fence = { ch: f[1][0], len: f[1].length };
+      continue;
+    }
     if (!belowHeading) {
-      belowHeading = CONTRACT_REVIEW_HEADING_MARKER.test(line) && !/^\s*>/.test(line);
+      belowHeading = CONTRACT_REVIEW_HEADING_MARKER.test(line) && /^[ ]{0,3}#/.test(line);
       continue;
     }
     const m = CONTRACT_REVIEW_HEAD_SHA_LINE.exec(line);
@@ -25097,6 +25118,9 @@ async function selfTest() {
   t('H4 prose PR: …and says what to do with it: re-point, not release', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('releases nothing'), true);
   t('H4 prose PR: an UNMERGED close beside an OPEN target is neither an expiry nor all-open', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('1 still reads OPEN, 1 closed UNMERGED (which withholds)'), true);
   t('H4 prose PR: …and the mixed count never counts the unmerged close as expired', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
+  const abandonedBesideUnresolved = proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), { ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]);
+  t('H4 prose PR: an UNMERGED close beside an UNRESOLVED target names only the counts it has', abandonedBesideUnresolved.includes('None of them has released — 1 closed UNMERGED (which withholds), 1 could not be resolved from this install —'), true);
+  t('H4 prose PR: …and never says `0 still read OPEN`', abandonedBesideUnresolved.includes('0 still read'), false);
   t('H4 prose PR: a MERGED PR beside an UNMERGED one counts only the merge as expired', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow), proseFromRow(27296, abandonedPrRow)]).includes('1 of 2 is ALREADY CLOSED'), true);
   t('H4 prose: an UNRESOLVED cross-repo candidate claims nothing about the block', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('says NOTHING about whether'), true);
   t('H4 prose: …and renders the cross-repo address, not a bare number', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('`objectstack-ai/objectui#4356` UNRESOLVED'), true);
@@ -30765,8 +30789,16 @@ async function selfTest() {
     [REPARK_COMMENT],
     'objectstack-ai/objectstack',
   ) ?? '');
-  t('H28: two stale body targets are counted', manyStale.includes('names 2 CLOSED'), true);
+  t('H28: two stale body targets are counted', manyStale.includes('names 2 `Blocked-by:` target(s) no longer OPEN'), true);
   t('H28: …and the live one is still named', manyStale.includes('`#11501`'), true);
+  // A body target that is a PR closed UNMERGED (#28033): the body line is spent
+  // either way (the wait it states is over), so the row still fires -- but the
+  // target is named with its unmerged mark, never as a bare close.
+  const abandonedStale = String(h28StaleBodyBlockerLine(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z', unmerged: true }), target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack') ?? '');
+  t('H28: an UNMERGED PR as the spent body target still fires the row', abandonedStale.includes('the body line is '), true);
+  t('H28: …naming it with its unmerged mark, as `namedTargets` renders it', abandonedStale.includes('`#9255` (closed UNMERGED 2026-08-19T11:28:26Z)'), true);
+  t('H28: …and never calls it a CLOSED target', abandonedStale.includes('names 1 CLOSED'), false);
+  t('H28: …while saying it released nothing', abandonedStale.includes('it released nothing'), true);
 
   // -- H32 — a HELD seat idle over a non-empty lane queue (#11706) ------------
   //
@@ -33527,6 +33559,12 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // ⛔ A fence closes only on its OWN character and a run at least as long: a nested ``` inside ````, a ~~~ inside ```,
   // are content, and a `Head-sha:` line between them stays fenced; a longer closing run closes; a never-closed one runs out.
   t('⛔ record reader: a nested or mismatched fence does not close the open one — the `Head-sha:` line inside stays fenced; a longer run closes; an unmatched run leaves it open to the end', [contractReviewHeadSha(UNDER51('````', '```', `Head-sha: \`${HEAD51}\``, '```', '````', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', '~~~', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', `Head-sha: \`${HEAD51}\``, '`````', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', '~~~', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``))].join('|'), [OLDHEAD51, OLDHEAD51, OLDHEAD51, ''].join('|'));
+  // ⛔ A closing run with TRAILING TEXT is fence content, not a close (CommonMark): the fence stays open past it, so a
+  // `Head-sha:` line after such a line is still fenced; a bare run later closes it; whitespace after the run still closes.
+  t('⛔ record reader: a fence is closed only by a run on a line of its OWN — a run with trailing text is content, so the line after it stays fenced; a bare run later closes; trailing whitespace still closes', [contractReviewHeadSha(UNDER51('```', '``` not a close', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```', '``` not a close', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('~~~', '~~~ tail', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``, '```  ', `Head-sha: \`${OLDHEAD51}\``))].join('|'), ['', OLDHEAD51, OLDHEAD51, OLDHEAD51].join('|'));
+  // ⛔ A heading indented as CODE (four spaces or a tab) opens no scope — the same three-space bound the key line is held
+  // to — while one indented up to three spaces does; the marker itself keeps its tolerance for the locator.
+  t('⛔ record reader: a `## Contract review` heading indented four spaces or a tab opens no scope, one indented three does; the marker still finds the indented one', [contractReviewHeadSha(['    ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), contractReviewHeadSha(['\t## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), contractReviewHeadSha(['   ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), latestContractReviewOnHead([cm51(1, ['    ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n'), T51)], HEAD51), CONTRACT_REVIEW_HEADING_MARKER.test('    ## Contract review')].join('|'), ['', '', HEAD51, '', 'true'].join('|'));
   t('⛔ record reader: the key folded INTO the span, a bare hex value, a lowercase key and a sub-floor span name no head', [contractReviewHeadSha(UNDER51(`\`Head-sha: ${HEAD51}\``)), contractReviewHeadSha(UNDER51(`Head-sha: ${HEAD51}`)), contractReviewHeadSha(UNDER51(`head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('Head-sha: `ba3d95`'))].join('|'), '|||');
   // ⛔ The shapes the review of the line-form reader probed (2026-10-30): a `Head-sha:` line naming ANOTHER head above the
   // record's own — placed before the heading, blockquoted, bulleted or fenced. Each is a citation, not the record's line,

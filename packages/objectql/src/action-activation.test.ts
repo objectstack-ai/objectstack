@@ -32,6 +32,7 @@ import { describe, it, expect, vi } from 'vitest';
 // from metadata-core rather than from `@objectstack/objectql`: this test lives
 // INSIDE objectql, and the package re-exporting it is this one.
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { describeTurnedOffPackagedItem } from '@objectstack/types';
 
 import { ObjectQL } from './engine.js';
 import {
@@ -327,6 +328,12 @@ describe('ActionActivationProjection — absence means ACTIVE', () => {
         // advertise machinery that does not exist — the FLOW refusal says
         // "clone", and this one must not inherit that sentence.
         expect(message).not.toMatch(/clone/i);
+    });
+
+    it('[#27966] the sentence is the shared switched-off packaged item sentence, not a second copy of it', () => {
+        expect(new ActionActivationProjection().describeDisabled('convert_lead')).toBe(
+            describeTurnedOffPackagedItem('action'),
+        );
     });
 });
 

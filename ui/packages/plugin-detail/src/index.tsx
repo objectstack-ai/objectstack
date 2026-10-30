@@ -259,6 +259,7 @@ export {
   EMPTY_RELATED_ARRANGEMENT,
   RELATED_CARD_NEW_BADGE_MS,
   editRelatedArrangement,
+  RELATED_ARRANGEMENT_RECORD_VERSION,
   relatedArrangementFromRecord,
   relatedArrangementToRecord,
   relatedCardId,

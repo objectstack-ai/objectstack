@@ -4,7 +4,7 @@
 // record the admin's DECISIONS and a reference to the user, never a value of a
 // field of that user, on a real boot.
 //
-// ## Why the producer, and not the read side
+// ## Where it is asserted: at the producer, at rest
 //
 // `plugin-auth` writes its own `sys_audit_log` row for `/admin/create-user`
 // and `/admin/set-user-password`, beside the rows plugin-audit's CRUD mirror
@@ -12,10 +12,17 @@
 // before/after snapshot columns to what each reader is served. The explicit
 // row's `metadata` is free text keyed by decision names, so no read-time
 // narrowing can map it back to fields without deriving masking a second time.
-// A field value copied there was served to a ledger reader the data plane
-// withholds that field from. The fix is at the producer: the row carries the
-// decisions and its `object_name` + `record_id` reference, and the values ride
-// the mirror's narrowed snapshots.
+// A field value copied there would be served, un-narrowed, to every reader of
+// the row. The fix is at the producer: the row carries the decisions and its
+// `object_name` + `record_id` reference, and the values ride the mirror's
+// narrowed snapshots.
+//
+// [#26750, ruling A] Every row about the subject here is a deployment-level
+// row: the platform administrator's endpoints write it with no organization in
+// `tenant_id`, so it is served to the platform administrator alone, in every
+// tenancy posture. No reader below is served one, whatever class applies to
+// it, so the decisions-only guarantee is asserted where it is made, on the rows
+// at rest, and the read side pins the ruling instead.
 //
 // ## The composition
 //
@@ -39,24 +46,24 @@
 // Every reader can also OPEN that user through the data door. The ledger's
 // parent-record read gate (`audit-log-read-visibility.ts`) serves a row about a
 // record only to a caller who can read that record, and a member reads only its
-// own user row by default. So each reader's sets add view-all on `sys_user` —
-// a row-scope grant, not a field one: the classes above still apply, which the
-// armed check below measures — and a reader who could not open the subject
-// would be served none of its rows, so the classes would measure nothing.
+// own user row by default. So each reader's sets add view-all on `sys_user`,
+// a row-scope grant, not a field one, and one CONTROL row about the same
+// subject carries the readers' organization (every sign-up is bound to the
+// Default Organization): a reader who could not open the subject, or whose
+// ledger read did not resolve, would be served nothing for that reason, and
+// the empty answers below would not be the ruling's.
 //
 // ## What is asserted
 //
 // - `beforeAll` (`assertArmed`): both explicit rows exist at rest, and the
 //   mirror rows at rest carry every class; every reader opens the subject
-//   through the data door; the mirror rows served to each
-//   reader withhold exactly its class (the security service's own answer is
-//   engaged for it), and the control is served every class.
-// - Per class, through the list door, the by-id door and a list projected to
-//   the metadata and snapshot columns: both explicit rows are served to the
-//   reader, and no row served to it carries a value of its class. The other
-//   two classes still reach it through the mirror's snapshots.
-// - The control is served every class through the mirror's snapshots, and the
-//   explicit rows carry the closed decision set and nothing else.
+//   through the data door; no row about the subject at rest carries an
+//   organization, and the control row, which does, is served to every reader.
+// - At rest: the explicit rows carry the closed decision set and the subject
+//   reference, and no value of any class.
+// - Per reader, through the list door, the by-id door and a list projected to
+//   the metadata and snapshot columns: no row about the subject is served, the
+//   control row alone is. The platform administrator is served every one.
 //
 // Fixtures are synthetic. ⚠️ No test title states a value.
 // `@objectstack/plugin-auth` and `@objectstack/plugin-audit` resolve through
@@ -229,33 +236,38 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
   let ql: any;
   let priorScim: string | undefined;
   let subjectId = '';
+  /** [#26750] A row about the subject that carries the readers' organization: the one every reader is served. */
+  let controlRowId = '';
   const token: Record<string, string> = {};
 
   const filter = () => encodeURIComponent(JSON.stringify({ object_name: USER, record_id: subjectId }));
 
-  /** Every ledger row about the subject a reader is served, through three doors. */
-  const servedRows = async (who: Reader) => {
-    const doors: Record<'list' | 'byId' | 'projected', Row[]> = { list: [], byId: [], projected: [] };
+  /** The ledger rows about the subject at rest, the control row aside. */
+  const ledgerAtRest = async (): Promise<Row[]> =>
+    (await ql.find(LEDGER, { where: { object_name: USER, record_id: subjectId }, context: { isSystem: true } }))
+      .filter((r: Row) => String(r.id) !== controlRowId);
+
+  /** The ids of the rows about the subject a caller is served, through three doors. */
+  const servedIds = async (who: Reader | 'admin') => {
+    const doors: Record<'list' | 'byId' | 'projected', string[]> = { list: [], byId: [], projected: [] };
     const list = await stack.apiAs(token[who], 'GET', `/data/${LEDGER}?$filter=${filter()}`);
     expect(list.status).toBe(200);
-    doors.list = rowsOf(await list.json());
-    for (const row of doors.list) {
-      const res = await stack.apiAs(token[who], 'GET', `/data/${LEDGER}/${row.id}`);
-      expect(res.status).toBe(200);
-      doors.byId.push(recordOf(await res.json()));
+    doors.list = rowsOf(await list.json()).map((r) => String(r.id)).sort();
+    for (const id of [controlRowId, ...(await ledgerAtRest()).map((r) => String(r.id))]) {
+      const res = await stack.apiAs(token[who], 'GET', `/data/${LEDGER}/${id}`);
+      if (res.status === 200) doors.byId.push(String(recordOf(await res.json()).id));
+      else expect(res.status, `ledger row ${id} by id`).toBe(404);
     }
+    doors.byId.sort();
     const projected = await stack.apiAs(
       token[who],
       'GET',
       `/data/${LEDGER}?$filter=${filter()}&$select=id,metadata,old_value,new_value`,
     );
     expect(projected.status).toBe(200);
-    doors.projected = rowsOf(await projected.json());
+    doors.projected = rowsOf(await projected.json()).map((r) => String(r.id)).sort();
     return doors;
   };
-
-  const ledgerAtRest = async (): Promise<Row[]> =>
-    ql.find(LEDGER, { where: { object_name: USER, record_id: subjectId }, context: { isSystem: true } });
 
   beforeAll(async () => {
     priorScim = process.env.OS_SCIM_ENABLED;
@@ -272,7 +284,8 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
 
     // The seeded platform admin signs in first, so no reader can be the first
     // account on the deployment.
-    const admin = await stack.signIn();
+    token.admin = await stack.signIn();
+    const organizations = new Set<string>();
     for (const who of Object.keys(READERS) as Reader[]) {
       const email = `ald-${who}@verify.test`;
       token[who] = await stack.signUp(email);
@@ -281,16 +294,20 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
         expect(await catalogPermissionSet(ql, name), `fixture permission set ${name} served by the security catalog`).toBeTruthy();
         await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
       }
+      for (const m of await ql.find('sys_member', { where: { user_id: userId }, context: { isSystem: true } })) {
+        organizations.add(String(m.organization_id ?? ''));
+      }
     }
+    expect([...organizations], 'the one organization every reader is a member of').toHaveLength(1);
 
     // The admin drives both endpoints through their HTTP doors.
-    const created = await stack.apiAs(admin, 'POST', '/auth/admin/create-user', {
+    const created = await stack.apiAs(token.admin, 'POST', '/auth/admin/create-user', {
       ...SUBJECT,
       password: 'Ald!Subject12345',
     });
     expect(created.status, await created.clone().text()).toBe(200);
     subjectId = String((await created.json()).data.user.id);
-    const reset = await stack.apiAs(admin, 'POST', '/auth/admin/set-user-password', {
+    const reset = await stack.apiAs(token.admin, 'POST', '/auth/admin/set-user-password', {
       userId: subjectId,
       newPassword: 'Ald!Rotated67890',
     });
@@ -304,6 +321,14 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
           CLASSES.every((c) => rows.filter(isMirror).some((r) => rowCarries(r, c)))) break;
       await new Promise((r) => setTimeout(r, 250));
     }
+
+    // [#26750] The control row: about the same subject, in the readers' organization.
+    const [organization] = [...organizations];
+    controlRowId = String((await ql.insert(
+      LEDGER,
+      { action: 'read', object_name: USER, record_id: subjectId, user_id: null, actor: 'svc:fixture', tenant_id: organization },
+      SYS,
+    )).id);
 
     await assertArmed([
       armedWhen({
@@ -321,7 +346,7 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
       }),
       armedWhen({
         control: 'every reader opens the subject user through the data door',
-        disarmedBy: 'the ledger serves a row about a record only to a caller who can read that record, so a reader who could not open the subject would be served none of its rows and every class case below would measure an empty list',
+        disarmedBy: 'the ledger serves a row about a record only to a caller who can read that record, so a reader who could not open the subject would be served none of its rows for the gate\'s reason, not the ruling\'s',
         observe: async () => {
           const status: Record<string, number> = {};
           for (const who of Object.keys(READERS) as Reader[]) {
@@ -333,20 +358,21 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
         describe: (o) => JSON.stringify(o),
       }),
       armedWhen({
-        control: 'the mirror rows served to each reader withhold exactly its class, and the control is served every class',
-        disarmedBy: 'a reader whose grants did not resolve would be served every value, and its negative cases would measure an unrestricted reader',
+        control: 'no row about the subject at rest carries an organization, and every reader is served the control row about the same subject, which does',
+        disarmedBy: 'a reader whose ledger read did not resolve would be served nothing, and the empty answers below would measure that instead of ruling A; a row about the subject stamped with an organization would leave the ruling nothing to withhold',
         observe: async () => {
-          const served: Record<string, ClassName[]> = {};
+          const rows = await ledgerAtRest();
+          const servedTheControl: Record<string, boolean> = {};
           for (const who of Object.keys(READERS) as Reader[]) {
-            const { list } = await servedRows(who);
-            served[who] = CLASSES.filter((c) => list.filter(isMirror).some((r) => rowCarries(r, c)));
+            servedTheControl[who] = (await servedIds(who)).list.includes(controlRowId);
           }
-          return served;
+          return {
+            atRest: rows.length,
+            withAnOrganization: rows.filter((r) => r.tenant_id != null && r.tenant_id !== '').length,
+            servedTheControl,
+          };
         },
-        armed: (o) =>
-          CLASSES.every((c) => !o[c].includes(c) && CLASSES.filter((x) => x !== c).every((x) => o[c].includes(x))) &&
-          o.control.length === 3 &&
-          o.wildcard.length === 0,
+        armed: (o) => o.atRest > 0 && o.withAnOrganization === 0 && Object.values(o.servedTheControl).every(Boolean),
         describe: (o) => JSON.stringify(o),
       }),
     ]);
@@ -358,57 +384,38 @@ describe('the admin identity rows on the compliance ledger carry decisions, neve
     else process.env.OS_SCIM_ENABLED = priorScim;
   });
 
-  for (const c of CLASSES) {
-    it(`${c}: both explicit rows are served to the reader, and no row served to it carries a value of its class, through any door`, async () => {
-      const doors = await servedRows(c);
-      for (const [door, rows] of Object.entries(doors)) {
-        const events = rows.map(eventOf);
-        expect(events, `${door}: the explicit rows are served`).toContain(CREATE_EVENT);
-        expect(events, `${door}: the explicit rows are served`).toContain(PASSWORD_SET_EVENT);
-        for (const row of rows) {
-          expect(rowCarries(row, c), `${door}: a ${eventOf(row) ?? row.action} row carries the ${c} class`).toBe(false);
-        }
-      }
-    });
-
-    it(`${c}: the two other classes still reach the reader, through the mirror's snapshots`, async () => {
-      const { list } = await servedRows(c);
-      for (const other of CLASSES.filter((o) => o !== c)) {
-        expect(list.filter(isMirror).some((r) => rowCarries(r, other)), `the ${other} class`).toBe(true);
-      }
-    });
-  }
-
-  it('wildcard: a reader granted the ledger by the platform read-only set is served no value of any class, through any door', async () => {
-    const doors = await servedRows('wildcard');
-    for (const [door, rows] of Object.entries(doors)) {
-      expect(rows.filter(isExplicit).length, `${door}: the explicit rows are served`).toBe(2);
-      for (const row of rows) {
-        for (const c of CLASSES) expect(rowCarries(row, c), `${door}: the ${c} class`).toBe(false);
-      }
+  it('at rest: the explicit rows carry the closed decision set and the subject reference, and nothing else', async () => {
+    const explicit = (await ledgerAtRest()).filter(isExplicit);
+    expect(explicit.map(eventOf).sort()).toEqual([CREATE_EVENT, PASSWORD_SET_EVENT].sort());
+    for (const row of explicit) {
+      const allowed = DECISIONS[eventOf(row) as string];
+      const keys = Object.keys(JSON.parse(row.metadata));
+      for (const k of allowed.required) expect(keys, `the ${k} decision`).toContain(k);
+      for (const k of keys) expect([...allowed.required, ...allowed.optional], 'an undeclared key').toContain(k);
+      expect(row.object_name).toBe(USER);
+      expect(row.record_id).toBe(subjectId);
     }
   });
 
-  it('control: every class reaches the unmasking reader through the mirror, and the explicit rows carry only the closed decision set', async () => {
-    const doors = await servedRows('control');
-    for (const c of CLASSES) {
-      expect(doors.list.filter(isMirror).some((r) => rowCarries(r, c)), `the ${c} class`).toBe(true);
-    }
-    for (const [door, rows] of Object.entries(doors)) {
-      const explicit = rows.filter(isExplicit);
-      expect(explicit.length, `${door}: the explicit rows are served`).toBe(2);
-      for (const row of explicit) {
-        const allowed = DECISIONS[eventOf(row) as string];
-        expect(allowed, `${door}: a known event`).toBeTruthy();
-        const keys = Object.keys(JSON.parse(row.metadata));
-        for (const k of allowed.required) expect(keys, `${door}: the ${k} decision`).toContain(k);
-        for (const k of keys) expect([...allowed.required, ...allowed.optional], `${door}: an undeclared key`).toContain(k);
-        // The reference to the record is the row's own columns (not projected on the third door).
-        if (door !== 'projected') {
-          expect(row.object_name).toBe(USER);
-          expect(row.record_id).toBe(subjectId);
-        }
-      }
-    }
+  for (const c of CLASSES) {
+    it(`${c}: no explicit row at rest carries a value of the class, in any column`, async () => {
+      const explicit = (await ledgerAtRest()).filter(isExplicit);
+      expect(explicit.length, 'the explicit rows at rest').toBe(2);
+      for (const row of explicit) expect(rowCarries(row, c), `a ${eventOf(row)} row`).toBe(false);
+    });
+  }
+
+  for (const who of Object.keys(READERS) as Reader[]) {
+    it(`[#26750] ${who}: is served no row about the subject through any door, the control row alone`, async () => {
+      const doors = await servedIds(who);
+      for (const [door, ids] of Object.entries(doors)) expect(ids, door).toEqual([controlRowId]);
+    });
+  }
+
+  it('[#26750] the platform administrator is served every row about the subject through every door', async () => {
+    const all = [controlRowId, ...(await ledgerAtRest()).map((r) => String(r.id))].sort();
+    expect(all.length).toBeGreaterThan(3);
+    const doors = await servedIds('admin');
+    for (const [door, ids] of Object.entries(doors)) expect(ids, door).toEqual(all);
   });
 });

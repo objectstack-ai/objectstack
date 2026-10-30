@@ -24,10 +24,10 @@ const TYPE_TONES: Record<string, string> = {
   record: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/20',
 };
 
-// Per-type icon for four of the six `FavoriteItem['type']` kinds (object /
+// Per-type icon for four of the seven `FavoriteItem['type']` kinds (object /
 // record / dashboard / page) so those cards are visually distinguishable at
-// a glance; `report` has no dedicated glyph and falls back to the same
-// Database icon as any unrecognized name. `nav` is the sixth kind — it never
+// a glance; `report` and `view` have no dedicated glyph and fall back to the
+// same Database icon as any unrecognized name. `nav` is the seventh kind — it never
 // reaches this lookup because it is filtered out below (nav items are
 // excluded from Starred; see FavoritesProvider's `FavoriteItem['type']` doc,
 // objectui#6335).

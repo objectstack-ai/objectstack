@@ -23,12 +23,9 @@ import { SysUserDetailPage } from './sys-user.page.js';
 
 type Rec = Record<string, unknown>;
 
-/** The details body as the page authored it before the move — sections and hidden fields unchanged. */
+/** The details body: its sections and hidden fields. */
 const HIDE_FIELDS = [
   'id',
-  'banned',
-  'ban_reason',
-  'ban_expires',
   'email',
   'phone_number',
   'email_verified',
@@ -38,7 +35,13 @@ const HIDE_FIELDS = [
 const SECTIONS = [
   {
     label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad' },
-    fields: ['name', 'image'],
+    // #27859: a saved Locale is shown; the renderer draws only authored sections.
+    fields: ['name', 'image', 'locale'],
+  },
+  {
+    // #27859: a banned user reads as banned, with the reason, not as active.
+    label: { en: 'Account Status', 'zh-CN': '账号状态', 'ja-JP': 'アカウントの状態', 'es-ES': 'Estado de la cuenta' },
+    fields: ['banned', 'ban_reason', 'ban_expires'],
   },
   {
     label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría' },
@@ -70,6 +73,15 @@ describe('sys_user_detail — the details body lives in the first tab', () => {
     const props = children[0]!.properties as Rec;
     expect(props.hideFields).toEqual(HIDE_FIELDS);
     expect(props.sections).toEqual(SECTIONS);
+  });
+
+  it('shows locale and the ban state, and hides none of them (#27859)', () => {
+    const props = (items[0]!.children as Rec[])[0]!.properties as Rec;
+    const shown = (props.sections as { fields: string[] }[]).flatMap((s) => s.fields);
+    for (const f of ['locale', 'banned', 'ban_reason', 'ban_expires']) {
+      expect(shown, f).toContain(f);
+      expect(props.hideFields, f).not.toContain(f);
+    }
   });
 
   it('is the one `record:details` on the page — no second copy anywhere in its body', () => {

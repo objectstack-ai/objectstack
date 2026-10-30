@@ -13,8 +13,9 @@ import { resolveIcon } from '../action/resolve-icon';
 import { hasDeclaredVisibilityGate } from '../action/visibility-gate';
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
+import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
-import { ComponentRegistry, compareSortValues, evalRowPredicate, formatDate, hasDeclaredPredicate, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
+import { ComponentRegistry, compareSortValues, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
 import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope } from '@object-ui/react';
@@ -753,7 +754,7 @@ const DataTableRowActionsMenu: React.FC<{
   const customActions = useMemo(
     () =>
       Array.isArray(schema.rowActionDefs) && schema.onRowActionDef
-        ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions))
+        ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d))
         : [],
     [schema.rowActionDefs, schema.onRowActionDef, mayInvoke],
   );
@@ -3454,8 +3455,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                   const rowErrored = erroredRows.has(rowKey);
                   
                   return (
-                    <TableRow 
-                      key={rowId} 
+                    // objectstack#27545 — the row of the record a pane beside
+                    // the list shows: highlighted and scrolled into view as the
+                    // pane steps, by this row's own subscription, so a step
+                    // re-renders two rows and never the table.
+                    <ActiveListRow key={rowId} recordId={listRecordIdOf(row)}>
+                    {(isActiveRecord, activeRecordRef) => (
+                    <TableRow
+                      ref={activeRecordRef}
+                      data-active-record={isActiveRecord ? '' : undefined}
+                      aria-current={isActiveRecord ? 'true' : undefined}
                       data-state={isSelected ? 'selected' : undefined}
                       className={cn(
                         // Unified row state styling — softer hover (40 vs default 50),
@@ -3470,6 +3479,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         "[--os-row-tint:transparent] hover:[--os-row-tint:transparent] data-[state=selected]:[--os-row-tint:transparent]",
                         "hover:bg-muted/40",
                         "data-[state=selected]:bg-primary/5 data-[state=selected]:hover:bg-primary/10",
+                        // The open record's row, frozen cells included.
+                        "data-[active-record]:bg-primary/10 data-[active-record]:[--os-row-tint:color-mix(in_oklab,var(--color-primary)_10%,transparent)]",
                         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
                         schema.onRowClick && "cursor-pointer",
                         rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
@@ -3998,6 +4009,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       )}
                       {addColumnEnabled && <TableCell aria-hidden className="w-10" />}
                     </TableRow>
+                    )}
+                    </ActiveListRow>
                   );
                 })}
                 {/* Add record row (Airtable-style) */}

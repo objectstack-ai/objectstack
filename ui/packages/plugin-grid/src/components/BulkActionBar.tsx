@@ -11,6 +11,7 @@ import { Button } from '@object-ui/components';
 import { Trash2, CheckSquare, X } from 'lucide-react';
 import { LazyIcon, toKebabIconName } from '@object-ui/components';
 import { useObjectTranslation, usePredicateScope, useCapabilityGate } from '@object-ui/react';
+import { isActionSwitchedOff } from '@object-ui/core';
 import type { BulkActionDef } from '@object-ui/types';
 import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
@@ -131,7 +132,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   // gate on, so they are untouched.
   const mayInvoke = useCapabilityGate();
   const permittedDefs = React.useMemo(
-    () => (actionDefs ?? []).filter(d => mayInvoke(d?.requiredPermissions)),
+    () => (actionDefs ?? []).filter(d => mayInvoke(d?.requiredPermissions) && !isActionSwitchedOff(d)),
     [actionDefs, mayInvoke],
   );
   const hasDefs = permittedDefs.length > 0;

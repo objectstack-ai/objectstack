@@ -129,20 +129,21 @@ describe('repaired grid examples render the responsive ramp (#4001)', () => {
       'components-data-display-statistic/metrics-grid',
       'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4',
     ],
-    // columns: 4 — was `grid grid-cols-2 gap-4`
+    // columns: 4 — was `grid grid-cols-2 gap-4`; two across on a phone
+    // since objectstack#27355
     [
       'report/report-header-with-kpis',
-      'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4',
+      'grid grid-cols-2 md:grid-cols-4 gap-4',
     ],
     // columns: 4 + className passthrough — was `grid grid-cols-2 gap-4 mb-6`
     [
       'components-layout-page/full-dashboard',
-      'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6',
+      'grid grid-cols-2 md:grid-cols-4 gap-4 mb-6',
     ],
     // columns: 4 with a non-default gap — was `grid grid-cols-2 gap-3 p-4`
     [
       'theme/semantic-color-palette',
-      'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 p-4',
+      'grid grid-cols-2 md:grid-cols-4 gap-3 p-4',
     ],
     // columns: 2 — the `div` → `grid` migration exemplar that
     // `content/docs/components/basic/div.mdx` points authors at. Its column count

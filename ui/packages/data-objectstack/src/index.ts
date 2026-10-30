@@ -79,6 +79,7 @@ import type {
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import {
   attachObjectSortability,
+  markSwitchedOffActions,
   convertFiltersToAST,
   emulateBatchTransaction,
   normalizeSchemaReferenceKeys,
@@ -5559,6 +5560,11 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // projection (a backend older than the upstream change), so such a
     // deployment is left exactly as it was rather than being told, falsely,
     // that nothing is sortable.
+    // [objectstack#27504] …and the envelope's `disabledActions`, the names of
+    // this object's actions the installation switched off: stamped onto those
+    // entries under a symbol (`markSwitchedOffActions`), so every action gate
+    // reads it and no metadata write ever carries it.
+    markSwitchedOffActions(item, data && typeof data === 'object' ? (data as any).disabledActions : undefined);
     return attachObjectSortability(item, data && typeof data === 'object' ? (data as any).sortability : undefined);
   }
 

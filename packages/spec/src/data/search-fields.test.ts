@@ -12,6 +12,7 @@ import {
   SEARCHABLE_TEXTUAL_TYPES,
 } from './search-fields';
 import { FieldType } from './field.zod';
+import { MASKED_ON_READ_FIELD_TYPES } from './masked-field-types';
 
 // ---------------------------------------------------------------------------
 // [#4483] The auto-default's "lead" field ORDERS the set; it must not ADMIT one.
@@ -236,6 +237,34 @@ describe('search type vocabularies are pairwise disjoint', () => {
         `'${t}' is declared searchable but the auto-default rejected it`,
       ).toEqual({ allowed: ['probe'], source: 'auto' });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#27822] Every credential type is auto-excluded from search.
+//
+// `MASKED_ON_READ_FIELD_TYPES` is the one credential vocabulary: the engine's
+// search withhold, the aggregate refusal, the evaluation guard and the lint
+// check all read its keys (`isCredentialFieldType`). The REST ingress
+// (`assertSearchFieldsAreSearchable`) does not — it resolves the auto-default
+// over the unfiltered field map with `SEARCH_AUTO_EXCLUDED_TYPES`, which names
+// its credential members by hand. A type added to the mask table and not to
+// this set would be withheld by the engine yet admitted at the REST door in an
+// auto-default `$searchFields`. This pin turns that edit red here instead.
+// ---------------------------------------------------------------------------
+describe('SEARCH_AUTO_EXCLUDED_TYPES covers every credential type', () => {
+  const credentialTypes = Object.keys(MASKED_ON_READ_FIELD_TYPES);
+
+  it.each(credentialTypes)('credential type %s is auto-excluded', (type) => {
+    expect(
+      SEARCH_AUTO_EXCLUDED_TYPES.has(type),
+      `'${type}' is masked on read but the search auto-default would scan it`,
+    ).toBe(true);
+  });
+
+  it('CONTROL — the mask table is not empty', () => {
+    // An emptied table would green the per-type pin above while pinning nothing.
+    expect(credentialTypes.length).toBeGreaterThan(0);
   });
 });
 

@@ -5,13 +5,15 @@
  * tab's own history is longer than the console's, so `window.history.length`
  * is simulated as 3 on every cell. Direction, written before the run: keyed on
  * `window.history.length > 1`, every direct-URL cell RED; in-app cells GREEN.
+ * A real browser history under `BrowserRouter`, since the page reads the entry
+ * index react-router writes there (objectstack-ai/objectstack#28036).
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { RecordFormPage } from './RecordFormPage';
 
@@ -50,6 +52,11 @@ vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => METADATA })
 vi.mock('../providers/AdapterProvider', () => ({ useAdapter: () => null }));
 
 const Where = () => h('div', { 'data-testid': 'where' }, useLocation().pathname);
+/** The console's own in-app navigation: a react-router push to `to`. */
+const Nav = ({ to }: { to: string }) => {
+  const navigate = useNavigate();
+  return h('button', { type: 'button', 'data-testid': 'push', onClick: () => { void navigate(to); } }, 'push');
+};
 
 const LIST = '/apps/crm/showcase_task';
 const DETAIL = '/apps/crm/showcase_task/record/t1';
@@ -61,16 +68,17 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-/** Mount the form behind `before` (none = direct URL), fire `exit`, return where it lands. */
-function exitFrom(mode: 'create' | 'edit', exit: 'success' | 'cancel', before?: string): string {
+/** Load the document on `before` and push the form (none = direct URL), fire `exit`, return where it lands. */
+async function exitFrom(mode: 'create' | 'edit', exit: 'success' | 'cancel', before?: string): Promise<string> {
   const form = mode === 'create' ? `${LIST}/new` : `${DETAIL}/edit`;
-  const entries = before ? [before, form] : [form];
+  window.history.replaceState(null, '', before ?? form);
   render(
     h(I18nProvider, {
       config: { defaultLanguage: 'en', detectBrowserLanguage: false },
       children: h(
-        MemoryRouter,
-        { initialEntries: entries, initialIndex: entries.length - 1 },
+        BrowserRouter,
+        null,
+        h(Nav, { to: form }),
         h(
           Routes,
           null,
@@ -81,32 +89,33 @@ function exitFrom(mode: 'create' | 'edit', exit: 'success' | 'cancel', before?: 
       ),
     }),
   );
+  if (before) fireEvent.click(screen.getByTestId('push'));
   fireEvent.click(screen.getByTestId(exit === 'success' ? 'fire-success' : 'fire-cancel'));
-  return screen.getByTestId('where').textContent ?? '';
+  return (await screen.findByTestId('where')).textContent ?? '';
 }
 
 describe('RecordFormPage — direct-URL entry returns inside the app (objectstack-ai/objectstack#27454)', () => {
-  it('edit, direct URL: saves, toasts, lands on the record detail', () => {
-    expect(exitFrom('edit', 'success')).toBe(DETAIL);
+  it('edit, direct URL: saves, toasts, lands on the record detail', async () => {
+    expect(await exitFrom('edit', 'success')).toBe(DETAIL);
     expect(toastSuccess).toHaveBeenCalledWith('Task "Quarterly review" updated');
   });
 
-  it('create, direct URL: saves, toasts, lands on the object list', () => {
-    expect(exitFrom('create', 'success')).toBe(LIST);
+  it('create, direct URL: saves, toasts, lands on the object list', async () => {
+    expect(await exitFrom('create', 'success')).toBe(LIST);
     expect(toastSuccess).toHaveBeenCalledWith('Task "Quarterly review" created');
   });
 
-  it('edit, direct URL: cancel lands on the record detail, no toast', () => {
-    expect(exitFrom('edit', 'cancel')).toBe(DETAIL);
+  it('edit, direct URL: cancel lands on the record detail, no toast', async () => {
+    expect(await exitFrom('edit', 'cancel')).toBe(DETAIL);
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it('edit, in-app entry: save goes back to the page it came from', () => {
-    expect(exitFrom('edit', 'success', VIEW)).toBe(VIEW);
+  it('edit, in-app entry: save goes back to the page it came from', async () => {
+    expect(await exitFrom('edit', 'success', VIEW)).toBe(VIEW);
     expect(toastSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it('create, in-app entry: cancel goes back to the page it came from', () => {
-    expect(exitFrom('create', 'cancel', VIEW)).toBe(VIEW);
+  it('create, in-app entry: cancel goes back to the page it came from', async () => {
+    expect(await exitFrom('create', 'cancel', VIEW)).toBe(VIEW);
   });
 });

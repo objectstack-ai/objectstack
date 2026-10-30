@@ -131,7 +131,7 @@ const ZH: I18nConfig = {
 };
 
 const NOT_FOUND_EN = 'Record not found';
-const NOT_FOUND_DESCRIPTION_EN = 'The record you are looking for does not exist or may have been deleted.';
+const NOT_FOUND_DESCRIPTION_EN = 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.';
 const NOT_FOUND_ZH = '未找到记录';
 
 /** Open the record page; returns the adapter's two record reads, spied, to count the page's reads. */

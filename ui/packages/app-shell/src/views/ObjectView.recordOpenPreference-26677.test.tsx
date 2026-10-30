@@ -19,7 +19,9 @@
  *
  *   - preference `split` → the split face: the list in the left pane with its
  *     record-count footer (drawn only there) and the pane's own close control;
- *   - no preference → the drawer: a dialog-role sheet, no footer, no pane;
+ *   - preference `drawer` → the drawer: a dialog-role sheet, no footer, no pane;
+ *   - no preference → the split face: the default since objectstack#27545
+ *     (maintainer ruling 2026-10-29, Target 1);
  *   - a view that DECLARES `page` → the declaration wins over the preference:
  *     neither the pane nor the drawer is drawn on the list.
  *
@@ -153,7 +155,7 @@ async function openRecord(objects: ReturnType<typeof objectsWith>) {
     </I18nProvider>,
   );
   // The list's own page is drawn in every row; the overlay settles after it.
-  await screen.findByTestId('view-tab-bar', undefined, { timeout: 5000 });
+  await screen.findByTestId('list-view-switcher', undefined, { timeout: 5000 });
   await new Promise((settle) => setTimeout(settle, 80));
 }
 
@@ -165,11 +167,19 @@ describe('objectstack#26677 — the split pane is the reader\'s preference', () 
     expect(screen.getByRole('button', { name: 'Close panel' })).toBeTruthy();
   });
 
-  it('no preference: the record opens in the drawer, and nothing is drawn beside the list', async () => {
+  it('preference `drawer`: the record opens in the drawer, and nothing is drawn beside the list', async () => {
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
     await openRecord(objectsWith());
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByTestId('record-count-footer')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
+  });
+
+  it('objectstack#27545 — no preference: the record opens beside the list', async () => {
+    await openRecord(objectsWith());
+    expect(await screen.findByTestId('record-split-pane', undefined, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByTestId('record-count-footer')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('a view that declares `page` keeps its declaration: the preference draws no pane', async () => {
