@@ -456,7 +456,7 @@ describe('[ADR-0015 D7] an adopted plugin driver\'s failed-credentials verdict c
     const { source, listeners } = repairableLender(new Set(['sap_s4']));
     const { svc, engine } = service({ supports: () => false, create: vi.fn() } as unknown as IDatasourceDriverFactory, source);
     for (const name of ['sap_orders', 'sap_invoices']) {
-      engine.registerDriver({ name } as IDataDriver);
+      engine.drivers.set(name, { name } as IDataDriver);
       await svc.connect({ ...sapOrders, name }, { context: { origin: 'code', trigger: 'declared-auto' } });
     }
     expect(listeners.size).toBe(1);
@@ -468,7 +468,7 @@ describe('[ADR-0015 D7] an adopted plugin driver\'s failed-credentials verdict c
     const disabled = new Set(['sap_s4']);
     const { source } = repairableLender(disabled);
     const { svc, engine } = service({ supports: () => false, create: vi.fn() } as unknown as IDatasourceDriverFactory, source);
-    engine.registerDriver({ name: 'sap_orders' } as IDataDriver);
+    engine.drivers.set('sap_orders', { name: 'sap_orders' } as IDataDriver);
     await svc.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
     await svc.disconnect('sap_orders');
     disabled.delete('sap_s4');
@@ -481,7 +481,7 @@ describe('[ADR-0015 D7] an adopted plugin driver\'s failed-credentials verdict c
     const disabled = new Set(['sap_s4']);
     const { source } = repairableLender(disabled);
     const { svc, engine } = service({ supports: () => false, create: vi.fn() } as unknown as IDatasourceDriverFactory, source);
-    engine.registerDriver({ name: 'sap_orders' } as IDataDriver);
+    engine.drivers.set('sap_orders', { name: 'sap_orders' } as IDataDriver);
     await svc.connect(sapOrders, { context: { origin: 'code', trigger: 'declared-auto' } });
     engine.drivers.delete('sap_orders');
     disabled.delete('sap_s4');
@@ -494,7 +494,7 @@ describe('[ADR-0015 D7] an adopted plugin driver\'s failed-credentials verdict c
     const banners = async (source: IConnectorCredentialSource) => {
       const warnings: string[] = [];
       const engine = fakeEngine();
-      engine.registerDriver({ name: 'sap_orders' } as IDataDriver);
+      engine.drivers.set('sap_orders', { name: 'sap_orders' } as IDataDriver);
       const svc = new DatasourceConnectionService({
         factory: () => ({ supports: () => false, create: vi.fn() }) as unknown as IDatasourceDriverFactory,
         engine: () => engine,

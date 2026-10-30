@@ -6,7 +6,7 @@
 
 fix: a plugin-driver datasource refused at boot for its connector instance's credential recovers on the next granted borrow, and the connector call path withholds the form-encoded spelling of a credential
 
-Clause-②: yes
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 - **`@objectstack/service-datasource`**: a datasource served by a plugin driver (driver-odata) that names `external.connector`, whose instance could not lend at boot (undeclared, disabled, no `auth`), was recorded `failed-credentials` and marked unavailable until a restart, although the driver borrows again on every request and served as soon as the instance was repaired. The first borrow the lender grants for that instance now retracts the verdict and the engine's unavailable mark, so Setup → Datasources shows it available again with no restart. A grant for any other instance leaves it standing. The degraded-boot banner says which recovery applies; with no lender registered the verdict still lasts until a restart.
