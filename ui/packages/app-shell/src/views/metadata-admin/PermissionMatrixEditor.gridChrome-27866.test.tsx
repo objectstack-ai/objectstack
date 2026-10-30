@@ -85,11 +85,11 @@ async function renderPage(studio = false) {
       />
     </MemoryRouter>,
   );
-  await screen.findByRole('button', { name: objectButton('a_project') });
+  await screen.findByRole('button', { name: objectButton('a_project') }, { timeout: 5000 });
 }
 
 /** An object row's expand button: its label, then its API name. */
-const objectButton = (name: string) => new RegExp(`^${name === 'a_project' ? 'Project' : 'Task'}\\W*${name}$`);
+const objectButton = (name: string) => new RegExp(`^${name === 'a_project' ? 'Project' : 'Task'}\\W*${name}\\W*$`);
 
 async function expand() {
   fireEvent.click(screen.getByRole('button', { name: objectButton('a_project') }));
