@@ -65,9 +65,37 @@ export default defineStack({
 | `name` | `odata` | The datasource name, the driver name and its `driver.<name>` service suffix. |
 | `serviceRoot` | — | The service root URL (http or https, no credentials, no query). |
 | `version` | `4.0` | The protocol version. Only the v4 dialect ships. |
-| `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. |
+| `auth` | `{ scheme: 'none' }` | `none`, `bearer`, or `basic` with a `username`. The secret is the datasource's `external.credentialsRef`. Leave it `none` when the datasource borrows a connector instance's credential (below). |
 | `pageSize` | `500` | Rows asked for per server page (`Prefer: odata.maxpagesize`). |
 | `requestTimeoutMs` | `30000` | Per-request timeout. |
+
+## Borrowing a connector instance's credential
+
+When a connector instance already authorizes the vendor, the datasource can name it in
+`external.connector` instead of binding a secret of its own (ADR-0015 amendment D7): one
+credential, set under Setup → Connector credentials, serves the connector's flow actions and
+the datasource's records.
+
+```typescript
+connectors: [{
+  name: 'erp_api', type: 'api', provider: 'openapi', providerConfig: { spec: './erp-openapi.json' },
+  auth: { type: 'bearer', credentialRef: 'erp_token' },
+}],
+datasources: [{
+  name: 'erp', driver: 'erp', schemaMode: 'external', config: {},
+  external: { connector: 'erp_api' },                // no credentialsRef: exactly one channel
+}],
+```
+
+The plugin is created with `auth` left at `none`: the instance's `auth` decides how the credential
+is sent (a bearer token, basic auth, or an API key as a header or a query parameter). It borrows
+from the `connector-credential-source` service, which `@objectstack/service-automation`
+registers, at the first request, and presents it on every request through
+`callWithBorrowedCredential`: refreshed when it has expired, refreshed once and retried on a
+`401`, and refused with a `503` naming the instance when the fresh one is refused too. A stack with
+no automation service, an instance that cannot lend (not declared, disabled, no `auth`), an `auth`
+scheme set on the plugin beside the connector, and a `credentialsRef` beside it all refuse the
+request instead of sending it.
 
 ## What is pushed down
 

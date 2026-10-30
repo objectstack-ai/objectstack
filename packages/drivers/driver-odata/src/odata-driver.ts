@@ -54,6 +54,7 @@ import type { DriverOptions } from '@objectstack/spec/data';
 import type { EdmEntitySet, EdmEntityType, EdmProperty, ODataDialect, ODataServiceModel } from './dialect.js';
 import { odataV4Dialect } from './dialect-v4.js';
 import { translateWhere, type FilterTarget } from './filter.js';
+import type { ConnectorCredentialHandle } from '@objectstack/types';
 import { ODataRequestError, ODataTransport, type FetchLike, type ODataResponse } from './transport.js';
 import type { ODataDriverConfig } from './config.js';
 
@@ -71,6 +72,8 @@ export interface ODataDriverRuntime {
   fetch?: FetchLike;
   /** The secret behind the datasource's `external.credentialsRef`; see `plugin.ts`. */
   credential?: () => Promise<string | undefined>;
+  /** The credential borrowed from the connector instance the datasource names in `external.connector`; see `plugin.ts`. */
+  borrowed?: () => Promise<ConnectorCredentialHandle | undefined>;
 }
 
 /** An introspected table, with the navigation properties the import offers as lookups. */
@@ -141,6 +144,7 @@ export class ODataDriver implements IDataDriver {
       pageSize: config.pageSize,
       ...(runtime.fetch ? { fetch: runtime.fetch } : {}),
       ...(runtime.credential ? { credential: runtime.credential } : {}),
+      ...(runtime.borrowed ? { borrowed: runtime.borrowed } : {}),
     });
   }
 
