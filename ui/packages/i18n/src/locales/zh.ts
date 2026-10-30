@@ -2863,7 +2863,9 @@ const zh = {
         title: '您的密码已过期',
         resetTitle: '您必须修改密码',
         fallbackMessage: '请设置新密码后继续。',
+        resetBody: '管理员为您设置了临时密码。请设置您自己的新密码后继续。',
         current: '当前密码',
+        temporary: '临时密码',
         next: '新密码',
         confirm: '确认新密码',
         submit: '修改密码并继续',
@@ -4745,6 +4747,11 @@ const zh = {
     actionsEmptyTitle: '没有打包动作',
     actionsEmptyBody: '本部署中没有任何已安装软件包声明动作。你自己编写的动作在 Studio 中。',
     actionsLoadFailed: '无法加载打包动作。',
+    switchedOn: '「{{label}}」已开启。',
+    switchedOff: '「{{label}}」已在本部署中关闭。',
+    actionOffTitle: '关闭「{{label}}」？',
+    actionOffBody: '在重新开启之前，它将在本部署中所有提供它的地方对所有用户停止运行。',
+    actionOffConfirm: '关闭',
   },
   element: {
     number: {

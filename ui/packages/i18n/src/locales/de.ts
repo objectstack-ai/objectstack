@@ -2786,7 +2786,9 @@ const de = {
         title: "Ihr Passwort ist abgelaufen",
         resetTitle: "Sie müssen Ihr Passwort ändern",
         fallbackMessage: "Bitte legen Sie ein neues Passwort fest, um fortzufahren.",
+        resetBody: "Ein Administrator hat ein temporäres Passwort für Sie festgelegt. Wählen Sie ein eigenes neues Passwort, um fortzufahren.",
         current: "Aktuelles Passwort",
+        temporary: "Temporäres Passwort",
         next: "Neues Passwort",
         confirm: "Neues Passwort bestätigen",
         submit: "Passwort ändern & fortfahren",
@@ -4687,6 +4689,11 @@ const de = {
     actionsEmptyTitle: "Keine Paket-Aktionen",
     actionsEmptyBody: "In dieser Installation deklariert kein installiertes Paket eine Aktion. Selbst erstellte Aktionen finden Sie im Studio.",
     actionsLoadFailed: "Paket-Aktionen konnten nicht geladen werden.",
+    switchedOn: "{{label}} ist eingeschaltet.",
+    switchedOff: "{{label}} ist für diese Bereitstellung ausgeschaltet.",
+    actionOffTitle: "{{label}} ausschalten?",
+    actionOffBody: "Es wird überall, wo es in dieser Bereitstellung angeboten wird, für alle Benutzer nicht mehr ausgeführt, bis es wieder eingeschaltet wird.",
+    actionOffConfirm: "Ausschalten",
   },
   element: {
     number: {

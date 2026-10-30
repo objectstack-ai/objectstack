@@ -3340,7 +3340,9 @@ const en = {
         title: 'Your password has expired',
         resetTitle: 'You must change your password',
         fallbackMessage: 'Please set a new password to continue.',
+        resetBody: 'An administrator set a temporary password for you. Choose a new password of your own to continue.',
         current: 'Current password',
+        temporary: 'Temporary password',
         next: 'New password',
         confirm: 'Confirm new password',
         submit: 'Change password & continue',
@@ -5497,6 +5499,13 @@ const en = {
     actionsEmptyBody:
       'No installed package declares an action on this deployment. Actions you author yourself live in Studio.',
     actionsLoadFailed: 'Could not load packaged actions.',
+    // The toast after a switch the server accepted, in both sections, and
+    // the confirm a packaged action's switch-off asks first (objectstack#27521).
+    switchedOn: '"{{label}}" is switched on.',
+    switchedOff: '"{{label}}" is switched off for this deployment.',
+    actionOffTitle: 'Switch "{{label}}" off?',
+    actionOffBody: 'It stops running everywhere it is offered on this deployment, for every user, until it is switched on again.',
+    actionOffConfirm: 'Switch off',
   },
   element: {
     // objectui#10951 — `element:number` authored with an aggregate and no

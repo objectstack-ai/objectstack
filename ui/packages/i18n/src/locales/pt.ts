@@ -2840,7 +2840,9 @@ const pt = {
         title: "Sua senha expirou",
         resetTitle: "Você precisa alterar sua senha",
         fallbackMessage: "Defina uma nova senha para continuar.",
+        resetBody: "Um administrador definiu uma senha temporária para você. Escolha uma nova senha sua para continuar.",
         current: "Senha atual",
+        temporary: "Senha temporária",
         next: "Nova senha",
         confirm: "Confirmar nova senha",
         submit: "Alterar senha e continuar",
@@ -4801,6 +4803,11 @@ const pt = {
     actionsEmptyTitle: "Nenhuma ação de pacote",
     actionsEmptyBody: "Nenhum pacote instalado declara uma ação nesta implantação. As ações que você mesmo cria ficam no Studio.",
     actionsLoadFailed: "Não foi possível carregar as ações de pacote.",
+    switchedOn: "\"{{label}}\" está ativado.",
+    switchedOff: "\"{{label}}\" está desativado nesta implantação.",
+    actionOffTitle: "Desativar \"{{label}}\"?",
+    actionOffBody: "Ele deixa de ser executado em todos os lugares onde é oferecido nesta implantação, para todos os usuários, até ser ativado novamente.",
+    actionOffConfirm: "Desativar",
   },
   element: {
     number: {

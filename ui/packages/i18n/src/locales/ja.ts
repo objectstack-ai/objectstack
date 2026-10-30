@@ -2788,7 +2788,9 @@ const ja = {
         title: "パスワードの有効期限が切れました",
         resetTitle: "パスワードの変更が必要です",
         fallbackMessage: "続行するには新しいパスワードを設定してください。",
+        resetBody: "管理者が一時パスワードを設定しました。続行するには、ご自身の新しいパスワードを設定してください。",
         current: "現在のパスワード",
+        temporary: "一時パスワード",
         next: "新しいパスワード",
         confirm: "新しいパスワード（確認）",
         submit: "パスワードを変更して続行",
@@ -4688,6 +4690,11 @@ const ja = {
     actionsEmptyTitle: "パッケージアクションはありません",
     actionsEmptyBody: "このデプロイには、アクションを宣言するインストール済みパッケージがありません。自分で作成したアクションは Studio にあります。",
     actionsLoadFailed: "パッケージアクションを読み込めませんでした。",
+    switchedOn: "「{{label}}」をオンにしました。",
+    switchedOff: "「{{label}}」をこのデプロイでオフにしました。",
+    actionOffTitle: "「{{label}}」をオフにしますか？",
+    actionOffBody: "再びオンにするまで、このデプロイで提供されているすべての場所で、すべてのユーザーに対して実行されなくなります。",
+    actionOffConfirm: "オフにする",
   },
   element: {
     number: {
