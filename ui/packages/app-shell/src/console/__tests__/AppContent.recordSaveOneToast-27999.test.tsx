@@ -264,11 +264,11 @@ describe('AppContent — an overlay save with warnings shows one record-named to
     );
 
     expect(toastSuccess).not.toHaveBeenCalled();
-    expect(toastWarning.mock.calls.map(([title]) => title).sort()).toEqual([
+    expect(toastWarning.mock.calls.map((call: unknown[]) => call[0]).sort()).toEqual([
       'Saved — but some fields did not take effect',
       'Task "Quarterly review" updated',
     ]);
-    expect(toastWarning.mock.calls.find(([title]) => title === 'Task "Quarterly review" updated')?.[1]).toEqual({
+    expect(toastWarning.mock.calls.find((call: unknown[]) => call[0] === 'Task "Quarterly review" updated')?.[1]).toEqual({
       description: ADVISORY.message,
     });
   });
