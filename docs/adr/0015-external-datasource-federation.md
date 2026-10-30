@@ -411,9 +411,12 @@ A pure module `packages/spec/src/data/type-compat.ts` maps SQL types
 ObjectStack field types, and exposes `isCompatible(remoteSqlType,
 fieldType): boolean | 'lossy'`. The matrix is dialect-aware
 (`postgres`, `mysql`, `sqlite`, `snowflake`, `bigquery`, `mongo`, `odata`). New
-dialects extend the matrix; the matrix is unit-tested independently. `odata` is
-the one vocabulary that is not SQL: its aliases (`DIALECT_ALIASES.odata`) map the
-EDM primitive types an OData service's `$metadata` declares.
+dialects extend the matrix; the matrix is unit-tested independently. `mongo` and
+`odata` are the two vocabularies that are not SQL: `DIALECT_ALIASES.mongo` maps
+BSON type names, and `DIALECT_ALIASES.odata` maps the EDM primitive types an
+OData service's `$metadata` declares, except `Edm.Duration` and the
+`Edm.Geography*` / `Edm.Geometry*` families, which it leaves unmapped so a draft
+flags them for review.
 
 ---
 

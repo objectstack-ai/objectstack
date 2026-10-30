@@ -189,9 +189,10 @@ const CANONICAL_TO_FIELD: Record<
   // the remote system's. Measured: better-auth mints a 32-character
   // alphanumeric string for every user it creates (sign-up, admin create,
   // import), and a row written past it through the engine gets the SQL
-  // driver's 16-character nanoid — a string either way, never a UUID and
-  // never an integer. A text column carries it; an integer column cannot hold
-  // one, so `user` there stays a `type_mismatch` error.
+  // driver's 16-character nanoid. A minted id is never a UUID or an integer;
+  // a caller-supplied id is stored verbatim as a string, which is why the
+  // `uuid` row keeps `user`. A text column carries it; an integer column
+  // cannot hold one, so `user` there stays a `type_mismatch` error.
   text: { suggested: 'text', exact: ['text', 'textarea', 'email', 'url', 'phone', 'markdown', 'html', 'richtext', 'code', 'select', 'color', 'signature', 'qrcode', 'lookup', 'master_detail', 'user'], lossy: [] },
   integer: { suggested: 'number', exact: ['number', 'autonumber', 'rating', 'percent', 'lookup', 'master_detail'], lossy: ['currency', 'boolean'] },
   bigint: { suggested: 'number', exact: ['number', 'autonumber', 'lookup', 'master_detail'], lossy: ['currency'] },
