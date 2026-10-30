@@ -350,7 +350,10 @@ The runtime `authentication` takes the four static kinds:
 A token obtained from a token endpoint (OAuth 2.0 `authorization_code` or
 `client_credentials`, or a Feishu, DingTalk or WeCom app credential) is declared
 on a provider-bound instance's `auth` as `oauth2` or `app-credential`, with the
-secret behind a `credentialRef` (ADR-0143). See
+secret behind a `credentialRef` (ADR-0143). An upstream that authenticates
+each request by a signature over the request itself is declared as `signed`,
+with a closed `scheme`, the public `keyId` and the signing key behind a
+`credentialRef`; the platform signs every attempt (ADR-0143 D2.3). See
 [Connectors](../../../content/docs/automation/connectors.mdx).
 
 ### Best Practices
