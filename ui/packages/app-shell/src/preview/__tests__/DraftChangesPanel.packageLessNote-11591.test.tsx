@@ -100,7 +100,7 @@ describe('the confirm note says what this scope publishes (objectui#11591)', () 
     renderSheet('com.example.showcase');
 
     await waitFor(async () =>
-      expect(await confirmNote()).toBe('Publishing releases the 1 pending draft of this package atomically.'),
+      expect(await confirmNote()).toBe('Publishing releases the 1 pending draft of this package: it goes live, or nothing changes.'),
     );
   });
 
@@ -111,6 +111,6 @@ describe('the confirm note says what this scope publishes (objectui#11591)', () 
     ]);
     renderSheet('com.example.showcase');
 
-    expect(await confirmNote()).toBe('Publishing releases all 2 pending drafts of this package atomically.');
+    expect(await confirmNote()).toBe('Publishing releases all 2 pending drafts of this package together: all of them go live, or none do.');
   });
 });

@@ -106,6 +106,9 @@ function json(body: unknown) {
  * The batch door, as the protocol answers it inside the dispatcher's envelope:
  * `backfillApplied` only when the request named a field (objectstack#24253).
  */
+/** An object went live, so the toast also offers the way to Access (objectstack#27521). */
+const ACCESS_ACTION = { action: { label: t('engine.studio.publishedOpenAccess', 'en'), onClick: expect.any(Function) } };
+
 function batchAnswer(requested: { backfill?: Array<{ object: string; field: string }> }) {
   return {
     success: true,
@@ -202,7 +205,7 @@ describe('Studio publish with the default backfill (objectui#12929)', () => {
     expect(vi.mocked(toast.success).mock.calls).toEqual([
       [
         publishedTitle(),
-        { description: tFormat('engine.studio.backfillWritten', 'en', { field: `${OBJECT}.done`, count: N }) },
+        { description: tFormat('engine.studio.backfillWritten', 'en', { field: `${OBJECT}.done`, count: N }), ...ACCESS_ACTION },
       ],
     ]);
     expect(String(vi.mocked(toast.success).mock.calls[0]![1]?.description)).toContain(String(N));
@@ -226,6 +229,7 @@ describe('Studio publish with the default backfill (objectui#12929)', () => {
             count: N,
             error: stoppedReason,
           }),
+          ...ACCESS_ACTION,
         },
       ],
     ]);
@@ -244,7 +248,9 @@ describe('Studio publish with the default backfill (objectui#12929)', () => {
     // Byte for byte the request every publish sent before this card.
     expect(publishBodies[0]).toBe('{}');
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
-    // No receipt, so no backfill line: the toast is the publish's alone.
-    expect(vi.mocked(toast.success).mock.calls).toEqual([[publishedTitle()]]);
+    // No receipt, so no backfill line: the publish's own toast, with the Access hint.
+    expect(vi.mocked(toast.success).mock.calls).toEqual([
+      [publishedTitle(), { description: t('engine.studio.publishedAccessHint', 'en'), ...ACCESS_ACTION }],
+    ]);
   });
 });

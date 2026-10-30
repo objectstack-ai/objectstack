@@ -236,6 +236,7 @@ import {
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
+  verdictPreviewEntries,
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import {
@@ -261,6 +262,7 @@ import {
   objectSaveRefusal,
   plainRefusal,
   publishRefusal,
+  reportHeldEdit,
   type PublishFailure,
   type StudioHeld,
   type StudioRefusal,
@@ -282,7 +284,7 @@ import { useSurfaceDeepLink, resolveSurfaceDeepLink, type SurfaceTarget } from '
 import { SurfaceDeepLinkProvider, useRequestedSurface, useSurfaceNavigator } from './surfaceDeepLinkChannel.js';
 import { buildObjectSkeleton, buildFlowSkeleton, buildAppSkeleton, buildPermissionSkeleton, type AppNavSeed } from './skeletons.js';
 import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
-import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { t, tFormat, translateMetadataType, translateValidationMessage, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { fieldsForNodeType, localizeFlowFields, type FlowConfigField } from '../metadata-admin/inspectors/flow-node-config.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
@@ -1688,6 +1690,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     return new Map([...publishRefusals].filter(([key]) => listed.has(key)));
   }, [feedCount, pendingEntries, publishRefusals]);
 
+  // The publish toast's way to the Access pillar; set once the router's
+  // navigate is in hand below.
+  const openAccessRef = React.useRef<() => void>(() => {});
+
   // `options` is the review sheet's (objectui#12929): its checked backfill
   // choices, or nothing. Only the package batch door below carries it; the
   // sheet offers no choice in the package-less scope.
@@ -1859,10 +1865,28 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         // wrote. A field that stopped short leaves the publish standing, so the
         // toast still says what went live, as a warning that carries why.
         const receipt = payload?.backfillApplied;
+        // A published app or object reaches members only through a permission
+        // set, so the toast points the author to Access.
+        const reachesMembers =
+          Array.isArray(published) &&
+          published.some((p) => {
+            const type = (p as { type?: unknown } | null)?.type;
+            return type === 'app' || type === 'object';
+          });
+        const access = reachesMembers
+          ? {
+              action: {
+                label: t('engine.studio.publishedOpenAccess', locale),
+                onClick: () => openAccessRef.current(),
+              },
+            }
+          : {};
         if (receipt) {
           const description = formatBackfillReceipt(receipt, locale);
-          if (receipt.success === false) toast.warning(title, { description });
-          else toast.success(title, { description });
+          if (receipt.success === false) toast.warning(title, { description, ...access });
+          else toast.success(title, { description, ...access });
+        } else if (reachesMembers) {
+          toast.success(title, { description: t('engine.studio.publishedAccessHint', locale), ...access });
         } else {
           toast.success(title);
         }
@@ -1934,6 +1958,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // package ships an app, offer Open app — opened in a new tab so the builder
   // context survives. (App → builder is the reverse bridge, tracked separately.)
   const shellNavigate = useNavigate();
+  React.useEffect(() => {
+    openAccessRef.current = () => {
+      if (confirmLeavePillar()) shellNavigate(`/studio/${scopeSegment}/access`);
+    };
+  });
   // objectui#11181 — `label` is the app's own `I18nLabel` (a plain string or an
   // inline locale map), held as the spec types it and never `String()`ed: a map
   // would read `[object Object]`. Only the presence of `packageApp` is read
@@ -4835,11 +4864,16 @@ export function InterfacesPillar({
   // objectstack#27459 — so is an item just added to one of the dashboard's
   // own list properties (Global Filters, the header's Actions), asked of the
   // spec's dashboard schema, until its required inputs are filled in.
+  // objectstack#27785 — a report likewise: an item just added to Order or a
+  // joined report's Blocks, or a chart whose type is picked before its axes,
+  // asked of the spec's report schema (`reportHeldEdit`).
   const leafType = current?.type;
-  const leafIncomplete = React.useMemo(
-    () => (ifDirty && leafType === 'dashboard' ? dashboardHeldEdit(draft, locale) : null),
-    [ifDirty, leafType, draft, locale],
-  );
+  const leafIncomplete = React.useMemo(() => {
+    if (!ifDirty) return null;
+    if (leafType === 'dashboard') return dashboardHeldEdit(draft, locale);
+    if (leafType === 'report') return reportHeldEdit(draft, locale);
+    return null;
+  }, [ifDirty, leafType, draft, locale]);
   const { loaded: draftLoaded } = useDraftAutoSave({
     // objectui#11232 — the leaf `doSave` addresses, `type:name`.
     target: leafKey,
@@ -6950,7 +6984,18 @@ export function DataPillar({
     };
   }, [client, current, packageId, publishNonce, objReloadNonce, recordObjRead]);
 
-  const fieldCount = React.useMemo(() => readFields(objDraft.fields).entries.length, [objDraft]);
+  // The header counts the fields the canvas shows, and names the platform's
+  // own columns apart: "2 fields (+8 system)".
+  const fieldCount = React.useMemo(() => {
+    const all = readFields(objDraft.fields).entries.length;
+    const own = formFieldNames(objDraft.fields).length;
+    return { own, system: all - own };
+  }, [objDraft]);
+  const fieldCountText =
+    tFormat(fieldCount.own === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
+      count: fieldCount.own,
+    }) +
+    (fieldCount.system > 0 ? ` ${tFormat('engine.studio.data.systemFieldCount', locale, { count: fieldCount.system })}` : '');
 
   /**
    * The design-mode grid's columns: the object's own fields in metadata order,
@@ -7581,7 +7626,7 @@ export function DataPillar({
             title={current ? current.label : t('engine.studio.data.objects', locale)}
             titleProps={current ? undefined : { className: 'text-[13px] font-normal text-muted-foreground' }}
             apiName={current?.name}
-            meta={current && objLoaded ? tFormat('engine.studio.data.fieldCount', locale, { count: fieldCount }) : undefined}
+            meta={current && objLoaded ? fieldCountText : undefined}
             status={objDraftStatus}
             actions={
               <>
@@ -8537,6 +8582,16 @@ export function AutomationsPillar({
   // draft's (what its publish will refuse), else the layered read's. Taken off
   // each read, never computed here; the inspectors read it at their paths.
   const [flowVerdict, setFlowVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // objectstack#27799 — and the flow's Problems list reads that same verdict,
+  // so it never calls a flow valid that its publish refuses.
+  const flowPreviewDiagnostics = React.useMemo(
+    () =>
+      verdictPreviewEntries(flowVerdict).map((entry) => ({
+        ...entry,
+        message: translateValidationMessage(entry.message, locale),
+      })),
+    [flowVerdict, locale],
+  );
   const flowVerdictSeq = React.useRef(0);
   const rereadFlowVerdict = React.useCallback(
     (flowName: string) => {
@@ -9506,6 +9561,8 @@ export function AutomationsPillar({
                         // edge selection still open the inspector read-only below.
                         onPatch: readOnly ? undefined : onPatch,
                         locale,
+                        // objectstack#27799 — the Problems list reads the verdict the inspectors read.
+                        diagnostics: flowPreviewDiagnostics,
                       })}
                     </FlowPreviewChromeProvider>
                   </FlowRegistrationContext.Provider>

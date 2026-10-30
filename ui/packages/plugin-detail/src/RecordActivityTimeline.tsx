@@ -778,9 +778,14 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           <h2 className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight">
             <Activity className="h-4 w-4" />
             {title}
-            <span className="text-sm font-normal text-muted-foreground">
-              ({filtered.length})
-            </span>
+            {/* A refused read leaves the count unknown, not zero: the rows
+                the reader may not see are not in `filtered`, so a number here
+                would state what the server withheld. */}
+            {!activityDenied && !commentsDenied && (
+              <span className="text-sm font-normal text-muted-foreground" data-testid="activity-count">
+                ({filtered.length})
+              </span>
+            )}
           </h2>
           <div className="flex items-center gap-1">
             {isStream && (

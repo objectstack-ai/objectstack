@@ -62,7 +62,7 @@ function targetLabel(
       title: `${p.target.source} → ${p.target.target}`,
     };
   }
-  return { text: 'flow' };
+  return p.location ? { text: p.location, title: p.location } : { text: 'flow' };
 }
 
 export function ProblemsPanel({ problems, selectedKey, onSelectProblem, locale, runStatus, nodes = [] }: ProblemsPanelProps) {
