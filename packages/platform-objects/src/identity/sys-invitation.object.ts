@@ -128,9 +128,9 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Resend Invitation',
       // A confirmation, not a form: the question rides `description` (one
       // dialog, see `action-confirm-one-dialog.test.ts`) and both params are
-      // carried over from the row. Editing them did nothing useful: invite-member
-      // renews a pending invitation with its STORED role whatever role is sent,
-      // and a changed email invited a different person.
+      // carried over from the row. invite-member renews a pending invitation
+      // with its stored role whatever role is sent, and another email would
+      // invite a different person, so neither is the user's to edit here.
       description: 'Resend the invitation to ${record.email}? Its expiry date starts over.',
       icon: 'send',
       variant: 'secondary',
@@ -147,7 +147,7 @@ export const SysInvitation = ObjectSchema.create({
       outcomeMessages: { ...RESEND_INVITATION_OUTCOME_MESSAGES },
       refreshAfter: true,
       // Both seeded from the row, so every list view that offers this action
-      // projects `email` and `role` (`resend-invitation-confirm.test.ts`).
+      // projects `email` and `role` (`invitation-screens-copy.test.ts`).
       params: [
         { field: 'email', required: true, defaultFromRow: true, carryOver: true },
         { field: 'role', required: true, defaultFromRow: true, carryOver: true },

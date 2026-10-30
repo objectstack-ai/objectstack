@@ -861,7 +861,9 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
                   onChange={(v: unknown) => updateValue(param.name, v)}
                   field={field}
                   className={errors[param.name] ? 'border-destructive' : ''}
-                  aria-invalid={errors[param.name] ? true : undefined}
+                  // The widget's validation slot: it sets `aria-invalid` on its
+                  // control. The message itself is drawn below, once.
+                  error={errorText(param.name, param.label)}
                   // State channel for required (objectui#3299) — deliberately NOT
                   // the native `required` attribute (#3290 ruling: that would arm
                   // the browser's constraint-validation bubble alongside the

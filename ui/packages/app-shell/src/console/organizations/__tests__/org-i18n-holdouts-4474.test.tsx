@@ -432,6 +432,14 @@ describe('#4474 family 3 — icon-only buttons carry a translated aria-label —
     await waitFor(() => expect(screen.getByLabelText('复制邀请链接')).toBeInTheDocument());
   });
 
+  it('the cancel dialog dismisses with "Keep invitation", not a second "Cancel" (objectstack#27521 row 9)', async () => {
+    renderIn('en', <InvitationsPage />);
+    await waitFor(() => expect(screen.getByTestId('invitations-page')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Cancel invitation'));
+    expect(await screen.findByRole('button', { name: 'Keep invitation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
+
   it('MUST NOT CHANGE — en aria-labels stay the English the card measured', async () => {
     renderIn('en', <InvitationsPage />);
     await waitFor(() => expect(screen.getByTestId('invitations-page')).toBeInTheDocument());
