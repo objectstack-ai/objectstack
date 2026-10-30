@@ -56,6 +56,7 @@ function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>
             if (!(v as Array<Record<string, unknown>>).some((c) => matchesWhere(r, c))) return false;
             continue;
         }
+        if (k.startsWith('$')) throw new Error(`test double: unsupported combinator '${k}'`);
         if (v === undefined) continue;
         if ((r[k] ?? null) !== v) return false;
     }
@@ -108,15 +109,16 @@ function makeProtocol(opts: { unreadableCommits?: readonly string[] } = {}) {
             if (table !== 'sys_metadata') return null;
             return findRow(o.where)?.row ?? null;
         },
-        async find(table: string, o?: { where?: Record<string, unknown> }) {
-            if (table === 'sys_metadata_commit') {
-                return commits.filter((c) => c.package_id === o?.where?.package_id);
-            }
-            if (table === 'sys_metadata_history') {
-                return historyRows.filter((h) => matchesHistory(h, o?.where ?? {}));
-            }
-            if (table !== 'sys_metadata') return [];
-            return Array.from(rows.values()).filter((r) => matchesWhere(r as any, o?.where ?? {}));
+        async find(table: string, o?: { where?: Record<string, unknown>; limit?: number }) {
+            const matched: unknown[] =
+                table === 'sys_metadata_commit'
+                    ? commits.filter((c) => c.package_id === o?.where?.package_id)
+                    : table === 'sys_metadata_history'
+                        ? historyRows.filter((h) => matchesHistory(h, o?.where ?? {}))
+                        : table === 'sys_metadata'
+                            ? Array.from(rows.values()).filter((r) => matchesWhere(r as any, o?.where ?? {}))
+                            : [];
+            return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
         },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
