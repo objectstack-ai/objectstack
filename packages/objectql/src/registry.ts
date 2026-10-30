@@ -3499,6 +3499,11 @@ export class SchemaRegistry {
    * {@link securityCatalogPackageHolders}'s answer, the one predicate. Built-in
    * names are skipped, as the cold boot skips them (see the method above).
    * Sorted by type in that list's order, then name.
+   *
+   * Also read BY NAME from `@objectstack/metadata-protocol`
+   * (`protocol-save-door-refusals.ts`, `registryPackageHoldersOf`): renaming
+   * this member means updating that caller and
+   * `protocol-permission-set-name-registry-reading.test.ts`.
    */
   private packageHeldSecurityCatalogNames(): Array<{ catalogType: SecurityCatalogType; name: string; packageIds: string[] }> {
     const held: Array<{ catalogType: SecurityCatalogType; name: string; packageIds: string[] }> = [];
