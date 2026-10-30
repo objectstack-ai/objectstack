@@ -445,12 +445,22 @@ function ChartTooltipContent({
 
 const ChartLegend = Legend
 
+/**
+ * The swatch a legend item draws for a series, keyed by its `dataKey`, when
+ * the chart knows better than the colour recharts hands the legend: a mark
+ * filled from a gradient hands it a paint-server reference (`url(#…)`), which
+ * no swatch can draw. A `comparison` series draws its swatch hollow, the way
+ * its mark is muted.
+ */
+export type LegendSwatch = { color: string; comparison?: boolean }
+
 function ChartLegendContent({
   className,
   hideIcon = false,
   payload,
   verticalAlign = "bottom",
   nameKey,
+  swatches,
 }: any) {
   const { config } = useChart()
 
@@ -471,6 +481,7 @@ function ChartLegendContent({
         .map((item: any) => {
           const key = `${nameKey || item.dataKey || "value"}`
           const itemConfig = getPayloadConfigFromPayload(config, item, key)
+          const swatch: LegendSwatch | undefined = (swatches as Record<string, LegendSwatch> | undefined)?.[String(item.dataKey)]
 
           return (
             <div
@@ -487,10 +498,16 @@ function ChartLegendContent({
                 // same shape as the tooltip indicator above (AGENTS.md styling
                 // carve-out; objectui#10021).
                 <div
-                  className="h-2 w-2 shrink-0 rounded-[2px] bg-(--color-bg)"
+                  className={cn(
+                    "h-2 w-2 shrink-0 rounded-[2px]",
+                    swatch?.comparison
+                      ? "border-[1.5px] border-(--color-bg) bg-transparent"
+                      : "bg-(--color-bg)"
+                  )}
+                  data-swatch={swatch?.comparison ? "comparison" : undefined}
                   style={
                     {
-                      "--color-bg": item.color,
+                      "--color-bg": swatch?.color ?? item.color,
                     } as React.CSSProperties
                   }
                 />

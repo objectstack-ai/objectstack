@@ -47,11 +47,12 @@ import {
   ChartTooltipContent,
   ChartLegend,
   ChartLegendContent,
+  type LegendSwatch,
   ChartContainerConfig
 } from './ChartContainerImpl';
 import { mapScatterClick, mapTreemapClick, mapSankeyClick } from './chartDrillEvents';
 import { formatterFor, domainFor, ticksFor, plotsWholeNumbers, RENDERABLE, SINGLE_VALUE_CHART_TYPES, TABULAR_CHART_TYPES, effectiveChartFamily, comboBaseFamily, placeYAxes, type DeclaredChartFamily, type NormalizedAxis, type NormalizedSeries, type ValueAxisSlot, type YAxisPlacement } from './normalizeChartSchema';
-import { buildCategoryRank, chartRowBucketId, isRealCalendarDate, toDateInputValue, toDisplayDate, type ChartSegmentClickEvent } from '@object-ui/core';
+import { buildCategoryRank, chartRowBucketId, formatMonthBucketLabel, isRealCalendarDate, toDateInputValue, toDisplayDate, type ChartSegmentClickEvent } from '@object-ui/core';
 import { createSafeTranslation, useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
 
 // Default color fallback for chart series
@@ -477,6 +478,87 @@ function estimateLabelWidthPx(label: string): number {
   let ems = 0;
   for (const glyph of label) ems += WIDE_GLYPH.test(glyph) ? 1 : NARROW_GLYPH_EM;
   return ems * AXIS_TICK_FONT_PX;
+}
+
+/**
+ * The most lines a horizontal-bar category label wraps to before it is cut.
+ * Two keep a bar's label beside its own bar at the row heights a dashboard
+ * tile draws.
+ */
+const CATEGORY_LABEL_MAX_LINES = 2;
+
+/**
+ * A horizontal-bar category label broken into lines that fit `maxWidthPx`,
+ * by the same upper estimate the x axis sizes its bands from
+ * ({@link estimateLabelWidthPx}). Words wrap whole; a word wider than a line
+ * is cut by glyph. Past {@link CATEGORY_LABEL_MAX_LINES} the last line ends in
+ * an ellipsis and `truncated` is set, so the tick carries the full label as
+ * its tooltip.
+ */
+function wrapCategoryLabel(label: string, maxWidthPx: number): { lines: string[]; truncated: boolean } {
+  const fits = (text: string) => estimateLabelWidthPx(text) <= maxWidthPx;
+  if (label === '' || fits(label)) return { lines: [label], truncated: false };
+  const lines: string[] = [];
+  let current = '';
+  const pushGlyphs = (word: string) => {
+    for (const glyph of word) {
+      if (current !== '' && !fits(current + glyph)) {
+        lines.push(current);
+        current = '';
+      }
+      current += glyph;
+    }
+  };
+  for (const word of label.split(/\s+/u).filter(Boolean)) {
+    const candidate = current === '' ? word : `${current} ${word}`;
+    if (fits(candidate)) {
+      current = candidate;
+    } else {
+      if (current !== '') lines.push(current);
+      current = '';
+      if (fits(word)) current = word;
+      else pushGlyphs(word);
+    }
+  }
+  if (current !== '') lines.push(current);
+  if (lines.length <= CATEGORY_LABEL_MAX_LINES) return { lines, truncated: false };
+  const kept = lines.slice(0, CATEGORY_LABEL_MAX_LINES);
+  let last = kept[kept.length - 1];
+  while (last.length > 0 && !fits(`${last}…`)) last = Array.from(last).slice(0, -1).join('');
+  kept[kept.length - 1] = `${last.trimEnd()}…`;
+  return { lines: kept, truncated: true };
+}
+
+/**
+ * What a left category axis keeps between its edge and the label's end:
+ * recharts' `tickSize` plus its default `tickMargin` of 2.
+ */
+const CATEGORY_TICK_INSET_PX = RECHARTS_TICK_SIZE + 2;
+
+/** The line advance of a wrapped category label, in em. */
+const CATEGORY_LABEL_LINE_EM = 1.1;
+
+/**
+ * The horizontal-bar CATEGORY axis tick: the full label, wrapped into the
+ * axis width ({@link wrapCategoryLabel}) and centred on its bar, with the full
+ * label as a tooltip when it had to be cut. It replaces the phone cut to eight
+ * characters, which left a bar named only by its first letters ("In Progr…").
+ */
+function WrappedCategoryTick(props: any) {
+  const { x, y, payload, textAnchor, maxWidthPx, formatLabel } = props;
+  const full = String(formatLabel(payload?.value) ?? '');
+  const { lines, truncated } = wrapCategoryLabel(full, maxWidthPx);
+  // Centre the block on the tick: the first line rises half the extra lines,
+  // and 0.355em puts a line's middle (not its baseline) on `y`.
+  const firstDy = `${0.355 - ((lines.length - 1) * CATEGORY_LABEL_LINE_EM) / 2}em`;
+  return (
+    <text x={x} y={y} textAnchor={textAnchor ?? 'end'} fill={AXIS_TICK_STYLE.fill} className="recharts-text recharts-cartesian-axis-tick-value">
+      {truncated ? <title>{full}</title> : null}
+      {lines.map((line, i) => (
+        <tspan key={i} x={x} dy={i === 0 ? firstDy : `${CATEGORY_LABEL_LINE_EM}em`}>{line}</tspan>
+      ))}
+    </text>
+  );
 }
 
 /** recharts' default chart margin, left plus right (5px each side). */
@@ -2281,8 +2363,10 @@ function AdvancedChartImplInner({
   }, []);
 
   // Format ISO date strings into compact "MMM D" / "MMM YYYY" labels for X-axis ticks.
-  // Falls back to the raw value when not parseable as a date.
-  const formatTick = React.useCallback((value: any): string => {
+  // Falls back to the raw value when not parseable as a date. The full label:
+  // `formatTick` below adds the phone cut, which the horizontal-bar category
+  // axis does not take (it wraps instead, see `WrappedCategoryTick`).
+  const formatCategoryLabel = React.useCallback((value: any): string => {
     if (value == null || value === '') return '';
     // A resolved display label for this exact category value — the same
     // `config[key]?.label` convention already used for series names (below)
@@ -2292,6 +2376,10 @@ function AdvancedChartImplInner({
     const resolved = config?.[String(value)]?.label;
     if (resolved != null) return String(resolved);
     const str = typeof value === 'string' ? value : String(value);
+    // A month bucket key (`2025-10`, a `month`-granularity date dimension) reads
+    // as `Oct 2025`; the key itself stays the bucket's identity in the row.
+    const month = formatMonthBucketLabel(str, displayLocale);
+    if (month !== undefined) return month;
     // Detect ISO 8601 date / datetime strings (YYYY-MM-DD or with time component)
     const isoLike = /^\d{4}-\d{2}-\d{2}/.test(str);
     if (isoLike) {
@@ -2327,9 +2415,13 @@ function AdvancedChartImplInner({
         }
       }
     }
+    return str;
+  }, [data, xAxisKey, config, displayLocale]);
+  const formatTick = React.useCallback((value: any): string => {
+    const str = formatCategoryLabel(value);
     if (isMobile && str.length > 8) return str.slice(0, 8) + '…';
     return str;
-  }, [data, xAxisKey, isMobile, config, displayLocale]);
+  }, [formatCategoryLabel, isMobile]);
 
   // Memoize whether any X-axis label is long enough to warrant angle rotation
   const hasLongLabels = React.useMemo(
@@ -3477,6 +3569,12 @@ function AdvancedChartImplInner({
 
   // Horizontal bar — swap X/Y axis types and orientation.
   const isHorizontal = chartType === 'horizontal-bar';
+  // Its category axis draws each label in full (no phone cut), wrapped into
+  // this width by `WrappedCategoryTick`.
+  const categoryTickFormatter = formatterFor(xAxisSpec?.format, displayLocale) ?? formatCategoryLabel;
+  const categoryAxisWidth = isHorizontal
+    ? Math.min(140, Math.max(60, Math.ceil(Math.max(0, ...data.map((d) => estimateLabelWidthPx(String(categoryTickFormatter(d?.[xAxisKey]) ?? ''))))) + CATEGORY_TICK_INSET_PX))
+    : 0;
 
   // Build vertical fill gradients (bar + area) for every colour in play, so
   // fills read as a polished ramp instead of flat blocks (大屏 look). Inline
@@ -3491,6 +3589,30 @@ function AdvancedChartImplInner({
     ...series.map((s: any, i: number) => resolveColor(((config[s.dataKey] as any)?.color) || _gpal[i % _gpal.length] || DEFAULT_CHART_COLOR)),
   ]));
   const gslug = (c: string) => 'g' + c.replace(/[^a-zA-Z0-9]/g, '');
+
+  // A series' colour. A comparison series mirrors the colour of the primary
+  // series it overlays rather than taking a fresh palette slot: the first
+  // non-comparison series above it.
+  const seriesColorAt = (sIdx: number): string => {
+    const s = series[sIdx];
+    const isComparison = s?.variant === 'comparison';
+    const baseSeries = isComparison
+      ? (series.slice(0, sIdx).find((p: any) => p.variant !== 'comparison') || series[0])
+      : s;
+    const baseIdx = isComparison ? series.indexOf(baseSeries) : sIdx;
+    return resolveColor(config[baseSeries.dataKey]?.color || _gpal[baseIdx % _gpal.length] || DEFAULT_CHART_COLOR);
+  };
+  // The legend's swatch per series. A bar or area mark fills from a gradient,
+  // so the colour recharts hands the legend is a paint-server reference no
+  // swatch can draw; the swatch takes the series colour instead. A comparison
+  // swatch is drawn hollow, the way its mark is muted, so it reads apart from
+  // the primary series it shares a colour with.
+  const legendSwatches: Record<string, LegendSwatch> = Object.fromEntries(
+    series.map((s: any, sIdx: number) => [
+      String(s.dataKey),
+      { color: seriesColorAt(sIdx), comparison: s.variant === 'comparison' },
+    ]),
+  );
 
   return (
     <ChartFrame title={title} subtitle={subtitle}>
@@ -3543,14 +3665,18 @@ function AdvancedChartImplInner({
                 `position` included: `left` / `right` are its sides here
                 (objectui#10587, see `placeXAxis`). Its `title` follows them too,
                 laid out for an axis running down the plot (objectui#10654). */}
+            {/* The category labels wrap inside the axis width and carry the
+                full label as a tooltip when cut (`WrappedCategoryTick`); the
+                width is sized from the widest label, between 60 and 140 px. */}
             <YAxis
               type="category"
               dataKey={xAxisKey}
-              tick={AXIS_TICK_STYLE}
+              tick={(tickProps: any) => (
+                <WrappedCategoryTick {...tickProps} maxWidthPx={categoryAxisWidth - CATEGORY_TICK_INSET_PX} formatLabel={categoryTickFormatter} />
+              )}
               tickLine={false}
               axisLine={false}
-              width={Math.min(140, Math.max(60, Math.max(...data.map(d => String(d[xAxisKey] ?? '').length)) * 7))}
-              tickFormatter={xTickFormatter}
+              width={categoryAxisWidth}
               {...(xAxisDown ? { orientation: xAxisDown } : {})}
               {...(xAxisSpec?.title ? { label: { value: xAxisSpec.title, ...yAxisTitleLayoutFor(xAxisDown) } } : {})}
             />
@@ -3608,23 +3734,15 @@ function AdvancedChartImplInner({
         {tooltipsEnabled ? <ChartTooltip content={<ChartTooltipContent />} /> : null}
         {legendVisible ? (
           <ChartLegend
-            content={<ChartLegendContent />}
+            content={<ChartLegendContent swatches={legendSwatches} />}
             {...(isMobile && { verticalAlign: "bottom", wrapperStyle: { fontSize: '11px', paddingTop: '8px' } })}
           />
         ) : null}
         {annotationEls}
         {brushEl}
         {series.map((s: any, sIdx: number) => {
-          const palette = getPalette();
-          // Comparison series should mirror the color of the primary series
-          // they overlay, not be assigned a fresh palette color. Find the
-          // first non-comparison series above this one and reuse its color.
           const isComparison = s.variant === 'comparison';
-          const baseSeries = isComparison
-            ? (series.slice(0, sIdx).find((p: any) => p.variant !== 'comparison') || series[0])
-            : s;
-          const baseIdx = isComparison ? series.indexOf(baseSeries) : sIdx;
-          const seriesColor = resolveColor(config[baseSeries.dataKey]?.color || palette[baseIdx % palette.length] || DEFAULT_CHART_COLOR);
+          const seriesColor = seriesColorAt(sIdx);
 
           // Spec `series[].yAxis` binds this series to a value-axis slot. Only
           // meaningful once a second axis is declared, and bound to the id the
