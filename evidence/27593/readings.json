@@ -1,0 +1,80 @@
+{
+  "rail1280": {
+    "window": 1280,
+    "state": "collapsed",
+    "rail": "rail",
+    "gapWidth": 48,
+    "panelWidth": 48,
+    "panelZ": "10",
+    "frameDisplay": "contents",
+    "mainLeft": 48,
+    "mainWidth": 1232,
+    "keepOpen": false
+  },
+  "overlay1280": {
+    "window": 1280,
+    "state": "expanded",
+    "rail": "overlay",
+    "gapWidth": 48,
+    "panelWidth": 256,
+    "panelZ": "40",
+    "frameDisplay": "contents",
+    "mainLeft": 48,
+    "mainWidth": 1232,
+    "keepOpen": true
+  },
+  "afterEsc1280": {
+    "window": 1280,
+    "state": "collapsed",
+    "rail": "rail",
+    "gapWidth": 48,
+    "panelWidth": 48,
+    "panelZ": "10",
+    "frameDisplay": "contents",
+    "mainLeft": 48,
+    "mainWidth": 1232,
+    "keepOpen": false
+  },
+  "triggerOverlay1280": {
+    "window": 1280,
+    "state": "expanded",
+    "rail": "overlay",
+    "gapWidth": 48,
+    "panelWidth": 256,
+    "panelZ": "40",
+    "frameDisplay": "contents",
+    "mainLeft": 48,
+    "mainWidth": 1232,
+    "keepOpen": true
+  },
+  "afterOutside1280": {
+    "window": 1280,
+    "state": "collapsed",
+    "rail": "rail",
+    "gapWidth": 48,
+    "panelWidth": 48,
+    "panelZ": "10",
+    "frameDisplay": "contents",
+    "mainLeft": 48,
+    "mainWidth": 1232,
+    "keepOpen": false
+  },
+  "wide1440": {
+    "window": 1440,
+    "state": "expanded",
+    "rail": null,
+    "gapWidth": 256,
+    "panelWidth": 256,
+    "panelZ": "10",
+    "frameDisplay": "contents",
+    "mainLeft": 256,
+    "mainWidth": 1184,
+    "keepOpen": false
+  },
+  "phone700": {
+    "window": 700,
+    "desktopSidebar": false,
+    "mobileSheet": true,
+    "main": 700
+  }
+}
