@@ -18,7 +18,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhooks",
-    description: "Outbound HTTP webhook subscription authored by an organization in the Studio editor or through the API. A webhook declared in code via defineStack({ webhooks }) / defineWebhook() is read from the metadata registry and writes no row here. Both are dispatched by the webhook auto-enqueuer onto the shared HTTP outbox.",
+    description: "An outbound HTTP webhook your organization creates here or through the API. Webhooks that come built into an app are not listed here. Both kinds are sent through the same delivery queue.",
     fields: {
       id: {
         label: "Webhook ID"

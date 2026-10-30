@@ -5,27 +5,33 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * The reader's arrangement of the record page's related cards
- * (objectstack#27055, Targets 7 and 10).
+ * The reader's arrangement of the record page's related panels
+ * (objectstack#27055, Targets 7 and 10; objectstack#27524, Target 10).
  *
- * Related cards are the reader's to arrange: reorder (drag, or 上移 / 下移),
- * collapse to title + count, hide. What a reader chose is kept per user ×
- * object in the console's workspace-preference store, never metadata; this
- * module is the pure rule that lays the author's default order and the
- * reader's choice over each other, so the column, the tabbed tier's 关联 tab
- * and the tests read one answer.
+ * Related panels are the reader's to arrange: reorder (drag the ⠿ handle, or
+ * ⌥↑ / ⌥↓ on it) and hide. A panel never collapses: its header switches to
+ * its tab, which is its enlarged face (objectstack#27524). What a reader
+ * chose is kept per user × object in the console's workspace-preference
+ * store, never metadata; this module is the pure rule that lays the author's
+ * default order and the reader's choice over each other, so the column, the
+ * tabbed tier's 关联 tab and the tests read one answer.
  *
  * ## The stored value is a DIFF against the default order
  *
- * `{ order, collapsed, hidden, basedOn }`, relationship ids being
- * `object.field` (the child object and its FK field):
+ * `{ order, hidden, basedOn }` (stored as `{ v, order, hidden, basedOn, seen }`,
+ * the codec adding `v`), relationship ids being `object.field` (the child
+ * object and its FK field):
  *
  *  - `order` — the order of the reader's last drag; EMPTY while the reader
- *    never dragged, which is "follow the default" (a collapse or a hide alone
- *    does not freeze the order);
- *  - `collapsed` / `hidden` — the cards the reader collapsed / hid;
+ *    never dragged, which is "follow the default" (a hide alone does not
+ *    freeze the order);
+ *  - `hidden` — the panels the reader hid;
  *  - `basedOn` — the hash of the default order the reader's `order` was laid
  *    over ({@link relatedDefaultOrderHash}).
+ *
+ * The earlier shape also carried `collapsed`; it is gone with no
+ * compatibility read (the codec's version moved, so a record of the old shape
+ * is "no choice").
  *
  * ## The merge rules (the maintainer's, on the card, each pinned by a test)
  *
@@ -34,16 +40,16 @@
  *     author's default never reorders them — only 「恢复默认顺序」 does.
  *  3. A relationship new since the reader last dragged is inserted after the
  *     nearest card that precedes it in the default order and exists in the
- *     reader's order (first in default → first), carries a 「新」 badge for
- *     48 h, and takes the default collapsed state.
+ *     reader's order (first in default → first) and carries a 「新」 badge for
+ *     48 h.
  *  4. A relationship that no longer exists is dropped from `order` (and from
- *     `collapsed` / `hidden`) on the next write.
+ *     `hidden`) on the next write.
  *  5. When `basedOn` differs from the current default's hash, the column
  *     says so: 「默认顺序已更新 · 恢复默认」.
  *  6. Hidden cards leave the column; its last line 「已隐藏 N 张 · 显示」
  *     brings them back.
  *
- * Rule 3's 48 h needs a clock the four keys cannot carry, so the value has
+ * Rule 3's 48 h needs a clock the three keys cannot carry, so the value has
  * one more member, `seen` — when this reader first saw each new relationship
  * (epoch ms). It is written once per new relationship, by the host, and
  * dropped with the relationship.
@@ -65,7 +71,6 @@ export type RelatedCardId = string;
 /** The reader's stored arrangement — see the module header. */
 export interface RelatedArrangement {
   order: RelatedCardId[];
-  collapsed: RelatedCardId[];
   hidden: RelatedCardId[];
   basedOn: string;
   /** When the reader first saw each relationship new since their last drag (epoch ms). */
@@ -74,12 +79,11 @@ export interface RelatedArrangement {
 
 /**
  * The arrangement of a reader who chose nothing: the default order, every
- * card open and shown. Equivalent to no stored value in every rule — the
- * host's fallback while the store holds no choice.
+ * panel shown. Equivalent to no stored value in every rule — the host's
+ * fallback while the store holds no choice.
  */
 export const EMPTY_RELATED_ARRANGEMENT: RelatedArrangement = Object.freeze({
   order: [],
-  collapsed: [],
   hidden: [],
   basedOn: '',
 }) as RelatedArrangement;
@@ -113,7 +117,6 @@ export interface ResolvedRelatedArrangement {
   order: RelatedCardId[];
   /** Every existing card in display order, hidden ones in their place. */
   fullOrder: RelatedCardId[];
-  collapsed: ReadonlySet<RelatedCardId>;
   hidden: RelatedCardId[];
   /** Cards that carry the 「新」 badge (rule 3). */
   fresh: ReadonlySet<RelatedCardId>;
@@ -132,18 +135,11 @@ export interface ResolvedRelatedArrangement {
   rearranged: boolean;
 }
 
-/**
- * Lay the reader's stored arrangement over the default order (rules 1–6).
- *
- * `defaultCollapsed` is the default collapsed state of each card (a card the
- * page draws collapsed until the reader opens it); every card is open by
- * default when it is omitted.
- */
+/** Lay the reader's stored arrangement over the default order (rules 1–6). */
 export function resolveRelatedArrangement(
   defaultOrder: readonly RelatedCardId[],
   stored: RelatedArrangement | undefined,
   now: number,
-  defaultCollapsed: ReadonlySet<RelatedCardId> = new Set(),
 ): ResolvedRelatedArrangement {
   const exists = new Set(defaultOrder);
   const dragged = !!stored && stored.order.length > 0;
@@ -174,13 +170,6 @@ export function resolveRelatedArrangement(
     });
   }
   const hiddenSet = new Set((stored?.hidden ?? []).filter((id) => exists.has(id)));
-  const collapsed = new Set<RelatedCardId>();
-  for (const id of fullOrder) {
-    // A new relationship takes the default collapsed state (rule 3); every
-    // other card the state the reader's last write recorded for it.
-    const fromDefault = !stored || newSinceDrag.includes(id);
-    if (fromDefault ? defaultCollapsed.has(id) : stored!.collapsed.includes(id)) collapsed.add(id);
-  }
   // Rule 3's badge runs on the reader's clock, not on the order: a
   // relationship new since the last drag is fresh until stamped, and a stamped
   // one stays fresh for 48 h from its stamp — a later drag, which takes it
@@ -201,7 +190,6 @@ export function resolveRelatedArrangement(
   return {
     order: fullOrder.filter((id) => !hiddenSet.has(id)),
     fullOrder,
-    collapsed,
     hidden,
     fresh,
     unseen,
@@ -216,14 +204,12 @@ export type RelatedArrangementEdit =
   | { kind: 'move'; id: RelatedCardId; to: number }
   | { kind: 'move-up'; id: RelatedCardId }
   | { kind: 'move-down'; id: RelatedCardId }
-  | { kind: 'collapse'; id: RelatedCardId; collapsed: boolean }
   | { kind: 'hide'; id: RelatedCardId }
   | { kind: 'show-hidden' }
   | { kind: 'restore-default-order' }
   /**
    * 「恢复默认顺序」 (objectstack#27241): the default order with every card
-   * shown — the column a reader who never arranged it sees; collapsed state
-   * stays the reader's.
+   * shown — the column a reader who never arranged it sees.
    */
   | { kind: 'restore-default-arrangement' }
   | { kind: 'mark-seen'; ids: RelatedCardId[]; at: number };
@@ -241,9 +227,8 @@ export function editRelatedArrangement(
   stored: RelatedArrangement | undefined,
   edit: RelatedArrangementEdit,
   now: number,
-  defaultCollapsed: ReadonlySet<RelatedCardId> = new Set(),
 ): RelatedArrangement {
-  const resolved = resolveRelatedArrangement(defaultOrder, stored, now, defaultCollapsed);
+  const resolved = resolveRelatedArrangement(defaultOrder, stored, now);
   const exists = new Set(defaultOrder);
   const hash = relatedDefaultOrderHash(defaultOrder);
   const keepSeen = (seen: Record<RelatedCardId, number> | undefined) => {
@@ -257,7 +242,6 @@ export function editRelatedArrangement(
   // until the reader drags again.
   const base: RelatedArrangement = {
     order: resolved.dragged ? stored!.order.filter((id, index, all) => exists.has(id) && all.indexOf(id) === index) : [],
-    collapsed: resolved.fullOrder.filter((id) => resolved.collapsed.has(id)),
     hidden: [...resolved.hidden],
     basedOn: resolved.dragged ? stored!.basedOn : hash,
     seen: keepSeen(stored?.seen),
@@ -289,11 +273,6 @@ export function editRelatedArrangement(
       if (at < 0) return finish(base);
       return moveTo(edit.id, edit.kind === 'move-up' ? at - 1 : at + 1);
     }
-    case 'collapse': {
-      const collapsed = base.collapsed.filter((id) => id !== edit.id);
-      if (edit.collapsed && exists.has(edit.id)) collapsed.push(edit.id);
-      return finish({ ...base, collapsed: resolved.fullOrder.filter((id) => collapsed.includes(id)) });
-    }
     case 'hide':
       if (!exists.has(edit.id) || base.hidden.includes(edit.id)) return finish(base);
       return finish({ ...base, hidden: resolved.fullOrder.filter((id) => id === edit.id || base.hidden.includes(id)) });
@@ -314,6 +293,13 @@ export function editRelatedArrangement(
 }
 
 /**
+ * The version of the stored record (`v`, added by the host's codec). Version
+ * 1 carried `collapsed`; version 2 does not, and a version-1 record is "no
+ * choice" — no compatibility read (objectstack#27524, Target 10).
+ */
+export const RELATED_ARRANGEMENT_RECORD_VERSION = 2;
+
+/**
  * Read a stored record into an arrangement, or `undefined` for one this
  * module does not read (the codec's `fromRecord`). Strict: every list is an
  * array of strings, `basedOn` a string, `seen` a string → finite-number map.
@@ -322,9 +308,8 @@ export function relatedArrangementFromRecord(record: Record<string, unknown>): R
   const ids = (value: unknown): string[] | undefined =>
     Array.isArray(value) && value.every((v) => typeof v === 'string') ? (value as string[]) : undefined;
   const order = ids(record.order);
-  const collapsed = ids(record.collapsed);
   const hidden = ids(record.hidden);
-  if (!order || !collapsed || !hidden || typeof record.basedOn !== 'string') return undefined;
+  if (!order || !hidden || typeof record.basedOn !== 'string') return undefined;
   let seen: Record<string, number> | undefined;
   if (record.seen !== undefined) {
     if (!record.seen || typeof record.seen !== 'object' || Array.isArray(record.seen)) return undefined;
@@ -334,14 +319,13 @@ export function relatedArrangementFromRecord(record: Record<string, unknown>): R
       seen[id] = at;
     }
   }
-  return { order, collapsed, hidden, basedOn: record.basedOn, ...(seen ? { seen } : {}) };
+  return { order, hidden, basedOn: record.basedOn, ...(seen ? { seen } : {}) };
 }
 
 /** The stored record of an arrangement (the codec's `toRecord`). */
 export function relatedArrangementToRecord(value: RelatedArrangement): Record<string, unknown> {
   return {
     order: value.order,
-    collapsed: value.collapsed,
     hidden: value.hidden,
     basedOn: value.basedOn,
     ...(value.seen && Object.keys(value.seen).length > 0 ? { seen: value.seen } : {}),

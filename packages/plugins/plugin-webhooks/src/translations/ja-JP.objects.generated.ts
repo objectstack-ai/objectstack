@@ -18,7 +18,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "ウェブフック",
     pluralLabel: "ウェブフック",
-    description: "送信 HTTP Webhook サブスクリプション。組織がスタジオエディタまたは API で作成します。コードで defineStack({ webhooks }) / defineWebhook() により宣言した Webhook はメタデータレジストリから読み取られ、ここに行を書き込みません。どちらも Webhook 自動エンキューアが共有 HTTP アウトボックスへディスパッチします。",
+    description: "組織がここまたは API で作成する送信 HTTP Webhook。アプリに組み込まれた Webhook はここには表示されません。どちらも同じ配信キューを通じて送信されます。",
     fields: {
       id: {
         label: "Webhook ID"
