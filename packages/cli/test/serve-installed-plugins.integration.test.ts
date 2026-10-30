@@ -39,9 +39,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateEd25519KeyPair, signPayload } from '@objectstack/core';
-import { loadPluginInstallations, pluginInstallDir } from '@objectstack/runtime';
+import { loadPluginInstallations, pluginInstallDir, recordPluginInstallation } from '@objectstack/runtime';
 import { isExitSignal } from '../src/utils/format.js';
-import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from '../src/utils/osplugin.js';
+import { MANIFEST_FILENAME, computeIntegrity, createTarGz, readTarGz, sha256Hex, type ArchiveFile } from '../src/utils/osplugin.js';
+import { materializePlugin } from '../src/utils/plugin-install.js';
 import PluginBuild from '../src/commands/plugin/build.js';
 import PluginInstall from '../src/commands/plugin/install.js';
 import PluginDisable from '../src/commands/plugin/disable.js';
@@ -121,7 +122,7 @@ const savedCwd = process.cwd();
 const marker = (id: string) => join(home, `init-${id}`);
 
 /** A signed `.osplugin` whose `init` writes {@link marker}. */
-function signedArtifact(id: string, runtime = 'node'): string {
+function signedArtifact(id: string, runtime = 'node', extra: Record<string, unknown> = {}): string {
   const files: ArchiveFile[] = [{
     path: 'dist/index.mjs',
     data: text(
@@ -130,7 +131,7 @@ function signedArtifact(id: string, runtime = 'node'): string {
       + `init() { writeFileSync(${JSON.stringify(marker(id))}, 'ran'); } };\n`,
     ),
   }];
-  const manifest = { id, version: '1.0.0', type: 'plugin', runtime, packaging: 'bundled', integrity: computeIntegrity(files) };
+  const manifest = { id, version: '1.0.0', name: 'Probe', type: 'plugin', runtime, packaging: 'bundled', integrity: computeIntegrity(files), ...extra };
   const path = join(root, `${id}.osplugin`);
   writeFileSync(path, createTarGz([...files, { path: MANIFEST_FILENAME, data: text(JSON.stringify(manifest)) }]));
   writeFileSync(`${path}.sig`, signPayload(new Uint8Array(readFileSync(path)), publisher.privateKeyPem, KEY_ID));
@@ -206,7 +207,8 @@ function boot(): Promise<Boot> {
   });
 }
 
-const IDS = ['com.acme.loads', 'com.acme.sandboxed', 'com.acme.tampered', 'com.acme.disabled', 'com.acme.removed'] as const;
+const RETIRED = 'com.acme.retired';
+const IDS = ['com.acme.loads', 'com.acme.sandboxed', 'com.acme.tampered', 'com.acme.disabled', 'com.acme.removed', RETIRED] as const;
 
 let first: Boot;
 let second: Boot;
@@ -250,6 +252,23 @@ beforeAll(async () => {
   const builtInstall = await run(PluginInstall, [await builtArtifact(), ...db, '--json']);
   expect(builtInstall.exitCode, builtInstall.stdout.slice(-400)).toBe(0);
   writeFileSync(join(pluginInstallDir('env_local', 'com.acme.tampered', '1.0.0'), 'dist', 'index.mjs'), 'export default { name: "evil", init() {} };\n');
+  // A pre-retirement install: what an `os plugin install` that read only the
+  // manifest's `id`/`version` laid down from an artifact this one refuses
+  // (`packaging: 'manifest-deps'`), signed by the trusted key.
+  {
+    const path = signedArtifact(RETIRED, 'node', { packaging: 'manifest-deps' });
+    const bytes = new Uint8Array(readFileSync(path));
+    const dir = pluginInstallDir('env_local', RETIRED, '1.0.0');
+    materializePlugin({ dir, files: readTarGz(bytes), artifact: bytes, signature: readFileSync(`${path}.sig`, 'utf8') });
+    const template = loadPluginInstallations('env_local').find((r) => r.id === 'com.acme.loads')!;
+    recordPluginInstallation('env_local', {
+      ...template,
+      id: RETIRED,
+      versionId: `${RETIRED}@1.0.0`,
+      dir,
+      artifact: { ...template.artifact, sha256: sha256Hex(bytes) },
+    });
+  }
   expect((await run(PluginDisable, ['com.acme.disabled', '--json'])).exitCode).toBe(0);
   expect((await run(PluginUninstall, ['com.acme.removed', '--json'])).exitCode).toBe(0);
 
@@ -295,6 +314,15 @@ describe('[#27123] os serve loads installed plugins, verified, by tier', () => {
     expect(ranAfterFirst).not.toContain('com.acme.tampered');
   });
 
+  it("refuses a pre-retirement artifact (packaging: 'manifest-deps') with the schema's prescription, not import_failed, and boots on", () => {
+    expect(first.output).toMatch(
+      /✗ Refused installed plugin com\.acme\.retired@1\.0\.0 \(manifest_invalid\): .*packaging: `packaging: 'manifest-deps'` was removed/,
+    );
+    expect(first.output).not.toMatch(/com\.acme\.retired@1\.0\.0 \(import_failed\)/);
+    expect(ranAfterFirst).not.toContain(RETIRED);
+    expect(ranInSecond).not.toContain(RETIRED);
+  });
+
   it('skips the disabled plugin, saying so, until it is enabled', () => {
     expect(first.output).toMatch(/Installed plugin com\.acme\.disabled@1\.0\.0 is disabled/);
     expect(ranAfterFirst).not.toContain('com.acme.disabled');
@@ -313,6 +341,7 @@ describe('[#27123] os serve loads installed plugins, verified, by tier', () => {
     expect(loadPluginInstallations('env_local').map((r) => r.id).sort()).toEqual([
       BUILT,
       'com.acme.disabled',
+      RETIRED,
       'com.acme.sandboxed',
       'com.acme.tampered',
     ]);

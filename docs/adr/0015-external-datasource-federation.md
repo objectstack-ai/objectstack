@@ -4,7 +4,39 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8.
+
+> **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
+> §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
+> database. An **API-backed** datasource (a plugin-contributed driver over a vendor API, such as
+> OData) may instead name a declared connector instance in `external.connector` and borrow that
+> instance's credential — whichever kind its `auth` declares (`ConnectorInstanceAuthSchema`:
+> `bearer`, `api-key` and `basic` today; ADR-0143 D2 adds the grant-bearing `oauth2`,
+> `app-credential` and `signed`), resolved as ADR-0143 D4 resolves the instance's own: a static kind
+> once at materialization, a grant-bearing kind per dispatch. The datasource connection service hands
+> it to the driver (the runtime half, #27746). One Connect per vendor then serves both the connector's
+> actions (flows) and the datasource's records (virtual objects), and one reconnect restores both.
+> The contract (`packages/spec/src/data/datasource.zod.ts#ExternalDatasourceSettingsSchema`):
+>
+> - `connector` and `credentialsRef` are exclusive; a datasource carrying both is refused, rather
+>   than one silently winning.
+> - `connector` is refused on a built-in database driver (it lends an HTTP credential) and on a
+>   managed datasource (an API-backed datasource's schema is the remote system's).
+> - The named instance must be declared in the same stack: a `connectors` entry with a
+>   `provider` and an `auth` other than `none`. Anything else is refused at build
+>   (`packages/spec/src/stack.zod.ts#collectDatasourceConnectorErrors`).
+>
+> Execution identity is not reopened: ADR-0143 Q1 = A (organization-shared) applies to the
+> virtual-object read as to the flow dispatch, and object permissions and RLS stay the only gate
+> on what a user sees. A datasource stays environment-scoped (§10). The connection it borrows is
+> selected per dispatch by the request's organization, and a read that carries no organization
+> (a boot-time drift check, a schedule) uses the instance's connection only when exactly one exists
+> (ADR-0143 D4). Under the ruled single-organization posture (#27230 S1: one environment, one
+> organization), that is always exactly one, so the environment-level datasource and the
+> `(organization, connector instance)` connection record meet without a new rule. A shared
+> environment hosting several organizations is outside S1: there a no-organization read is
+> refused, never answered from an arbitrary organization's grant. Not taken: a second auth block
+> on the datasource (two grants per vendor that drift), and a static key for OAuth sources.
 
 > **Amendment note (2026-10-27, ADR-0143) — attribution only, no decision changes.** ADR-0018,
 > ADR-0022, ADR-0023, ADR-0024 and ADR-0097 put OAuth2 refresh and per-tenant connection lifecycle
@@ -622,10 +654,30 @@ export default defineDatasource({
     allowWrites: false,
     validation: { onMismatch: 'fail', checkOnBoot: true },
     queryTimeoutMs: 15_000,
-    credentialsRef: 'secret:warehouse/readonly',
+    // The opaque handle the secret store minted (Setup → Datasources binds
+    // the password and writes it here); the shipped binder resolves only
+    // `sys_secret:` handles.
+    credentialsRef: 'sys_secret:9f2c…',
   },
 });
 ```
+
+> **Amendment note (2026-10-30, #27688) — the example's credential handle; no decision changes.**
+> The `credentialsRef` above is the amended one; the original read
+> `credentialsRef: 'secret:warehouse/readonly'`. That form parses, but nothing shipped resolves it.
+> The datasource secret binder dereferences only a `sys_secret:<id>` handle, `<id>` being the
+> `sys_secret` row the secret store minted when the credential was bound
+> (`packages/services/service-datasource/src/datasource-secret-binder.ts#parseCredentialsRef`).
+> A hand-written path resolves to nothing, and the connection service leaves the datasource
+> unconnected (`failed-credentials`). The Setup → Datasources connection form's secret field
+> encrypts the password into `sys_secret` and writes the handle here; the datasource schema's
+> refusals and `content/docs/data-modeling/drivers.mdx` teach the same form (PR #27656). §10's
+> `service-secrets` names no shipped package: this binder is the component that resolves the
+> reference, and what it yields is the password, injected beside a credential-free `config` at
+> connect. The rest of the example is kept as written, as the surface this record was taken on.
+> Today's parse refuses two of its keys by name, each with its fix: `external.label` (removed in
+> `@objectstack/spec` 17.0.0 under ADR-0049; the label is the datasource's top-level one) and
+> `config.connectionString` (spelled `url`).
 
 ```bash
 os datasource list-tables warehouse --schema mart
@@ -706,7 +758,10 @@ managed Postgres for low-latency joins.
 
 - **Credentials** never appear in metadata artefacts. `credentialsRef`
   points at `service-secrets`; the secrets service is the only
-  component that resolves the actual connection string.
+  component that resolves the actual connection string. *(Amended by
+  D7, see the note at the top: an API-backed datasource may instead
+  borrow a declared connector instance's credential through
+  `external.connector`.)*
 - **Connection pools** default conservatively for external mode
   (`max: 5`) to protect the remote system; `pool` may be overridden.
 - **Timeouts** are enforced at the driver. AI tool calls additionally

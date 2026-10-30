@@ -214,7 +214,8 @@ describe('the Validations New menu opens on presets (objectui#11861)', () => {
     const cel = 'record.start_date != null && record.end_date != null && record.end_date < record.start_date';
     expect(lastValidations(onPatch)[0]).toMatchObject({
       type: 'cross_field',
-      name: 'validation_1',
+      // objectstack#27521 — a preset's rule is named from its message.
+      name: 'end_date_must_be_on_or_after_start_date',
       condition: cel,
       // fields[0] is where the server attaches the violation: the end date.
       fields: ['end_date', 'start_date'],
@@ -252,7 +253,7 @@ describe('the Validations New menu opens on presets (objectui#11861)', () => {
     expect(screen.getByTestId('rule-held')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Create' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Update' })).toBeChecked();
-    const group = screen.getByRole('group', { name: /Fail condition/ });
+    const group = screen.getByRole('group', { name: /When this condition is/ });
     await waitFor(() => expect(document.activeElement).toBe(group));
 
     typeGuard(GUARD);
@@ -266,7 +267,7 @@ describe('the Validations New menu opens on presets (objectui#11861)', () => {
     fireEvent.click(presetButton('not_negative'));
     // The menu hands focus back to "New", as it always did.
     await waitFor(() => expect(document.activeElement).toBe(screen.getByText('New')));
-    expect(document.activeElement).not.toBe(screen.getByRole('group', { name: /Fail condition/ }));
+    expect(document.activeElement).not.toBe(screen.getByRole('group', { name: /When this condition is/ }));
   });
 
   it('a preset the object cannot serve is disabled, says what it needs, and never takes a system or hidden field', () => {

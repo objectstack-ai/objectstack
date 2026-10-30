@@ -436,6 +436,8 @@ import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstall
 import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
+// [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
+import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -7015,6 +7017,9 @@ export class ObjectStackProtocolImplementation implements
      *  - [#26724] an object restored with a `datasource` that names no
      *    datasource here, when that is not the binding it holds now
      *    ({@link unknownDatasourceSaveRefusal});
+     *  - [#27818] a datasource restored with an `external.credentialsRef` the
+     *    active row it is restored into does not hold now
+     *    ({@link datasourceCredentialsRefSaveRefusal}, in its restore words);
      *  - a `runAs: 'system'` flow an anonymous endpoint names
      *    ({@link anonymousElevatedFlowRefusal}): a restore writes an ACTIVE
      *    row, the case the save door asks it of;
@@ -7068,6 +7073,7 @@ export class ObjectStackProtocolImplementation implements
             credentialChannelFor: (...a) => this.credentialChannelFor(...a),
             defaultRecordPageSaveRefusal: (...a) => this.defaultRecordPageSaveRefusal(...a),
             externalBindingSaveRefusal: (...a) => this.externalBindingSaveRefusal(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             permissionSetNameCollisionRefusal: (...a) => this.permissionSetNameCollisionRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
@@ -7218,6 +7224,11 @@ export class ObjectStackProtocolImplementation implements
      * Computed on every draft read rather than stored at save: the verdict
      * depends on the live universe and the package's other drafts, which a
      * stored verdict would not see change.
+     *
+     * [#27444] An object draft is also told the namespace-prefix verdict
+     * ({@link objectNamespacePrefixViolation}, `NAMESPACE_PREFIX`), the one
+     * rule outside the gate that the promotion doors refuse a draft on — the
+     * same judge, on the draft row's package, never a copy of it.
      */
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
@@ -7232,6 +7243,7 @@ export class ObjectStackProtocolImplementation implements
             foldStoredCollection: (...a) => this.foldStoredCollection(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
+            objectNamespacePrefixViolation: (...a) => this.objectNamespacePrefixViolation(...a),
             orgWallEnforced: (...a) => this.orgWallEnforced(...a),
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
@@ -8936,6 +8948,15 @@ export class ObjectStackProtocolImplementation implements
      * "does a code package ship this?" test (`isCodeArtifactBody`) applied to
      * the OWNER contributor alone.
      *
+     * [#27559] Its `validations` are the one exception to "owner only": the
+     * registry's `getPackagedObjectBase` appends the rules each CODE extender
+     * ships, because a rule's packaged message is whichever code layer shipped
+     * that rule name, and the rule evaluator's `packagedRuleLookup` reads the
+     * same answer, so `/meta` and the refusal judge a tenant's rewrite against
+     * one packaged rule set. The scalars above stay the owner's. A registry
+     * double that predates that method is read through
+     * `getPackagedObjectOwner`, the owner alone.
+     *
      * Returns `undefined` — meaning "no packaged baseline, do not infer
      * anything" — for a runtime/tenant-authored object (no code owner), an
      * unknown name, and a partial registry double. The caller's contract is
@@ -8944,8 +8965,10 @@ export class ObjectStackProtocolImplementation implements
     getPackagedObjectBase(name: string): unknown {
         if (typeof name !== 'string' || name === '') return undefined;
         const registry = (this.engine as any)?.registry;
-        if (!registry || typeof registry.getPackagedObjectOwner !== 'function') return undefined;
+        if (!registry) return undefined;
         try {
+            if (typeof registry.getPackagedObjectBase === 'function') return registry.getPackagedObjectBase(name);
+            if (typeof registry.getPackagedObjectOwner !== 'function') return undefined;
             return registry.getPackagedObjectOwner(name)?.definition;
         } catch {
             // Same rule as the fold above: a read over in-memory contributors
@@ -21282,6 +21305,17 @@ export class ObjectStackProtocolImplementation implements
             if (datasourceRefusal) throw datasourceRefusal;
         }
 
+        // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
+        // holds: refused 400 before the authoring gate and every write. See {@link datasourceCredentialsRefSaveRefusal}.
+        {
+            const repo = this.getOverlayRepo();
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: request.item,
+                mode, packageId: request.packageId, source: request.source,
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
+        }
+
         // [ADR-0138 D2b] A flow published with `runAs: 'system'` while an
         // anonymous endpoint of `type: 'flow'` names it is refused, in publish
         // mode only (a draft does not execute; its publish is judged at the
@@ -23043,7 +23077,10 @@ export class ObjectStackProtocolImplementation implements
         // binding the active row is written under), before `repo.promoteDraft`
         // writes — so a batch publish aborts on it as it aborts on the owner
         // refusal above. See {@link permissionSetNameCollisionRefusal}.
-        {
+        // Asked only when a draft was read, like its siblings: with none at
+        // the address the caller is told `repo.promoteDraft`'s `NO_DRAFT`
+        // first, the fact about its own state, rather than another owner's.
+        if (draftForGate) {
             const nameCollision = await this.permissionSetNameCollisionRefusal(
                 singularType, request.name, promoteInto, 'publish',
             );
@@ -23082,6 +23119,15 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, request.batchDatasources,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+        // [#27818] …and a datasource draft whose `external.credentialsRef` the active row it is promoted into
+        // (`promoteInto`) does not hold now: refused before `repo.promoteDraft` writes. See {@link datasourceCredentialsRefSaveRefusal}.
+        if (draftForGate) {
+            const credentialsRefRefusal = await datasourceCredentialsRefSaveRefusal({
+                headAt: (...a) => repo.headAt(...a), type: singularType, name: request.name, item: draftForGate.body,
+                mode: 'publish', packageId: promoteInto, source: undefined, door: 'publish',
+            });
+            if (credentialsRefRefusal) throw credentialsRefRefusal;
         }
         // [ADR-0138 D2b] …and a flow draft that would go `active` with
         // `runAs: 'system'` while an anonymous endpoint of `type: 'flow'` names
@@ -27121,6 +27167,15 @@ export class ObjectStackProtocolImplementation implements
      * Roll a package back THROUGH every `apply` commit newer than `commitId`
      * (newest first), leaving the package as it was at that commit. Each step is
      * an individual `revertCommit`, so the whole rollback is itself audited.
+     *
+     * `failed[]` carries both kinds of failure a step can have: a step that
+     * THREW (one entry for the commit), and every item a step REFUSED and
+     * reported in its own returned `failed[]` (one entry per item, its `error`
+     * naming the item and quoting the step's client-facing text). Either makes
+     * `success` false — the declared answer's "true exactly when nothing
+     * failed". A refused item stops neither its commit nor the rollback: the
+     * step still reverts the item's neighbours and records its revert commit,
+     * so that commit is also listed in `revertedCommits`.
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
@@ -27157,11 +27212,19 @@ export class ObjectStackProtocolImplementation implements
         const failed: Array<{ commitId: string; error: string }> = [];
         for (const c of toRevert) {
             try {
-                await this.revertCommit({
+                const step = await this.revertCommit({
                     commitId: c.id,
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 revertedCommits.push(c.id);
+                // An item the step refused is returned, never thrown; its
+                // `error` is already client-facing (P11).
+                for (const item of step.failed) {
+                    failed.push({
+                        commitId: c.id,
+                        error: `Item '${item.type}/${item.name}' was not reverted: ${item.error}`,
+                    });
+                }
             } catch (e: any) {
                 // [#8333 · P12] The derivative of P11 — `failed[].error` on the
                 // rollback response. Measured on `origin/main` by failing the

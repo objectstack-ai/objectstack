@@ -205,7 +205,7 @@ const fieldNames = (body: Record<string, unknown>) => readFields(body.fields).en
 // The object header's count: since objectui#12451 each Form section card
 // counts its own fields with the same words, so the read is scoped.
 const fieldCount = (editor: HTMLElement) =>
-  within(within(editor).getByTestId('data-object-header')).getByText(/^\d+ fields$/).textContent;
+  within(within(editor).getByTestId('data-object-header')).getByText(/^\d+ fields?( \(\+\d+ system\))?$/).textContent;
 const serverDraftFields = () => fieldNames(server.drafts.get(`object/${OBJECT.name}`)!.body);
 
 async function loaded(editor: HTMLElement, count: string): Promise<void> {
@@ -365,7 +365,7 @@ describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () 
     await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
     expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
 
-    await loaded(a, '1 fields');
+    await loaded(a, '1 field');
     fireEvent.click(within(a).getAllByRole('button', { name: 'Form' })[0]!);
     await addFieldAndSave(a, addFieldFromFormToolbar);
     await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);

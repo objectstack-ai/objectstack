@@ -2,6 +2,7 @@
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
+import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 
 /**
  * The BCP-47 shape `sys_user.locale` accepts — a 2–3 letter language subtag
@@ -115,6 +116,10 @@ export const SysUser = ObjectSchema.create({
       // `{{ result.email }}`: invite-member answers the bare invitation row,
       // whose top-level `email` is the invitee's address as stored (lowercased).
       successMessage: 'Invitation sent to {{ result.email }}',
+      // [#27843] The copy per delivery outcome invite-member answers: `sent`,
+      // or `link_only` when this deployment does not deliver mail. The
+      // `successMessage` above stays the fallback for an answer without one.
+      outcomeMessages: { ...INVITE_USER_OUTCOME_MESSAGES },
       refreshAfter: true,
       params: [
         { field: 'email', required: true },

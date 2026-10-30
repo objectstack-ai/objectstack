@@ -128,11 +128,11 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
     const type = within(popover).getByRole('combobox', { name: t('designer.field.type', 'en') });
     expect(type).toHaveAttribute('data-field-type', 'text');
     const create = within(popover).getByTestId('add-field-create');
-    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute('aria-disabled', 'true');
     await userEvent.type(label, '   ');
-    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute('aria-disabled', 'true');
     await userEvent.type(label, 'Score');
-    expect(create).toBeEnabled();
+    expect(create).not.toHaveAttribute('aria-disabled');
   });
 
   it('Create adds the field named as typed with the chosen type, and opens it in the inspector', async () => {
@@ -214,7 +214,7 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
     const popover = await screen.findByTestId('add-field-popover');
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), '满意度');
     const create = within(popover).getByTestId('add-field-create');
-    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute('aria-disabled', 'true');
     expect(within(popover).getByTestId('add-field-api-name-hint')).toHaveTextContent(
       t('engine.studio.data.addFieldApiNameNotDerived', 'en'),
     );
@@ -222,11 +222,11 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
     // Typed through the same normaliser as the inspector's API name box.
     expect(within(popover).getByTestId('add-field-api-name-input')).toHaveValue('satisfaction');
     expect(within(popover).queryByTestId('add-field-api-name-hint')).toBeNull();
-    expect(create).toBeEnabled();
+    expect(create).not.toHaveAttribute('aria-disabled');
     // A typed name another field holds is refused here too.
     await userEvent.clear(within(popover).getByTestId('add-field-api-name-input'));
     await userEvent.type(within(popover).getByTestId('add-field-api-name-input'), 'name');
-    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute('aria-disabled', 'true');
     expect(within(popover).getByTestId('add-field-api-name-hint')).toHaveTextContent('name');
     expect(mockClient.save).not.toHaveBeenCalled();
   });
@@ -238,7 +238,7 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), 'Health Score');
     expect(within(popover).getByTestId('add-field-api-name-preview')).toHaveTextContent('health_score');
     expect(within(popover).queryByTestId('add-field-api-name-input')).toBeNull();
-    expect(within(popover).getByTestId('add-field-create')).toBeEnabled();
+    expect(within(popover).getByTestId('add-field-create')).not.toHaveAttribute('aria-disabled');
   });
 
   it('the Records grid "+" opens the same popover, and focus goes back to it on Cancel', async () => {

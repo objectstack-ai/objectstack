@@ -140,6 +140,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -577,6 +581,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -664,6 +672,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -794,6 +806,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
+        outcomeMessages: {
+          sent: "Invitation sent to ${result.email}",
+          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        },
         params: {
           role: {
             options: {
@@ -813,7 +829,22 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Resend Invitation",
-        successMessage: "Invitation resent"
+        successMessage: "Invitation resent",
+        outcomeMessages: {
+          sent: "Invitation resent to ${result.email}",
+          link_only: "Invitation renewed for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+        }
+      },
+      copy_invitation_link: {
+        label: "Copy Invite Link",
+        resultDialog: {
+          title: "Invite link",
+          description: "Anyone who opens this link can accept the invitation, so share it only with the person you invited. It stops working once the invitation is accepted, declined, canceled or expires.",
+          acknowledge: "Done",
+          fields: {
+            acceptUrl: "Invite link"
+          }
+        }
       },
       accept_invitation: {
         label: "Accept Invitation",
@@ -1154,12 +1185,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       revoke_api_key: {
         label: "Revoke API Key",
         confirmText: "Revoke this API key? Any clients using it will immediately lose access.",
-        successMessage: "API key revoked"
+        successMessage: "API key \"{{ record.name }}\" revoked"
       },
       restore_api_key: {
         label: "Restore API Key",
         confirmText: "Restore this revoked API key? Existing clients holding the key will regain access.",
-        successMessage: "API key restored"
+        successMessage: "API key \"{{ record.name }}\" restored"
       }
     }
   },
@@ -3528,6 +3559,47 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      }
+    }
+  },
+  sys_exchange_rate: {
+    label: "Exchange Rate",
+    pluralLabel: "Exchange Rates",
+    description: "Exchange rates from the organization's home currency to a foreign currency, by effective date — the rates foreign-currency amounts are converted to the home currency with.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      currency: {
+        label: "Currency",
+        help: "ISO 4217 code of the foreign currency, uppercase (EUR, JPY, CHF)."
+      },
+      rate: {
+        label: "Rate",
+        help: "1 unit of the organization's home currency (Localization → Default currency) = Rate units of this currency. Example: home currency USD, currency EUR, rate 0.92 means 1 USD = 0.92 EUR."
+      },
+      effective_date: {
+        label: "Effective Date",
+        help: "First date this rate applies to. It stays in force until a later row for the same currency takes over."
+      },
+      source: {
+        label: "Source",
+        help: "How the row arrived: typed in Setup (manual), loaded from a file (import), or written by an app flow (app).",
+        options: {
+          manual: "Manual",
+          import: "Import",
+          app: "App"
+        }
+      }
+    },
+    _views: {
+      all_rates: {
+        label: "All",
+        description: "1 unit of the organization's home currency (Localization → Default currency) = Rate units of this currency. Example: home currency USD, currency EUR, rate 0.92 means 1 USD = 0.92 EUR.",
+        emptyState: {
+          title: "No exchange rates yet",
+          message: "Add one row per currency for each date its rate changes, for example one row per currency at the start of each month."
+        }
       }
     }
   }

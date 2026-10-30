@@ -97,7 +97,7 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.loading': 'Loading…',
   'detail.copyToClipboard': 'Copy to clipboard',
   'detail.copied': 'Copied!',
-  'detail.deleteConfirmation': 'Are you sure you want to delete this record?',
+  'detail.deleteConfirmation': 'Are you sure you want to delete this record? This cannot be undone.',
   'detail.editRecord': 'Edit record',
   'detail.viewAll': 'View All',
   'detail.new': 'New',

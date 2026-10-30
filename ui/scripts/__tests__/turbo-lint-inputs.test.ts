@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { uiTurboConfigPath } from '../workspace-root.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
@@ -15,6 +14,17 @@ import {
   taskInputs,
 } from './helpers/turbo-inputs';
 import { walkedFiles } from '../check-lint-rule-coverage.mjs';
+import {
+  UI_JOBS,
+  globMatches,
+  repoPath,
+  rootCi,
+  rootCiJob,
+  rootCiPath,
+  stepsRunning,
+  uiFilterGlobs,
+  uiRun,
+} from './helpers/root-ci';
 import {
   FLAT_CONFIG_FILENAMES,
   configFilesFor,
@@ -250,106 +260,110 @@ describe('turbo `lint` inputs cover every out-of-package file (objectui#4184)', 
 });
 
 /**
- * objectui#12276 — the root task `lint` depends on hashes what it LINTS, not the
- * repository.
+ * objectui#12276 — the root task `lint` depended on hashed what it LINTS, not
+ * the repository; under the monorepo, a CI step that no hash inherits
+ * (objectstack#27283).
  *
- * Every package's `lint` dependsOn `//#lint:root` (objectui#4456), and turbo
- * folds a dependency's hash into its dependents'. The root task stays uncached
- * (`turbo-task-guard-coverage.test.ts` says why), so its `inputs` decide nothing
- * but that inherited hash — and with none, turbo hashed every file in the
- * repository for it. Measured on that card, before the fix: one untracked file
- * under `docs/` moved 46 of 46 package `lint` hashes, so the cache `Lint`
- * restores could never replay a single package. After it, on the same probe: 0
- * of 46; an untracked `.changeset/` or `content/` file, 0; a file in one
- * package, that package's alone; a root-level linted file (`scripts/`, `e2e/`)
- * or `eslint.config.js`, all 46 — readings of that day, not live counts.
+ * Standalone, every package's `lint` dependsOn `//#lint:root` (objectui#4456),
+ * and turbo folds a dependency's hash into its dependents'. The root task stayed
+ * uncached, so its `inputs` decided nothing but that inherited hash, and with
+ * none turbo hashed every file in the repository for it. Measured on that card,
+ * before the fix: one untracked file under `docs/` moved 46 of 46 package `lint`
+ * hashes, so the cache `Lint` restores could never replay a single package.
+ * objectui derived the inputs from the `lint:root` script's `--ignore-pattern`s.
  *
- * The inputs are the extensions ESLint lints at that scope, minus exactly the
- * trees the `lint:root` script hands ESLint as `--ignore-pattern`, so they
- * follow the script rather than a list of root directories that a new one would
- * outdate. Plus one exclusion that is turbo's, not ESLint's: under explicit
- * `inputs` turbo hashes git-ignored files as well (measured on that card: 64008
- * inputs, 63598 of them under the root `node_modules`), which `$TURBO_DEFAULT$`
- * never does.
+ * Under the monorepo `//` is the objectstack root package, so no turbo task can
+ * name objectui's root manifest: the root `ci.yml` runs the script as a step of
+ * `lint-ui` (objectstack#25697), and the live `lint` task depends on no root
+ * task. Each property the root task carried is pinned against that step, read
+ * from the workflow GitHub runs:
  *
- * ⚠️ Bound, said so it is not read as coverage: turbo adds the root
- * `package.json` and `turbo.json` to a root task's inputs on its own, so an
- * edit to either still moves every package's `lint` hash. And a git-ignored
- * output directory with linted extensions outside the four trees (a local
- * `coverage/`, say) is hashed too; none exists when `Lint` runs `pnpm lint`.
+ *   - "what every package `lint` depends on"            -> a step of the job that
+ *     lints the ui packages, running exactly the script;
+ *   - "declares inputs, not `$TURBO_DEFAULT$`"          -> no root-task hash is
+ *     folded into any package `lint` at all, the stronger form of the property
+ *     (no unrelated repository file can move every package's lint hash);
+ *   - "excludes exactly the trees the script ignores"  -> each ignored workspace
+ *     group is one the job's turbo `lint` step lints, so the two steps partition
+ *     the tree and `--ignore-pattern` never means "linted by nothing";
+ *   - "hashes every file ESLint lints"                  -> every file ESLint walks
+ *     at that scope sets the `ui` paths filter the job's `if:` reads, so a change
+ *     to any of them runs the step;
+ *   - "stays uncached"                                  -> the step is the script
+ *     itself, not a `turbo run`, so no cache can replay its verdict.
+ *
+ * The old "inputs reach no extension `lint:root` never lints" half had one job,
+ * keeping unlinted files out of the hash every package inherited; with no such
+ * hash, the second case below holds it.
  */
-describe('`//#lint:root` hashes the files it lints, never the whole repository (objectui#12276)', () => {
-  const ROOT_TASK = '//#lint:root';
-  const turbo = JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as {
-    tasks: Record<string, { cache?: boolean; dependsOn?: string[]; inputs?: string[] }>;
-  };
-  const inputs = turbo.tasks[ROOT_TASK]?.inputs ?? [];
-  const include = inputs.filter((glob) => !glob.startsWith('!')).map((glob) => globToRegExp(glob));
-  const exclude = inputs.filter((glob) => glob.startsWith('!')).map((glob) => globToRegExp(glob.slice(1)));
-  /** Turbo's rule: a file is an input when some glob names it and no `!` glob removes it. */
-  const hashed = (file: string): boolean => include.some((re) => re.test(file)) && !exclude.some((re) => re.test(file));
+describe('`lint:root` runs as a CI step no package lint hash inherits (objectui#12276, objectstack#27283)', () => {
+  const SCRIPT = 'lint:root';
+  const job = rootCiJob(UI_JOBS.lint);
+  const steps = stepsRunning(job, uiRun(SCRIPT));
 
   const script = (
     JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
-  ).scripts['lint:root'];
+  ).scripts[SCRIPT];
   const ignorePatterns = [...(script ?? '').matchAll(/--ignore-pattern\s+'([^']+)'/g)].map((m) => m[1]);
 
-  it('is what every package `lint` depends on, so its hash is in all of theirs', () => {
-    expect(turbo.tasks.lint?.dependsOn ?? [], 'the premise of this block').toContain(ROOT_TASK);
+  it('is a step of the job that lints the ui packages, running exactly the script', () => {
     expect(script, 'the root package.json must still define `lint:root`').toMatch(/^eslint \. /);
     expect(ignorePatterns, 'the `lint:root` ignore-pattern parse came back empty').toContain('docs/**');
+    expect(
+      steps,
+      `${rootCiPath}'s \`${UI_JOBS.lint}\` job must run \`${uiRun(SCRIPT)}\` as a step: nothing else ` +
+        'lints the files outside the workspace packages (`e2e/`, `scripts/`, `eslint-rules/`, the root ' +
+        'configs), which no package `lint` script reaches (objectui#4456).',
+    ).toHaveLength(1);
+    expect(steps[0]?.if, `the \`${uiRun(SCRIPT)}\` step must carry no \`if:\` of its own`).toBeUndefined();
   });
 
-  it('declares inputs, and `$TURBO_DEFAULT$` is not one of them', () => {
+  it('folds no root-task hash into any package `lint`, so no unrelated file moves all of them', () => {
+    const lint = liveTurboConfig().tasks?.lint as { dependsOn?: string[] } | undefined;
+    expect(lint, 'the root turbo.json must define `lint`').toBeDefined();
     expect(
-      inputs,
-      `\`${ROOT_TASK}\` declares no \`inputs\`, so turbo hashes every file in the repository for it — ` +
-        'and every package’s `lint` inherits that hash, so no commit can replay a cached lint.',
-    ).not.toHaveLength(0);
-    expect(inputs, '`$TURBO_DEFAULT$` on a root task is the whole repository again').not.toContain(
-      '$TURBO_DEFAULT$',
+      (lint?.dependsOn ?? []).filter((dep) => dep.startsWith('//#')),
+      'the live `lint` depends on a root task: its hash is now part of every package lint hash, so ' +
+        'it must declare inputs scoped to what it lints (objectui#12276) — or no commit can replay a ' +
+        'cached lint.',
+    ).toEqual([]);
+  });
+
+  it('ignores only trees the job lints elsewhere, so the two steps partition the tree', () => {
+    const packageLint = job.steps.find((step) => /\bturbo run lint\b/.test(step.run ?? ''));
+    expect(packageLint, `the premise: \`${UI_JOBS.lint}\` runs \`turbo run lint\` over the ui packages`).toBeDefined();
+    const filters = [...(packageLint?.run ?? '').matchAll(/--filter='\.\/ui\/([^']+)'/g)].map((m) => m[1]);
+    const groups = ignorePatterns.filter((glob) => glob !== 'docs/**').map((glob) => glob.replace(/\/\*\*$/, ''));
+    expect(groups.sort(), 'the `--ignore-pattern`s other than docs/** are the workspace groups').toEqual(
+      ['apps/*', 'examples/*', 'packages/*'],
     );
-  });
-
-  it('excludes exactly the trees the `lint:root` script ignores, and node_modules', () => {
-    const negations = inputs.filter((glob) => glob.startsWith('!')).map((glob) => glob.slice(1));
     expect(
-      negations.sort(),
-      'the `!` inputs must be the `lint:root` script’s `--ignore-pattern` values, so a file in a tree ' +
-        'that script never lints cannot move every package’s lint hash, plus `**/node_modules/**`, ' +
-        'which turbo would otherwise hash',
-    ).toEqual([...ignorePatterns, '**/node_modules/**'].sort());
-    for (const probe of ['node_modules/x/index.js', 'scripts/node_modules/y/index.mjs', 'docs/z.ts']) {
-      expect(hashed(probe), `${probe} must not be a \`${ROOT_TASK}\` input`).toBe(false);
-    }
+      groups.filter((group) => !filters.includes(group)),
+      'a tree `lint:root` ignores that the turbo `lint` step does not filter in is linted by nothing',
+    ).toEqual([]);
   });
 
-  it('hashes every file ESLint lints at the `lint:root` scope', async () => {
+  it('runs whenever a file it lints changes', async () => {
     const eslint = new ESLint({ cwd: repoRoot, ignorePatterns });
     const walked = await walkedFiles(repoRoot, eslint);
     expect(walked.length, 'the `lint:root` walk found implausibly few files').toBeGreaterThan(100);
     expect(walked, 'the walk must reach the root config and a root script').toEqual(
       expect.arrayContaining(['eslint.config.js', 'scripts/report-turbo-cache.mjs']),
     );
-    const unhashed = walked.filter((file) => !hashed(file));
+    expect(job.if ?? '', 'the premise: the job runs when the `ui` paths filter is set').toMatch(
+      /needs\.filter\.outputs\.ui\b/,
+    );
+    const globs = uiFilterGlobs(rootCi());
+    const unfiltered = walked.map(repoPath).filter((file) => !globs.some((glob) => globMatches(glob, file)));
     expect(
-      unhashed,
-      `files \`lint:root\` lints that \`${ROOT_TASK}\`'s inputs do not name — an edit to them would ` +
-        'not move the hash its dependents inherit:\n' +
-        unhashed.map((f) => `  - ${f}`).join('\n'),
-    ).toEqual([]);
-
-    const linted = new Set(walked.map((file) => path.extname(file)));
-    const beyond = [...repoFilesOnDisk()].filter((file) => hashed(file) && !linted.has(path.extname(file)));
-    expect(
-      beyond,
-      `\`${ROOT_TASK}\`'s inputs reach files of an extension \`lint:root\` never lints, and each one ` +
-        'moves every package’s lint hash when it changes:\n' +
-        beyond.map((f) => `  - ${f}`).join('\n'),
+      unfiltered,
+      `files \`lint:root\` lints that the \`ui\` paths filter does not match — a change to only these ` +
+        `would not run \`${UI_JOBS.lint}\`, so nothing would lint it:\n` +
+        unfiltered.map((f) => `  - ${f}`).join('\n'),
     ).toEqual([]);
   });
 
-  it('stays uncached, so its inputs scope a hash and never a replayed verdict', () => {
-    expect(turbo.tasks[ROOT_TASK]?.cache).toBe(false);
+  it('stays uncached: the step is the script itself, which no turbo cache stores', () => {
+    expect(steps[0]?.run?.trim()).toBe(uiRun(SCRIPT));
   });
 });

@@ -9,6 +9,7 @@ import { parseNodeConfig } from './parse-config.js';
 import { currentLoopIteration } from './loop-frame.js';
 import { isRegionSuspensionRefusal } from '../region-suspension-refusal.js';
 import { attachPartialSteps } from '../partial-steps.js';
+import { readCarriedRefusal, type CarriedRefusal } from '../inner-refusal.js';
 
 /**
  * `try_catch` built-in node — **structured try/catch/retry** (ADR-0031 §Decision 3).
@@ -150,6 +151,12 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       // region could never distinguish "the row is already there" from any
       // other failure — the whole point of commit c5a7448d5.
       let lastErrorCode: string | undefined;
+      // #27743 — the refusal the LAST failed attempt carried (`inner-refusal.ts`),
+      // read off the brand the engine put on that attempt's throw. Replaced on
+      // every failed attempt, so a retry ladder reports its last attempt's
+      // refusal and never an earlier one's — `retryExecution`'s rule — and an
+      // attempt that met no refusal leaves `{}`.
+      let lastCarried: CarriedRefusal = {};
       const failedAttemptSteps: StepLogEntry[] = [];
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         if (attempt > 0) {
@@ -234,6 +241,7 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             throw err;
           }
           lastError = err instanceof Error ? err.message : String(err);
+          lastCarried = readCarriedRefusal(err);
           const innerError = variables.get('$error');
           // Only a `$error` that actually CHANGED (identity, not content —
           // two failures can legitimately share a message) belongs to THIS
@@ -335,9 +343,17 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
           // with this error text, already produced a `NODE_FAILURE` step and
           // was already routable by a `fault` edge. No engine change — the
           // #14184 fold on `if (!result.success)` is already the reader.
+          //
+          // #27876 — and the CATCH region's refusal rides out the way the
+          // no-catch return's does (#27743, below): this return re-words the
+          // handler's failure, the brand on the handler's throw does not cross
+          // that, so it is spread here (`inner-refusal.ts`). It is the refusal
+          // the HANDLER met, never the try region's it handled; `{}` when the
+          // handler met none. The `error` text does not move.
           return {
             success: false,
             error: `try_catch '${node.id}': catch region failed — ${catchMsg}`,
+            ...readCarriedRefusal(catchErr),
             childSteps: [...failedAttemptSteps, ...catchAttemptSteps],
           };
         }
@@ -365,9 +381,18 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       // already routable by a `fault` edge. Adding `childSteps` moves none of
       // that — unlike the rejected "make `loop` swallow its throw and return"
       // shape (see `partial-steps.ts`), which would have changed all four.
+      //
+      // #27743 — and the try region's REFUSAL rides out the same way. This
+      // return re-words the region's failure into a new one, and the brand on
+      // the region's throw does not cross that, so a refusal met inside a
+      // guarded region reached the run's caller as text only. Spread here, the
+      // engine brands this node's throw like any data node's and the members
+      // reach the terminal exit (`inner-refusal.ts`); `{}` when the last
+      // attempt met none. The `error` text does not move.
       return {
         success: false,
         error: `try_catch '${node.id}': try region failed — ${lastError}`,
+        ...lastCarried,
         childSteps: failedAttemptSteps,
       };
     },

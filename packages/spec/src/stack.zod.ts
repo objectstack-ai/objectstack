@@ -4372,6 +4372,116 @@ function collectExternalBindingDatasourceErrors(config: ObjectStackDefinition): 
 }
 
 /**
+ * [ADR-0015 amendment D7 · ADR-0143] A datasource's `external.connector` must
+ * name a connector instance this stack declares: a `connectors` entry with a
+ * `provider` and an `auth` that is not `none` — the ADR-0143 instance auth
+ * contract whose credential the datasource borrows.
+ *
+ * The datasource borrows that instance's credential, so a name this stack
+ * cannot resolve would leave an API-backed datasource with no credential at
+ * all, found by its first read as an upstream 401. Refused here instead (the
+ * ruling: "refused at build when the named instance is not declared"), with
+ * three findings, because the fixes differ:
+ *
+ *  - no `connectors` entry of that name — declare the instance or correct the
+ *    name;
+ *  - an entry with no `provider` — a catalog descriptor (ADR-0097), which is
+ *    never materialized and holds no credential;
+ *  - an instance with no `auth`, or `auth: { type: 'none' }` — nothing to
+ *    lend; an unauthenticated upstream needs no `connector` on the datasource.
+ *
+ * Resolved against the stack's own `connectors`, like a job's mapping
+ * reference: a datasource is package-authored, and a reference its own stack
+ * cannot resolve is an authoring defect the package would otherwise ship. A
+ * connector a plugin registers at runtime is not a declared instance and has
+ * no connection record to share. A disabled instance (`enabled: false`) is
+ * accepted: the switch turns the vendor off for its actions and its records
+ * alike, which is the one-grant behaviour D7 asks for, not a dangling name.
+ * Runs before the object-count early return: it needs no object. A
+ * composition runs it once more over every input's datasources and connectors
+ * ({@link collectComposedDatasourceConnectorErrors}), passing `shadowedLender`:
+ * for a name declared more than once in one registration slot whose kept
+ * entry cannot lend, it returns the fix to prescribe instead (the duplicate),
+ * or `undefined` when no earlier declaration could have lent either.
+ */
+function collectDatasourceConnectorErrors(
+  config: ObjectStackDefinition,
+  shadowedLender?: (name: string) => string | undefined,
+): string[] {
+  const errors: string[] = [];
+  const datasources = Array.isArray(config.datasources) ? config.datasources : [];
+  const borrowing = datasources.filter(
+    (ds) => isRecord(ds) && isRecord(ds.external) && typeof ds.external.connector === 'string',
+  );
+  if (borrowing.length === 0) return errors;
+  const connectors = new Map<string, Record<string, unknown>>();
+  for (const entry of Array.isArray(config.connectors) ? config.connectors : []) {
+    if (isRecord(entry) && typeof entry.name === 'string') connectors.set(entry.name, entry);
+  }
+  for (const ds of borrowing) {
+    const name = String((ds.external as Record<string, unknown>).connector);
+    const entry = connectors.get(name);
+    const subject = connectorBorrowSubject(ds.name, name);
+    if (entry === undefined) {
+      errors.push(
+        `${subject}, which is not defined in connectors. Declare the connector instance it borrows ` +
+          `from (a connectors entry named '${name}' with a provider and an auth credential, e.g. ` +
+          `auth: { type: 'bearer', credentialRef }) or correct the name.`,
+      );
+      continue;
+    }
+    // The one door that sees a name declared twice in one registration slot:
+    // the later entry is the one the runtime keeps, so an earlier instance
+    // that could lend is shadowed, and the fix is the duplicate, not the
+    // entry's provider or auth.
+    const shadow = connectorCanLend(entry) ? undefined : shadowedLender?.(name);
+    if (!connectorHasProvider(entry)) {
+      errors.push(
+        shadow !== undefined
+          ? `${subject}, which declares no provider in the entry the composed artifact keeps — a catalog ` +
+              `descriptor that holds no credential to lend (ADR-0097). ${shadow}`
+          : `${subject}, which declares no provider — a connector entry with no provider is a catalog ` +
+              `descriptor, never materialized, and holds no credential to lend (ADR-0097). Give it the ` +
+              `provider that serves this vendor and an auth credential, or name a connector instance ` +
+              `that has one.`,
+      );
+      continue;
+    }
+    if (!connectorHasCredential(entry)) {
+      errors.push(
+        shadow !== undefined
+          ? `${subject}, which declares no auth credential in the entry the composed artifact keeps — ` +
+              `there is nothing to borrow. ${shadow}`
+          : `${subject}, which declares no auth credential — there is nothing to borrow. Declare the ` +
+              `instance's auth (e.g. auth: { type: 'bearer', credentialRef }), or, if the upstream ` +
+              `needs no credential, remove external.connector from the datasource.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/** The subject every `external.connector` finding opens with. */
+function connectorBorrowSubject(datasource: unknown, connector: string): string {
+  return `Datasource '${String(datasource)}' borrows the credential of connector '${connector}' (external.connector)`;
+}
+
+/** A connector entry with a `provider`: an instance, not a catalog descriptor (ADR-0097). */
+function connectorHasProvider(entry: Record<string, unknown>): boolean {
+  return typeof entry.provider === 'string' && entry.provider.length > 0;
+}
+
+/** A connector entry whose `auth` holds a credential to lend: present, and not `type: 'none'`. */
+function connectorHasCredential(entry: Record<string, unknown>): boolean {
+  return isRecord(entry.auth) && entry.auth.type !== 'none';
+}
+
+/** A connector entry a datasource's `external.connector` can borrow from. */
+function connectorCanLend(entry: Record<string, unknown>): boolean {
+  return connectorHasProvider(entry) && connectorHasCredential(entry);
+}
+
+/**
  * [ADR-0015 §4.2 · #25211] {@link collectExternalBindingDatasourceErrors} over
  * a COMPOSITION: an `external` object of one input bound to a datasource
  * another input declares managed (or with no `schemaMode`).
@@ -4396,6 +4506,165 @@ function collectComposedExternalBindingDatasourceErrors(
 ): string[] {
   const datasources = stacks.flatMap((stack) => (Array.isArray(stack.datasources) ? stack.datasources : []));
   return collectExternalBindingDatasourceErrors({ objects: composedObjects, datasources } as ObjectStackDefinition);
+}
+
+/** One declaration a composition input provides, and the registration slot it boots into. */
+interface ProvidedCollectionEntry {
+  entry: unknown;
+  /** Where it was declared, for a finding: the input, or a package body of it. */
+  declaredIn: string;
+  /**
+   * The registry slot the entry registers in: the registry keys a
+   * package-owned item by package id and name, so two entries under one name
+   * in one slot are one item (the later wins), and in two slots they are two.
+   */
+  slot: string;
+}
+
+/**
+ * Every entry of collection `key` that one composition input provides: the
+ * input's own top level, plus each `packages[]` body when the input is itself
+ * a multi-package artifact, whose collections live ONLY in those bodies
+ * (#14512) — the {@link providedFlowNames} reading, for the same reason: the
+ * top level alone would refuse an entry the input carries.
+ *
+ * Each entry object is listed once. A nested artifact whose bodies did not
+ * reproduce its flattened half keeps both halves, holding the same entry
+ * objects in each, so the bodies are read first and the top level adds only
+ * what no body carries. The slot follows how the artifact boots: a package
+ * body registers under its own id; a top-level entry registers under the
+ * input's own package when `preserve` folds each input into a package body,
+ * and under the composed artifact's one package otherwise.
+ */
+function providedCollectionEntries(
+  stack: ObjectStackDefinition,
+  index: number,
+  key: 'connectors' | 'datasources',
+  preserve: boolean,
+): ProvidedCollectionEntry[] {
+  const entries: ProvidedCollectionEntry[] = [];
+  const seen = new Set<unknown>();
+  const input = stackLabel(stack, index);
+  const collect = (list: unknown, declaredIn: string, slot: string): void => {
+    if (!Array.isArray(list)) return;
+    for (const entry of list) {
+      if (seen.has(entry)) continue;
+      seen.add(entry);
+      entries.push({ entry, declaredIn, slot });
+    }
+  };
+  const source = stack as Record<string, unknown>;
+  if (Array.isArray(source.packages)) {
+    for (const pkg of source.packages) {
+      if (!isRecord(pkg) || !isRecord(pkg.manifest)) continue;
+      const id = pkg.manifest.id ?? pkg.manifest.name;
+      if (typeof id === 'string') collect(pkg.manifest[key], `package '${id}' of ${input}`, `package:${id}`);
+      else collect(pkg.manifest[key], input, `input:${index}`);
+    }
+  }
+  const ownId = stack.manifest?.id ?? stack.manifest?.name;
+  collect(source[key], input, preserve && typeof ownId === 'string' ? `package:${ownId}` : 'artifact');
+  return entries;
+}
+
+/**
+ * [ADR-0015 amendment D7] {@link collectDatasourceConnectorErrors} over a
+ * COMPOSITION: a datasource's `external.connector` against the `connectors` of
+ * every input.
+ *
+ * `defineStack` judges the reference against its own stack only, and an input
+ * built with `strict: false` never reaches that pass, so a dangling name it
+ * carries reached the composed artifact with no verdict: the datasource has no
+ * credential to borrow, and the author learns of the typo when it first
+ * connects instead of when the artifact is built. Judged here over the
+ * `datasources` and the `connectors` of every input, top level and package
+ * bodies alike ({@link providedCollectionEntries}), by the same collector, so
+ * the three findings and their fixes read exactly as the per-stack ones do.
+ *
+ * What this can newly refuse: a dangling name, a descriptor or an instance
+ * with nothing to lend, carried by an input built with `strict: false`. A
+ * cross-input pair resolves (a datasource in one input borrowing an instance
+ * another declares, or one of a nested multi-package input's package bodies
+ * declares), because the composed artifact registers both.
+ *
+ * A connector name declared more than once is judged by how the artifact
+ * boots it. Within one registration slot the later declaration is the one the
+ * registry keeps ({@link SAME_STACK_ENTRY_IDENTITY}'s `connectors` row), so
+ * the kept entry is judged, and when it cannot lend but an earlier one in the
+ * slot could, the finding names both and prescribes the duplicate's fix. In
+ * DIFFERENT slots (two packages of the artifact) the registry keeps one entry
+ * per package, and the lender answers whichever registers first, so when the
+ * kept entries disagree on whether they can lend the borrow is refused as
+ * ambiguous in either declaration order: the build cannot know which one the
+ * datasource gets, and one name meaning one grant is what D7 asks for. When
+ * they agree, the verdict is the same whichever one lends.
+ */
+function collectComposedDatasourceConnectorErrors(
+  stacks: readonly ObjectStackDefinition[],
+  preserve: boolean,
+): string[] {
+  const datasources: unknown[] = [];
+  const declarations = new Map<string, Map<string, ProvidedCollectionEntry[]>>();
+  for (const [i, stack] of stacks.entries()) {
+    for (const { entry } of providedCollectionEntries(stack, i, 'datasources', preserve)) datasources.push(entry);
+    for (const provided of providedCollectionEntries(stack, i, 'connectors', preserve)) {
+      const { entry, slot } = provided;
+      if (!isRecord(entry) || typeof entry.name !== 'string') continue;
+      const bySlot = declarations.get(entry.name) ?? new Map<string, ProvidedCollectionEntry[]>();
+      bySlot.set(slot, [...(bySlot.get(slot) ?? []), provided]);
+      declarations.set(entry.name, bySlot);
+    }
+  }
+
+  const lends = (provided: ProvidedCollectionEntry): boolean => connectorCanLend(provided.entry as Record<string, unknown>);
+  const connectors: unknown[] = [];
+  const shadows = new Map<string, string>();
+  const ambiguities = new Map<string, string>();
+  for (const [name, bySlot] of declarations) {
+    const kept = [...bySlot.values()].map((inSlot) => inSlot[inSlot.length - 1]);
+    const lending = kept.filter(lends);
+    const notLending = kept.filter((provided) => !lends(provided));
+    if (lending.length > 0 && notLending.length > 0) {
+      const sites = (list: ProvidedCollectionEntry[]): string => list.map((p) => p.declaredIn).join(', ');
+      ambiguities.set(
+        name,
+        `which more than one package of the composed artifact declares, and they disagree: ` +
+          `${sites(lending)} declares an instance that can lend, and ${sites(notLending)} declares an ` +
+          `entry that cannot. The runtime keeps one entry per package and lends from whichever ` +
+          `registers first, so the datasource could boot with no credential. Rename or remove the ` +
+          `entry that cannot lend, so that one connector name means one instance.`,
+      );
+      continue;
+    }
+    const representative = kept[kept.length - 1];
+    connectors.push(representative.entry);
+    if (lends(representative)) continue;
+    const inSlot = bySlot.get(representative.slot) ?? [];
+    const lender = inSlot.slice(0, -1).reverse().find(lends);
+    if (lender === undefined) continue;
+    shadows.set(
+      name,
+      `Connector '${name}' is declared more than once: ${lender.declaredIn} declares an instance that ` +
+        `can lend, and ${representative.declaredIn} declares the later entry, which the runtime keeps. ` +
+        `Rename or remove the later entry, or give one of the two its own name and point ` +
+        `external.connector at the instance.`,
+    );
+  }
+
+  const errors: string[] = [];
+  const judged: unknown[] = [];
+  for (const ds of datasources) {
+    const connector = isRecord(ds) && isRecord(ds.external) ? ds.external.connector : undefined;
+    const ambiguity = typeof connector === 'string' ? ambiguities.get(connector) : undefined;
+    if (ambiguity === undefined) judged.push(ds);
+    else errors.push(`${connectorBorrowSubject((ds as Record<string, unknown>).name, connector as string)}, ${ambiguity}`);
+  }
+  errors.push(
+    ...collectDatasourceConnectorErrors({ datasources: judged, connectors } as ObjectStackDefinition, (name) =>
+      shadows.get(name),
+    ),
+  );
+  return errors;
 }
 
 /**
@@ -4449,6 +4718,9 @@ function validateCrossReferences(
   // Same placement: the development boot's demo accounts resolve against the
   // stack's positions and permission sets, and need no object either.
   errors.push(...collectDemoStaffErrors(config));
+  // Same placement: a datasource's `external.connector` resolves against the
+  // stack's connectors and needs no object either (ADR-0015 amendment D7).
+  errors.push(...collectDatasourceConnectorErrors(config));
   // Same placement: the names an object gives its related lists (`relatedLists`,
   // a field group's `relatedList`) resolve against the objects of the stack AND
   // its package bodies, so an artifact whose objects live only in package
@@ -7414,6 +7686,9 @@ function composeBuiltStacks(
   //     [ADR-0015 §4.2 · #25211] …and an `external` object of one input bound
   //     to a datasource another input declares managed: see
   //     {@link collectComposedExternalBindingDatasourceErrors}.
+  //     [ADR-0015 amendment D7] …and a datasource's `external.connector`
+  //     against the connectors of every input: see
+  //     {@link collectComposedDatasourceConnectorErrors}.
   //     [#25234] …and one membership key declared on two objects of the
   //     composed artifact: see {@link collectComposedMembershipKeyErrors}.
   //     [#25514] …and every flow target an input resolved only through
@@ -7426,6 +7701,7 @@ function composeBuiltStacks(
     ...collectComposedDefaultRecordPageErrors(stacks, opts.manifest === 'preserve'),
     ...collectComposedMembershipKeyErrors(stacks, objects as readonly unknown[] | undefined),
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
+    ...collectComposedDatasourceConnectorErrors(stacks, opts.manifest === 'preserve'),
     ...collectArtifactFlowClaimErrors(stacks),
   ];
   if (artifactCrossRefErrors.length > 0) {

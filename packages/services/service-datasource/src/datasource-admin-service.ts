@@ -41,6 +41,7 @@ import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
 import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-config-redaction.js';
 import { planCredentialMigration } from './datasource-credential-migration.js';
+import { borrowedConnectorOf } from './datasource-connector-credential.js';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
@@ -236,6 +237,20 @@ export interface DatasourceAdminServiceConfig {
    * runtime is counted the moment it is saved.
    */
   listObjectsBoundTo: (datasource: string) => Promise<Array<{ name?: unknown; external?: unknown }>>;
+  /**
+   * [ADR-0015 D7] Why a datasource naming connector instance `connector` in
+   * `external.connector` cannot borrow its credential — the instance is not
+   * declared, is a catalog descriptor, lends no credential or is disabled, or
+   * no connector credential source is registered — or `undefined` when it
+   * can. The create / update / test-connection judgement for such a
+   * datasource: a runtime-created datasource never passes `defineStack`'s
+   * check, so this door asks the one the connect path asks.
+   *
+   * Optional only for hosts and fakes with no such datasource: absent, a
+   * draft that names a connector is refused, since nothing could lend it a
+   * credential.
+   */
+  connectorRefusal?: (connector: string) => Promise<string | undefined>;
   /** Hot-(re)register a runtime datasource's connection pool after write. */
   registerPool?: (record: StoredDatasource) => Promise<void> | void;
   /** Tear down a runtime datasource's pool on remove. */
@@ -633,6 +648,8 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       'This connection draft is not a valid datasource.',
     );
     if (refusal) return { ok: false, error: refusal };
+    const lendRefusal = await this.connectorLendRefusal({ name: PROBE_DRAFT_NAME, external: input.external } as StoredDatasource);
+    if (lendRefusal) return { ok: false, error: lendRefusal };
     const queryTimeoutMs = (input.external as { queryTimeoutMs?: number } | undefined)?.queryTimeoutMs;
     try {
       return await this.config.probe({
@@ -649,6 +666,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
 
   async createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary> {
     this.assertValidName(input?.name);
+    this.assertNoDraftCredentialsRef(input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
     this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
@@ -678,6 +696,9 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // datasource before it exists (the save door gives no verdict on a
     // binding whose datasource it cannot see), so a create is judged too.
     await this.assertNoExternalBindingConflict(record);
+    // [ADR-0015 D7] Same position: a record that names a connector instance no
+    // source can lend leaves nothing behind.
+    await this.assertConnectorLendable(record);
 
     if (secret) {
       const credentialsRef = await this.config.writeSecret(secret, { name: input.name });
@@ -763,6 +784,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       // out of service. The secret does not move the verdict.
       await this.assertNoExternalBindingConflict(merged);
     }
+    // [ADR-0015 D7] Only when this write touches `external`, by the same
+    // reasoning: an instance removed from the stack must not make the row's
+    // `active: false` unreachable.
+    if (patch.external !== undefined) await this.assertConnectorLendable(merged);
 
     if (secret) {
       const prevRef = existing.external?.credentialsRef;
@@ -1154,6 +1179,27 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     if (refusal) throw new Error(refusal);
   }
 
+  /**
+   * [ADR-0015 D7] Why `record`'s `external.connector` cannot borrow a
+   * credential, or `undefined` when it names none or can. The reason is the
+   * one the connect path would record ({@link DatasourceAdminServiceConfig.connectorRefusal}).
+   */
+  private async connectorLendRefusal(record: StoredDatasource): Promise<string | undefined> {
+    const connector = borrowedConnectorOf(record.external);
+    if (connector === undefined) return undefined;
+    const reason = this.config.connectorRefusal
+      ? await this.config.connectorRefusal(connector)
+      : `this datasource borrows the credential of connector instance '${connector}' (external.connector), but this `
+        + 'host lends no connector credentials.';
+    return reason === undefined ? undefined : `Invalid datasource '${record.name}'.\nexternal.connector: ${reason}`;
+  }
+
+  /** {@link connectorLendRefusal} for a write door: refuses by throwing (a `400` at the route). */
+  private async assertConnectorLendable(record: StoredDatasource): Promise<void> {
+    const refusal = await this.connectorLendRefusal(record);
+    if (refusal) throw new Error(refusal);
+  }
+
   /** `record` as the record judgement must see it: with the binding `secret` will create, when one is supplied. */
   private withSecretBinding(record: StoredDatasource, secret: SecretInput | undefined): StoredDatasource {
     return secret ? withPendingSecretRef(record) : record;
@@ -1173,6 +1219,29 @@ export class DatasourceAdminService implements IDatasourceAdminService {
         `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
       );
     }
+  }
+
+  /**
+   * [#27722] The #27582 rule at this door: a write may only seal a new value or
+   * keep its own record's stored reference. A create has no record of its own,
+   * so the only `external.credentialsRef` it stores is the one a supplied
+   * `secret` is bound under, and a draft that names one is refused. One answer
+   * whatever it names: the message names the key and never its value, and
+   * nothing about the reference is looked up. Thrown before anything is
+   * written (a `400` at the route).
+   *
+   * An update needs no such refusal: it keeps the stored reference unless a
+   * supplied secret rewraps it, whatever the patch's `external` says.
+   */
+  private assertNoDraftCredentialsRef(input: DatasourceDraft): void {
+    const external = input.external as { credentialsRef?: unknown } | undefined;
+    if (external?.credentialsRef === undefined) return;
+    throw new Error(
+      `Invalid datasource '${input.name}': \`external.credentialsRef\` is not accepted on create. `
+        + 'It names a credential already stored, and only the reference this door binds a supplied `secret` '
+        + 'under can be stored on a new datasource. Send the credential as `secret`, and leave '
+        + '`external.credentialsRef` out. Nothing was written.',
+    );
   }
 
   private toRecord(input: DatasourceDraft): StoredDatasource {

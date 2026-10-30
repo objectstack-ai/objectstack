@@ -105,9 +105,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 /** What the copilot stub reports, per test. */
 const copilot = vi.hoisted(() => ({ available: true }));
 vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPending: boolean }) => void }) => {
+  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPendingCount: number }) => void }) => {
     React.useEffect(() => {
-      onStatusChange?.({ available: copilot.available, planPending: false });
+      onStatusChange?.({ available: copilot.available, planPendingCount: 0 });
     }, [onStatusChange]);
     return copilot.available ? <div data-testid="copilot-body">conversation</div> : null;
   },

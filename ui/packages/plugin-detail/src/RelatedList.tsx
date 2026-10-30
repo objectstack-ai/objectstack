@@ -577,15 +577,22 @@ function serverSentence(err: unknown): string | null {
  * the shared fixed sentence and never the server's text (a refused read does
  * not name what it cannot see), unless the producer marked a `userMessage` for
  * the reader; every other failure says the server's sentence when it gave one.
- * Retry for every kind but `api-disabled`, whose verdict a retry cannot change
- * — the ListView precedent.
+ * Retry for every kind but `api-disabled` and `forbidden`, whose verdicts a
+ * retry cannot change — the ListView precedent.
+ *
+ * A `forbidden` read is not a failure of anything the reader did: it is drawn
+ * as a quiet neutral line (`role="status"`, no destructive styling) and always
+ * says the list's no-access sentence. A producer's `userMessage` on a 403 is
+ * the generic action refusal ("...perform this action"), which reads as a
+ * rebuke to someone who only opened the record to read it.
  */
 const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> = ({ error, onRetry }) => {
   const { t } = useDetailTranslation();
   const kind = classifyLoadError(error);
   const copy = LOAD_FAILED_COPY[kind];
+  const refused = kind === 'forbidden';
   const message =
-    declaredUserMessage(error)
+    (refused ? null : declaredUserMessage(error))
     ?? (copy.message
       ? t(copy.message[0], { defaultValue: copy.message[1] })
       : serverSentence(error)
@@ -593,15 +600,18 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
   const Icon = kind === 'network' || kind === 'rejected' ? AlertTriangle : ShieldAlert;
   return (
     <div
-      role="alert"
+      role={refused ? 'status' : 'alert'}
       data-testid="related-list-load-failed"
       data-error-kind={kind}
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm"
+      className={cn(
+        'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-3 py-2 text-sm',
+        refused ? 'border-border bg-muted/40' : 'border-destructive/30 bg-destructive/5',
+      )}
     >
-      <Icon className="h-4 w-4 shrink-0 text-destructive/70" aria-hidden />
+      <Icon className={cn('h-4 w-4 shrink-0', refused ? 'text-muted-foreground' : 'text-destructive/70')} aria-hidden />
       <span className="font-medium">{t(copy.title[0], { defaultValue: copy.title[1] })}</span>
       <span className="min-w-0 text-muted-foreground">{message}</span>
-      {kind !== 'api-disabled' && (
+      {kind !== 'api-disabled' && !refused && (
         <Button
           variant="outline"
           size="sm"
@@ -1898,7 +1908,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // returns a falsy renderer — measured over seven spellings, including
       // ones no producer can emit, all of which resolved to `TextCellRenderer`.
       if (!def?.type) return undefined;
-      const rendererType = resolveCellRendererType({ type: def.type, format: def.format }) || def.type;
+      const rendererType = resolveCellRendererType({ type: def.type, format: def.format, widget: def.widget }) || def.type;
       const CellRenderer = getCellRenderer(rendererType);
       if (!CellRenderer) return undefined;
       const isLookup = def.type === 'lookup' || def.type === 'master_detail';
@@ -1943,6 +1953,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency in this list (objectui#12242).
         ...(def.currencyConfig && { currencyConfig: def.currencyConfig }),
+        // A formula's declared result type, which picks its face in the formula
+        // cell: `currency` draws through the currency cell with the
+        // `currencyConfig` above. Without it a money formula read as a bare
+        // number in this list (objectstack#27430).
+        ...(def.returnType && { returnType: def.returnType }),
         ...(def.precision !== undefined && { precision: def.precision }),
         ...((def as any).scale !== undefined && { scale: (def as any).scale }),
         // Beside `scale`, whose scale-0 grouping heuristic it overrides in the

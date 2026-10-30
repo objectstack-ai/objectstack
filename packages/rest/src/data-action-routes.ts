@@ -179,6 +179,14 @@ function describeNonFieldMap(value: unknown): string {
     return `a ${typeof value}`;
 }
 
+/**
+ * The `error` of an async import job that ended `failed` because every row
+ * failed (maintainer ruling B, record 6509036166): the per-row reasons are the
+ * job's `results`, which this sentence points the reader at.
+ */
+const IMPORT_JOB_EVERY_ROW_FAILED =
+    'Every row of this import failed and nothing was imported; each row\'s reason is in the job\'s results.';
+
 /** [#27500] The formats `GET /data/:object/export` serves, csv first as the default. */
 const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
 type ExportFormatServed = typeof EXPORT_FORMATS[number];
@@ -311,21 +319,26 @@ function importUndoFailure(id: string, action: ImportUndoFailure['action'], erro
 }
 
 /**
- * [#27501] Refuse an import job for an object nothing is behind, with the data
- * door's own answer for that name: `objectNotFoundError` (`@objectstack/core`),
- * the one factory the protocol's existence gate and the engine's verbs throw,
- * classified by the same `handleRouteError` — 404 `OBJECT_NOT_FOUND`, the same
- * envelope `POST /data/OBJ` answers.
+ * [#27501, #27728] Refuse an import for an object nothing is behind, with the
+ * data door's own answer for that name: `objectNotFoundError`
+ * (`@objectstack/core`), the one factory the protocol's existence gate and the
+ * engine's verbs throw, classified by the same `handleRouteError` — 404
+ * `OBJECT_NOT_FOUND`, the same envelope `POST /data/OBJ` answers. Both import
+ * doors ask it, the synchronous one (`POST /data/OBJ/import`) and the job door
+ * (`POST /data/OBJ/import/jobs`), right after the exposure gate and before the
+ * body is parsed, so a refused request writes no row and no job.
  *
  * The object is read by name as the exposure gate reads it (the execution face
- * where the protocol has one, else `getMetaItem`), and counts only under its
- * own name. A read the protocol refuses `OBJECT_PACKAGE_DISABLED` (its
- * by-name read's answer for an object of a disabled package, and the data
- * door's code for it too) propagates as thrown. Any other thrown read fails
- * OPEN and logs, as the exposure gate's same read does (`loadObjectItem`,
- * #3545): it is no answer about existence, and each row's data call still
- * gives the data door's own. A protocol with no by-name read cannot answer,
- * and is not asked.
+ * where the protocol has one, else `getMetaItem`). [#27729] Whatever item that
+ * read serves counts, under whichever name it carries: the by-name read
+ * resolves a legacy `ns__short` object from its short name exactly as the data
+ * door's `registry.getObject` does, so this answer is the data door's for every
+ * name. A read the protocol refuses `OBJECT_PACKAGE_DISABLED` (its by-name
+ * read's answer for an object of a disabled package, and the data door's code
+ * for it too) propagates as thrown. Any other thrown read fails OPEN and logs,
+ * as the exposure gate's same read does (`loadObjectItem`, #3545): it is no
+ * answer about existence, and each row's data call still gives the data door's
+ * own. A protocol with no by-name read cannot answer, and is not asked.
  */
 async function assertImportObjectExists(p: any, objectName: string, environmentId: string | undefined): Promise<void> {
     const byName = typeof p.getMetaItemForExecution === 'function'
@@ -337,12 +350,12 @@ async function assertImportObjectExists(p: any, objectName: string, environmentI
         envelope = await byName.call(p, { type: 'object', name: objectName, ...(environmentId ? { environmentId } : {}) });
     } catch (err) {
         if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') throw err;
-        logWarn('[REST] import job: object metadata read failed — not refused up front '
+        logWarn('[REST] import: object metadata read failed — not refused up front '
             + '(each row\'s data call still answers for the object)', (err as Error)?.message ?? err);
         return;
     }
     const item = envelope?.item;
-    if (item !== null && typeof item === 'object' && item.name === objectName) return;
+    if (item !== null && typeof item === 'object') return;
     throw objectNotFoundError(objectName);
 }
 
@@ -361,7 +374,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // object's `enable.clone` capability, default on). Optional JSON body
     // `{ overrides?: {...} }` (or a bare field map) is applied on top of
     // the copied values, e.g. to set a new name or clear a unique field.
-    // Any other `overrides` (or bare body) is a 400.
+    // Any other `overrides` (or bare body), or `overrides` beside other
+    // top-level keys, is a 400.
     // Distinct path segment (`/clone`) keeps it clear of the greedy
     // `/data/:object/:id` matchers.
     this.routeManager.register({
@@ -384,6 +398,21 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // callers can POST overrides directly without nesting.
                 const nested = isFieldMap(body) && 'overrides' in body;
                 const overrides = nested ? body.overrides : body;
+                // [#27669] Refused, not dropped: `overrides` beside other
+                // top-level keys used to clone with `overrides` alone and
+                // answer `201`, the other keys silently ignored. A record
+                // with a real field named `overrides` sets it through the
+                // nested shape.
+                if (nested) {
+                    const strays = Object.keys(body).filter((key) => key !== 'overrides');
+                    if (strays.length > 0) {
+                        sendEnvelopeError(res, 400, 'VALIDATION_ERROR',
+                            `The clone body carries "overrides" beside other keys (${strays.map((key) => `"${key}"`).join(', ')}). `
+                            + 'Send either { "overrides": {...} } or a bare field map, not both. '
+                            + 'To set a field named "overrides", nest it: { "overrides": { "overrides": ... } }.');
+                        return;
+                    }
+                }
                 // [#27489] Refused, not dropped: a non-object `overrides`
                 // (`"x"`, `1`, `true`, `null`) used to be skipped and answer
                 // `201` with a plain copy, and an array passed the `typeof`
@@ -509,6 +538,14 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     return;
                 }
                 if (await this.enforceApiAccess(req, res, p, environmentId, 'import', context)) return;
+
+                // [#27728] The object must exist before any row is read. The
+                // exposure gate above passes an unknown object through by design
+                // (#3770), and the data door's existence refusal used to fire only
+                // inside each row's write, so a misspelled name answered 200 with
+                // every row refused. Refused here, with the data door's answer.
+                await assertImportObjectExists(p, objectName, environmentId);
+
                 const body = req.body ?? {};
 
                 // [#24348] Who may take the object's declared controls off this
@@ -762,7 +799,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         // the durable row 'cancelled', and a late 'succeeded' here
                         // would silently overwrite it (framework#2824). Counts stay
                         // truthful either way — they reflect what was written.
-                        let finalStatus = summary.cancelled ? 'cancelled' : 'succeeded';
+                        let finalStatus: 'cancelled' | 'succeeded' | 'failed' = summary.cancelled ? 'cancelled' : 'succeeded';
                         if (finalStatus === 'succeeded' && this.cancelledImportJobs.has(jobId)) finalStatus = 'cancelled';
                         if (finalStatus === 'succeeded') {
                             try {
@@ -770,8 +807,20 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                                 if (String(row?.status ?? '') === 'cancelled') finalStatus = 'cancelled';
                             } catch { /* keep succeeded */ }
                         }
+                        // A job that was not cancelled, had rows, and created,
+                        // updated or skipped none of them accomplished nothing: it
+                        // ends `failed`, not `succeeded` (maintainer ruling B,
+                        // record 6509036166). Decided after every cancel re-check
+                        // above, so a cancel still wins. `ok` is not the test: a
+                        // skipped row is not counted in it. A zero-row job, an
+                        // all-skipped job and a partly-failed job stay `succeeded`
+                        // on purpose; a dry run follows the same rule.
+                        const everyRowFailed = finalStatus === 'succeeded' && summary.total > 0
+                            && summary.created + summary.updated + summary.skipped === 0;
+                        if (everyRowFailed) finalStatus = 'failed';
                         await patch({
                             status: finalStatus,
+                            ...(everyRowFailed ? { error: IMPORT_JOB_EVERY_ROW_FAILED } : {}),
                             processed_rows: summary.processed,
                             created_count: summary.created,
                             updated_count: summary.updated,
@@ -1437,8 +1486,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 let exported = 0;
                 let firstChunk = true;
                 let skip = 0;
-                if (format === 'json') res.write('[');
-                const xlsx = format === 'xlsx' ? await createXlsxStream(res, styled) : null;
+                let xlsx: Awaited<ReturnType<typeof createXlsxStream>> | null = null;
 
                 while (exported < limit) {
                     const take = Math.min(chunkSize, limit - exported);
@@ -1479,6 +1527,21 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         : Array.isArray(result?.data) ? result.data
                             : Array.isArray(result?.rows) ? result.rows
                                 : Array.isArray(result) ? result : [];
+
+                    // [#27682] json's opening bracket follows the FIRST read, as
+                    // csv's first byte does: the first `res.write` commits the
+                    // response to a streaming 200, so writing it before
+                    // `findData` turned a refused query into a 200 carrying a
+                    // lone `[` instead of the 400 envelope. The loop always
+                    // runs at least once (`limit` is at least 1), so the
+                    // closing `]` below always has its opener.
+                    if (format === 'json' && firstChunk) res.write('[');
+                    // [#27755] The xlsx workbook writer opens after the first
+                    // read for the same reason: opening it commits the stream
+                    // too, so a refused query answered 200 instead of the 400
+                    // envelope. Opened before the zero-row break, so an empty
+                    // export is still a readable workbook.
+                    if (format === 'xlsx' && firstChunk) xlsx = await createXlsxStream(res, styled);
 
                     if (rows.length === 0) break;
 

@@ -201,7 +201,10 @@ describe('[#23718] the action door answers a body\'s thrown plain object with it
     it('CONTROL — a thrown Error answers as before', async () => {
         const response = await postAction('throw_error');
         expect(response.status, JSON.stringify(response.body)).toBe(400);
-        expect(response.body?.error?.code).toBe('VALIDATION_ERROR');
+        // [#27672] FLIPPED on purpose from `VALIDATION_ERROR`: a thrown Error
+        // with no code is an undeclared abort, answered `HOOK_ABORTED` as `/data`
+        // answers it. The sentence is this control's subject and is unchanged.
+        expect(response.body?.error?.code).toBe('HOOK_ABORTED');
         expect(response.body?.error?.message).toBe('x');
     });
 });

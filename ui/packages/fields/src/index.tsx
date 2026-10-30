@@ -1437,6 +1437,9 @@ const SEMANTIC_COLOR_MAP: Record<string, string> = {
   normal: 'blue',
   low: 'gray',
   none: 'gray',
+  // Severity values (en): info is the quiet level, not an alarm colour
+  info: 'blue',
+  warning: 'yellow',
   // Status values (en)
   paid: 'green',
   completed: 'green',
@@ -3494,16 +3497,21 @@ const TEXTUAL_BASE_TYPES = new Set(['text', 'textarea', 'string', 'longtext', ''
 /**
  * Field `widget` hints whose READ face is a cell of its own (objectui#12613),
  * registered under the widget's own key below. The spec's `widget` names the
- * component a field is drawn with in place of its `type` default; for these two
- * the stored text is a machine reference — an object name, a recipient id —
- * and a host face registered under the key names what it references, as the
- * edit widget's readonly branch does, instead of printing the api name.
+ * component a field is drawn with in place of its `type` default; for these
+ * the stored text is a machine reference — an object name, a recipient id, a
+ * position or permission-set name — and the face registered under the key
+ * names what it references instead of printing the api name.
  *
  * Only a widget listed here promotes, and only over a textual base type, the
  * same bound the `format` hints keep: a widget with no read face of its own
- * (`filter-condition`, `position-ref`, …) still draws as its `type`.
+ * (`filter-condition`, …) still draws as its `type`.
  */
-const WIDGET_CELL_RENDERER_TYPES: ReadonlySet<string> = new Set(['object-ref', 'recipient-picker']);
+const WIDGET_CELL_RENDERER_TYPES: ReadonlySet<string> = new Set([
+  'object-ref',
+  'recipient-picker',
+  'position-ref',
+  'permission-ref',
+]);
 
 /**
  * Resolve the canonical cell-renderer key for a field. Accepts either a
@@ -4220,6 +4228,7 @@ export function getCellRenderer(fieldType: string): React.FC<CellRendererProps> 
   return standardMap[fieldType] || TextCellRenderer;
 }
 
+import { PositionRefCell, PermissionRefCell } from './widgets/RegistryRefCell.js';
 // Register standard renderers immediately
 registerFieldRenderer('lookup', LookupCellRenderer);
 registerFieldRenderer('master_detail', LookupCellRenderer);
@@ -4240,6 +4249,11 @@ registerFieldRenderer(RECORD_POINTER_CARD_TYPE, RecordPointerTextCellRenderer);
 // the host loads its faces lazily, off the eager closure.
 registerFieldRenderer('object-ref', TextCellRenderer);
 registerFieldRenderer('recipient-picker', TextCellRenderer);
+// The registry-name keys draw their label in this package: the reader is the
+// edit widget's own `listMetadataItems` catalog, one shared read per data
+// source and type, which `check:eager-closure` weighs with the rest of it.
+registerFieldRenderer('position-ref', PositionRefCell);
+registerFieldRenderer('permission-ref', PermissionRefCell);
 // `owner` was registered here to the same UserCellRenderer until objectui#4814
 // retired the spelling — see the TOMBSTONE below. `getCellRenderer('owner')`
 // now reports the prescription and falls to the text cell.

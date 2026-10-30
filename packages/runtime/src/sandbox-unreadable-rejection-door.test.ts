@@ -128,14 +128,18 @@ describe('[#23723] the action door answers an unreadable rejection at once, as a
     it("throw '': 400, the fixed sentence", async () => {
         const response = await postAction('throw_empty_string');
         expect(response.status, JSON.stringify(response.body)).toBe(400);
-        expect(response.body?.error?.code).toBe('VALIDATION_ERROR');
+        // [#27672] FLIPPED on purpose from `VALIDATION_ERROR`: the body declared
+        // no code, so this is an undeclared abort, answered `HOOK_ABORTED`.
+        expect(response.body?.error?.code).toBe('HOOK_ABORTED');
         expect(response.body?.error?.message).toBe(UNREADABLE);
     });
 
     it('throw Object.create(null): 400, the fixed sentence', async () => {
         const response = await postAction('throw_null_proto');
         expect(response.status, JSON.stringify(response.body)).toBe(400);
-        expect(response.body?.error?.code).toBe('VALIDATION_ERROR');
+        // [#27672] FLIPPED on purpose from `VALIDATION_ERROR`: the body declared
+        // no code, so this is an undeclared abort, answered `HOOK_ABORTED`.
+        expect(response.body?.error?.code).toBe('HOOK_ABORTED');
         expect(response.body?.error?.message).toBe(UNREADABLE);
     });
 });

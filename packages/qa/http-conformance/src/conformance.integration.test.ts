@@ -171,8 +171,9 @@ async function bootStack(makePlugin: () => any, opts: { withAnalytics?: boolean 
     // Registering an object after bootstrap misses the boot-time schema sync,
     // so nothing has issued this table's DDL. The mingo driver this fixture used
     // before #4065 created a table on first touch and hid that; on SQL the
-    // insert fails with `no such table`, which the REST error mapper turns into
-    // a 404 OBJECT_NOT_FOUND — a routing-shaped symptom for a DDL-shaped cause.
+    // insert fails with `no such table`, which the REST error mapper used to
+    // turn into a 404 OBJECT_NOT_FOUND — a routing-shaped symptom for a
+    // DDL-shaped cause (a 500 DATABASE_ERROR since #27702).
     await ql.syncObjectSchema('task');
     for (const o of authzResolverObjects) ql.registry.registerObject(o.def as never, o.owner);
     // A real `single` install's Default Organization: the writes below derive

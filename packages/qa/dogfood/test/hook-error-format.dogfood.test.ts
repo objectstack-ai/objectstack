@@ -8,9 +8,12 @@
 // deliberate business rule (e.g. referential-integrity "记录被引用,删除被
 // 阻断"). The console shows the REST body's `error` string verbatim in its
 // toast, so that string must be ONLY the author's message — not the sandbox
-// debug wrapper (`hook 'x' threw: Error: …`, which belongs in server logs)
-// and not a `code` field: `throw new Error(...)` declares no code, and
-// ADR-0112 invents nothing for a producer that declared none.
+// debug wrapper (`hook 'x' threw: Error: …`, which belongs in server logs).
+//
+// [#27597] The body still carries a `code`, and not one the hook declared:
+// `throw new Error(...)` declares none, so the abort answers the ledgered
+// `HOOK_ABORTED`, the one code a client branches on for "a hook refused this
+// write in its own words". It used to carry no `code` at all.
 //
 // [#7543] Non-default error names (`TypeError: …`) are the OPPOSITE case, and
 // this file used to assert they were KEPT on the wire "as useful context". They
@@ -115,10 +118,10 @@ describe('objectstack verify: sandboxed hook error message format (#hef)', () =>
     // The console toast renders this string verbatim — it must be exactly
     // what the hook author threw.
     expect(body.error).toBe(BUSINESS_MSG);
-    // No sandbox debug wrapper, no branding, and no `code` — the hook threw
-    // no code, and ADR-0112 invents nothing for a producer that declared none.
+    // No sandbox debug wrapper and no branding. [#27597] The hook threw no
+    // code, so the abort answers the ledgered `HOOK_ABORTED`.
     expect(JSON.stringify(body)).not.toMatch(/threw:|hook '|\[ObjectStack\]/);
-    expect(body.code).toBeUndefined();
+    expect(body.code).toBe('HOOK_ABORTED');
   });
 
   it('ground truth: the blocked delete did not remove the record', async () => {

@@ -40,8 +40,8 @@ afterEach(() => cleanup());
 
 /** Menu labels, verbatim from the `engine.studio.rules.type*` English pack. */
 const MENU: ReadonlyArray<[type: string, label: string]> = [
-  ['script', 'Script — CEL fail condition'],
-  ['cross_field', 'Cross-field — CEL over multiple fields'],
+  ['script', 'Condition — reject the save when it is true'],
+  ['cross_field', 'Compare fields — a condition over several fields'],
   ['state_machine', 'State machine — allowed transitions'],
   ['format', 'Format — regex / built-in format'],
   ['json_schema', 'JSON schema — validate a JSON field'],
@@ -233,7 +233,7 @@ describe('whenKeyPin — ObjectValidationsPanel emits spec-parseable metadata', 
     // script (`condition`) → conditional (`when`)
     const onPatch = vi.fn();
     render(<ObjectValidationsPanel draft={baseDraft} onPatch={onPatch} />);
-    expect(screen.getByTestId('rule-type')).toHaveTextContent('Script — CEL fail condition');
+    expect(screen.getByTestId('rule-type')).toHaveTextContent('Condition — reject the save when it is true');
     await pickType('Conditional — apply a rule when a guard holds');
     const toConditional = onPatch.mock.calls[0][0].validations[0];
     expect(toConditional.when).toBe('record.amount < 0');
@@ -258,7 +258,7 @@ describe('whenKeyPin — ObjectValidationsPanel emits spec-parseable metadata', 
     };
     render(<ObjectValidationsPanel draft={conditionalDraft} onPatch={onPatch2} />);
     expect(screen.getByTestId('rule-type')).toHaveTextContent('Conditional — apply a rule when a guard holds');
-    await pickType('Script — CEL fail condition');
+    await pickType('Condition — reject the save when it is true');
     const toScript = onPatch2.mock.calls[0][0].validations[0];
     expect(toScript.condition).toBe('record.amount > 100');
     expect(toScript).not.toHaveProperty('when');

@@ -105,8 +105,9 @@ export async function fileCardStep({ github, context, core, now = () => new Date
   // The DECISION is the module's, driven offline by its self-test
   // against a mutable board (one red run files one card; the next
   // refreshes it and files no second; a refresh of a card whose
-  // every blocker is a closed LOCAL card moves `pm:blocked` to
-  // `pm:queue`). What is left here is thin callbacks over the API.
+  // every blocker is a closed LOCAL card, a PR one merged, moves
+  // `pm:blocked` to `pm:queue`). What is left here is thin callbacks
+  // over the API.
   const outcome = await mod.fileOrRefreshCard({
     identity,
     body,
@@ -138,7 +139,9 @@ export async function fileCardStep({ github, context, core, now = () => new Date
     getIssue: async ({ repo: target, number }) => {
       const [targetOwner, targetRepo] = target.split('/');
       const res = await github.rest.issues.get({ owner: targetOwner, repo: targetRepo, issue_number: number });
-      return { state: res.data.state, closed_at: res.data.closed_at };
+      // A PR number answers `closed` merged or not; `merged_at` tells them apart.
+      const pr = res.data.pull_request ? { pull_request: { merged_at: res.data.pull_request.merged_at ?? null } } : {};
+      return { state: res.data.state, closed_at: res.data.closed_at, ...pr };
     },
     // The swap: an additive POST and ONE remove by name.
     addLabels: async ({ number, labels }) => {
@@ -362,6 +365,43 @@ const SELF_TEST_CASES = [
       { output: ['number', '430'] },
     ],
   },
+  {
+    label: 'a pm:blocked card whose blocker is a PR closed unmerged is held: the PR shape reaches the judgement, no label write',
+    run: watchedRun(),
+    api: {
+      'actions.listWorkflowRuns': async () => previousGreenRun,
+      'repos.compareCommitsWithBasehead': async () => compareOf(0),
+      'issues.listForRepo': async () => ({
+        data: [{
+          number: 440,
+          title: mod.cardIdentity('CI').title,
+          body: 'old\n\nBlocked-by: #601\n',
+          state: 'open',
+          labels: [{ name: 'bug' }, { name: 'pm:blocked' }],
+          assignees: [],
+        }],
+      }),
+      'issues.listComments': async () => ({ data: [] }),
+      'issues.get': async () => ({
+        data: { state: 'closed', closed_at: '2026-10-26T20:00:00Z', pull_request: { merged_at: null } },
+      }),
+      'issues.update': async () => ({ data: {} }),
+    },
+    calls: [
+      LOOKUP, COMPARE, SCAN,
+      { api: 'issues.listComments', params: { ...OWNER_REPO, issue_number: 440, per_page: 100, page: 1 } },
+      { api: 'issues.get', params: { ...OWNER_REPO, issue_number: 601 } },
+      { api: 'issues.update', params: { ...OWNER_REPO, issue_number: 440 } },
+    ],
+    body: renderArgs({ compareUrl: COMPARE_URL }),
+    reports: [
+      { info: `refreshed ${mod.cardIdentity('CI').marker} card #440` },
+      { info: 'block: held -- #601 closed unmerged (a PR that never landed)' },
+      { notice: 'CI is red on the scheduled full run — card #440 refreshed.' },
+      { output: ['action', 'refreshed'] },
+      { output: ['number', '440'] },
+    ],
+  },
 ];
 
 // The roster is a LITERAL the table is checked against (see
@@ -375,9 +415,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a compare past the endpoint cap is marked truncated, and the watched workflow names the card': 1,
   'an open card is refreshed in place: one issues.update, no create, no label write': 1,
   'a pm:blocked card whose only blocker closed reaches every callback: comments, issue read, add then remove': 1,
+  'a pm:blocked card whose blocker is a PR closed unmerged is held: the PR shape reaches the judgement, no label write': 1,
 });
 // Deleting a roster entry silences its floor as surely as zeroing it.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 /** Doubles of what github-script hands the step, recording every call. */
 function doubles(caseDef) {

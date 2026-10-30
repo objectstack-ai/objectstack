@@ -77,7 +77,7 @@ import {
   useStudioItemDraftStatus,
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
-import { overlayPath, packagedAutomationPath } from './BuilderLanding.js';
+import { packagedAutomationPath } from './BuilderLanding.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
@@ -199,6 +199,7 @@ import {
   listViewColumnFields,
   listViewColumnIndexOf,
   listViewColumnSelection,
+  listViewHeldEdit,
   listViewIsKanban,
   listViewTargetOf,
   ObjectListViewInspector,
@@ -236,6 +237,7 @@ import {
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
+  verdictPreviewEntries,
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import {
@@ -261,6 +263,7 @@ import {
   objectSaveRefusal,
   plainRefusal,
   publishRefusal,
+  reportHeldEdit,
   type PublishFailure,
   type StudioHeld,
   type StudioRefusal,
@@ -282,7 +285,7 @@ import { useSurfaceDeepLink, resolveSurfaceDeepLink, type SurfaceTarget } from '
 import { SurfaceDeepLinkProvider, useRequestedSurface, useSurfaceNavigator } from './surfaceDeepLinkChannel.js';
 import { buildObjectSkeleton, buildFlowSkeleton, buildAppSkeleton, buildPermissionSkeleton, type AppNavSeed } from './skeletons.js';
 import { OWD_CREATE_MODELS, OWD_DEFAULT, type OwdCreateModel } from './owd-sharing.js';
-import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { t, tFormat, translateMetadataType, translateValidationMessage, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { fieldsForNodeType, localizeFlowFields, type FlowConfigField } from '../metadata-admin/inspectors/flow-node-config.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
@@ -556,16 +559,16 @@ function CreateTakenNotice({
  *
  * Exported for its pins; `index.ts` does not re-export it.
  */
-export function StudioHeldNotice({
+export function StudioHeldNotice<Target extends MetadataSelection | null = MetadataSelection>({
   held,
   locale,
   onShow,
   className,
 }: {
-  held: StudioHeld;
+  held: StudioHeld<Target>;
   locale: string;
   /** Opens the held input; omitted while that input is the one open. */
-  onShow?: (target: MetadataSelection) => void;
+  onShow?: (target: Target) => void;
   /** Spacing and type size, which differ by pillar. */
   className?: string;
 }): React.ReactElement {
@@ -805,45 +808,72 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
 
 /**
  * objectui#12453 — a read-only package says so twice: the lock in the app
- * chip, and this link at the right of the open item's header, in every
- * pillar. It names the one way to change an installed package, an
- * environment overlay, and lands on the package's metadata directory
- * (`overlayPath`, the Studio home's read-only package card's route), where
- * each type says whether it accepts an overlay. The pillar's read-only
- * sentence (objectui#11781) is its title.
+ * chip, and this mark at the right of the open item's header, in every
+ * pillar. The pillar's read-only sentence (objectui#11781) is its title.
  *
- * objectui#12707 — at a tab row's end, the link folds to its glyph when the
+ * It offers an environment overlay only where one exists: when the open
+ * item's metadata type declares `allowEnvironmentOverlay` in the served
+ * registry (ADR-0005), it is a link to that item's Setup page, where the
+ * overlay is edited. Any other item, no open item, or a registry not yet
+ * read draws a plain "Read-only" mark that links nowhere.
+ *
+ * objectui#12707 — at a tab row's end, the mark folds to its glyph when the
  * row cannot hold it whole (`useStudioTabRowFold`), rather than being cut
  * mid-word at the row's edge. Folded, its text stays as its accessible name
- * and its title stays its tooltip; where it goes is the same.
+ * and its title stays its tooltip.
  */
-function StudioReadOnlyLink({
-  packageId,
+export function StudioReadOnlyLink({
+  item,
   title,
   locale,
 }: {
-  packageId: string;
+  /** The open item, or `null` when the header has none open. */
+  item: { type: string; name: string } | null;
   title: string;
   locale: string;
 }): React.ReactElement {
-  const ref = React.useRef<HTMLAnchorElement | null>(null);
-  const label = t('engine.studio.pkg.readonlyLink', locale);
+  const client = useMetadataClient();
+  const { entries } = useMetadataTypes(client);
+  const overlayable = item !== null && entries.some((e) => e.type === item.type && e.allowEnvironmentOverlay === true);
+  const ref = React.useRef<HTMLElement | null>(null);
+  const label = t(overlayable ? 'engine.studio.pkg.readonlyLink' : 'engine.studio.pkg.readonly', locale);
   const folded = useStudioTabRowFold(ref, label);
-  return (
+  const className = cn(
+    'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 dark:text-amber-300',
+    overlayable && 'hover:bg-amber-400/25',
+    folded ? 'w-7 justify-center' : 'px-2.5',
+  );
+  const body = (
+    <>
+      {overlayable ? (
+        <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      ) : (
+        <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      )}
+      <span className={folded ? 'sr-only' : undefined}>{label}</span>
+    </>
+  );
+  return overlayable && item ? (
     <Link
-      ref={ref}
-      to={overlayPath(packageId)}
+      ref={ref as React.Ref<HTMLAnchorElement>}
+      to={`/apps/setup/metadata/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
       title={title}
       data-testid="studio-readonly-link"
       data-folded={folded || undefined}
-      className={cn(
-        'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 hover:bg-amber-400/25 dark:text-amber-300',
-        folded ? 'w-7 justify-center' : 'px-2.5',
-      )}
+      className={className}
     >
-      <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className={folded ? 'sr-only' : undefined}>{label}</span>
+      {body}
     </Link>
+  ) : (
+    <span
+      ref={ref as React.Ref<HTMLSpanElement>}
+      title={title}
+      data-testid="studio-readonly-link"
+      data-folded={folded || undefined}
+      className={className}
+    >
+      {body}
+    </span>
   );
 }
 
@@ -1688,6 +1718,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
     return new Map([...publishRefusals].filter(([key]) => listed.has(key)));
   }, [feedCount, pendingEntries, publishRefusals]);
 
+  // The publish toast's way to the Access pillar; set once the router's
+  // navigate is in hand below.
+  const openAccessRef = React.useRef<() => void>(() => {});
+
   // `options` is the review sheet's (objectui#12929): its checked backfill
   // choices, or nothing. Only the package batch door below carries it; the
   // sheet offers no choice in the package-less scope.
@@ -1759,14 +1793,17 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         } else {
           // objectui#11807 — how many went live: every draft read above, as
           // none failed.
+          // The toast names what went live: one flow in its title, several
+          // by count with their names in the description.
           setPublishRefusals(NO_PUBLISH_REFUSALS);
-          toast.success(
-            tFormat(
-              pending.length === 1 ? 'engine.studio.publishedAllFlowsOne' : 'engine.studio.publishedAllFlows',
-              locale,
-              { count: pending.length },
-            ),
-          );
+          const names = pending.map((d) => resolveI18nLabel(d.label, locale)?.trim() || d.name);
+          if (names.length === 1) {
+            toast.success(tFormat('engine.studio.publishedAllFlowsOne', locale, { label: names[0] }));
+          } else {
+            toast.success(tFormat('engine.studio.publishedAllFlows', locale, { count: names.length }), {
+              description: names.join(', '),
+            });
+          }
           setChangesOpen(false);
         }
         setPublishNonce((n) => n + 1);
@@ -1859,10 +1896,28 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
         // wrote. A field that stopped short leaves the publish standing, so the
         // toast still says what went live, as a warning that carries why.
         const receipt = payload?.backfillApplied;
+        // A published app or object reaches members only through a permission
+        // set, so the toast points the author to Access.
+        const reachesMembers =
+          Array.isArray(published) &&
+          published.some((p) => {
+            const type = (p as { type?: unknown } | null)?.type;
+            return type === 'app' || type === 'object';
+          });
+        const access = reachesMembers
+          ? {
+              action: {
+                label: t('engine.studio.publishedOpenAccess', locale),
+                onClick: () => openAccessRef.current(),
+              },
+            }
+          : {};
         if (receipt) {
           const description = formatBackfillReceipt(receipt, locale);
-          if (receipt.success === false) toast.warning(title, { description });
-          else toast.success(title, { description });
+          if (receipt.success === false) toast.warning(title, { description, ...access });
+          else toast.success(title, { description, ...access });
+        } else if (reachesMembers) {
+          toast.success(title, { description: t('engine.studio.publishedAccessHint', locale), ...access });
         } else {
           toast.success(title);
         }
@@ -1934,6 +1989,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // package ships an app, offer Open app — opened in a new tab so the builder
   // context survives. (App → builder is the reverse bridge, tracked separately.)
   const shellNavigate = useNavigate();
+  React.useEffect(() => {
+    openAccessRef.current = () => {
+      if (confirmLeavePillar()) shellNavigate(`/studio/${scopeSegment}/access`);
+    };
+  });
   // objectui#11181 — `label` is the app's own `I18nLabel` (a plain string or an
   // inline locale map), held as the spec types it and never `String()`ed: a map
   // would read `[object Object]`. Only the presence of `packageApp` is read
@@ -2128,7 +2188,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   const [slotPropsClaims, setSlotPropsClaims] = React.useState(0);
   const [copilotStatus, setCopilotStatus] = React.useState<StudioCopilotStatus>({
     available: false,
-    planPending: false,
+    planPendingCount: 0,
   });
   const [copilotCanvasOpen, setCopilotCanvasOpen] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
@@ -2568,7 +2628,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
             onModeChange={setSlotMode}
             hasProps={slotHasProps}
             copilotAvailable={copilotAvailable}
-            planPending={copilotStatus.planPending}
+            planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
             wideWidth={copilotCanvasOpen && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
             overlay={isMobile}
@@ -4832,11 +4892,19 @@ export function InterfacesPillar({
   // widget's inspector hints the input, and the line on the canvas names it.
   // Asked of the spec's own widget schema (`dashboardHeldEdit`); a widget that
   // is finished but wrong is sent, and its refusal shows as before.
+  // objectstack#27459 — so is an item just added to one of the dashboard's
+  // own list properties (Global Filters, the header's Actions), asked of the
+  // spec's dashboard schema, until its required inputs are filled in.
+  // objectstack#27785 — a report likewise: an item just added to Order or a
+  // joined report's Blocks, or a chart whose type is picked before its axes,
+  // asked of the spec's report schema (`reportHeldEdit`).
   const leafType = current?.type;
-  const leafIncomplete = React.useMemo(
-    () => (ifDirty && leafType === 'dashboard' ? dashboardHeldEdit(draft, locale) : null),
-    [ifDirty, leafType, draft, locale],
-  );
+  const leafIncomplete = React.useMemo(() => {
+    if (!ifDirty) return null;
+    if (leafType === 'dashboard') return dashboardHeldEdit(draft, locale);
+    if (leafType === 'report') return reportHeldEdit(draft, locale);
+    return null;
+  }, [ifDirty, leafType, draft, locale]);
   const { loaded: draftLoaded } = useDraftAutoSave({
     // objectui#11232 — the leaf `doSave` addresses, `type:name`.
     target: leafKey,
@@ -4854,7 +4922,6 @@ export function InterfacesPillar({
   const [navRenamePending, setNavRenamePending] = React.useState<string | null>(null);
   const navRenameClause =
     navRenamePending === null ? null : tFormat('engine.studio.held.navRename', locale, { item: navRenamePending });
-  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? navRenameClause);
   // objectui#12725 — the header's draft line reads the badge's ledger.
   const leafDraftStatus = useStudioItemDraftStatus(
     current ? { type: current.type, name: current.name } : null,
@@ -4866,14 +4933,57 @@ export function InterfacesPillar({
   // the Properties panel and shown on the canvas, autosaved to the package
   // draft like the other two. Blocked on `readOnly` like them.
   const listView = useObjectListViewDraft({ client, packageId, leaf: current, publishNonce, draftOnlyObjects, onDraftSaved });
-  useDraftAutoSave({
+  // objectstack#27895 — an edit that clears a required setting of the view
+  // type's own block (a calendar's start date) is held, not sent, as a
+  // leaf's is: asked of the spec's list-view schema (`listViewHeldEdit`).
+  const listViewHeld = listViewHeldEdit(listView, locale);
+  const { flush: flushListView } = useDraftAutoSave({
     target: listView.targetKey,
     loadedFor: listView.loadedFor,
     dirty: listView.dirty,
-    blocked: !listView.target || listView.saving || readOnly,
+    blocked: !listView.target || listView.saving || readOnly || listViewHeld !== null,
     snapshot: listView.row,
     save: listView.save,
   });
+  useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? listViewHeld?.clause ?? navRenameClause);
+  const heldUnsent = leafHeld !== null || listViewHeld !== null;
+  // objectstack#27896 — the panel's view picker (and its "Back to …") opens
+  // another view of the object in the one list-view buffer, whose load
+  // replaces the open view's edits, and the autosave sends nothing once the
+  // view has changed (objectui#11232). So the switch sends a pending edit
+  // first with the autosave's own `flush` and shows the view once the buffer
+  // is clean, as the Data pillar's object rail does (objectstack#27511); a
+  // save in flight is waited out the same way. An edit that cannot be sent
+  // (held, or its save refused with the refusal on screen) is the author's to
+  // drop: the switch asks (objectstack#26705).
+  const [listViewSwitchTo, setListViewSwitchTo] = React.useState<string | null>(null);
+  const listViewDirty = listView.dirty;
+  const listViewSaving = listView.saving;
+  const listViewHolds = listViewHeld !== null;
+  const showListView = listView.showView;
+  const switchListView = React.useCallback(
+    (viewId: string) => {
+      if (listViewSaving || (listViewDirty && !listViewHolds && flushListView())) {
+        setListViewSwitchTo(viewId);
+        return;
+      }
+      if (!confirmDropUnsavedWork(listViewDirty, locale)) return;
+      setListViewSwitchTo(null);
+      setSelection(null);
+      showListView(viewId);
+    },
+    [listViewSaving, listViewDirty, listViewHolds, flushListView, locale, setSelection, showListView],
+  );
+  React.useEffect(() => {
+    if (!listViewSwitchTo || listViewSaving) return;
+    if (listViewDirty && !listViewHolds && flushListView()) return;
+    setListViewSwitchTo(null);
+    // Still dirty: the save was refused (on screen) or an edit taken meanwhile
+    // is held. The author stays; the next switch asks.
+    if (listViewDirty) return;
+    setSelection(null);
+    showListView(listViewSwitchTo);
+  }, [listViewSwitchTo, listViewSaving, listViewDirty, listViewHolds, flushListView, setSelection, showListView]);
   // objectui#12725 — a click on a column header in an `object` leaf's canvas
   // selects that column (`StudioCanvasColumnSelectionContext`): the pillar's
   // one selection, so it shows in the panel's column list, asks the slot for
@@ -5028,13 +5138,13 @@ export function InterfacesPillar({
       // objectstack#26845 — the created item opens at once, and its load
       // replaces the buffer a held widget lives in: asked before the dialog
       // opens, so Cancel costs nothing and the create itself asks nothing.
-      if (!confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+      if (!confirmDropUnsavedWork(heldUnsent, locale)) return;
       setCreateError(null);
       setReportBinding(NO_REPORT_BINDING);
       setPageKind(DEFAULT_PAGE_SOURCE_KIND);
       setCreateKind(kind);
     },
-    [leafHeld, locale],
+    [heldUnsent, locale],
   );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
@@ -5496,7 +5606,7 @@ export function InterfacesPillar({
             </span>
           )}
           {readOnly && (
-            <StudioReadOnlyLink packageId={packageId} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+            <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
           )}
           {isObjectLeaf && openSurface && current && (
             <button
@@ -5546,7 +5656,7 @@ export function InterfacesPillar({
       }}
       className={cn('flex min-w-0 flex-1 flex-col overflow-auto bg-muted/30 py-4', inSlot ? 'px-4' : 'px-6')}
     >
-      {(error || navError || leafHeld) && (
+      {(error || navError || leafHeld || listViewHeld) && (
         <div className="mb-3 flex shrink-0 flex-col gap-1.5">
           {/* objectui#11776 — the pillar's failure and the nav editor's own,
               each cleared by what settles it, the same failure shown once.
@@ -5572,11 +5682,25 @@ export function InterfacesPillar({
               held={leafHeld}
               locale={locale}
               // objectui#11910 — no "Show me" while that widget is the one open.
+              // objectstack#27459 — an item of the leaf's own list property
+              // (`target: null`) always offers it: the leaf's properties may
+              // be collapsed, or scrolled past the list it opens and focuses.
               onShow={
-                selection?.kind === leafHeld.target.kind && selection.id === leafHeld.target.id
-                  ? undefined
-                  : (target) => setSelection(target)
+                leafHeld.target === null
+                  ? () => showLeafRefusal(null, leafHeld.input)
+                  : selection?.kind === leafHeld.target.kind && selection.id === leafHeld.target.id
+                    ? undefined
+                    : (target) => setSelection(target)
               }
+              className="px-3 py-2 text-xs"
+            />
+          )}
+          {listViewHeld && (
+            <StudioHeldNotice
+              held={listViewHeld}
+              locale={locale}
+              // The setting is in the leaf's own panel, which may be collapsed or scrolled past.
+              onShow={() => showLeafRefusal(null, listViewHeld.input)}
               className="px-3 py-2 text-xs"
             />
           )}
@@ -5749,6 +5873,10 @@ export function InterfacesPillar({
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
             onSelectionChange={setSelection}
+            // objectstack#27836 — "Add view" opens another view here: the pending edit goes first.
+            onAddViewOpen={flushListView}
+            // objectstack#27896 — another view of the object: the pending edit goes first, or the author is asked.
+            onSwitchView={switchListView}
           />
         </div>
       ) : (
@@ -5910,7 +6038,7 @@ export function InterfacesPillar({
   const pickSurface = (s: Surface) => {
     // objectstack#26705 — another leaf's load replaces the buffer the held
     // widget lives in; an entry for the open leaf keeps it.
-    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafHeld !== null, locale)) return;
+    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(heldUnsent, locale)) return;
     setCurrent(s);
     if (isMobile) setRailOpen(false);
   };
@@ -6942,7 +7070,18 @@ export function DataPillar({
     };
   }, [client, current, packageId, publishNonce, objReloadNonce, recordObjRead]);
 
-  const fieldCount = React.useMemo(() => readFields(objDraft.fields).entries.length, [objDraft]);
+  // The header counts the fields the canvas shows, and names the platform's
+  // own columns apart: "2 fields (+8 system)".
+  const fieldCount = React.useMemo(() => {
+    const all = readFields(objDraft.fields).entries.length;
+    const own = formFieldNames(objDraft.fields).length;
+    return { own, system: all - own };
+  }, [objDraft]);
+  const fieldCountText =
+    tFormat(fieldCount.own === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
+      count: fieldCount.own,
+    }) +
+    (fieldCount.system > 0 ? ` ${tFormat('engine.studio.data.systemFieldCount', locale, { count: fieldCount.system })}` : '');
 
   /**
    * The design-mode grid's columns: the object's own fields in metadata order,
@@ -7573,7 +7712,7 @@ export function DataPillar({
             title={current ? current.label : t('engine.studio.data.objects', locale)}
             titleProps={current ? undefined : { className: 'text-[13px] font-normal text-muted-foreground' }}
             apiName={current?.name}
-            meta={current && objLoaded ? tFormat('engine.studio.data.fieldCount', locale, { count: fieldCount }) : undefined}
+            meta={current && objLoaded ? fieldCountText : undefined}
             status={objDraftStatus}
             actions={
               <>
@@ -7604,7 +7743,7 @@ export function DataPillar({
                     read-only sentence the Layout control no longer does. */}
                 {readOnly && (
                   <StudioReadOnlyLink
-                    packageId={packageId}
+                    item={current}
                     title={
                       viewMode === 'form'
                         ? t('engine.studio.data.form.layoutBadgeReadOnly', locale)
@@ -8529,6 +8668,16 @@ export function AutomationsPillar({
   // draft's (what its publish will refuse), else the layered read's. Taken off
   // each read, never computed here; the inspectors read it at their paths.
   const [flowVerdict, setFlowVerdict] = React.useState<ServerDiagnostics | undefined>(undefined);
+  // objectstack#27799 — and the flow's Problems list reads that same verdict,
+  // so it never calls a flow valid that its publish refuses.
+  const flowPreviewDiagnostics = React.useMemo(
+    () =>
+      verdictPreviewEntries(flowVerdict).map((entry) => ({
+        ...entry,
+        message: translateValidationMessage(entry.message, locale),
+      })),
+    [flowVerdict, locale],
+  );
   const flowVerdictSeq = React.useRef(0);
   const rereadFlowVerdict = React.useCallback(
     (flowName: string) => {
@@ -9194,7 +9343,7 @@ export function AutomationsPillar({
   // end, the slot objectui#12456 gave the Access note for the same reason.
   const autoReadOnlyLinkEl =
     readOnly && packageId !== null ? (
-      <StudioReadOnlyLink packageId={packageId} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
+      <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
   const flowTabsEl =
     flowOpen ? (
@@ -9498,6 +9647,8 @@ export function AutomationsPillar({
                         // edge selection still open the inspector read-only below.
                         onPatch: readOnly ? undefined : onPatch,
                         locale,
+                        // objectstack#27799 — the Problems list reads the verdict the inspectors read.
+                        diagnostics: flowPreviewDiagnostics,
                       })}
                     </FlowPreviewChromeProvider>
                   </FlowRegistrationContext.Provider>
@@ -10056,7 +10207,7 @@ export function AccessPillar({
     <StudioStatusChip {...accessStatus} />
   ) : (
     <StudioReadOnlyLink
-      packageId={packageId}
+      item={current !== null && !owdOpen ? { type: 'permission', name: current } : null}
       title={t('engine.studio.access.bannerTitleReadOnly', locale)}
       locale={locale}
     />

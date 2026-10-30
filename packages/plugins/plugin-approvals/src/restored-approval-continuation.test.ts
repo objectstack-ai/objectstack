@@ -53,9 +53,16 @@ import { registerApprovalReviseNode } from './approval-revise-node.js';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
 const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
 
+/**
+ * The accounts this suite routes `user` approver slots to: a `user` approver
+ * holds a slot only when an account carries it (#27397), so the double's
+ * directory starts with them.
+ */
+const ROUTED_USERS = ['u1', 'u2'];
+
 /** In-memory ObjectQL stand-in for the approvals tables. */
 function makeFakeEngine() {
-  const tables = new Map<string, any[]>();
+  const tables = new Map<string, any[]>([['sys_user', ROUTED_USERS.map((id) => ({ id }))]]);
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
   // ⭐ The lever that makes a REAL strand reachable from a test: fail the very
   // next insert into one table, once. The approval node's executor opens the

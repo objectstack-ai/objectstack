@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { uiRoot } from '../../ui-root.mjs';
-import { uiScopedTurboConfig, uiTurboConfigPath, workspaceGlobs } from '../../workspace-root.mjs';
+import { uiScopedTurboConfig, workspaceGlobs } from '../../workspace-root.mjs';
 
 /** Repo root: the objectui tree, standalone or as the monorepo's `ui/`. */
 export const repoRoot = uiRoot();
@@ -36,21 +36,11 @@ export interface TurboTasks {
  * (`$TURBO_ROOT$/ui/x` read as `$TURBO_ROOT$/x`, the monorepo's own entries
  * dropped) by `uiScopedTurboConfig`. Under the monorepo that is the root
  * `turbo.json`; no turbo invocation reads anything else (objectstack#26080).
- * A guard whose property the root config carries reads this one.
+ * Every guard in this family reads this one: the parked pre-merge copy is gone
+ * (objectstack#27283), so a guard can only go green on the config turbo hashes.
  */
 export function liveTurboConfig(): TurboTasks {
   return uiScopedTurboConfig();
-}
-
-/**
- * objectui's OWN task declaration: `turbo.json` at the repo root, or the copy
- * the cutover parks as `turbo.objectui.json`. ⚠️ No turbo run reads the parked
- * copy (objectstack#26080 measured every invocation); it is still the default
- * here only for the guards whose property the root config does not carry yet
- * (`build` and `test` inputs), so none of them is loosened by a retarget.
- */
-export function parkedTurboConfig(): TurboTasks {
-  return JSON.parse(fs.readFileSync(uiTurboConfigPath(), 'utf8')) as TurboTasks;
 }
 
 /** POSIX-separated, repo-relative. The one path spelling these guards compare in. */
@@ -123,7 +113,7 @@ export function packagesWithScript(script: string): WorkspacePackage[] {
  * turbo's default, which is the defect all four guards exist to close, so the
  * absence throws rather than reading as an empty list.
  */
-export function taskInputs(task: string, turbo: TurboTasks = parkedTurboConfig()): string[] {
+export function taskInputs(task: string, turbo: TurboTasks = liveTurboConfig()): string[] {
   const definition = turbo.tasks?.[task];
   if (!definition) throw new Error(`turbo.json must define a \`${task}\` task`);
   const inputs = definition.inputs ?? [];
@@ -138,7 +128,7 @@ export function taskInputs(task: string, turbo: TurboTasks = parkedTurboConfig()
  * outside the package directory — turbo has no `..` escape, which is why
  * `$TURBO_ROOT$` exists at all.
  */
-export function rootAnchoredInputs(task: string, turbo: TurboTasks = parkedTurboConfig()): string[] {
+export function rootAnchoredInputs(task: string, turbo: TurboTasks = liveTurboConfig()): string[] {
   return taskInputs(task, turbo)
     .filter((entry) => entry.startsWith('$TURBO_ROOT$/'))
     .map((entry) => entry.slice('$TURBO_ROOT$/'.length));

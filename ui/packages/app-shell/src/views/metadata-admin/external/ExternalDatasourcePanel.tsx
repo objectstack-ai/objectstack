@@ -147,7 +147,7 @@ export function ExternalDatasourcePanel({
           <TabsTrigger value="validation">{tr('engine.externalDatasource.validation', locale)}</TabsTrigger>
         </TabsList>
         <TabsContent value="tables" className="mt-3">
-          <SchemaBrowser datasource={datasource} />
+          <SchemaBrowser datasource={datasource} allowWrites={allowWrites} />
         </TabsContent>
         <TabsContent value="validation" className="mt-3">
           <ValidationPanel datasource={datasource} />

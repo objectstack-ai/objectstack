@@ -629,6 +629,16 @@ function MetadataResourceEditPageImpl({
   // the user types anything reads as broken, not helpful (the save path still
   // validates). Flips true on the first real edit.
   const [createDirty, setCreateDirty] = React.useState(false);
+  // objectstack#27865 — one message per mistake. `revealIssues` ends the create
+  // form's show-on-touch deferral once Save is attempted; `inlineIssueFields`
+  // is what the form reports it draws inline (a top-level field, mounted, not
+  // deferred), which the summary banner and the refusal line leave out.
+  const [revealIssues, setRevealIssues] = React.useState(false);
+  const [inlineIssueFields, setInlineIssueFields] = React.useState<ReadonlySet<string>>(() => new Set());
+  const inlineIssueFieldsRef = React.useRef(inlineIssueFields);
+  React.useEffect(() => {
+    inlineIssueFieldsRef.current = inlineIssueFields;
+  });
 
   // Wrap setDraft so that editing a field clears any *server-side*
   // diagnostic issues whose path begins with that field. The user
@@ -946,7 +956,10 @@ function MetadataResourceEditPageImpl({
   //
   // So schema issues are surfaced loudly — banner, inline field errors,
   // `previewDiagnostics` — and left advisory; the server has the last word.
-  // Pinned by `ResourceEditPage.schemaAdvisory.test.tsx`.
+  // Pinned by `ResourceEditPage.schemaAdvisory.test.tsx`. One bounded
+  // exception, outside this gate: a create whose NAME the live pass refuses is
+  // held in `doSave` (objectstack#27865) — the create form always offers that
+  // input, so no skew can wedge it.
   //
   // ⭐ THE BOUNDARY, stated so a later reader can apply it (`9073cf018`).
   // "Advisory" is about a verdict this client PREDICTS, and it is the whole of
@@ -1810,6 +1823,10 @@ function MetadataResourceEditPageImpl({
     setSaving(true);
     setError(null);
     setIssues([]);
+    if (createMode) {
+      setRevealIssues(true);
+      setCreateDirty(true);
+    }
     try {
       // Ensure identity is set on create, and that any `createDefaults`
       // / `createBuildBody` shape (e.g. `{ fields: {} }` for object,
@@ -1851,6 +1868,31 @@ function MetadataResourceEditPageImpl({
         setError(t('engine.validation.nameRequired', locale));
         setSaving(false);
         return;
+      }
+      // objectstack#27865 — a create whose NAME the client validator refuses is
+      // held: no request, and the refusal is the inline error on the Name field
+      // (revealed above). The verdict is the live pass's own, run here on the
+      // same draft so a Save inside its debounce cannot slip past it.
+      //
+      // ⭐ This is the one place a predicted verdict holds Save, and it is
+      // bounded so the dead-bolt the advisory ruling at `blockingReport`
+      // guards against stays out of reach: only the create door, and only the
+      // identity field — an input the create form always offers, so a client
+      // stricter than the server can never wedge the author, who can always
+      // type a name both accept. Every other live issue stays advisory, and an
+      // edit is never held here.
+      if (createMode && hasClientValidator(type, 'create')) {
+        const verdict = await validateMetadataDraft(
+          type,
+          draft,
+          entry?.schema as { required?: unknown } | undefined,
+          { mode: 'create' },
+        );
+        if (verdict.issues.some((issue) => issue.path === identityField)) {
+          setIssues(verdict.issues);
+          setSaving(false);
+          return;
+        }
       }
       // objectui#12810 — a create never saves the seed's placeholder identity
       // (`buildCreateModeBody` leaves it out). One the author left unset that
@@ -2023,7 +2065,16 @@ function MetadataResourceEditPageImpl({
           held,
           summary: held.map((h) => h.label).join(', '),
         });
-        if (mapped.length === 1 && !mapped[0].path) {
+        // objectstack#27865 — a refusal the form draws in full on its fields is
+        // said there, once. Only where the summary banner reads these issues
+        // (a client validator exists), so a field that leaves the screen still
+        // has its message somewhere.
+        const drawnInline =
+          hasClientValidator(type, draftMode) &&
+          mapped.every((m) => !!m.path && inlineIssueFieldsRef.current.has(m.path));
+        if (drawnInline) {
+          setError(null);
+        } else if (mapped.length === 1 && !mapped[0].path) {
           setError(mapped[0].message);
         } else if (mapped.length === 1) {
           setError(`${labelForIssuePath(mapped[0].path)}: ${mapped[0].message}`);
@@ -3027,7 +3078,11 @@ function MetadataResourceEditPageImpl({
               ) {
                 return null;
               }
-              const errs = liveErrors;
+              // objectstack#27865 — an error the form already draws on its
+              // field is not repeated here.
+              const errs = liveErrors.filter(
+                (e) => !(inlineIssueFields.has(e.path) && displayIssues.some((d) => d.path === e.path)),
+              );
               const warns = diag?.warnings ?? [];
               const hasErrs = !liveValid && errs.length > 0;
               const hasWarns = warns.length > 0;
@@ -3403,6 +3458,8 @@ function MetadataResourceEditPageImpl({
                             readOnly={formReadOnly}
                             createMode={createMode}
                             widgetContext={widgetContext}
+                            revealIssues={revealIssues}
+                            onInlineIssueFieldsChange={setInlineIssueFields}
                           />
                         )}
                       </div>
@@ -3427,6 +3484,8 @@ function MetadataResourceEditPageImpl({
                 readOnly={formReadOnly}
                 createMode={createMode}
                 widgetContext={widgetContext}
+                revealIssues={revealIssues}
+                onInlineIssueFieldsChange={setInlineIssueFields}
               />
             )}
             {/* objectui#7611 — under the designer, too: `position` renders

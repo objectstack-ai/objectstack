@@ -406,7 +406,10 @@ export function InboxPopover({
             Spell the addends out here, unclamped, so a user seeing "9+" can
             read exactly which N notifications and which M pending approvals it
             is made of (the M is the same count Home's approvals card and the
-            Approvals Inbox tab show — one source, `pendingApprovalsCount`). */}
+            Approvals Inbox tab show — one source, `pendingApprovalsCount`).
+            The first addend names its unit — unread *topics* (objectstack#27704):
+            one coalesced row reading "×3 · 3 unread" is one topic, so the line
+            and the row tell one story instead of "1 notification" against "3". */}
         {totalBadge > 0 && (
           <div
             data-testid="inbox-badge-breakdown"
@@ -421,7 +424,7 @@ export function InboxPopover({
             <span aria-hidden>·</span>
             <span data-testid="inbox-badge-breakdown-notifications">
               {t('notifications.badgeNotifications', {
-                defaultValue: '{{count}} notifications',
+                defaultValue: '{{count}} unread topics',
                 count: unreadTopics,
               })}
             </span>

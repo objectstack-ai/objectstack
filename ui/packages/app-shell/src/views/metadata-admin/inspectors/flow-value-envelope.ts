@@ -118,3 +118,23 @@ export function valueEnvelopeRefusal(value: unknown): string[] | null {
   const result = AssignmentValueSchema.safeParse(value);
   return result.success ? null : result.error.issues.map((issue) => issue.message);
 }
+
+/**
+ * The spec's refusal of an expression left blank, read once from the spec's
+ * own judge rather than restated: the messages {@link valueEnvelopeRefusal}
+ * gives an envelope in the slot's dialect whose `source` is empty.
+ */
+const BLANK_EXPRESSION_REFUSALS: ReadonlySet<string> = new Set(
+  valueEnvelopeRefusal({ dialect: VALUE_DIALECT, source: '' }) ?? [],
+);
+
+/**
+ * Whether `message` is the spec's refusal of a blank expression in a value
+ * slot, so an editor can say it in business words. The node's value cell and
+ * the flow's Problems list both ask this of the one verdict they show (the
+ * cell's live spec parse, the publish verdict the draft read serves), so the
+ * two say the same thing.
+ */
+export function isBlankExpressionRefusal(message: string): boolean {
+  return BLANK_EXPRESSION_REFUSALS.has(message);
+}

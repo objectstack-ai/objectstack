@@ -86,11 +86,6 @@
 # Prove the check: node scripts/check-osv-exemptions.mjs --self-test
 
 [[IgnoredVulns]]
-id = "GHSA-hp3w-g68c-fv3c"
-ignoreUntil = 2026-11-05
-reason = "https://github.com/advisories/GHSA-hp3w-g68c-fv3c — no fixed sprintf-js exists (1.1.3, the latest release, is the last affected version), and it arrives only transitively through tedious 18.6.2 (driver-sql's optional mssql peer) and fengari 0.1.5 (under ioredis-mock, a service-cluster-redis devDependency), whose latest releases (tedious 20.3.3, fengari 0.1.5) still require ^1.1.3; remove when sprintf-js publishes a fix or both parents drop it."
-
-[[IgnoredVulns]]
 id = "GHSA-xcx6-jx8p-x3h5"
 ignoreUntil = 2026-11-26
 reason = "https://github.com/advisories/GHSA-xcx6-jx8p-x3h5 — the only patched @azure/msal-node is 7.1.0, a major no published @azure/identity accepts yet (4.13.1 here and 4.14.0, the latest, both require ^6), and it arrives only transitively through tedious 18.6.2 (driver-sql's optional mssql peer, dev tree only) → @azure/identity; the flaw is in the authorization-code flow (acquireTokenByCode), which tedious's client-credential and managed-identity sign-in never calls; remove when @azure/identity accepts msal-node 7.1+ and tedious takes that release."

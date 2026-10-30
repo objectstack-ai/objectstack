@@ -207,7 +207,8 @@ describe('PackageDetailSheet — starting an action clears the previous message 
   // it is where the action starts.
   it.each([
     ['Duplicate'],
-    ['Delete app'],
+    ['Delete package'],
+    ['Disable'],
     ['Adopt loose items'],
     [`Discard changes (${DRAFTS.length})`],
     ['View info'],

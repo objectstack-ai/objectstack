@@ -14,7 +14,7 @@ import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bod
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization } from '@object-ui/i18n';
 import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, extractWriteErrorMessage } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
@@ -763,6 +763,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The DISPLAY locale the audit-history dates format with (objectui#10442).
   // `language` above stays for what it is: the key into per-locale LABEL maps.
   const displayLocale = useDisplayLocale();
+  // The tenant default currency (ADR-0053) a `dynamic` currency diff reads,
+  // the same `useLocalization().currency` the record page's cells read.
+  const { currency: tenantCurrency } = useLocalization();
   const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
   // label + confirmText + successMessage through ONE call (objectui#4265) —
   // the three keys of an `_actions.<name>` bundle entry can no longer be
@@ -2473,7 +2476,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
         // `locale` is spent on the date faces only, so it is the display
         // locale, never the UI language (objectui#10442).
-        const fmtCtx = { t, locale: displayLocale, lookupLabels };
+        const fmtCtx = { t, locale: displayLocale, lookupLabels, tenantCurrency };
         const enriched = items.map((it, idx) => {
           const u = it?.user_id ? userMap.get(it.user_id) : undefined;
           // Attribution fallback chain: resolved user name → service/automation
@@ -2518,7 +2521,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // language switch so the translated values re-localize, and
     // `displayLocale` on a display-locale switch so the dates do.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataSource, pureRecordId, objectDef, historyEnabled, historyWanted, objects, language, displayLocale]);
+  }, [dataSource, pureRecordId, objectDef, historyEnabled, historyWanted, objects, language, displayLocale, tenantCurrency]);
 
   // Fetch a directory of active users once per dataSource mount and expose
   // them as @-mention suggestions to the DiscussionContext. Capped at 50 to
@@ -3915,17 +3918,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // (`recordDelete.confirmCopy`): the title names this record by the
           // ADR-0079 resolver over the READABLE row the header title reads
           // (a denied name field reads as absent here too) plus the object
-          // label, the body is the list's question, and the confirm button is
-          // "Delete", painted destructive.
-          const copy = recordDelete.confirmCopy(
-            {
-              objectName: objectName!,
-              t,
-              label: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
-              objectDef,
-            },
-            { record: (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId } },
-          );
+          // label, the body is the list's question (it says the delete is
+          // permanent), and the confirm button is "Delete", painted destructive.
+          // The success toast names the same record (`recordDelete.successText`).
+          const deleteDeps = {
+            objectName: objectName!,
+            t,
+            label: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
+            objectDef,
+          };
+          const deleteTarget =
+            (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId };
+          const copy = recordDelete.confirmCopy(deleteDeps, { record: deleteTarget });
           // objectui#11001 — asked through this page's own confirm runtime,
           // the in-app `ActionConfirmDialog` the list view's delete asks
           // through too, never the browser's native `window.confirm` (which
@@ -3941,7 +3945,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           ) return;
           try {
             await dataSource.delete(objectName!, pureRecordId!);
-            toast.success(t('detail.deleted', { defaultValue: 'Record deleted' }));
+            toast.success(recordDelete.successText(deleteDeps, deleteTarget));
             const baseAppUrl = appName ? `/apps/${appName}` : '';
             navigate(`${baseAppUrl}/${objectName}`, { replace: true });
           } catch (err: any) {

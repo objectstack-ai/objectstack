@@ -1,31 +1,57 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page, type Response } from '@playwright/test';
 import { selectOption, fillLookup } from './helpers';
 
 /**
  * Live e2e for the master-detail entry form (showcase "New Project + Tasks").
  *
- * Regression guard for the "click Create, nothing happens" bug: the submit must
- * carry the user's input through to the atomic batch. The earlier symptom was a
- * `form.reset()` firing on a parent re-render (between the click and the
- * deferred requestSubmit) that wiped the form, so RHF then validated blank
- * required fields and never submitted. We assert the POST /api/v1/batch fires
- * with the populated parent payload — which only happens when the form kept its
- * values through submit.
+ * What this spec proves, per test, against the real backend:
+ *   1. the click on Create sends ONE `POST /api/v1/batch` whose operations
+ *      carry what the user typed (request shape: names WHICH half broke when a
+ *      save fails — the form, or the server);
+ *   2. the server answers that batch 2xx;
+ *   3. the data API then reads back what the batch stored: the parent with the
+ *      typed name, the chosen lookup and status, and (second test) the child
+ *      task pointing at that parent's id.
  *
- * (Asserting the persisted record needs a browser write-session; the live
- * harness injects a bearer token that the data API accepts for reads but not
- * the transactional /batch write, so we assert the outgoing request instead.)
+ * The regression it was written for is "click Create, nothing happens": a
+ * `form.reset()` firing on a parent re-render between the click and the
+ * deferred requestSubmit wiped the form, so RHF validated blank required
+ * fields and never submitted. Step 1 guards that; steps 2 and 3 guard the
+ * server half, which a request-only assertion reads green when the batch is
+ * refused, stores only the parent, or drops the child's parent reference.
+ *
+ * Auth: the page writes with the bearer token global-setup puts in the app
+ * origin's localStorage; the read-back goes through the `request` fixture,
+ * which carries the better-auth session cookie of the same storageState.
  */
 const PAGE = '/apps/showcase_app/page/showcase_project_workspace';
+const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 
-async function captureBatch(page: import('@playwright/test').Page) {
-  const reqs: any[] = [];
-  page.on('request', (r) => {
-    if (r.method() === 'POST' && r.url().includes('/api/v1/batch')) {
-      try { reqs.push(r.postDataJSON()); } catch { reqs.push(null); }
-    }
-  });
-  return reqs;
+/** Click Create and resolve with the batch response it provoked. */
+async function submitBatch(page: Page): Promise<Response> {
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.request().method() === 'POST' && r.url().includes('/api/v1/batch'),
+      { timeout: 15_000 },
+    ),
+    page.getByTestId('md-form-submit').click(),
+  ]);
+  return response;
+}
+
+/** Assert the batch answered 2xx and return its per-operation results. */
+async function batchResults(response: Response): Promise<any[]> {
+  const body = await response.json().catch(() => null);
+  expect(response.ok(), `POST /api/v1/batch answered ${response.status()}: ${JSON.stringify(body)}`).toBe(true);
+  expect(Array.isArray(body?.results), `batch body carries results[]: ${JSON.stringify(body)}`).toBe(true);
+  return body.results;
+}
+
+/** Read one stored record back through the data API. */
+async function readBack(request: APIRequestContext, object: string, id: string) {
+  const res = await request.get(`${API}/api/v1/data/${object}/${encodeURIComponent(id)}`);
+  expect(res.ok(), `GET ${object}/${id} answered ${res.status()}`).toBe(true);
+  return (await res.json()).record;
 }
 
 test.beforeEach(async ({ page }) => {
@@ -33,45 +59,47 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'New Project + Tasks' })).toBeVisible();
 });
 
-test('Create submits the populated parent in one atomic batch', async ({ page }) => {
-  const batches = await captureBatch(page);
+test('the status select offers only the state the server admits on create', async ({ page }) => {
+  // `project_status_flow` declares `initialStates: ['planned']`; every other
+  // option would be refused 400 `invalid_initial_state` (#27763).
+  await page.getByTestId('select-trigger-status').first().click();
+  await expect(page.getByTestId('select-option-planned').first()).toBeVisible();
+  for (const refused of ['active', 'on_hold', 'completed', 'cancelled']) {
+    await expect(page.getByTestId(`select-option-${refused}`)).toHaveCount(0);
+  }
+});
+
+test('Create stores the populated parent through one atomic batch', async ({ page, request }) => {
   const name = `E2E Project ${Date.now()}`;
   await page.locator('input[name="name"]').fill(name);
   await fillLookup(page, 'account', 'North');
   await selectOption(page, 'status', 'planned');
   await expect(page.getByText('Northwind', { exact: false })).toBeVisible();
 
-  await Promise.all([
-    // This predicate used to end `&& r.request?.().method?.() !== 'GET'`, which
-    // objectui#4471's first-ever compile of this file reported as TS2339:
-    // `Request` has no `request` member (that is `Response.request()`). Because
-    // the whole chain is optional, it evaluated to `undefined !== 'GET'` — always
-    // true — so the non-GET filter has never been in effect for a single run.
-    // Deleted rather than repaired: removing a provably-always-true conjunct
-    // cannot change what this wait resolves on, whereas restoring the intent as
-    // `r.method() !== 'GET'` WOULD, and that needs the live stack to validate.
-    // Nothing this test asserts depends on it either way — the `batches` array
-    // below does its own `r.method() === 'POST'` filtering, and this wait's
-    // result is discarded (`.catch(() => null)`); it only races the click.
-    page.waitForRequest((r) => r.url().includes('/api/v1/batch'), { timeout: 15_000 }).catch(() => null),
-    page.getByTestId('md-form-submit').click(),
-  ]);
-  await page.waitForTimeout(500);
+  const response = await submitBatch(page);
 
-  expect(batches.length).toBeGreaterThan(0);
-  const parentOp = batches[0]?.operations?.[0];
+  const parentOp = response.request().postDataJSON()?.operations?.[0];
   expect(parentOp?.object).toBe('showcase_project');
   expect(parentOp?.data?.name).toBe(name);        // the form kept its value through submit
   expect(parentOp?.data?.account).toBeTruthy();    // lookup committed
   expect(parentOp?.data?.status).toBe('planned');  // Radix select committed
+
+  const [parentResult] = await batchResults(response);
+  expect(parentResult?.id, 'the batch echoes the created parent id').toBeTruthy();
+
+  const stored = await readBack(request, 'showcase_project', parentResult.id);
+  expect(stored?.name).toBe(name);
+  expect(stored?.account).toBe(parentOp.data.account);
+  expect(stored?.status).toBe('planned');
 });
 
-test('Create with a task line includes the child op referencing the parent', async ({ page }) => {
-  const batches = await captureBatch(page);
+test('Create with a task line stores the child referencing the parent', async ({ page, request }) => {
   const name = `E2E MD ${Date.now()}`;
   await page.locator('input[name="name"]').fill(name);
   await fillLookup(page, 'account', 'North');
-  await selectOption(page, 'status', 'active');
+  // `planned` is the only status `project_status_flow` admits on create, and
+  // the only one the select offers.
+  await selectOption(page, 'status', 'planned');
   await expect(page.getByText('Northwind', { exact: false })).toBeVisible();
 
   // `showcase_task` is a rich child, so its relationship smart-default resolves
@@ -86,18 +114,26 @@ test('Create with a task line includes the child op referencing the parent', asy
   await editor.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(editor).toBeHidden();
 
-  await Promise.all([
-    page.waitForRequest((r) => r.url().includes('/api/v1/batch'), { timeout: 15_000 }).catch(() => null),
-    page.getByTestId('md-form-submit').click(),
-  ]);
-  await page.waitForTimeout(500);
+  const response = await submitBatch(page);
 
-  expect(batches.length).toBeGreaterThan(0);
-  const ops = batches[0]?.operations ?? [];
+  const ops = response.request().postDataJSON()?.operations ?? [];
   expect(ops[0]?.data?.name).toBe(name);
   // a child task op referencing the parent via $ref:0
-  const child = ops.find((o: any) => o.object === 'showcase_task');
-  expect(child).toBeTruthy();
-  expect(child?.data?.title).toBe('E2E Task A');
-  expect(child?.data?.project).toEqual({ $ref: 0 });
+  const childIndex = ops.findIndex((o: any) => o.object === 'showcase_task');
+  expect(childIndex).toBeGreaterThan(0);
+  expect(ops[childIndex]?.data?.title).toBe('E2E Task A');
+  expect(ops[childIndex]?.data?.project).toEqual({ $ref: 0 });
+
+  const results = await batchResults(response);
+  const parentId = results[0]?.id;
+  const childId = results[childIndex]?.id;
+  expect(parentId, 'the batch echoes the created parent id').toBeTruthy();
+  expect(childId, 'the batch echoes the created child id').toBeTruthy();
+
+  const parent = await readBack(request, 'showcase_project', parentId);
+  expect(parent?.name).toBe(name);
+  expect(parent?.status).toBe('planned');
+  const child = await readBack(request, 'showcase_task', childId);
+  expect(child?.title).toBe('E2E Task A');
+  expect(child?.project).toBe(parentId);
 });

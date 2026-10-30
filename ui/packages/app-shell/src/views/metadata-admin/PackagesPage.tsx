@@ -522,6 +522,9 @@ export function PackageDetailSheet({
   // the fourth.
   const [adoptOpen, setAdoptOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  // Disable takes a package's metadata out of service for every user, so it
+  // is confirmed first; Enable restores and runs at once.
+  const [disableOpen, setDisableOpen] = React.useState(false);
   const [deleteMode, setDeleteMode] = React.useState<DeleteMode>('');
   const [deleteTyped, setDeleteTyped] = React.useState('');
   const [discardOpen, setDiscardOpen] = React.useState(false);
@@ -1005,11 +1008,20 @@ export function PackageDetailSheet({
         <Separator className="my-4" />
 
         <div className="space-y-2">
-          {isKernel && (
-            <p className="text-sm text-muted-foreground">
+          {/* Why the write actions are missing, said once above them: a
+              read-only package offers only its reads (and Enable when it is
+              off), and an absent button explains nothing on its own. */}
+          {isKernel ? (
+            <p className="text-sm text-muted-foreground" data-testid="pkg-detail-readonly-reason">
               {t('engine.packages.detail.kernelReadOnly', locale)}
             </p>
-          )}
+          ) : pkg.writable === false ? (
+            <p className="text-sm text-muted-foreground" data-testid="pkg-detail-readonly-reason">
+              {pkg.manifest.scope === 'project'
+                ? t('engine.packages.detail.codeReadOnly', locale)
+                : t('engine.packages.detail.readOnly', locale)}
+            </p>
+          ) : null}
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t('engine.packages.detail.actions', locale)}
           </p>
@@ -1040,7 +1052,12 @@ export function PackageDetailSheet({
                 server's enable door has no writability gate), so a disabled
                 read-only package can still be switched back on. */}
             {(writable || !enabled) && (
-              <Button size="sm" variant="outline" onClick={toggleEnable} disabled={!!busy}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => (enabled ? startAction(() => setDisableOpen(true)) : void toggleEnable())}
+                disabled={!!busy}
+              >
                 {enabled ? (
                   <PowerOff className="mr-1.5 h-3.5 w-3.5" />
                 ) : (
@@ -1080,7 +1097,7 @@ export function PackageDetailSheet({
                 className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
                 <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                {busy === 'delete' ? t('engine.packages.detail.deleting', locale) : t('engine.packages.detail.deleteApp', locale)}
+                {busy === 'delete' ? t('engine.packages.detail.deleting', locale) : t('engine.packages.detail.deletePackage', locale)}
               </Button>
             )}
           </div>
@@ -1185,7 +1202,7 @@ export function PackageDetailSheet({
             <RadioGroup
               value={deleteMode}
               onValueChange={(v) => setDeleteMode(v === 'structure' || v === 'all' ? v : '')}
-              aria-label={t('engine.packages.detail.deleteApp', locale)}
+              aria-label={t('engine.packages.detail.deletePackage', locale)}
               className="gap-3"
             >
               <div className="flex items-start gap-2">
@@ -1246,7 +1263,34 @@ export function PackageDetailSheet({
               >
                 {busy === 'delete'
                   ? t('engine.packages.detail.deleting', locale)
-                  : t('engine.packages.detail.deleteApp', locale)}
+                  : t('engine.packages.detail.deletePackage', locale)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={disableOpen} onOpenChange={setDisableOpen}>
+          <AlertDialogContent data-testid="pkg-detail-disable-dialog">
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {tFormat('engine.packages.detail.disableTitle', locale, { name: displayName })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('engine.packages.detail.disableDescription', locale)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="pkg-detail-disable-cancel">
+                {t('engine.cancel', locale)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                data-testid="pkg-detail-disable-confirm"
+                onClick={() => {
+                  setDisableOpen(false);
+                  void toggleEnable();
+                }}
+              >
+                {t('engine.packages.detail.disable', locale)}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -1543,7 +1587,11 @@ export function PackagesPage() {
             ? t('engine.packages.installedApps.title', locale)
             : t('engine.packages.title', locale)
         }
-        subtitle={t('engine.packages.description', locale)}
+        subtitle={
+          installedAppsView
+            ? t('engine.packages.installedApps.description', locale)
+            : t('engine.packages.description', locale)
+        }
         icon={<PackageIcon className="h-4 w-4" />}
         refresh={{ onRefresh: () => void load(), label: t('engine.packages.refresh', locale), busy: loading }}
         actions={

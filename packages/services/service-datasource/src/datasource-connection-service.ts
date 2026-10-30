@@ -46,6 +46,8 @@ import {
 import { connectFailureRemedy } from './connect-failure-remedy.js';
 import type { Logger } from './logger.js';
 import type { IDataDriver, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { ConnectorCredentialHandle, IConnectorCredentialSource } from '@objectstack/types';
+import { borrowConnectorCredential, borrowedConnectorOf } from './datasource-connector-credential.js';
 
 /** A datasource definition this service can connect (code- or runtime-origin). */
 export interface ConnectableDatasource {
@@ -56,6 +58,8 @@ export interface ConnectableDatasource {
   config?: Record<string, unknown>;
   external?: (Record<string, unknown> & {
     credentialsRef?: string;
+    /** The declared connector instance whose credential this datasource borrows (ADR-0015 D7). */
+    connector?: string;
     validation?: { onMismatch?: 'fail' | 'warn' | 'ignore' };
   }) | undefined;
   pool?: Record<string, unknown>;
@@ -151,6 +155,13 @@ export interface DatasourceConnectionServiceConfig {
   engine: () => ConnectionEngineLike | undefined;
   /** Dereference `credentialsRef` → cleartext (Phase 2). Optional in Phase 1. */
   secrets?: ConnectionSecretResolver;
+  /**
+   * The connector credential source an `external.connector` datasource
+   * borrows through (ADR-0015 D7) — the automation service's, resolved lazily
+   * per connect. Absent, or answering `undefined`, refuses such a datasource
+   * at connect: nothing else can supply its credential.
+   */
+  connectorCredentials?: () => IConnectorCredentialSource | undefined;
   /** Injectable connect policy. Defaults to {@link allowAllConnectPolicy}. */
   policy?: DatasourceConnectPolicy;
   logger?: Logger;
@@ -321,6 +332,21 @@ export class DatasourceConnectionService {
    * the admin surface and the query-time error say something true.
    */
   private readonly states = new Map<string, DatasourceConnectionState>();
+
+  /**
+   * [ADR-0015 D7] The `failed-credentials` verdicts the already-registered
+   * guard recorded for an adopted plugin driver, by datasource name, each
+   * with the connector instance the datasource names and the reason recorded.
+   * The driver stays registered and borrows again on every request, so the
+   * verdict judges the declaration at boot, not for the life of the process:
+   * the first borrow the lender grants for THAT instance retracts it
+   * ({@link retractOnLend}). A connect, reconnect or disconnect of the
+   * datasource drops its entry, since it records a verdict of its own.
+   */
+  private readonly awaitingLend = new Map<string, { connector: string; reason: string }>();
+
+  /** The lenders whose `onLent` this service subscribed to, one subscription each, with their unsubscribes. */
+  private readonly lendSubscriptions = new Map<IConnectorCredentialSource, () => void>();
 
   constructor(cfg: DatasourceConnectionServiceConfig) {
     this.cfg = cfg;
@@ -519,6 +545,42 @@ export class DatasourceConnectionService {
     });
   }
 
+  /**
+   * Subscribe to `source`'s granted borrows, once per lender. `false` when
+   * there is no lender or it offers no `onLent`, so nothing can retract a
+   * verdict recorded against it.
+   */
+  private subscribeToLends(source: IConnectorCredentialSource | undefined): boolean {
+    if (!source || typeof source.onLent !== 'function') return false;
+    if (!this.lendSubscriptions.has(source)) {
+      this.lendSubscriptions.set(source, source.onLent((connector) => this.retractOnLend(connector)));
+    }
+    return true;
+  }
+
+  /**
+   * [ADR-0015 D7] The lender granted a borrow of `connector`: every
+   * already-registered-guard verdict waiting on THAT instance is retracted —
+   * re-recorded `already-registered`, which clears the engine's unavailable
+   * mark — provided the retained state is still the verdict recorded and the
+   * plugin's driver is still registered. A grant for any other instance
+   * proves nothing about this one and leaves it standing.
+   */
+  private retractOnLend(connector: string): void {
+    for (const [name, awaiting] of this.awaitingLend) {
+      if (awaiting.connector !== connector) continue;
+      this.awaitingLend.delete(name);
+      const state = this.states.get(name);
+      if (state?.status !== 'failed-credentials' || state.reason !== awaiting.reason) continue;
+      if (!this.cfg.engine()?.getDriverByName?.(name)) continue;
+      this.logger?.info?.(
+        `datasource '${name}': connector instance '${connector}' lent its credential again — the boot's ` +
+        `failed-credentials verdict is retracted`,
+      );
+      this.recordState({ name, status: 'already-registered' }, undefined);
+    }
+  }
+
   private async attemptConnect(
     record: ConnectableDatasource,
     opts: { objects?: readonly string[]; mappedObjects?: readonly string[]; context?: DatasourceConnectContext; asDefault?: boolean } = {},
@@ -526,6 +588,7 @@ export class DatasourceConnectionService {
     const name = record.name;
     const engine = this.cfg.engine();
     const factory = this.cfg.factory();
+    this.awaitingLend.delete(name);
 
     // Idempotent: never double-register (e.g. a legacy `onEnable` bridge already
     // registered this driver — the D8 escape hatch). The default driver keeps
@@ -536,6 +599,48 @@ export class DatasourceConnectionService {
         return { name, status: 'already-registered' };
       }
     } else if (engine?.getDriverByName?.(name)) {
+      // [ADR-0015 D7] …except for the credential it borrows. A plugin driver
+      // (driver-odata) is adopted from its `driver.<name>` service before this
+      // runs, so this guard is the only connect a datasource naming
+      // `external.connector` ever reaches: without a verdict here an instance
+      // that cannot lend (undeclared, disabled, no `auth`, no automation
+      // service) would boot as available and fail every read with its cause in
+      // the server log only. The borrow judges the declaration and resolves no
+      // value. The driver is not evicted — it belongs to the plugin that
+      // registered it (#13578), and it refuses each request on its own — but
+      // the datasource is recorded failed (Setup → Datasources names why) and,
+      // when objects bind to it, the boot fails as for any connect failure.
+      //
+      // The verdict is the boot's judgment of the declaration, and the driver
+      // borrows again on every request, so once the instance is repaired the
+      // first borrow the lender grants for it retracts the verdict and the
+      // engine's unavailable mark (`retractOnLend`) — no restart. A lender
+      // without `onLent`, or none at all, leaves the verdict until a restart,
+      // and the degraded-boot banner says which.
+      const connector = borrowedConnectorOf(record.external);
+      if (connector !== undefined) {
+        const source = this.cfg.connectorCredentials?.();
+        const borrow = await borrowConnectorCredential(source, connector);
+        if (!borrow.ok) {
+          const retractable = this.subscribeToLends(source);
+          const result = this.handleFailure(
+            record,
+            'failed-credentials',
+            borrow.reason,
+            opts.context,
+            opts.objects,
+            opts.mappedObjects,
+            borrow.cause,
+            retractable
+              ? `until connector instance '${connector}' can lend its credential: the driver borrows again on every ` +
+                `request, and the first borrow granted for '${connector}' clears this verdict and the unavailable ` +
+                `mark, with no restart.`
+              : undefined,
+          );
+          if (retractable) this.awaitingLend.set(name, { connector, reason: borrow.reason });
+          return result;
+        }
+      }
       return { name, status: 'already-registered' };
     }
 
@@ -620,6 +725,24 @@ export class DatasourceConnectionService {
       }
     }
 
+    // [ADR-0015 D7] The other credential channel, FAIL-CLOSED for the same
+    // reason as the block above: a datasource that names a connector instance
+    // has no credential but the one it borrows, so a connect that cannot
+    // borrow is refused here, naming why — never a driver built to fail its
+    // first read with an upstream 401. The borrow judges the declaration
+    // only (a runtime-created datasource never passed `defineStack`'s
+    // check); a credential not set yet is the handle's to refuse per request,
+    // and clears without a reconnect once it is set.
+    let credential: ConnectorCredentialHandle | undefined;
+    const connector = borrowedConnectorOf(record.external);
+    if (connector !== undefined) {
+      const borrow = await borrowConnectorCredential(this.cfg.connectorCredentials?.(), connector);
+      if (!borrow.ok) {
+        return this.handleFailure(record, 'failed-credentials', borrow.reason, opts.context, opts.objects, opts.mappedObjects, borrow.cause);
+      }
+      credential = borrow.handle;
+    }
+
     // #13578 — set to the registry key ONLY when this attempt is the thing that
     // put it there, so the rollback below can never evict a driver someone else
     // owns. `registerDriver` is a no-op on a name it already holds (it keeps the
@@ -628,7 +751,11 @@ export class DatasourceConnectionService {
     // "we called register" is not evidence that "we registered".
     let registeredByThisAttempt: string | undefined;
     try {
-      const handle = await factory.create({ ...toSpec(record), ...(secret ? { secret } : {}) });
+      const handle = await factory.create({
+        ...toSpec(record),
+        ...(secret ? { secret } : {}),
+        ...(credential ? { credential } : {}),
+      });
       if (typeof handle?.connect === 'function') await handle.connect();
 
       // The engine routes a datasource to a driver by `driver.name === <datasource>`.
@@ -770,6 +897,7 @@ export class DatasourceConnectionService {
     // behind would make the admin list — and the query-time error — describe a
     // datasource that no longer exists in that state.
     this.states.delete(name);
+    this.awaitingLend.delete(name);
     engine?.clearDatasourceUnavailable?.(name);
 
     // #13578 — the eviction this method never did. Closing the pool above only
@@ -825,20 +953,41 @@ export class DatasourceConnectionService {
    * `unregisterDriver` removes the datasource def together with the driver
    * (the registry owns that invariant), so the keep-old-pool path must restore
    * the def the old pool was serving under — otherwise the write gate would
-   * judge writes for a datasource whose def vanished mid-failure.
+   * judge writes for a datasource whose def vanished mid-failure. It is
+   * REQUIRED ([#27727]): the restored def's `driver` is what keeps a kept
+   * plugin-driver pool behind the engine's correctness floor, and a restore
+   * that cannot name it would serve that pool unfloored, silently. A call
+   * without `previous.driver` is refused before anything is evicted.
    *
    * Not for the DEFAULT datasource: runtime-admin records can never be named
    * `default` (the name is host-reserved), and the default driver's natural-
    * name registration (#3826) would make a name-keyed swap evict nothing.
+   *
+   * [#27750] `objects` are the objects bound to the NEW record, passed to the
+   * rebuild's {@link connect} so its sync loop gives them their tables on the
+   * pool the new configuration opens (a changed `config` can point at a new,
+   * empty database). The caller passes them only for a MANAGED datasource, the
+   * same gate `registerPool` applies on create. The kept-old-pool path syncs
+   * nothing: that pool already served those objects.
    */
   async reconnect(
     record: ConnectableDatasource,
     opts: {
+      objects?: readonly string[];
       context?: DatasourceConnectContext;
-      previous?: Pick<ConnectableDatasource, 'driver' | 'schemaMode' | 'external'>;
-    } = {},
+      previous: Pick<ConnectableDatasource, 'driver' | 'schemaMode' | 'external'>;
+    },
   ): Promise<ConnectResult> {
     const name = record.name;
+    if (typeof opts?.previous?.driver !== 'string' || opts.previous.driver === '') {
+      throw new Error(
+        `datasource '${name}': reconnect needs \`previous\`, the record the live pool was built from, ` +
+          'with its `driver` id — without it, when a pool is live, a failed rebuild would restore that pool ' +
+          'under a definition that names no driver, and a plugin driver would be served without the engine\'s ' +
+          'correctness floor. ' +
+          'Pass the stored record as it was before this update.',
+      );
+    }
     const engine = this.cfg.engine();
     const oldDriver = engine?.getDriverByName?.(name);
     if (!oldDriver || !engine || typeof engine.unregisterDriver !== 'function') {
@@ -847,7 +996,7 @@ export class DatasourceConnectionService {
       // plain connect is the whole job: it builds when the name is free, and
       // on a door-less engine it degrades to the pre-#13804 idempotent no-op —
       // the safe direction for a host that cannot express a swap.
-      return this.connect(record, { context: opts.context });
+      return this.connect(record, { objects: opts.objects, context: opts.context });
     }
     const oldOwnership = this.states.get(name)?.ownership;
 
@@ -859,9 +1008,9 @@ export class DatasourceConnectionService {
       // plugin driver" and serve the kept pool unfloored.
       engine.registerDatasourceDef?.({
         name,
-        driver: opts.previous?.driver,
-        schemaMode: opts.previous?.schemaMode,
-        external: opts.previous?.external as { allowWrites?: boolean } | undefined,
+        driver: opts.previous.driver,
+        schemaMode: opts.previous.schemaMode,
+        external: opts.previous.external as { allowWrites?: boolean } | undefined,
       });
     };
     const stillServingSuffix =
@@ -870,7 +1019,7 @@ export class DatasourceConnectionService {
     engine.unregisterDriver(name);
     let result: ConnectResult;
     try {
-      result = await this.connect(record, { context: opts.context });
+      result = await this.connect(record, { objects: opts.objects, context: opts.context });
     } catch (err) {
       // `connect` re-throws authoring verdicts (an unhonourable `pool` block,
       // #5714) after recording a failed state. Same settlement as a returned
@@ -927,6 +1076,9 @@ export class DatasourceConnectionService {
     for (const n of names) {
       await this.disconnect(n, { asDefault: n === DEFAULT_DATASOURCE_NAME });
     }
+    for (const unsubscribe of this.lendSubscriptions.values()) unsubscribe();
+    this.lendSubscriptions.clear();
+    this.awaitingLend.clear();
   }
 
   /**
@@ -991,6 +1143,12 @@ export class DatasourceConnectionService {
      * credential) — those are never module-resolution failures.
      */
     cause?: unknown,
+    /**
+     * How the datasource recovers, for the degraded-boot banner, when that is
+     * not the default "until it is reachable AND the server is restarted"
+     * (the already-registered guard's verdict clears on the next lend).
+     */
+    recovery?: string,
   ): ConnectResult {
     const isExternal = record.schemaMode && record.schemaMode !== 'managed';
     const msg = `datasource '${record.name}': connect failed — ${reason}`;
@@ -1032,7 +1190,7 @@ export class DatasourceConnectionService {
     const banner =
       `⚠️ DEGRADED BOOT: ${msg} (${why}), but OS_ALLOW_DRIVER_CONNECT_FAILURE is set — starting ` +
       `anyway. Queries against the objects bound to it fail with ERR_DATASOURCE_UNAVAILABLE (HTTP ` +
-      `503) until it is reachable AND the server is restarted: nothing re-runs the connect. ` +
+      `503) ${recovery ?? 'until it is reachable AND the server is restarted: nothing re-runs the connect.'} ` +
       `Its state shows as 'error' in Setup → Datasources. Unset OS_ALLOW_DRIVER_CONNECT_FAILURE ` +
       `to restore fail-fast boot.`;
     this.logger?.warn?.(banner);

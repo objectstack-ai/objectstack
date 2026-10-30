@@ -328,9 +328,12 @@ describe('[#24380] an import undo runs under the object\'s declared controls for
 
     const res = await ctx.undo(jobId);
     expect(res._json).toMatchObject({ success: false, deleted: 0, restored: 0, failed: 2 });
+    // [#27597] The freeze is a sandboxed hook's free-text abort, so each row
+    // carries the ledgered `HOOK_ABORTED` (the status-derived `VALIDATION_ERROR`
+    // before).
     expect(res._json.failures).toEqual([
-      { id: 'c_new', action: 'delete', code: 'VALIDATION_ERROR', error: FROZEN },
-      { id: 'c_old', action: 'restore', code: 'VALIDATION_ERROR', error: FROZEN },
+      { id: 'c_new', action: 'delete', code: 'HOOK_ABORTED', error: FROZEN },
+      { id: 'c_old', action: 'restore', code: 'HOOK_ABORTED', error: FROZEN },
     ]);
     expect(await ctx.record('ou_case', 'c_new')).toMatchObject({ title: 'fresh', status: 'closed' });
     expect(await ctx.record('ou_case', 'c_old')).toMatchObject({ title: 'after', status: 'closed' });

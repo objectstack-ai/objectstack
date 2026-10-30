@@ -63,7 +63,6 @@ import {
 } from './filter-comparand-shape.js';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
-  assertHavingResolvedTemporalTokensInRange,
   assertHavingTemporalComparandsInterpretable,
   assertResolvedTemporalTokensInRange,
   assertTemporalComparandsInterpretable,
@@ -77,10 +76,8 @@ import {
 } from './number-comparand-declared-type-door.js';
 import {
   lowerRelationSite,
-  RELATION_FILTER_ID_CAP,
-  relationFilterCapError,
+  type RELATION_FILTER_ID_CAP,
   type RelationFilterSite,
-  type RelationReplacement,
 } from './relation-filter-lowering.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
@@ -439,6 +436,9 @@ import {
   assertHavingIsEvaluable,
   assertHavingIsFilterCondition,
 } from './having-filter.js';
+// [#25522 cut 20] The `where`-lowering bodies (`QueryLoweringHost`), imported
+// after every module they import, so module evaluation order is unchanged.
+import { lowerRelationConditions, resolveSearchQueryableFields, resolveWhereTokens } from './engine-query-lowering.js';
 import {
   auditDanglingReferences,
   type AuditableObject,
@@ -1414,7 +1414,7 @@ function whereResolvedTokenJudge(
  *
  * Returns the input by reference when nothing resolved and nothing lowered.
  */
-function resolveThenLowerWhere<W>(
+export function resolveThenLowerWhere<W>(
   where: W,
   context: Parameters<typeof filterTokenContextFrom>[0],
   lowering: FilterLoweringOptions,
@@ -1564,7 +1564,7 @@ function judgeWhereAdmission(
  * recorded and kept as written, so nothing is rewritten). Empty for a filter
  * with none, and for a registry-less host (no field map, no relation column).
  */
-function relationSitesOf(
+export function relationSitesOf(
   object: string,
   operation: string,
   where: unknown,
@@ -9244,7 +9244,8 @@ export class ObjectQL implements IObjectQLEngine {
    * `external.allowWrites` so the write gate ({@link assertWriteAllowed}) can
    * enforce external-datasource ownership, and `external.credentialsRef` so
    * {@link listDatasourceDefs} can hand a credentials sweep the handle a
-   * code-declared datasource holds. Safe to call repeatedly; last write wins.
+   * code-declared datasource holds. Safe to call repeatedly; last write wins,
+   * except an absent `driver` keeps the id stored before it.
    */
   registerDatasourceDef(def: DatasourceDef): void {
     if (!def?.name) return;
@@ -9311,10 +9312,15 @@ export class ObjectQL implements IObjectQLEngine {
    * Each entry is a fresh object with a COPIED `external` block. The index
    * stores the caller's `external` by reference, and a reader must not be able
    * to reach through this accessor and mutate the write gate's own input.
+   *
+   * [#27727] The stored `driver` id is answered too: it is what decides whether
+   * the datasource's driver is floored, so a sweep asking "which datasources
+   * name a plugin driver" can be written against the contract's read-back.
    */
   listDatasourceDefs(): DatasourceDef[] {
     return Array.from(this.datasourceDefs, ([name, def]) => ({
       name,
+      ...(def.driver !== undefined ? { driver: def.driver } : {}),
       ...(def.schemaMode !== undefined ? { schemaMode: def.schemaMode } : {}),
       ...(def.external ? { external: { ...def.external } } : {}),
     }));
@@ -13218,26 +13224,13 @@ export class ObjectQL implements IObjectQLEngine {
     position: 'where' | 'having' = 'where',
     operation = 'find',
   ): Promise<void> {
-    if (!ast || ast[position] == null) return;
-    // [#20157] Through the stage function the judge also calls.
-    if (position === 'having') {
-      // [#20844] The year range of a resolved date macro, by each aggregated
-      // column's class — the reading the `having` temporal door takes. Built
-      // only when something resolved.
-      ast[position] = resolveThenLowerWhere(ast[position], execCtx, lowering, (written, resolved) => {
-        const fields = (this._registry.getObject(ast.object) as { fields?: Record<string, unknown> } | undefined)?.fields;
-        assertHavingResolvedTemporalTokensInRange(
-          ast.object, written, resolved, aggregatedRowColumnClasses(ast.groupBy, ast.aggregations, fields), ast,
-        );
-      });
-      return;
-    }
-    // [#20802] `where` serves the nested-relation form: resolve, then lower
-    // each relation condition (a read of the related object, as the caller),
-    // then the shared lowering — {@link resolveRelateThenLowerWhere}.
-    ast[position] = await this.resolveRelateThenLowerWhere(
-      ast.object, operation, ast[position], execCtx, lowering,
-    );
+    // [#25522 cut 20] The body moved to `engine-query-lowering.ts` (see `QueryLoweringHost`).
+    const readRegistry = () => this._registry;
+    const host: ThisParameterType<typeof resolveWhereTokens> = {
+      get _registry() { return readRegistry(); },
+      resolveRelateThenLowerWhere: (...a) => this.resolveRelateThenLowerWhere(...a),
+    };
+    return resolveWhereTokens.call(host, ast, execCtx, lowering, position, operation);
   }
 
   /**
@@ -13302,33 +13295,15 @@ export class ObjectQL implements IObjectQLEngine {
     where: W,
     execCtx: ExecutionContext | undefined,
   ): Promise<W> {
-    if (where == null) return where;
-    const schema = this._registry.getObject(object);
-    const sites = relationSitesOf(object, operation, where, schema, this.relatedSchemaOf);
-    if (sites.length === 0) return where;
-    const context = `${operation}('${object}')`;
-    const replacements: RelationReplacement[] = [];
-    for (const site of sites) {
-      const rows = await this.find(site.target, {
-        where: site.condition as FilterCondition,
-        fields: ['id'],
-        limit: RELATION_FILTER_ID_CAP + 1,
-        ...(execCtx ? { context: execCtx } : {}),
-      });
-      const matched = Array.isArray(rows) ? rows : [];
-      if (matched.length > RELATION_FILTER_ID_CAP) {
-        throw relationFilterCapError(site, context, RELATION_FILTER_ID_CAP);
-      }
-      replacements.push(lowerRelationSite(
-        site,
-        matched.map((row) => (row as { id?: unknown } | null)?.id).filter((id) => id !== undefined && id !== null),
-      ));
-    }
-    let next = 0;
-    return mapRelationConditions(object, operation, schema, where, {
-      schemaOf: this.relatedSchemaOf,
-      replace: () => replacements[next++],
-    });
+    // [#25522 cut 20] The body moved to `engine-query-lowering.ts` (see `QueryLoweringHost`).
+    const readRegistry = () => this._registry;
+    const readRelatedSchemaOf = () => this.relatedSchemaOf;
+    const host: ThisParameterType<typeof lowerRelationConditions> = {
+      get _registry() { return readRegistry(); },
+      get relatedSchemaOf() { return readRelatedSchemaOf(); },
+      find: (...a) => this.find(...a),
+    };
+    return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
   }
 
   /**
@@ -13491,20 +13466,12 @@ export class ObjectQL implements IObjectQLEngine {
     object: string,
     context: ExecutionContext | undefined,
   ): Promise<ReadonlySet<string> | undefined> {
-    if (context === undefined) return undefined;
-    // Read from the engine slot at use (see SECURITY_SERVICE_SOURCE_SLOT), never cached.
-    const source = (this as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT];
-    if (typeof source !== 'function') return undefined;
-    let svc: Partial<Pick<ISecurityService, 'getQueryableFields'>> | undefined;
-    try {
-      svc = source() ?? undefined;
-    } catch {
-      // The in-repo kernels throw on a name nothing registered: no service.
-      return undefined;
-    }
-    if (typeof svc?.getQueryableFields !== 'function') return undefined;
-    const queryable = await svc.getQueryableFields(object, context as any);
-    return queryable === undefined ? undefined : new Set(queryable);
+    // [#25522 cut 20] The body moved to `engine-query-lowering.ts` (see `QueryLoweringHost`).
+    const readSecurityServiceSourceSlot = () => (this as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT];
+    const host: ThisParameterType<typeof resolveSearchQueryableFields> = {
+      get [SECURITY_SERVICE_SOURCE_SLOT]() { return readSecurityServiceSourceSlot(); },
+    };
+    return resolveSearchQueryableFields.call(host, object, context);
   }
 
   /**

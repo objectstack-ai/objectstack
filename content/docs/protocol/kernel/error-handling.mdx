@@ -164,7 +164,9 @@ nested envelope would nest under `details` rides as **top-level siblings** here.
 - `error` — the human-readable message, **a string**.
 - `code` — the machine-readable code. **Optional**: ADR-0112 invents nothing for the half
   a producer did not name, so a refusal that declared a status but no code arrives with
-  `error` alone. Branch on `code` only after checking it is there.
+  `error` alone. Branch on `code` only after checking it is there. One producer is named
+  instead: a sandboxed hook body that aborts with free text and no code answers
+  `HOOK_ABORTED`, at the 4xx status it declared, else `400`.
 - `object` — the object the refusal is about, when the door knows it.
 - `declaredCode` / `userMessage` — the same two optional channels as above, as top-level
   siblings.

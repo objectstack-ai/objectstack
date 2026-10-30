@@ -1093,8 +1093,11 @@ const MEMBER_SCREEN_READ_LIMIT = 50000;
  * back to a `type:value` literal that no user can act on. They are listed here
  * so that dead end gets one warning instead of passing in silence.
  *
- * `user` / `field` are deliberately absent: they resolve to the id they were
- * given without a lookup, so there is no "expanded to nobody" state to report.
+ * `field` is deliberately absent: it resolves to the ids the record holds
+ * without a lookup, so there is no "expanded to nobody" state to report.
+ * `user` is absent from the SET but not from the warning (#27397): its id is
+ * checked against the directory, and one that names no one takes this same
+ * warning — then adds no slot, as a person type does.
  * `manager` is absent too: it names a PERSON, so an empty lookup adds no slot at
  * all ({@link PERSON_APPROVER_TYPES}) and has its own warning.
  * `business_unit` / `bu` are the accepted dialects of `department`.
@@ -1122,7 +1125,9 @@ const GRAPH_APPROVER_TYPES: ReadonlySet<string> = new Set([
  * other entries carry the request — the "second entry that cannot resolve
  * empty" escape that page names for an unset manager.
  *
- * `user` needs no entry: its `value` IS the slot and it never falls back.
+ * `user` needs no entry: its `value` IS the slot when it names an account,
+ * and it never falls back to a literal — one that names no account adds no
+ * slot and warns as the graph types do (#27397).
  * `position` keeps its literal because the literal is an acting address — a
  * holder staffed into the position later decides it, on a slate that also
  * names a person. A slate of literals alone names no one, and under the
@@ -2380,7 +2385,8 @@ export class ApprovalService implements IApprovalService {
    * resolved ids with a group (#3266) without duplicating the resolution logic.
    * Returns the `type:value` literal as a single-element fallback when a GROUP
    * lookup yields nothing, and an empty list when a PERSON type
-   * ({@link PERSON_APPROVER_TYPES}) does (#22558).
+   * ({@link PERSON_APPROVER_TYPES}) does (#22558) or a `user` names no
+   * account (#27397).
    */
   private async resolveApproverSpec(
     a: any,
@@ -2420,16 +2426,53 @@ export class ApprovalService implements IApprovalService {
     const crossOrg = directoryOrg !== organizationId;
 
     if (type === 'user') {
-      return this.applyOooDelegation(String(a.value), now, organizationId, substitutions);
+      // #27397: the value is the slot only when an account carries it — asked
+      // through the ONE "does this address resolve to a person" predicate the
+      // reassign door asks ({@link reassignTargetRefusal}): a `sys_user` row
+      // carries the id (or the email, as stored). Asked with NO organization,
+      // so the predicate's tenancy screen does not run: `user` is
+      // directory-less and ADR-0105 D9 leaves it untouched — a person of
+      // another organization's directory named outright stays named. A banned
+      // account still resolves, as a banned team or unit member does (neither
+      // expansion reads the flag). What is asked is the slot the route ENDS
+      // on: an out-of-office hop that carries the request to a delegate has
+      // named someone (a removed account's delegation still routes, #24065;
+      // a delegate no account carries routes back here, #27752).
+      // One that resolves to no one falls through to the graph types'
+      // "expanded to nobody" warning below and adds no slot, so a slate it
+      // leaves empty reaches the node's onEmptyApprovers. A failed read proves
+      // nothing, so the slot stays: this file's addressing-path posture (fail
+      // open, never empty a live slate on a hiccup). A value spelled as a
+      // `type:value` literal is not asked: `slateNamesAPerson` already reads it
+      // as naming no one.
+      const value = String(a.value);
+      const routed = await this.applyOooDelegation(value, now, organizationId, substitutions);
+      if (routed.length !== 1 || routed[0] !== value || value.includes(':')) return routed;
+      if (!await this.namesNoAccount(value)) return routed;
     }
     if (type === 'field' && record) {
       // #3447: a record field can name MANY approvers — a multi-select user
       // field arrives as an array (or a legacy CSV string). Fan each out into
       // its own slot and OOO-substitute per person; collapsing to `String(...)`
       // (→ `'u1,u2'`) would mint one bogus approver id and skip every delegate.
+      //
+      // #27752: each id takes the `user` treatment above — the slot is the id
+      // only when an account carries it. One that resolves to no one warns as
+      // `user` does and adds no slot, so a slate it leaves empty reaches the
+      // node's onEmptyApprovers; a failed read keeps the slot.
       const out: string[] = [];
       for (const id of csvSplit((record as any)[a.value])) {
-        out.push(...await this.applyOooDelegation(id, now, organizationId, substitutions));
+        const routed = await this.applyOooDelegation(id, now, organizationId, substitutions);
+        if (routed.length === 1 && routed[0] === id && !id.includes(':') && await this.namesNoAccount(id)) {
+          this.logger?.warn?.(
+            `[approvals] approver 'field:${a.value}' id '${id}' expanded to nobody — the slot names no one, so no `
+            + `one is asked through it. Staff it or re-point the approver; a slate left naming no one is decided `
+            + `by the node's onEmptyApprovers.`,
+            { type, value: a.value, id, organizationId: organizationId ?? null },
+          );
+          continue;
+        }
+        out.push(...routed);
       }
       return out;
     }
@@ -2537,7 +2580,7 @@ export class ApprovalService implements IApprovalService {
       );
       return [];
     }
-    if (GRAPH_APPROVER_TYPES.has(type)) {
+    if (GRAPH_APPROVER_TYPES.has(type) || type === 'user') {
       // #3807 follow-up — every OTHER way to land here is a graph type whose
       // lookup produced nobody, and the literal below is a slot no user can
       // ever act on. That silence is what let #3807 hide: a `department`
@@ -2564,6 +2607,10 @@ export class ApprovalService implements IApprovalService {
         { type, value: a.value, organizationId: organizationId ?? null },
       );
     }
+    // #27397: a `user` that resolved to no one adds no slot — `user:<value>`
+    // is no acting address (`approver-address.ts`), and the bare value is the
+    // phantom slot the existence check above exists to keep off the slate.
+    if (type === 'user') return [];
     return [`${type}:${a.value}`];
   }
 
@@ -2661,11 +2708,23 @@ export class ApprovalService implements IApprovalService {
     // unstaffed-target behaviour (and #3424 admin rescue) as the static types.
     const resolveAs = String(a.resolveAs ?? 'user');
     if (resolveAs === 'user') {
+      // #27879: each value takes the `field` treatment (#27752) — the slot is
+      // the id only when an account carries it. One that resolves to no one
+      // warns and adds no slot, so a slate it leaves empty reaches the node's
+      // onEmptyApprovers; a failed read keeps the slot.
       const slots: Array<{ id: string }> = [];
       for (const id of raw) {
-        for (const routed of await this.applyOooDelegation(id, now, organizationId, substitutions)) {
-          slots.push({ id: routed });
+        const routed = await this.applyOooDelegation(id, now, organizationId, substitutions);
+        if (routed.length === 1 && routed[0] === id && !id.includes(':') && await this.namesNoAccount(id)) {
+          this.logger?.warn?.(
+            `[approvals] approver 'expression' id '${id}' expanded to nobody — the slot names no one, so no `
+            + `one is asked through it. Staff it or re-point the expression; a slate left naming no one is decided `
+            + `by the node's onEmptyApprovers.`,
+            { type: 'expression', value: source, id, organizationId: organizationId ?? null },
+          );
+          continue;
         }
+        for (const r of routed) slots.push({ id: r });
       }
       return { slots, raw };
     }
@@ -3378,6 +3437,7 @@ export class ApprovalService implements IApprovalService {
   ): Promise<string[]> {
     const start = String(userId ?? '').trim();
     if (!start) return [];
+    const mark = collector?.length ?? 0;
     let current = start;
     const visited = new Set<string>([current]);
     for (let hop = 0; hop < OOO_MAX_CHAIN; hop++) {
@@ -3389,7 +3449,32 @@ export class ApprovalService implements IApprovalService {
       visited.add(to);
       current = to;
     }
+    // #27752: a delegate no account carries is a slot no one can take. The
+    // original approver is a person the route already named, and delegation is
+    // only their convenience, so a broken one routes back to them — never to
+    // no slot — with the "expanded to nobody" warning, and its hops leave the
+    // collector so no substitution is audited or notified. A failed read
+    // proves nothing, so the delegate stays.
+    if (current !== start && !current.includes(':') && await this.namesNoAccount(current)) {
+      this.logger?.warn?.(
+        `[approvals] out-of-office delegate '${current}' of '${start}' expanded to nobody — the delegation `
+        + `names no account, so the slot stays with '${start}'. Point the delegation at a current user, or `
+        + `delete it.`,
+        { delegatorId: start, delegateId: current, organizationId: organizationId ?? null },
+      );
+      if (collector) collector.length = mark;
+      return [start];
+    }
     return [current];
+  }
+
+  /**
+   * Whether no account carries `value` — the {@link reassignTargetRefusal}
+   * predicate asked with NO organization, as a `user` approver asks it
+   * (#27397). A failed read proves nothing, so it answers `false`.
+   */
+  private async namesNoAccount(value: string): Promise<boolean> {
+    try { return (await this.reassignTargetRefusal(value, null)) !== undefined; } catch { return false; }
   }
 
   /**
@@ -5923,8 +6008,9 @@ export class ApprovalService implements IApprovalService {
   /**
    * Why `to` resolves to no one in `organizationId` — the sentence a refusal
    * carries — or `undefined` when someone can take a slot under it. The ONE
-   * predicate behind {@link assertReassignTargetResolves} (the door) and
-   * {@link escalateRequest}'s `reassign` (the SLA sweep, #25598); its contract
+   * predicate behind {@link assertReassignTargetResolves} (the door),
+   * {@link escalateRequest}'s `reassign` (the SLA sweep, #25598) and a `user`
+   * approver's resolution in {@link resolveApproverSpec} (#27397); its contract
    * is that docblock's.
    */
   private async reassignTargetRefusal(to: string, organizationId: string | null): Promise<string | undefined> {
