@@ -15,9 +15,10 @@ deployment and to the sender. Scaffolded apps list the three executors in
 
 - Actions come from the upstream (an OpenAPI `operationId`, an MCP tool name,
   the `rest` provider's single `request`) — authored on the entry, they are refused.
-- `connectorConfig.input` is sent **as written** — no CEL envelope, no `{{ }}`
-  hole — so a per-record payload (an id from `record.*`) is not a declarative
-  dispatch today: a gap to name, not a plugin to write.
+- `connectorConfig.input` is a value-slot map like `subflow` `input`: a top-level
+  CEL envelope is evaluated, any other value sent as written (`{…}`, `{{ }}` are
+  literal text) — `input: { customer: { dialect: 'cel', source: 'record.stripe_id' } }`.
+  `os validate` does not judge it yet, so a malformed envelope fails at run time.
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value
   slot: `{ dialect: 'cel', source: 'bal.body.available[0].amount' }`.
@@ -31,7 +32,7 @@ deployment and to the sender. Scaffolded apps list the three executors in
 
 ```ts
 // Trim the vendor's OpenAPI 3.x document to the operations the app calls and ship
-// it in the package: 3.x only, package-relative, every `$ref` dereferenced offline.
+// it in the package, package-relative.
 export const StripeConnector = defineConnector({
   name: 'stripe', label: 'Stripe', type: 'api', provider: 'openapi',
   providerConfig: { spec: './src/connectors/stripe.trimmed.json' },   // holds `GetBalance` alone
@@ -60,7 +61,9 @@ export const StripeBalanceSweep = defineFlow({
 `requires: ['automation', 'triggers', 'job']`. Convert Swagger 2.0 or YAML and
 dereference every `$ref` offline, in-document ones included: the loader skips a
 `$ref` parameter, request body or response, and the derived input/output schema
-silently loses it. The `openapi` provider has no `include` key — the trimmed document is the allowlist.
+silently loses it. `providerConfig.include` allowlists operation keys as the
+`mcp` provider's does (absent = every operation; a non-array or unknown entry is
+fatal); trimming still keeps the package small.
 
 ## 2 · Remote MCP server, static header — GitHub
 
@@ -124,7 +127,7 @@ name the gap and poll its status (recipe 1's shape) until vendor schemes verify.
 ```ts
 export const LegacyErp = defineConnector({
   name: 'legacy_erp', label: 'Legacy ERP', type: 'api', provider: 'openapi',
-  providerConfig: { spec: {                       // inline OpenAPI 3.x, written from the vendor's docs
+  providerConfig: { spec: {                       // inline OpenAPI 3.x
     openapi: '3.0.3', info: { title: 'Legacy ERP', version: '1' },
     servers: [{ url: 'https://erp.example.com' }],
     paths: { '/v2/open-orders': { get: { operationId: 'listOpenOrders',
@@ -141,7 +144,7 @@ palette and to agents; `provider: 'rest'` instead when the path is per call.
 ## Not yet — declare the rest, mark the integration blocked, write no plugin
 
 - **OAuth-protected vendor** (DocuSign, Salesforce, Google): the declarative `auth`
-  union has four variants and no `oauth2`; the authorization-code / refresh
+  union has no `oauth2`; the authorization-code / refresh
   lifecycle is not delivered in the open tier. Do not park a short-lived access
   token behind a `bearer` ref. Declare the connector, fields and flows, mark the
   integration **blocked** on the platform's outbound-OAuth card, and say so.

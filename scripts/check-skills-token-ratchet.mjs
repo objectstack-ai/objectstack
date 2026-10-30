@@ -868,7 +868,25 @@ export const CEILINGS = new Map([
   // request body or response, so the derived schema silently loses it):
   // 8705 -> 8814 bytes, 2177 -> 2204.
   //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8814 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2204],
+  // 8814 -> 8942 (card #27982): the "Holds on every recipe" input bullet
+  // re-teaches `connectorConfig.input` as an evaluated value-slot map, with a
+  // record-field example and the not-yet-judged-at-`os validate` note, and
+  // recipe 1's closing sentence teaches `providerConfig.include` (the `mcp`
+  // allowlist meaning, a non-array or unknown entry fatal) instead of denying
+  // the key. Paid down first, three restatements each with a surviving home:
+  // recipe 1's comment "3.x only, … every `$ref` dereferenced offline" (the
+  // same comment says "OpenAPI 3.x document"; the paragraph under the recipe
+  // says to dereference every `$ref` offline), recipe 5's comment ", written
+  // from the vendor's docs" (its heading says write the document by hand),
+  // and the OAuth bullet's "four variants and" (the Holds `auth` bullet lists
+  // them). Arithmetic: 8814 -> 8942 (+128 net) -> ceil(8942 / 4) = 2236;
+  // headroom was 0 tokens, so the ceiling moves +32, pinned AT the
+  // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
+  // ruling record 6513306068 on #27847.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8942 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2236],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching
