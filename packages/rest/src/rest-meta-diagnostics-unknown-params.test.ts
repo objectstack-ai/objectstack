@@ -179,3 +179,42 @@ describe('[#27514] preservation: what the door could already serve still answers
         expect(answer.body.scannedTypes).toBe(1);
     });
 });
+
+/**
+ * [#27633] The same false all-clear one axis over: an unknown parameter NAME.
+ * Measured on `main` before this change, `?typ=view` answered `200` with the
+ * full sweep, so a caller who believed the answer was narrowed to `view` was
+ * handed every type. The route now declares its closed set (the three names
+ * the handler reads) and refuses any other name in its one nested envelope.
+ */
+describe('[#27633] an unknown parameter name is refused, not ignored into a full sweep', () => {
+    it('?typ=view answers 400 INVALID_REQUEST naming the parameter and the supported set', async () => {
+        const { diagnostics } = boot();
+        const answer = await diagnostics({ typ: 'view' });
+        expectRefusal(answer, 'INVALID_REQUEST');
+        expect(answer.body.error.message).toContain('"typ"');
+        expect(answer.body.error.message).toContain('Supported parameters: package, severity, type.');
+    });
+
+    it('?packageId= (the `_drafts` spelling, never read here) answers 400 INVALID_REQUEST', async () => {
+        const { diagnostics } = boot();
+        expectRefusal(await diagnostics({ packageId: PACKAGE_ID }), 'INVALID_REQUEST');
+    });
+
+    it('an unknown name beside known ones is still refused, even with an empty value', async () => {
+        const { diagnostics } = boot();
+        expectRefusal(await diagnostics({ type: 'view', severity: 'warning', sevrity: '' }), 'INVALID_REQUEST');
+    });
+
+    it('an unknown name outranks a repeated known one', async () => {
+        const { diagnostics } = boot();
+        expectRefusal(await diagnostics({ typ: 'view', type: ['view', 'object'] }), 'INVALID_REQUEST');
+    });
+
+    it('the three names the handler reads still answer together', async () => {
+        const { diagnostics } = boot();
+        const answer = await diagnostics({ type: 'view', severity: 'warning', package: PACKAGE_ID });
+        expect(answer.status).toBe(200);
+        expect(answer.body.stats.view.count).toBe(1);
+    });
+});
