@@ -884,7 +884,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // (`recordSaveMessage` in `@object-ui/i18n`), read through the object being
   // saved.
   const recordSaveMessage = useCallback((saved: any): string => buildRecordSaveMessage(t, {
-    label: formObjectDef ? objectLabel(formObjectDef as any) : t('common.record'),
+    label: formObjectDef ? objectLabel(formObjectDef as any) : t('common.record', { defaultValue: 'Record' }),
     objectDef: formObjectDef,
     saved,
     mode: editingRecord ? 'edit' : 'create',
