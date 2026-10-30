@@ -73,7 +73,7 @@ export function FiltersEditor({
             onChange={(e) => update(i, field, e.target.value)}
             placeholder={t('engine.inspector.appNav.filtersValue', locale)}
             disabled={disabled}
-            className="h-7 w-0 min-w-0 flex-1 rounded border bg-background px-2 font-mono text-xs"
+            className="h-7 w-0 min-w-0 flex-1 rounded border bg-background px-2 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
             data-testid={`nav-filter-value-${field || 'new'}`}
           />
           <button
