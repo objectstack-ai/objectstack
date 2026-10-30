@@ -313,7 +313,24 @@ that names the reference, and a dispatch to it fails with the same reason.
 
 #### Setting a credential
 
-Three routes, each requiring the `manage_metadata` capability:
+**In the Console**, an administrator sets them in **Setup → Integrations →
+Connector Credentials**. The page lists every reference with its status, the
+connectors that name it, and when it last changed. Each writable reference has
+a masked input that starts empty, whatever is stored: typing a value and saving
+stores it, and leaving the input empty keeps the current one. A reference with
+a value stored here also has **Clear**. One that an environment variable
+supplies is read-only, since the variable wins, and a `rejected` one shows the
+upstream's reason. Where the routes below refuse (a multi-organization
+environment, or a server without them), the page shows the server's sentence
+instead of a list.
+
+Installing an app from the marketplace ends on the same inputs: once the
+install lands, the credentials its connectors still need are listed, each with
+**Skip for now**. A skipped one leaves its connectors degraded until it is set
+on the Setup page. The step comes after the install, not before it, because the
+routes below refuse a reference that no installed app declares.
+
+Over the API, three routes, each requiring the `manage_metadata` capability:
 
 ```http
 GET    /api/v1/automation/connectors/credential-refs
