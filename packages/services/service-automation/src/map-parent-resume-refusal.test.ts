@@ -169,6 +169,20 @@ describe('a parent-id resume of a map whose item is still parked (#27877)', () =
     expect(downstream).toEqual([]);
   });
 
+  it('names the item run, never the caller\'s own, when a corrupt correlation cycles back to the caller', async () => {
+    const paused = await launch();
+    const [item1] = parked('one_item');
+    // Corrupt the item's row so it points back at its parent: map:A → map:B → A.
+    (engine as any).suspendedRuns.get(item1!.runId).correlation = `map:${paused.runId}`;
+
+    const refused = await engine.resume(paused.runId!, {});
+
+    expect(refused.code).toBe(MAP_ITEM_PENDING_REFUSAL_CODE);
+    expect(refused.error).toContain(`Resume run '${item1!.runId}' instead`);
+    expect(refused.error).not.toContain(`Resume run '${paused.runId}'`);
+    expect(mapState(paused.runId!)).toEqual({ started: 1, results: [] });
+  });
+
   it('leaves a subflow parent-id resume unchanged: the signal is delegated to the child', async () => {
     engine.registerFlow('child_flow', itemFlow('child_flow') as never);
     engine.registerFlow('parent_flow', hostFlow('parent_flow', {

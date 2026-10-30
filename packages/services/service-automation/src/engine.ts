@@ -6687,10 +6687,12 @@ export class AutomationEngine implements IAutomationService {
      * and each `map:` link with a successor is an item still parked under it
      * (#27877). Empty when nothing is suspended under that id; stops at the
      * last resolvable link when a child row is gone (that run is where
-     * `resumeInternal` will continue).
+     * `resumeInternal` will continue). The caller's own id is seen before the
+     * walk starts, so a corrupt correlation cycle back to it ends the chain
+     * there instead of listing the caller's run again as its own child.
      */
     private async resolveSuspensionChain(runId: string): Promise<SuspendedRun[]> {
-        const seen = new Set<string>();
+        const seen = new Set<string>([runId]);
         const chain: SuspendedRun[] = [];
         let run = await this.loadSuspendedRun(runId);
         for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {
