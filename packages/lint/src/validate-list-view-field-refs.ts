@@ -367,6 +367,32 @@
  * object is the view's own, that object is already inside the written
  * package's closure.
  *
+ * ## [#28018] `kanban.lanes` names option values, once each
+ *
+ * `kanban.lanes` chooses the lanes a board draws, in order, as stored option
+ * values of `kanban.groupByField`. The spec states the grammar of each entry
+ * and that the list is not empty; it cannot see the object, so the two rules
+ * that need more are judged here.
+ *
+ *  - **A lane that is not an option** — {@link LIST_VIEW_KANBAN_LANE_UNKNOWN},
+ *    `error`. The board buckets each card by its group value, so a lane
+ *    spelled as no option has (`inprogress` for `in_progress`) is a lane no
+ *    card can ever land in, while every card carrying the real value falls
+ *    into the `Uncategorized` lane instead of its own: the board shows the
+ *    wrong lanes and the wrong cards in them. Judged against the group
+ *    field's own inline `options`.
+ *  - **A lane listed twice** — {@link LIST_VIEW_KANBAN_LANE_REPEATED},
+ *    `error`, at the second entry. Two lanes share one id, so a card with
+ *    that value has two lanes to fall into and a drop has two targets with
+ *    one name. Judged with no field map at all, before any skip below.
+ *
+ * Not judged: a group field whose options come from a shared `picklist` (its
+ * option set is the list's plus every `picklistExtensions` entry, which a
+ * stack snapshot need not carry whole), a group field with no inline
+ * `options` (`boolean`, a lookup: their lanes are values, not options), and a
+ * `groupByField` that resolves to nothing, which is `list-view-field-unknown`
+ * at that key.
+ *
  * ## Skips — the same three every field-existence rule in this package takes
  *
  * Resolution is {@link resolveFieldPath}'s and its `unknowable` verdicts are
@@ -447,6 +473,18 @@ export const LIST_VIEW_GROUP_ORDER_UNORDERABLE = 'list-view-group-order-unordera
  * this module.
  */
 export const LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT = 'list-view-chart-dataset-foreign-object';
+
+/**
+ * [#28018] A `kanban.lanes` entry that is not an option of the group field.
+ * See the section of that name on this module.
+ */
+export const LIST_VIEW_KANBAN_LANE_UNKNOWN = 'list-view-kanban-lane-unknown';
+
+/**
+ * [#28018] A `kanban.lanes` value listed more than once. See the section of
+ * that name on this module.
+ */
+export const LIST_VIEW_KANBAN_LANE_REPEATED = 'list-view-kanban-lane-repeated';
 
 /**
  * A list view that still carries a key `@objectstack/spec` retired — reported
@@ -1019,6 +1057,87 @@ export function validateListViewFieldRefs(
   };
 
   /**
+   * [#28018] The inline option values each object's fields declare, read from
+   * the same `stack.objects` the graph indexes. A field with no non-empty
+   * inline `options` array is absent: its lanes are not judged.
+   */
+  const optionValues = new Map<string, Map<string, ReadonlySet<string>>>();
+  for (const obj of recordsOf(stack.objects)) {
+    const objName = strName(obj.name);
+    if (!objName) continue;
+    const byField = new Map<string, ReadonlySet<string>>();
+    for (const field of recordsOf(obj.fields)) {
+      const fieldName = strName(field.name);
+      if (!fieldName || !Array.isArray(field.options)) continue;
+      const values = new Set<string>();
+      for (const option of field.options) {
+        const value = isRec(option) ? strName(option.value) : undefined;
+        if (value) values.add(value);
+      }
+      if (values.size > 0) byField.set(fieldName, values);
+    }
+    optionValues.set(objName, byField);
+  }
+
+  /**
+   * [#28018] `kanban.lanes`, judged once a list view's bound object resolves:
+   * every entry must be an inline option of `groupByField`. See the section of
+   * that name on this module.
+   */
+  const checkKanbanLanes = (listView: AnyRec, object: string, where: string, path: string): void => {
+    const kanban = listView.kanban;
+    if (!isRec(kanban) || !Array.isArray(kanban.lanes)) return;
+    const groupBy = strName(kanban.groupByField);
+    if (!groupBy) return;
+    const options = optionValues.get(object)?.get(groupBy);
+    if (!options) return;
+    kanban.lanes.forEach((lane, i) => {
+      const written = strName(lane);
+      if (!written || options.has(written)) return;
+      findings.push({
+        severity: 'error',
+        rule: LIST_VIEW_KANBAN_LANE_UNKNOWN,
+        where: `${where} › kanban`,
+        path: `${path}.kanban.lanes[${i}]`,
+        message:
+          `lanes[${i}] "${written}" is not an option of "${object}.${groupBy}": no card lands in that lane, and ` +
+          `cards with the option it meant fall into \`Uncategorized\`.` +
+          suggestName(written, options),
+        hint: `Write an option's stored \`value\` of "${object}.${groupBy}" (not its label), or drop the entry`,
+      });
+    });
+  };
+
+  /**
+   * [#28018] A `kanban.lanes` value listed twice, reported at the second entry.
+   * Needs no field map, so it runs before every skip.
+   */
+  const checkKanbanLaneRepeats = (listView: AnyRec, where: string, path: string): void => {
+    const kanban = listView.kanban;
+    if (!isRec(kanban) || !Array.isArray(kanban.lanes)) return;
+    const firstAt = new Map<string, number>();
+    kanban.lanes.forEach((lane, i) => {
+      const written = strName(lane);
+      if (!written) return;
+      const first = firstAt.get(written);
+      if (first === undefined) {
+        firstAt.set(written, i);
+        return;
+      }
+      findings.push({
+        severity: 'error',
+        rule: LIST_VIEW_KANBAN_LANE_REPEATED,
+        where: `${where} › kanban`,
+        path: `${path}.kanban.lanes[${i}]`,
+        message:
+          `lanes[${i}] "${written}" repeats lanes[${first}]: the board would draw two lanes with one id, so a card ` +
+          `carrying that value has two lanes to fall into`,
+        hint: `List each lane once: delete lanes[${i}]`,
+      });
+    });
+  };
+
+  /**
    * Judge ONE written reference at one position.
    *
    * The HEAD segment is what is resolved — see the dotted-path note on this
@@ -1161,6 +1280,7 @@ export function validateListViewFieldRefs(
         hint: retiredKeyRemedy(prescription),
       });
     }
+    checkKanbanLaneRepeats(listView, where, path);
     if (noUniverse) return;
 
     // ── Skip 4 (this surface's own): a list view bound to a non-`object`
@@ -1249,6 +1369,8 @@ export function validateListViewFieldRefs(
         });
       }
     }
+
+    checkKanbanLanes(listView, bound, where, path);
 
     // ── Filter KEYS: the view's own filter and the tab presets inside
     // `userFilters`. `walkFilterFieldKeys` handles all three authored filter
