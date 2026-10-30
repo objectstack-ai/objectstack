@@ -3532,7 +3532,7 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
 
 const LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'list-view-kanban-lane-unknown',
-  covers: 'why every `kanban.lanes` entry must be an option of the group field',
+  covers: 'why each kanban lane must name a group field option',
   paragraphs: [
     'A kanban board\'s `lanes` lists the lanes it draws, in order, as stored option values of the field ' +
       'named by `groupByField`. The board puts each card in the lane whose id equals the card\'s value for ' +
