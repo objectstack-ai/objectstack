@@ -802,6 +802,15 @@ export interface FlowUserGrants {
    * reads it drops out: the run sees less, never more.
    */
   email?: string;
+  /**
+   * The user's posture rung, derived from the grants above by the resolver a
+   * request's envelope is built through (`resolveUserAuthzGrants`' own field,
+   * under its own name). Run setup seeds it beside the positions and
+   * permission sets ({@link SeededRunContext.posture}). A resolver that omits
+   * it leaves the run without one, so every reader of the rung answers as for
+   * a principal below it: the run sees less, never more.
+   */
+  posture?: SeededRunContext['posture'];
 }
 
 /**
@@ -4988,8 +4997,24 @@ export class AutomationEngine implements IAutomationService {
      * The `FLOW_DISABLED` refusal MESSAGE, which is where the ledger-vs-status
      * distinction rides (ADR-0126 §7.2 reuses the CODE deliberately, so the
      * message is the only channel left).
+     *
+     * [#27966] The ledger sentence is written for the caller, in the shape
+     * the switched-off action refusal reads as (`describeTurnedOffPackagedItem`,
+     * `@objectstack/types`), so it names no table and no ADR. Those, with the
+     * code and the flow's name, go to the log line written here: both refusal
+     * exits ask for this message exactly when they refuse, so this is the one
+     * place every ledger refusal passes that holds the logger. It is `info`,
+     * not `warn`: the refusal is handed to the caller, and nothing is degraded
+     * (AGENTS.md "Degradation log levels").
      */
     private describeDisabledFlow(flowName: string): string {
+        if (this.flowLedgerDisabled.has(flowName)) {
+            this.logger.info(
+                `FLOW_DISABLED: packaged flow '${flowName}' refused — it is switched off in the activation ledger ` +
+                    '(sys_metadata_activation, ADR-0126 §7.2).',
+                { flow: flowName, refusal: 'FLOW_DISABLED' },
+            );
+        }
         // The body lives in ./subflow-guards.ts (#25222).
         const host: ThisParameterType<typeof describeDisabledFlow> = {
             flowLedgerDisabled: this.flowLedgerDisabled,
@@ -5655,7 +5680,8 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Seed a `runAs:'user'` run context's authorization facts — `positions`,
-     * `permissions`, the peer list `org_user_ids` and the user's `email` — for
+     * `permissions` with the posture rung derived from them, the peer list
+     * `org_user_ids` and the user's `email` — for
      * its `userId`, through the wired grants resolver: the one resolver the
      * request path seeds a request's envelope through
      * (`resolveUserAuthzGrants`, bridged by the automation plugin). Mutates
@@ -6687,10 +6713,12 @@ export class AutomationEngine implements IAutomationService {
      * and each `map:` link with a successor is an item still parked under it
      * (#27877). Empty when nothing is suspended under that id; stops at the
      * last resolvable link when a child row is gone (that run is where
-     * `resumeInternal` will continue).
+     * `resumeInternal` will continue). The caller's own id is seen before the
+     * walk starts, so a corrupt correlation cycle back to it ends the chain
+     * there instead of listing the caller's run again as its own child.
      */
     private async resolveSuspensionChain(runId: string): Promise<SuspendedRun[]> {
-        const seen = new Set<string>();
+        const seen = new Set<string>([runId]);
         const chain: SuspendedRun[] = [];
         let run = await this.loadSuspendedRun(runId);
         for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {

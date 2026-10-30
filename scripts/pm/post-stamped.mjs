@@ -2060,17 +2060,20 @@ export function keyedLineRefusalText(rows) {
 
 /** What the record's owner accepts, printed BY the refusal so the fix is one line away. */
 export const RECORD_KEY_SPELLINGS = Object.freeze({
-  'Head-sha': '`Head-sha: ` then the reviewed head as 7 to 40 hex in a code span of its OWN, at the START of a line BELOW the `## Contract review` heading — not blockquoted, not bulleted, not inside a fence, not before the heading; the first such line is the head the record names, and a record written before the line existed may omit it',
+  'Head-sha': '`Head-sha: ` then the reviewed head as 7 to 40 hex in a code span of its OWN, at the START of a line (up to three spaces of indent) BELOW an unquoted, unindented `## Contract review` heading — not blockquoted, not bulleted, not inside a fence, not indented as code (four spaces or a tab), not before the heading, not under a quoted or code-indented heading; the first such line is the head the record names, and a record written before the line existed may omit it',
   'Local-runs': '`Local-runs: none` at the START of a line, or `Local-runs: probe — REASON` naming the ONE local run the read-only rule was broken for and why; a record written before the line existed may omit it',
 });
 
-/** PRESENCE only, case-blind: a `Head-sha` key anywhere in the body, however decorated or placed. Consulted solely to
- *  tell "the author wrote the key and the reader cannot read it" (refused) from "no key at all" (not re-judged). */
-const HEAD_SHA_KEY_ANYWHERE = /head-sha[ \t`*]*:/i;
+/** PRESENCE only, case-blind: a `Head-sha` key opening a LINE, however decorated or placed — any indent, blockquote
+ *  markers, a bullet or a list number, bold or backticks around the key — so a decorated, fenced, code-indented or
+ *  pre-heading key line still counts as written. Consulted solely to tell "the author wrote the key and the reader
+ *  cannot read it" (refused) from "no key at all" (not re-judged). ⛔ Not mid-sentence: a comment that quotes a record's
+ *  heading and then names the key in prose wrote no key line, and was refused for it until 2026-10-30 (loudness only). */
+const HEAD_SHA_KEY_LINE = /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*]*head-sha[ \t`*]*:/im;
 
 /** The first line carrying a `Head-sha` key, however spelled — a LOCATOR for the writer's eye, ⛔ never the judgement. */
 function headShaKeyLine(text) {
-  const hit = text.split(/\r?\n/).find((line) => HEAD_SHA_KEY_ANYWHERE.test(line));
+  const hit = text.split(/\r?\n/).find((line) => HEAD_SHA_KEY_LINE.test(line));
   return hit === undefined ? '(no single line carries the key)' : offendingSpan(hit.trim(), 160);
 }
 
@@ -2081,7 +2084,8 @@ function headShaKeyLine(text) {
  * verdict over a line nobody had been asked to write. Scoped by the record's own heading marker, on `--comment`
  * alone — a record IS a comment.
  *   Head-sha     `contractReviewHeadSha` (`check-half-states.mjs`) is the ONE reader every guard reaches the record's head
- *                through: the first plain `Head-sha:` line below the heading, outside any blockquote, bullet or fence. A
+ *                through: the first plain `Head-sha:` line below an unquoted, unindented heading, outside any blockquote,
+ *                bullet, fence or indented code. A
  *                body that carries the key somewhere and reads `null` there would be filed by every reader as a review of
  *                NO head — absent on the owed list, refused at the queue — so it is refused here, before the write. The
  *                template's null-oid placeholder reads as a head (it is 40 hex) and is not this row's: C6 refuses it.
@@ -2093,8 +2097,8 @@ export function recordKeyedLineRefusals(body) {
   const text = String(body ?? '');
   if (!CONTRACT_REVIEW_HEADING_MARKER.test(text)) return [];
   const rows = [];
-  if (HEAD_SHA_KEY_ANYWHERE.test(text) && contractReviewHeadSha(text) === null)
-    rows.push({ key: 'Head-sha', line: headShaKeyLine(text), why: '`contractReviewHeadSha` reads NO head here — a `Head-sha` key is present, but no line below the `## Contract review` heading carries it plainly with a hex span of its own (a blockquoted, bulleted, fenced or pre-heading line, the key folded into the span, a bare hex value, a lowercase key and a sub-floor span all read as nothing). Every reader would file this record as a review of NO head.' });
+  if (HEAD_SHA_KEY_LINE.test(text) && contractReviewHeadSha(text) === null)
+    rows.push({ key: 'Head-sha', line: headShaKeyLine(text), why: '`contractReviewHeadSha` reads NO head here — a `Head-sha` key opens a line, but no line below an unquoted, unindented `## Contract review` heading carries it plainly with a hex span of its own (a blockquoted, bulleted, fenced or pre-heading line, a code-indented line — four spaces or a tab — a line under a quoted or code-indented heading, the key folded into the span, a bare hex value, a lowercase key and a sub-floor span all read as nothing). Every reader would file this record as a review of NO head.' });
   const runs = readLocalRuns(text);
   if (!localRunsStand(runs))
     rows.push({ key: 'Local-runs', line: runs.line, why: '`readLocalRuns` reads the line and cannot grade its value — `none` and `probe — REASON` are the closed set, and a probe with no reason names no deviation.' });
@@ -5319,6 +5323,12 @@ export function selfTest() {
     t('⭐ a quoted line ABOVE the record\'s own passes — the reader skips the quotation and reads the line below it', rkeys(SHA_WITH([`> Head-sha: \`${'f'.repeat(40)}\``, `Head-sha: \`${SHA_HEAD}\``])) === '');
     t('⛔ ABSENT is NOT re-judged for this key either: a record with no `Head-sha` key at all passes untouched — the retired-dialect records carry none', rkeys(SHA_WITH([])) === '');
     t('⛔ a fully QUOTED record, and a code-indented (four spaces or tab) line alone, are refused — a quoted heading opens no scope and an indented line is code', rkeys(SHA_WITH([`Head-sha: \`${SHA_HEAD}\``]).split('\n').map((l) => `> ${l}`).join('\n')) === 'Head-sha' && rkeys(SHA_WITH([`    Head-sha: \`${SHA_HEAD}\``])) === 'Head-sha' && rkeys(SHA_WITH([`\tHead-sha: \`${SHA_HEAD}\``])) === 'Head-sha');
+    // ⛔ PRESENCE is a key LINE, however decorated, ⛔ never a mid-sentence mention: a record-shaped comment that names the key
+    // in prose wrote no line and is untouched; a key under a code-indented heading, or opening a numbered, doubly quoted
+    // or `+`-bulleted line, is a written line the reader refuses, and is refused here.
+    t('⭐ NOT a key line: a record-shaped comment that names `Head-sha:` mid-sentence, with no line opening on the key, is untouched — presence is a key LINE', rkeys('## Contract review\n\nThe seat\'s own record carries its Head-sha: line plainly, below the heading; see `Head-sha:` in the template.') === '' && rkeys(`> ## Contract review\n\nquoted above; the record\'s Head-sha: line is \`${SHA_HEAD}\` there`) === '');
+    t('⛔ …while a decorated key LINE still counts as written and is refused when the reader names no head: numbered, doubly quoted, `+`-bulleted, and one under a CODE-INDENTED heading', rkeys(SHA_WITH([`1. Head-sha: \`${SHA_HEAD}\``])) === 'Head-sha' && rkeys(SHA_WITH([`> > **Head-sha:** \`${SHA_HEAD}\``])) === 'Head-sha' && rkeys(SHA_WITH([`+ Head-sha: \`${SHA_HEAD}\``])) === 'Head-sha' && rkeys(`    ## Contract review\nHead-sha: \`${SHA_HEAD}\``) === 'Head-sha');
+    t('the `Head-sha` refusal and the printed spelling NAME the two causes the reader added — a code-indented line and a line under a quoted or code-indented heading', (() => { const text = recordLineRefusalText(recordKeyedLineRefusals(SHA_WITH([`\tHead-sha: \`${SHA_HEAD}\``]))); const rule = RECORD_KEY_SPELLINGS['Head-sha']; return text.includes('a code-indented line — four spaces or a tab') && text.includes('a line under a quoted or code-indented heading') && rule.includes('not indented as code (four spaces or a tab)') && rule.includes('not under a quoted or code-indented heading') && rule.includes('BELOW an unquoted, unindented'); })());
     t('both lines unreadable ⇒ both rows, `Head-sha` first', rkeys(SHA_WITH([`> Head-sha: \`${SHA_HEAD}\``], 'Local-runs: probe')) === 'Head-sha,Local-runs');
     t('the `Head-sha` refusal prints the spelling that reads, names the owner, and quotes the offending line', (() => { const rows = recordKeyedLineRefusals(SHA_WITH([`> Head-sha: \`${SHA_HEAD}\``])); const text = recordLineRefusalText(rows); return text.includes(RECORD_KEY_SPELLINGS['Head-sha']) && text.includes('contractReviewHeadSha') && rows[0].line.includes('> Head-sha'); })());
     t('⛔ NOT a record: a claim or a report carrying a quoted `Head-sha:` line is untouched — the reader runs on the record\'s heading only', rkeys(`Claim: x\n> Head-sha: \`${SHA_HEAD}\``) === '' && rkeys(`os-dev-report\n\n> Head-sha: \`${SHA_HEAD}\``) === '');

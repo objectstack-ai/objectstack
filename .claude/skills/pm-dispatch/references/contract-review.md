@@ -30,7 +30,7 @@
 - 新 head 即清;点名现 head 时 (b) 不起;条件满足由持有车道挂等复核标记或落交接行。
 - 逾 24 小时条件未满的 hold 列入分诊轮次记录(`check-owed-reviews.mjs` 标出)。
 - 复核记录 = 一条评论落 PR 或卡,席内与子代理同形;散文、dev 自评、`os-dev-report` 恒不算。
-- 同形 = `## Contract review` 题头、`Head-sha:` 行独占码段、①②③ 逐项、独立性对、PASS/FAIL。
+- 同形 = `## Contract review` 题头之下 `Head-sha:` 行独占码段、①②③逐项、独立性对、PASS/FAIL。
 - 同形含首行 `Served-tier:`:值写该面所定档的常量名 `CONTRACT_REVIEW_TIER` 或 `TIER_DEFAULT`;
   无此行不成裁决;模板 `node scripts/pm/record-recognisers.mjs --template`,申报面加 `--face declaration`。
 - 同形带 `Local-runs:` 行:`none` 或 `probe — REASON` 具名唯一探针;有行必校,缺行旧记录不改判。

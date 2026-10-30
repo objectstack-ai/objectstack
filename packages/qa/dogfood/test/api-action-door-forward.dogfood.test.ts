@@ -175,7 +175,12 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
 
     expect(refused.status, refused.text).toBe(409);
     expect(refused.json?.error?.code).toBe('ACTION_DISABLED');
-    expect(String(refused.json?.error?.message)).toContain('sys_metadata_activation');
+    // [#27842] The sentence is the end user's: it names where an administrator
+    // turns the action back on, and no system table (the code is the machine half).
+    const message = String(refused.json?.error?.message);
+    expect(message).toMatch(/^This action is turned off for this deployment\. /);
+    expect(message).toContain('An administrator can turn it on again under Setup › Packaged automation');
+    expect(message).not.toContain('sys_metadata_activation');
     expect(await isBanned(), 'a switched-off Ban User still banned — the #27506 defect').toBe(false);
   }, 120_000);
 

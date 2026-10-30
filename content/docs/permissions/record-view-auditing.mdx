@@ -224,7 +224,11 @@ A row about no organization (its `tenant_id` empty: a global settings change, a
 user-import run, a platform-admin standing change, a user account created or
 reset through the admin endpoints) is served to the platform
 administrator alone, in every tenancy posture, `single` included; no other
-reader is served one, this capability's holders included.
+reader is served one, this capability's holders included. A `runAs: 'user'`
+flow whose grants the engine resolves for its user (a record-change run, or the
+segment after an approval decision) carries that user's posture, so one run as
+the platform administrator is served these rows as their request is; a run
+started through the REST or action door is not, yet.
 Rows carry the
 ADR-0057 `audit` lifecycle class: retained hot for
 90 days, then archived for seven years where an `archive` datasource is
