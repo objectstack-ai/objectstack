@@ -4947,6 +4947,43 @@ export function InterfacesPillar({
   });
   useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? listViewHeld?.clause ?? navRenameClause);
   const heldUnsent = leafHeld !== null || listViewHeld !== null;
+  // objectstack#27896 — the panel's view picker (and its "Back to …") opens
+  // another view of the object in the one list-view buffer, whose load
+  // replaces the open view's edits, and the autosave sends nothing once the
+  // view has changed (objectui#11232). So the switch sends a pending edit
+  // first with the autosave's own `flush` and shows the view once the buffer
+  // is clean, as the Data pillar's object rail does (objectstack#27511); a
+  // save in flight is waited out the same way. An edit that cannot be sent
+  // (held, or its save refused with the refusal on screen) is the author's to
+  // drop: the switch asks (objectstack#26705).
+  const [listViewSwitchTo, setListViewSwitchTo] = React.useState<string | null>(null);
+  const listViewDirty = listView.dirty;
+  const listViewSaving = listView.saving;
+  const listViewHolds = listViewHeld !== null;
+  const showListView = listView.showView;
+  const switchListView = React.useCallback(
+    (viewId: string) => {
+      if (listViewSaving || (listViewDirty && !listViewHolds && flushListView())) {
+        setListViewSwitchTo(viewId);
+        return;
+      }
+      if (!confirmDropUnsavedWork(listViewDirty, locale)) return;
+      setListViewSwitchTo(null);
+      setSelection(null);
+      showListView(viewId);
+    },
+    [listViewSaving, listViewDirty, listViewHolds, flushListView, locale, setSelection, showListView],
+  );
+  React.useEffect(() => {
+    if (!listViewSwitchTo || listViewSaving) return;
+    if (listViewDirty && !listViewHolds && flushListView()) return;
+    setListViewSwitchTo(null);
+    // Still dirty: the save was refused (on screen) or an edit taken meanwhile
+    // is held. The author stays; the next switch asks.
+    if (listViewDirty) return;
+    setSelection(null);
+    showListView(listViewSwitchTo);
+  }, [listViewSwitchTo, listViewSaving, listViewDirty, listViewHolds, flushListView, setSelection, showListView]);
   // objectui#12725 — a click on a column header in an `object` leaf's canvas
   // selects that column (`StudioCanvasColumnSelectionContext`): the pillar's
   // one selection, so it shows in the panel's column list, asks the slot for
@@ -5838,6 +5875,8 @@ export function InterfacesPillar({
             onSelectionChange={setSelection}
             // objectstack#27836 — "Add view" opens another view here: the pending edit goes first.
             onAddViewOpen={flushListView}
+            // objectstack#27896 — another view of the object: the pending edit goes first, or the author is asked.
+            onSwitchView={switchListView}
           />
         </div>
       ) : (
