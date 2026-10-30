@@ -176,6 +176,16 @@ export type {
     JobWithoutBody,
     HookWithoutBody,
 } from './app-artifact-handlers.js';
+// [#28039] The ONE path that registers, records and connects the datasources a
+// package declares — called by `AppPlugin.start` and by the install-local plugin
+// (`@objectstack/cloud-connection`) on install and rehydrate.
+export { connectPackageDatasources } from './declared-datasources.js';
+export type {
+    DeclaredDatasourceOwner,
+    OwnedDatasources,
+    PackageDatasourceOptions,
+    PackageDatasourceVerdict,
+} from './declared-datasources.js';
 // #14094 — what a DECLARATIVE job's handler is invoked with. A job has no graph,
 // so unlike a flow `script` node it is given data reach (`ql`) instead of being a
 // pure value-returner whose I/O the surrounding graph performs.

@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
-import { InitiateChunkedUploadRequestSchema } from '@objectstack/spec/api';
+import { GetPresignedUrlRequestSchema, InitiateChunkedUploadRequestSchema } from '@objectstack/spec/api';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
@@ -130,28 +130,55 @@ describe('Storage REST Routes', () => {
       ['a numeric string', '100'],
       ['a negative number', -5],
       ['a negative fraction', -0.5],
+      // [#27598] A byte count is whole: a fractional size minted a URL and a
+      // pending row that no upload could ever complete (the held byte count
+      // never equals it).
+      ['a positive fraction', 1.5],
       ['NaN', Number.NaN],
       ['Infinity', Number.POSITIVE_INFINITY],
       ['a boolean', true],
     ])('REFUSED 400 INVALID_REQUEST: size as %s, with no sys_file row written', async (_label, size) => {
       const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
       const createFile = vi.spyOn(store, 'createFile');
+      const body = { filename: 'a.png', mimeType: 'image/png', size };
       const res = createMockRes();
-      await handler(createMockReq({ body: { filename: 'a.png', mimeType: 'image/png', size } }), res);
+      await handler(createMockReq({ body }), res);
 
       expect(res._status, JSON.stringify(res._json)).toBe(400);
       expect(res._json.success).toBe(false);
       expect(res._json.error.code).toBe('INVALID_REQUEST');
       expect(res._json.error.message).toMatch(/^size must be the file size in bytes/);
+      expect(GetPresignedUrlRequestSchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
       expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
     });
 
+    // [#27598] The door's presence check refuses an empty `filename` or
+    // `mimeType`; the declaration says the same.
+    it.each(['filename', 'mimeType'] as const)(
+      'REFUSED 400 INVALID_REQUEST: an empty %s, which the declared schema refuses too, with no row written',
+      async (key) => {
+        const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+        const createFile = vi.spyOn(store, 'createFile');
+        const body = { filename: 'a.png', mimeType: 'image/png', size: 1, [key]: '' };
+        const res = createMockRes();
+        await handler(createMockReq({ body }), res);
+
+        expect(res._status, JSON.stringify(res._json)).toBe(400);
+        expect(res._json.success).toBe(false);
+        expect(res._json.error.code).toBe('INVALID_REQUEST');
+        expect(GetPresignedUrlRequestSchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
+        expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
+      },
+    );
+
     it.each([0, 1024])('CONTROL: size %d is accepted and stored on the pending row as sent', async (size) => {
       const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+      const body = { filename: 'a.png', mimeType: 'image/png', size };
       const res = createMockRes();
-      await handler(createMockReq({ body: { filename: 'a.png', mimeType: 'image/png', size } }), res);
+      await handler(createMockReq({ body }), res);
 
       expect(res._status, JSON.stringify(res._json)).toBe(200);
+      expect(GetPresignedUrlRequestSchema.safeParse(body).success, 'the declaration accepts it').toBe(true);
       const row = await store.getFile(res._json.data.fileId);
       expect(row!.size).toBe(size);
       expect(row!.status).toBe('pending');

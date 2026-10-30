@@ -78,6 +78,38 @@ describe('GetPresignedUrlRequestSchema', () => {
       })
     ).toThrow();
   });
+
+  // [#27598] `size` is a whole, non-negative byte count, and `filename` /
+  // `mimeType` are non-empty: what the presigned door refuses, declared.
+  it.each<[string, number]>([
+    ['a negative size', -1],
+    ['a fractional size', 1.5],
+    ['a negative fraction', -0.5],
+  ])('refuses %s, naming size', (_label, size) => {
+    const result = GetPresignedUrlRequestSchema.safeParse({ filename: 'a.png', mimeType: 'image/png', size });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toHaveLength(1);
+    expect(result.error!.issues[0].path).toEqual(['size']);
+  });
+
+  it.each(['filename', 'mimeType'] as const)('refuses an empty %s, naming that key', (key) => {
+    const result = GetPresignedUrlRequestSchema.safeParse({
+      filename: 'a.png',
+      mimeType: 'image/png',
+      size: 1,
+      [key]: '',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toHaveLength(1);
+    expect(result.error!.issues[0].path).toEqual([key]);
+    expect(result.error!.issues[0].code).toBe('too_small');
+  });
+
+  it.each([0, 1, 1048576])('CONTROL: size %d parses (0 is an empty file)', (size) => {
+    const result = GetPresignedUrlRequestSchema.safeParse({ filename: 'a', mimeType: 'b', size });
+    expect(result.success).toBe(true);
+    expect(result.data!.size).toBe(size);
+  });
 });
 
 describe('CompleteUploadRequestSchema', () => {
