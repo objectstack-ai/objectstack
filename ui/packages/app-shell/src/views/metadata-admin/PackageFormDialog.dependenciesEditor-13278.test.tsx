@@ -14,7 +14,8 @@
  *   (b) adding `@acme/core` → `^1.2.0` and saving in edit mode sends that map;
  *   (c) removing every row sends `{}`, which clears the row (objectui#13121);
  *   (d) a duplicate package name is flagged inline and nothing is sent;
- *   (e) CONTROL — create mode shows the same editor.
+ *   (e) CONTROL — create mode shows the same editor (under Advanced,
+ *       objectstack#27833).
  */
 
 import * as React from 'react';
@@ -146,6 +147,9 @@ describe('PackageFormDialog — the Dependencies row is a key/value editor (obje
 
   it('(e) CONTROL — create mode shows the same editor', async () => {
     openDialog('create');
+    // objectstack#27833 — on create the editor sits in the collapsed
+    // Advanced disclosure with the other technical rows.
+    fireEvent.click(screen.getByTestId('package-form-advanced-toggle'));
     const group = await dependencies();
     expect(within(group).getByTestId('package-dependencies-empty').textContent).toBe('No dependencies.');
     addRow(group, '@acme/core', '^1.2.0');

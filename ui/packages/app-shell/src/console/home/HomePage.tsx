@@ -790,6 +790,11 @@ export function HomePage() {
             apps={launcherApps}
             favorites={favorites}
             settingsHref={setupApp ? setupPath : undefined}
+            settingsLabel={
+              setupApp
+                ? appLabel({ name: setupApp.name, label: resolveKeyedI18nLabel(setupApp.label, t) })
+                : undefined
+            }
             lastOpened={lastOpened}
             /* Deliberately NOT resolved through `hostAppSegment` (objectui#4074
                scope guard): the marketplace is an admin-only surface that lives

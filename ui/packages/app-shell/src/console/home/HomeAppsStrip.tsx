@@ -58,6 +58,7 @@ export function HomeAppsStrip({
   canAuthorMetadata = true,
   marketplaceEnabled = true,
   settingsHref,
+  settingsLabel,
   lastOpened,
 }: {
   apps: any[];
@@ -91,6 +92,12 @@ export function HomeAppsStrip({
    * case.
    */
   settingsHref?: string;
+  /**
+   * The Setup app's own label, as its header and the app switcher draw it, so
+   * the link names the app it opens in the reader's language. Omitted, the
+   * link falls back to the `home.systemSettings` string.
+   */
+  settingsLabel?: string;
   /**
    * [objectui#12601] When the user last had each app open, by app `name` (an
    * ISO timestamp), drawn under the tile's name as "2 hr. ago" (zh "2小时前打开";
@@ -153,7 +160,7 @@ export function HomeAppsStrip({
               data-testid="home-system-settings-link"
             >
               <Settings className="h-3.5 w-3.5" aria-hidden />
-              {t('home.systemSettings', { defaultValue: 'System Settings' })}
+              {settingsLabel || t('home.systemSettings', { defaultValue: 'System Settings' })}
             </Link>
           )}
         </div>

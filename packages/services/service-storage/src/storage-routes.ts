@@ -1115,6 +1115,10 @@ export function registerStorageFamily(
       const session = await requireUploadSession(req, res);
       if (session === false) return;
       const body = req.body ?? {};
+      // [#27801] The presence check refuses nothing the schema parse below
+      // accepts: `InitiateChunkedUploadRequestSchema` declares `filename` and
+      // `mimeType` non-empty. It stays ahead of the scope gate so a missing
+      // field keeps this answer whatever `scope` says.
       if (!body.filename || !body.mimeType || body.totalSize == null) {
         sendError(res, 400, 'INVALID_REQUEST', 'filename, mimeType, and totalSize are required');
         return;

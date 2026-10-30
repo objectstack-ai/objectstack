@@ -423,6 +423,20 @@ export class DatasourceAdminServicePlugin implements Plugin {
         .map((o) => ({ name: o.name, external: o.external }));
     };
 
+    // [#27701 · #27750] The objects a pool's connect syncs: the ones bound to
+    // a MANAGED datasource, so they get their tables on the database the pool
+    // opens. ⛔ A datasource whose schema ObjectStack does not own (`external`,
+    // `validate-only`) gets none: it never gets DDL. Its mode is read the way
+    // the driver factory reads it, so the gate and the driver agree on what it
+    // is. One helper for both pool doors: the open (`registerPool`) and the
+    // rebuild (`reregisterPool`).
+    const managedObjectsBoundTo = (record: StoredDatasource): string[] =>
+      (resolveDatasourceSchemaMode({ ...record, config: record.config ?? {} }) ?? 'managed') === 'managed'
+        ? objectsBoundTo(record.name)
+            .map((o) => o.name)
+            .filter((n): n is string => typeof n === 'string')
+        : [];
+
     const config: DatasourceAdminServiceConfig = {
       probe: (input) => this.probe(factory(), input),
 
@@ -541,20 +555,12 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // `connectDeclared` does for a declared datasource. Boot's schema sync
       // ran before this driver existed and skipped them; without this a code
       // object bound to a Setup-created datasource had no table, on create and
-      // after every restart, and every read of it was a 500. ⛔ A datasource
-      // whose schema ObjectStack does not own (`external`, `validate-only`)
-      // passes none: it never gets DDL. Its mode is read the way the driver
-      // factory reads it, so the gate and the driver agree on what it is.
+      // after every restart, and every read of it was a 500. The gate is
+      // `managedObjectsBoundTo`'s: never DDL for an unmanaged datasource.
       registerPool: async (record) => {
         this.livePoolRecords.set(record.name, record);
-        const managed = (resolveDatasourceSchemaMode({ ...record, config: record.config ?? {} }) ?? 'managed') === 'managed';
-        const objects = managed
-          ? objectsBoundTo(record.name)
-              .map((o) => o.name)
-              .filter((n): n is string => typeof n === 'string')
-          : [];
         await this.connection?.connect(record, {
-          objects,
+          objects: managedObjectsBoundTo(record),
           context: { origin: record.origin ?? 'runtime', trigger: 'runtime-admin' },
         });
       },
@@ -570,9 +576,14 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // `previous` rides along because the engine's eviction door removes the
       // datasource def with the driver, and the keep-old-pool path must put
       // back the def the old pool was serving under.
+      //
+      // [#27750] The rebuild carries the objects bound to the NEW record, the
+      // way `registerPool` does on create: a changed `config` can open a new,
+      // empty database, and without them the bound objects had no table there.
       reregisterPool: async (previous, next) => {
         this.livePoolRecords.set(next.name, next);
         await this.connection?.reconnect(next, {
+          objects: managedObjectsBoundTo(next),
           previous,
           context: { origin: next.origin ?? 'runtime', trigger: 'runtime-admin' },
         });

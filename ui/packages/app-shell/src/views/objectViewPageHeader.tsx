@@ -17,7 +17,6 @@ import {
   DropdownMenuTrigger,
 } from '@object-ui/components';
 import { Upload, MoreHorizontal, RotateCcw } from 'lucide-react';
-import { SchemaRenderer } from '@object-ui/react';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
@@ -25,6 +24,7 @@ import { getIcon } from '../utils/getIcon.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
+import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewListUrlState } from './objectViewListUrlState.js';
@@ -123,7 +123,7 @@ export function ObjectViewPageHeader({
                           entitlements={environmentEntitlements}
                         />
                       ) : (
-                      <SchemaRenderer schema={toolbarBar} />
+                      <ListHeaderActionBar schema={toolbarBar} />
                       )
                     )}
 

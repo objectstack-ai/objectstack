@@ -238,6 +238,7 @@ describe('#4839 evidence — a delegation cannot rescue an IN-FLIGHT approval', 
   });
 
   it('the delegation DOES apply to a request opened afterwards — it is an open-time rule, nothing more', async () => {
+    engine._tables['sys_user'].push({ id: 'u7' }); // a delegate routes only when an account carries it (#27752)
     seedDelegation('u9', 'u7');
     const req = await svc.openNodeRequest(staffedInput(), SUBMITTER);
     // Guard the guard: the delegation machinery is wired and working in this

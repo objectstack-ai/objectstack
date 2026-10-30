@@ -6,10 +6,8 @@ Writing and debugging dynamic expressions in ObjectUI schemas. The expression sy
 
 ObjectUI uses a two-tier expression evaluator:
 
-1. **Template expressions** — strings containing `${...}` placeholders: `"Hello ${user.name}"`
-2. **Condition expressions** — raw boolean expressions without wrappers: `data.status === 'active'`
-
-Both are parsed by a **recursive-descent parser** (no `eval()`, no `new Function()`). This means expressions are CSP-safe and work under strict Content Security Policy headers.
+1. **Template expressions** — strings containing `${...}` placeholders: `"Hello ${user.name}"`, parsed by a **recursive-descent parser** (no `eval()`, no `new Function()`), so CSP-safe.
+2. **Condition expressions** — a bare string in a predicate key: `data.status == 'active'`. It is **CEL**, evaluated by `@objectstack/formula`, as on the server.
 
 Key files (for reference, not for editing):
 - `packages/core/src/evaluator/ExpressionEvaluator.ts` — main entry point
@@ -55,11 +53,6 @@ this rule. The four cases that decide most schemas:
 { "type": "text", "content": "${data.customer.name}" }
 ```
 
-`title` / `label` / `value` / `description` are template-evaluated on the types
-that declare them -- `statistic` (`label` / `value` / `description`), `card`
-(`title` / `description`), `button` (`label`) -- and read raw everywhere else.
-The set is closed and declared in `@objectstack/spec`.
-
 ## Template expression syntax (`${}`)
 
 ### Basic property access
@@ -79,6 +72,9 @@ ${!isLocked}                    → boolean negation
 ```
 
 ### Supported operators (full list)
+
+The `${…}` grammar only. A bare condition string is CEL — see "Condition fields".
+
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
 - Comparison: `>`, `<`, `>=`, `<=`, `==`, `===`, `!=`, `!==`
 - Logical: `&&`, `||`, `!`
@@ -237,7 +233,7 @@ name, so calls are case-insensitive.
 ### Syntax options
 
 The node-level condition keys are `visibleWhen` (show), `hidden` and
-`disabled`. Each takes a boolean, a `${}` template, or a raw expression:
+`disabled`. Each takes a boolean, a `${}` template, or a bare CEL string:
 
 <!-- os:check -->
 ```jsonc
@@ -251,8 +247,18 @@ The node-level condition keys are `visibleWhen` (show), `hidden` and
 
 <!-- os:check -->
 ```jsonc
-{ "hidden": "data.status !== 'active'" } // raw expression (no ${} needed)
+{ "hidden": "data.status != 'active'" } // bare string = CEL (no ${} needed)
 ```
+
+A JS-only spelling in a bare string faults: a visibility gate hides the node,
+`disabled` disables. FROM → TO:
+
+- `a === b` / `a !== b` → `a == b` / `a != b`
+- `list.includes(x)` → `x in list`; `s.includes('x')` → `s.contains('x')`
+- `list.length` → `size(list)`
+- a `data.*` key the scope may lack (`data.x == 1`, `!data.x`, `?.`, `??`) →
+  `has(data.x) && data.x == 1`, `!has(data.x) || !data.x`: CEL faults on a
+  missing key
 
 `visibleOn` / `hiddenOn` / `disabledOn` are retired and refused by name —
 rename to `visibleWhen` / `hidden` / `disabled`; the value is unchanged.
@@ -292,10 +298,8 @@ rename to `visibleWhen` / `hidden` / `disabled`; the value is unchanged.
 ## Field-level conditional rules (`visibleWhen` / `readonlyWhen` / `requiredWhen`)
 
 These live on the **object's field metadata**, are written in CEL, and are
-evaluated by `@objectstack/formula` -- a different tier from the node-level
-conditions above, which are schema/widget-level and run on the recursive-descent
-`SafeExpressionParser`. **How to author them is the `objectstack-data` skill's
-job**, under "Conditional Field Rules": the predicate scope, the client-only vs
+evaluated by `@objectstack/formula`. **How to author them is the
+`objectstack-data` skill's job**, under "Conditional Field Rules": the predicate scope, the client-only vs
 client-and-server enforcement split, the invariant-vs-transition-gate choice,
 and the protocol-17 removal of the `conditionalRequired` alias are all there.
 Author them in the canonical tagged-template form that skill teaches
@@ -332,9 +336,8 @@ Three renderer-side facts that live nowhere else:
   operator, value }` form and the `{ expression: "${…}" }` template form are
   retired, refused at the schema door by name with the respelling. A STORED
   legacy rule still renders through the shared evaluator (a compatibility read,
-  not an authoring form); a `condition` in legacy-only syntax (`${…}`, `===`,
-  `.includes()`) still routes to the old engine with a one-time deprecation
-  warning -- write CEL.
+  not an authoring form); only a `${…}` `condition` still routes to the old
+  engine. `===` or `.includes()` faults on CEL. Both warn once -- write CEL.
 - **`data.*` is the trap in a row predicate.** A row predicate binds ONE root,
   `record.*`; a bare `status` or `data.status` is retired there and faults on
   the runtime engine (`Unknown variable`), under each surface's existing error
@@ -637,6 +640,6 @@ When an expression isn't working:
 1. **Which key is it on, and does that type declare the key?** `content` and the predicate keys are evaluated and read on every type. `title` / `label` / `value` / `description` are evaluated **only on the types that declare them** — `statistic` (`label` / `value` / `description`), `card` (`title` / `description`), `button` (`label`) — and read raw everywhere else, including on a namespaced spelling such as `ui:statistic`. A `${...}` inside a `props` envelope is evaluated and then discarded. (A `properties` envelope is the one that is evaluated *and* hoisted onto the node — see [`rules/protocol.md`](../rules/protocol.md) for why that is recorded, not recommended.)
 2. Is the `${}` syntax correct? Check for unmatched braces.
 3. Is the data actually available in scope? Check what the host published on `PredicateScopeProvider` — ⛔ not `SchemaRendererProvider`'s `dataSource`, which publishes no expression root.
-4. For conditions: `visibleWhen` / `hidden` / `disabled` take a raw expression or a `${}` template; the `On` spellings are refused.
+4. For conditions: `visibleWhen` / `hidden` / `disabled` take a bare CEL string or a `${}` template.
 5. Does the expression use a blocked pattern? Check for constructors, `eval`, `window`, etc.
 6. Is type coercion causing issues? `${0 && "yes"}` returns `0`, not `false`.

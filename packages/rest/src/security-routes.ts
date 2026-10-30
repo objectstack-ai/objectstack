@@ -101,6 +101,17 @@ export interface SecurityRouteHost {
 }
 
 /**
+ * The explain request keys whose explicit empty string the door refuses
+ * `400 VALIDATION_FAILED` before any evaluation, each with the remedy its
+ * refusal names. The schema's `z.string()` admits "", so the line is drawn
+ * here; see the check in the handler for why each key is on it.
+ */
+const EMPTY_KEY_REMEDIES: ReadonlyArray<readonly ['object' | 'userId', string]> = [
+    ['object', 'Give the name of the object whose access to explain.'],
+    ['userId', 'Omit userId to explain your own access, or give the id of the user to explain.'],
+];
+
+/**
  * Register the access-explanation endpoints —
  * `RestServer#registerSecurityExplainEndpoints`' body, called by that method
  * with the server as `this`. The method's own docblock, which the published
@@ -204,16 +215,23 @@ export function registerSecurityExplainEndpoints(this: SecurityExplainRouteHost,
             const rawRecordIds = req.method === 'GET' && typeof src.recordIds === 'string' && src.recordIds !== ''
                 ? [src.recordIds]
                 : src.recordIds;
-            // [#27442] An omitted `userId` means the caller; an explicit empty
-            // one names nobody, so it is refused rather than dropped (dropping
-            // it answered about the caller, a principal nobody asked about).
-            // `?userId=` names the key on GET, so it is explicit there too.
-            // The schema's `z.string()` admits "", so the refusal is here.
-            if (src.userId === '') {
-                return respondError(
-                    res, 400, 'VALIDATION_FAILED',
-                    'Invalid explain request — userId is empty. Omit userId to explain your own access, or give the id of the user to explain.',
-                );
+            // An explicit empty string names nothing, so these keys refuse it
+            // here: the schema's `z.string()` admits "", and `?key=` names the
+            // key on GET, so it is explicit there too. One check, one remedy
+            // per key, in the route's own envelope, before any evaluation.
+            //  - [#27442] `userId`: an omitted one means the caller; an empty
+            //    one was dropped and answered about the caller, a principal
+            //    nobody asked about.
+            //  - [#27719] `object`: an empty one reached the engine, whose
+            //    plain `Error` fell to the `500 EXPLAIN_FAILED` arm below — a
+            //    request the caller can fix, answered and logged as a fault.
+            for (const [key, remedy] of EMPTY_KEY_REMEDIES) {
+                if (src[key] === '') {
+                    return respondError(
+                        res, 400, 'VALIDATION_FAILED',
+                        `Invalid explain request — ${key} is empty. ${remedy}`,
+                    );
+                }
             }
             const parsed = (ExplainRequestSchema as any).safeParse({
                 object: src.object,

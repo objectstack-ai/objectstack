@@ -118,6 +118,10 @@ const STUDIO_EN: Record<string, string> = {
   // CEL authoring safety for RLS predicates (objectui#2413).
   'perm.cel.valid': 'Valid CEL',
   'perm.cel.suggestions': 'Field and scope suggestions',
+  // The CEL editor's field picker: fields by label, inserting the CEL reference.
+  'perm.cel.insertField': 'Insert field',
+  'perm.cel.searchFields': 'Search fields…',
+  'perm.cel.noMatchingFields': 'No matching fields.',
   'perm.cel.type': 'Result type:',
   'perm.cel.type.number': 'Number',
   'perm.cel.type.text': 'Text',
@@ -1759,6 +1763,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.emptyCreate': 'Create your first package to start authoring metadata.',
   'engine.packages.emptyFiltered': 'No packages match your filters.',
   'engine.packages.installedApps.title': 'Installed Apps',
+  'engine.packages.installedApps.description': 'The apps installed from the marketplace into this system.',
   'engine.packages.installedApps.empty': 'No apps installed from the marketplace yet',
   'engine.packages.installedApps.emptyHint': 'Apps you install from the marketplace are listed here.',
   'engine.packages.loadFailed': 'Failed to load packages',
@@ -1788,7 +1793,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.import.success': 'Imported "{id}". Refresh the app switcher to use it.',
   'engine.packages.import.failed': 'Import failed',
   'engine.packages.create.title': 'New Package',
-  'engine.packages.create.description': 'Create a writable package to author and publish your own metadata. The id should be reverse-domain (e.g. {example}).',
+  'engine.packages.create.description': 'A package holds the objects, apps and other things you build. Give it a name to start; everything else is filled in for you.',
+  'engine.packages.create.derivedSummary': 'Its ID will be {id}, and its object names will start with {namespace}_. You can change both under Advanced.',
+  'engine.packages.create.advancedHint': 'Package ID, namespace, version and type, filled in from the name.',
   'engine.packages.create.id': 'Package ID',
   'engine.packages.create.namespace': 'Object namespace',
   'engine.packages.create.name': 'Display name',
@@ -1835,7 +1842,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.pendingHint': 'Drafted, not yet published. Publish the whole app, or review each below.',
   'engine.packages.detail.publishApp': 'Publish app ({count})',
   'engine.packages.detail.discardChanges': 'Discard changes ({count})',
-  'engine.packages.detail.kernelReadOnly': 'This is a platform kernel package. Authoring actions are disabled.',
+  'engine.packages.detail.kernelReadOnly': 'This package is part of the platform. It cannot be edited, disabled or deleted.',
+  'engine.packages.detail.codeReadOnly': 'This package is loaded from code, so it is read-only here: it cannot be edited, disabled or deleted in the console. Change it in its source and deploy again.',
+  'engine.packages.detail.readOnly': 'This package is read-only here: it cannot be edited, disabled or deleted in the console.',
   'engine.packages.detail.actions': 'Actions',
   'engine.packages.detail.edit': 'Edit',
   'engine.packages.edit.title': 'Edit package',
@@ -1848,9 +1857,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.revert': 'Revert',
   'engine.packages.detail.enable': 'Enable',
   'engine.packages.detail.disable': 'Disable',
+  'engine.packages.detail.disableTitle': 'Disable "{name}"?',
+  'engine.packages.detail.disableDescription': 'The package is taken out of service for every user until it is enabled again. No records are deleted, and you can enable it again at any time.',
   'engine.packages.detail.export': 'Export',
   'engine.packages.detail.exporting': 'Exporting…',
-  'engine.packages.detail.deleteApp': 'Delete app',
+  'engine.packages.detail.deletePackage': 'Delete package',
   'engine.packages.detail.deleting': 'Deleting…',
   'engine.packages.detail.discarding': 'Discarding…',
   'engine.packages.detail.actionFailed': 'Action failed',
@@ -3136,8 +3147,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
   // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
   'engine.studio.org.openSetup': 'Open in Setup',
-  'engine.studio.publishedAllFlows': 'Published {count} package-less flow drafts',
-  'engine.studio.publishedAllFlowsOne': 'Published {count} package-less flow draft',
+  'engine.studio.publishedAllFlows': 'Published {count} flows',
+  'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
   'engine.studio.designer.select': 'Select…',
   'engine.studio.designer.pickDate': 'Pick a date…',
@@ -3829,6 +3840,10 @@ const STUDIO_EN: Record<string, string> = {
   // host binds. `Unknown variable: …` is the runtime's own fault text and stays
   // as written. (An RLS clause the runtime cannot lower has no row here: it
   // ships `@objectstack/lint`'s own message, objectui#13061.)
+  // The plain sentence the CEL editors lead the catch-all CEL refusal with
+  // (`invalid-cel`); the engine's own fault and source excerpt follow it as written.
+  'engine.celLint.invalidCel':
+    "This expression can't be worked out as written: something is missing, extra, out of place, or doesn't fit the values beside it. The ^ mark below points to the spot.",
   'engine.celLint.notTheRow':
     '`{identifier}` is not the row on this surface: a row predicate binds the record as `{canonical}` and nothing else. The CEL scope vocabulary still accepts `{identifier}`, so nothing here blocks the save, but at runtime the expression faults with `Unknown variable: {identifier}` and the rule never fires. Re-root the reference on `{canonical}`.',
   'engine.pageBlockCanvas.renderFailed':
@@ -4056,6 +4071,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ Add sort…',
   'engine.studio.inspector.listView.sortAsc': '{field} ascending',
   'engine.studio.inspector.listView.sortDesc': '{field} descending',
+  // objectstack#27836 — "Add view": a new list view of the object, its type picked first.
+  'engine.studio.inspector.listView.addView': 'Add view',
+  'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
+  'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',

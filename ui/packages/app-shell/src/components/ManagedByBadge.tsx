@@ -214,8 +214,11 @@ export function ManagedByBadge({ managedBy, label, className }: ManagedByBadgePr
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
+          {/* Focusable, so the explanation a hover opens is reachable from
+              the keyboard too: the tooltip opens on focus. */}
           <Badge
             variant="outline"
+            tabIndex={0}
             data-testid="managed-by-badge"
             data-bucket={managedBy}
             className={cn(

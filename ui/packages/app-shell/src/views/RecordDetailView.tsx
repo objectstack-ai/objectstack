@@ -3885,17 +3885,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // (`recordDelete.confirmCopy`): the title names this record by the
           // ADR-0079 resolver over the READABLE row the header title reads
           // (a denied name field reads as absent here too) plus the object
-          // label, the body is the list's question, and the confirm button is
-          // "Delete", painted destructive.
-          const copy = recordDelete.confirmCopy(
-            {
-              objectName: objectName!,
-              t,
-              label: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
-              objectDef,
-            },
-            { record: (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId } },
-          );
+          // label, the body is the list's question (it says the delete is
+          // permanent), and the confirm button is "Delete", painted destructive.
+          // The success toast names the same record (`recordDelete.successText`).
+          const deleteDeps = {
+            objectName: objectName!,
+            t,
+            label: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
+            objectDef,
+          };
+          const deleteTarget =
+            (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId };
+          const copy = recordDelete.confirmCopy(deleteDeps, { record: deleteTarget });
           // objectui#11001 — asked through this page's own confirm runtime,
           // the in-app `ActionConfirmDialog` the list view's delete asks
           // through too, never the browser's native `window.confirm` (which
@@ -3911,7 +3912,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           ) return;
           try {
             await dataSource.delete(objectName!, pureRecordId!);
-            toast.success(t('detail.deleted', { defaultValue: 'Record deleted' }));
+            toast.success(recordDelete.successText(deleteDeps, deleteTarget));
             const baseAppUrl = appName ? `/apps/${appName}` : '';
             navigate(`${baseAppUrl}/${objectName}`, { replace: true });
           } catch (err: any) {
