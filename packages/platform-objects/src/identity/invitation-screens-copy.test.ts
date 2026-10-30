@@ -93,7 +93,11 @@ describe('row 8 — one role help text, a line per role', () => {
 
   it('Change Role names the member it changes, with a fallback for a row without the user', () => {
     const changeRole = action(SysMember, 'update_member_role');
-    expect(changeRole.description).toContain("${record.user_id?.name ?? 'this member'}");
+    // The whole sentence, not just its hole: the console's pin
+    // (`ActionParamDialog.invitationScreens-27521.test.tsx`) runs this exact
+    // text through a real `ActionRunner`, and reads "this member" for a row
+    // that does not expand `user_id`. A reworded declaration reds here first.
+    expect(changeRole.description).toBe("Choose the new organization role for ${record.user_id?.name ?? 'this member'}.");
     expect(changeRole.confirmText).toBeUndefined();
   });
 });
