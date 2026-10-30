@@ -2357,7 +2357,10 @@ function namedProseCandidates(rows) {
   return rows
     .map((r) => {
       const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
-      if (r.state === 'closed') return `${ref} CLOSED${r.closedAt ? ` (${r.closedAt})` : ''}`;
+      if (r.state === 'closed') {
+        const word = r.unmerged === true ? 'CLOSED UNMERGED' : 'CLOSED';
+        return `${ref} ${word}${r.closedAt ? ` (${r.closedAt})` : ''}`;
+      }
       if (r.state === 'unresolved') return `${ref} UNRESOLVED${r.detail ? ` (${r.detail})` : ''}`;
       return `${ref} open`;
     })
@@ -2373,16 +2376,29 @@ function namedProseCandidates(rows) {
  * scanned, nothing anchored, and the row again says nothing about prose. Only
  * a non-empty array produces a clause.
  *
+ * ## A PR candidate is released by its MERGE, never by its close
+ *
+ * The resolver (`blockerResolutionFromRow`) answers a PR number `closed`
+ * whether it merged or was abandoned, and marks the abandoned one
+ * `unmerged: true`. This clause used to bucket every `closed` row as a
+ * satisfied condition and told the seat the card was due back in `pm:queue` —
+ * for a prose-named PR that closed WITHOUT merging, a release that never
+ * happened. An unmerged close is now its own bucket: it withholds, it is never
+ * counted among the expired, and the clause says so instead of "due back".
+ *
  * @param {{ key: string, repo: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
- *   detail?: string|null }[]|null|undefined} candidates — RESOLVED candidates.
+ *   detail?: string|null, unmerged?: boolean }[]|null|undefined} candidates —
+ *   RESOLVED candidates.
  * @param {number} [heldBack] — distinct candidates left unresolved by the cap.
  */
 export function proseBlockerClause(candidates, heldBack = 0) {
   const rows = Array.isArray(candidates) ? candidates : [];
   if (rows.length === 0) return '';
-  const closed = rows.filter((r) => r.state === 'closed');
+  const closed = rows.filter((r) => r.state === 'closed' && r.unmerged !== true);
+  const abandoned = rows.filter((r) => r.state === 'closed' && r.unmerged === true);
   const unresolved = rows.filter((r) => r.state === 'unresolved');
+  const open = rows.filter((r) => r.state === 'open');
   const more =
     heldBack > 0
       ? ` (+${heldBack} more candidate(s) named but NOT resolved — the per-card cap is ` +
@@ -2407,10 +2423,22 @@ export function proseBlockerClause(candidates, heldBack = 0) {
       ' None of them could be resolved from this install — a cross-repo target is unjudgeable ' +
       'per install (each token reads its own repo), so this clause says NOTHING about whether ' +
       'the block still stands, and ⛔ no re-run resolves them.';
-  } else {
+  } else if (abandoned.length === rows.length) {
+    verdict =
+      ' Every one of them is a PR that closed UNMERGED — an abandoned attempt releases nothing, ' +
+      'so the condition this card states in words is NOT satisfied and the block still stands; ' +
+      'the target wants re-pointing (to the PR\'s card, or to the queue with a note).';
+  } else if (open.length === rows.length) {
     verdict =
       ' They all still read OPEN, so the block itself looks live — what is missing is only the ' +
       'line that would let a machine see it when they close.';
+  } else {
+    verdict =
+      ` None of them has released — ${open.length} still read${open.length === 1 ? 's' : ''} OPEN` +
+      (abandoned.length > 0 ? `, ${abandoned.length} closed UNMERGED (which withholds)` : '') +
+      (unresolved.length > 0 ? `, ${unresolved.length} could not be resolved from this install` : '') +
+      ' — so the block itself looks live, and what is missing is only the line that would ' +
+      'let a machine see it when a target merges or closes.';
   }
   return (
     head +
@@ -24992,6 +25020,21 @@ async function selfTest() {
   t('H4 prose: an OPEN upstream — the row says the block still looks live', proseRow(['nothing'], [cand(17438, 'open')]).includes('still read OPEN'), true);
   t('H4 prose: …and never claims an expiry', proseRow(['nothing'], [cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
   t('H4 prose: a MIXED reading counts the closed half', proseRow(['nothing'], [cand(16293, 'closed'), cand(17438, 'open')]).includes('1 of 2 is ALREADY CLOSED'), true);
+  // A prose-named PR target: released by its MERGE, never by its close. The
+  // rows go through the sweep's own projection of the issues-API answer
+  // (`blockerResolutionFromRow`), the same shapes H19's battery pins.
+  const proseFromRow = (number, row) => blockerResolutionFromRow({ ...cand(number, 'unread'), local: true }, row);
+  const mergedPrRow = { state: 'closed', closed_at: '2026-10-30T03:29:36Z', labels: [], pull_request: { merged_at: '2026-10-30T03:29:36Z' } };
+  const abandonedPrRow = { state: 'closed', closed_at: '2026-10-28T18:30:39Z', labels: [], pull_request: { merged_at: null } };
+  t('H4 prose PR: a prose-named MERGED PR is released — the row says the block already expired', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('ALREADY CLOSED'), true);
+  t('H4 prose PR: …and says where the card is due back', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('due back in `pm:queue`'), true);
+  t('H4 prose PR: a prose-named PR that closed UNMERGED is NOT released', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('ALREADY CLOSED'), false);
+  t('H4 prose PR: …and the row never says the card is due back', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('due back'), false);
+  t('H4 prose PR: …and names the candidate with its unmerged mark', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('`#27296` CLOSED UNMERGED (2026-10-28T18:30:39Z)'), true);
+  t('H4 prose PR: …and says what to do with it: re-point, not release', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('releases nothing'), true);
+  t('H4 prose PR: an UNMERGED close beside an OPEN target is neither an expiry nor all-open', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('1 still reads OPEN, 1 closed UNMERGED (which withholds)'), true);
+  t('H4 prose PR: …and the mixed count never counts the unmerged close as expired', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
+  t('H4 prose PR: a MERGED PR beside an UNMERGED one counts only the merge as expired', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow), proseFromRow(27296, abandonedPrRow)]).includes('1 of 2 is ALREADY CLOSED'), true);
   t('H4 prose: an UNRESOLVED cross-repo candidate claims nothing about the block', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('says NOTHING about whether'), true);
   t('H4 prose: …and renders the cross-repo address, not a bare number', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('`objectstack-ai/objectui#4356` UNRESOLVED'), true);
   t('H4 prose: the cap is DECLARED, never silent', proseRow(['nothing'], [cand(2, 'closed')], 3).includes('+3 more candidate(s) named but NOT resolved'), true);
