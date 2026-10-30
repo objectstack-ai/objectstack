@@ -268,17 +268,20 @@ export class MessagingServicePlugin implements Plugin {
         // formats in. Read through `resolveLocalizationContext`, the reader a
         // request resolves `ExecutionContext.currency` with, so a mail and the
         // record's currency field show the same currency. Probed at delivery
-        // time like the locale above; a failed read leaves it unset, and the
-        // render then refuses such a hole by name rather than guess one.
+        // time like the locale above. A read that found no default answers
+        // `undefined`, and the render then refuses such a hole by name rather
+        // than guess one. [#27257] A read that FAILED rejects instead: it
+        // learned nothing, so the channel renders without a currency and, if
+        // the render refuses for want of one, grades the delivery retryable.
         const getTenantCurrency = async (organizationId: string | undefined): Promise<string | undefined> => {
             let settings: unknown;
             try { settings = ctx.getService('settings'); } catch { settings = undefined; }
-            try {
-                const localization = await resolveLocalizationContext({ ql: getData(), settings, organizationId });
-                return localization.currency;
-            } catch {
-                return undefined;
+            const localization = await resolveLocalizationContext({ ql: getData(), settings, organizationId });
+            if (localization.readFailed) {
+                const of = organizationId ? ` of organization '${organizationId}'` : '';
+                throw new Error(`the localization settings${of} could not be read`);
             }
+            return localization.currency;
         };
 
         // [#24978] The `i18n` service whose catalog a keyed notification text

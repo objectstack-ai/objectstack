@@ -2357,7 +2357,10 @@ function namedProseCandidates(rows) {
   return rows
     .map((r) => {
       const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
-      if (r.state === 'closed') return `${ref} CLOSED${r.closedAt ? ` (${r.closedAt})` : ''}`;
+      if (r.state === 'closed') {
+        const word = r.unmerged === true ? 'CLOSED UNMERGED' : 'CLOSED';
+        return `${ref} ${word}${r.closedAt ? ` (${r.closedAt})` : ''}`;
+      }
       if (r.state === 'unresolved') return `${ref} UNRESOLVED${r.detail ? ` (${r.detail})` : ''}`;
       return `${ref} open`;
     })
@@ -2373,16 +2376,29 @@ function namedProseCandidates(rows) {
  * scanned, nothing anchored, and the row again says nothing about prose. Only
  * a non-empty array produces a clause.
  *
+ * ## A PR candidate is released by its MERGE, never by its close
+ *
+ * The resolver (`blockerResolutionFromRow`) answers a PR number `closed`
+ * whether it merged or was abandoned, and marks the abandoned one
+ * `unmerged: true`. This clause used to bucket every `closed` row as a
+ * satisfied condition and told the seat the card was due back in `pm:queue` —
+ * for a prose-named PR that closed WITHOUT merging, a release that never
+ * happened. An unmerged close is now its own bucket: it withholds, it is never
+ * counted among the expired, and the clause says so instead of "due back".
+ *
  * @param {{ key: string, repo: string, number: number, local: boolean,
  *   state: 'open'|'closed'|'unresolved', closedAt?: string|null,
- *   detail?: string|null }[]|null|undefined} candidates — RESOLVED candidates.
+ *   detail?: string|null, unmerged?: boolean }[]|null|undefined} candidates —
+ *   RESOLVED candidates.
  * @param {number} [heldBack] — distinct candidates left unresolved by the cap.
  */
 export function proseBlockerClause(candidates, heldBack = 0) {
   const rows = Array.isArray(candidates) ? candidates : [];
   if (rows.length === 0) return '';
-  const closed = rows.filter((r) => r.state === 'closed');
+  const closed = rows.filter((r) => r.state === 'closed' && r.unmerged !== true);
+  const abandoned = rows.filter((r) => r.state === 'closed' && r.unmerged === true);
   const unresolved = rows.filter((r) => r.state === 'unresolved');
+  const open = rows.filter((r) => r.state === 'open');
   const more =
     heldBack > 0
       ? ` (+${heldBack} more candidate(s) named but NOT resolved — the per-card cap is ` +
@@ -2407,10 +2423,22 @@ export function proseBlockerClause(candidates, heldBack = 0) {
       ' None of them could be resolved from this install — a cross-repo target is unjudgeable ' +
       'per install (each token reads its own repo), so this clause says NOTHING about whether ' +
       'the block still stands, and ⛔ no re-run resolves them.';
-  } else {
+  } else if (abandoned.length === rows.length) {
+    verdict =
+      ' Every one of them is a PR that closed UNMERGED — an abandoned attempt releases nothing, ' +
+      'so the condition this card states in words is NOT satisfied and the block still stands; ' +
+      'the target wants re-pointing (to the PR\'s card, or to the queue with a note).';
+  } else if (open.length === rows.length) {
     verdict =
       ' They all still read OPEN, so the block itself looks live — what is missing is only the ' +
       'line that would let a machine see it when they close.';
+  } else {
+    verdict =
+      ` None of them has released — ${open.length} still read${open.length === 1 ? 's' : ''} OPEN` +
+      (abandoned.length > 0 ? `, ${abandoned.length} closed UNMERGED (which withholds)` : '') +
+      (unresolved.length > 0 ? `, ${unresolved.length} could not be resolved from this install` : '') +
+      ' — so the block itself looks live, and what is missing is only the line that would ' +
+      'let a machine see it when a target merges or closes.';
   }
   return (
     head +
@@ -12596,45 +12624,98 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
 export const CONTRACT_REVIEW_HEADING_MARKER = /^\s*>?\s*## Contract review\b/m;
 
 /**
- * A hex code span long enough to be a commit id.
+ * A hex code span long enough to be a commit id — the VALUE grammar of the
+ * `Head-sha:` line below.
  *
  * SEVEN is git's own default abbreviation and the shortest spelling measured on
  * the board (`c5935b2`); the longest is a full 40. Below seven a code span is
  * not an abbreviated sha in this corpus — it is a field name, a status word or
  * an error code — and admitting it would let an unrelated span decide the
- * head-identity test.
+ * head-identity test. ⛔ Nothing scans a body with this grammar any more; it is
+ * only ever asked of the one line (`contractReviewHeadMatch` says why).
  */
 export const H51_SHA_MIN_HEX = 7;
 export const H51_SHA_SPAN = /`([0-9a-fA-F]{7,40})`/g;
 
 /**
- * Which head this comment says it reviewed — the matched span, or `null`.
+ * The `Head-sha:` key line — the ONE place a contract-review record names the
+ * head it reviewed.
  *
- * The test is PREFIX against the PR's head sha, case-insensitive, which answers
- * the abbreviated and full spellings with one comparison. The whole body is
- * scanned rather than a bounded prefix, deliberately: the head is written in
- * the heading in two dialects, on the first body line in a third, and inside an
- * adoption record's opening sentence in the fourth, so any prefix bound short
- * enough to be worth having would miss one of them SILENTLY — a row reading
- * clean on a verdict it could not see is the failure this file refuses.
+ * The key half is `record-recognisers.mjs`'s `keyLineRegex` convention, spelled
+ * here because that file imports this one: optional blockquote, bullet, bold
+ * and backticks around the key, then the colon. The VALUE is a hex code span of
+ * its OWN — the shape `--template` prints — and it is the FIRST thing after the
+ * colon (spaces and bold may precede it, ⛔ nothing else); what follows the span
+ * on that line is prose and decides nothing. A key folded into the span with
+ * its value (the live corpus once wrote the whole `Head-sha: …` pair inside one
+ * span) is no key line: the backtick that opens it is consumed as key
+ * decoration and the value then opens with hex rather than a backtick, so the
+ * record names no head — the accept set stays exactly one spelling. A bare hex
+ * value with no span, a lowercase key and a span below the floor name no head
+ * either; the repair for every one of them is on the WRITE side.
+ */
+export const CONTRACT_REVIEW_HEAD_SHA_LINE = new RegExp(
+  `^[ \\t]*(?:>[ \\t]*)?(?:[-*][ \\t]+)?(?:\\*\\*)?\`?Head-sha\`?(?:\\*\\*)?[ \\t]*:(?:[ \\t]|\\*\\*)*${H51_SHA_SPAN.source}`,
+);
+
+/**
+ * The head a contract-review record names — the span on its first `Head-sha:`
+ * line, as written (case kept), or `null` when no line reads.
  *
- * The direction is safe by construction: a span that is a prefix of THIS head
- * can only have been written once this head existed, so a false positive would
- * need a review to name a commit it could not yet have seen.
+ * First line wins, as `readServedTier` reads its key: a record is one comment
+ * and names one head, and a later `Head-sha:` line (a quoted record, say) is
+ * prose to this reader. Not judged against any head here — that is
+ * `contractReviewHeadMatch`'s half — so a caller can also ask which head a
+ * record is ABOUT, which the sentence a patrol prints needs.
+ */
+export function contractReviewHeadSha(body) {
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    const m = CONTRACT_REVIEW_HEAD_SHA_LINE.exec(line);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/**
+ * Which head this record says it reviewed — the sha on its `Head-sha:` line
+ * when that sha is a prefix of `headSha`, else `null`.
+ *
+ * ⭐ A record names exactly ONE head, on ONE line. The test is PREFIX against
+ * the PR's head, case-insensitive, so the abbreviated and the full spelling
+ * answer alike; the line is read by `contractReviewHeadSha`.
+ *
+ * ⛔ A sha anywhere ELSE in the record decides nothing: not in the heading, not
+ * on the first body line, not in an adoption sentence, not in the prose. Until
+ * 2026-10-30 this function scanned the WHOLE body for any hex span that
+ * prefixed the head, on the argument that such a span "can only have been
+ * written once this head existed, so a false positive would need a review to
+ * name a commit it could not yet have seen". That argument was false: a record
+ * is written AFTER the commits it discusses, and a delta record on head A
+ * routinely discusses head B — "the PR has since moved to `B`", "cancelled by
+ * the push of `B`" — so the scan read A's PASS as a review of B, and the
+ * owed-review list and the queue guard, which share this reader through
+ * `record-recognisers.mjs`, both admitted an unreviewed head. Measured on PR
+ * #27964: record 6516042954, a delta review of `8216bec4` whose prose names
+ * `b3d92fee` three times, read as a review of `b3d92fee`; driven through the
+ * guard with a Tier S path at that head, it CLEARED. Nor was the exposure
+ * rare: of the 700 line-form records posted to this repository in the week to
+ * 2026-10-30, 488 also carried some other hex span.
+ *
+ * The three legacy dialects the scan existed for — the head in the heading (two
+ * spellings), on the first body line, in an adoption record's opening sentence
+ * — are RETIRED, by count: in that same week they had 0, 1 and 0 records (the
+ * one, on PR #25399, named `448de8ca` while the PR landed at `e5f87a19` an hour
+ * later — a head the record never saw), against 700 of 702 carrying the
+ * `Head-sha:` line the template has printed since #18042. A legacy record now names no head — fail-closed, in the
+ * one direction that matters — and the repair is to post a record with the
+ * line.
  */
 export function contractReviewHeadMatch(body, headSha) {
   const head = String(headSha ?? '').toLowerCase();
   if (head.length < H51_SHA_MIN_HEX) return null;
-  const text = String(body ?? '');
-  // A fresh regex per call: the module-level source carries `g`, and a shared
-  // `g` regex hands its `lastIndex` to the next caller.
-  const spans = new RegExp(H51_SHA_SPAN.source, 'g');
-  let m;
-  while ((m = spans.exec(text))) {
-    const span = m[1].toLowerCase();
-    if (head.startsWith(span)) return m[1];
-  }
-  return null;
+  const named = contractReviewHeadSha(body);
+  if (named === null) return null;
+  return head.startsWith(named.toLowerCase()) ? named : null;
 }
 
 /**
@@ -24939,6 +25020,21 @@ async function selfTest() {
   t('H4 prose: an OPEN upstream — the row says the block still looks live', proseRow(['nothing'], [cand(17438, 'open')]).includes('still read OPEN'), true);
   t('H4 prose: …and never claims an expiry', proseRow(['nothing'], [cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
   t('H4 prose: a MIXED reading counts the closed half', proseRow(['nothing'], [cand(16293, 'closed'), cand(17438, 'open')]).includes('1 of 2 is ALREADY CLOSED'), true);
+  // A prose-named PR target: released by its MERGE, never by its close. The
+  // rows go through the sweep's own projection of the issues-API answer
+  // (`blockerResolutionFromRow`), the same shapes H19's battery pins.
+  const proseFromRow = (number, row) => blockerResolutionFromRow({ ...cand(number, 'unread'), local: true }, row);
+  const mergedPrRow = { state: 'closed', closed_at: '2026-10-30T03:29:36Z', labels: [], pull_request: { merged_at: '2026-10-30T03:29:36Z' } };
+  const abandonedPrRow = { state: 'closed', closed_at: '2026-10-28T18:30:39Z', labels: [], pull_request: { merged_at: null } };
+  t('H4 prose PR: a prose-named MERGED PR is released — the row says the block already expired', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('ALREADY CLOSED'), true);
+  t('H4 prose PR: …and says where the card is due back', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('due back in `pm:queue`'), true);
+  t('H4 prose PR: a prose-named PR that closed UNMERGED is NOT released', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('ALREADY CLOSED'), false);
+  t('H4 prose PR: …and the row never says the card is due back', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('due back'), false);
+  t('H4 prose PR: …and names the candidate with its unmerged mark', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('`#27296` CLOSED UNMERGED (2026-10-28T18:30:39Z)'), true);
+  t('H4 prose PR: …and says what to do with it: re-point, not release', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('releases nothing'), true);
+  t('H4 prose PR: an UNMERGED close beside an OPEN target is neither an expiry nor all-open', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('1 still reads OPEN, 1 closed UNMERGED (which withholds)'), true);
+  t('H4 prose PR: …and the mixed count never counts the unmerged close as expired', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow), cand(17438, 'open')]).includes('ALREADY CLOSED'), false);
+  t('H4 prose PR: a MERGED PR beside an UNMERGED one counts only the merge as expired', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow), proseFromRow(27296, abandonedPrRow)]).includes('1 of 2 is ALREADY CLOSED'), true);
   t('H4 prose: an UNRESOLVED cross-repo candidate claims nothing about the block', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('says NOTHING about whether'), true);
   t('H4 prose: …and renders the cross-repo address, not a bare number', proseRow(['nothing'], [{ ...blockerTargetKey({ repo: 'objectstack-ai/objectui', number: 4356 }, REPO4), state: 'unresolved', closedAt: null, detail: 'HTTP 404' }]).includes('`objectstack-ai/objectui#4356` UNRESOLVED'), true);
   t('H4 prose: the cap is DECLARED, never silent', proseRow(['nothing'], [cand(2, 'closed')], 3).includes('+3 more candidate(s) named but NOT resolved'), true);
@@ -33328,23 +33424,37 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
 
   // -- the contract-review RECORD readers, kept from the retired H51 row --------
   // SYNTHETIC fixtures (⛔ the self-test never touches GitHub) whose SHAPES were
-  // read off the live board: two title dialects and the 7-to-40 hex spelling
-  // range. `latestContractReviewOnHead` is what the queue guard's recognisers
-  // reach through `record-recognisers.mjs`, so its head-scoping stays pinned.
+  // read off the live board: the `Head-sha:` line the template prints, the
+  // 7-to-40 hex spelling range, the measured delta-record instance, and the
+  // three RETIRED dialects as controls. `latestContractReviewOnHead` is what the
+  // queue guard's recognisers reach through `record-recognisers.mjs`, so its
+  // head-scoping stays pinned.
   const HEAD51 = 'ba3d95a4f3514243131a698f12589c23d49e6fcd';
   const OLDHEAD51 = 'de0bd50469a6c5f20102f67e0901c43fe316567c';
   const cm51 = (id, body, at) => ({ id, body, created_at: at });
   const T51 = '2026-09-09T08:36:49Z';
+  const RECORD51 = (sha, prose = '') =>
+    `## Contract review\n\nServed-tier: \`CONTRACT_REVIEW_TIER\`\nHead-sha: \`${sha}\`\nLocal-runs: none\n${prose}\n**VERDICT: PASS**`;
+  // The retired dialects: the head in the heading (two spellings), on the first body line, in an adoption sentence.
   const DIALECT_A = (sha) =>
     `## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #17090 @ \`${sha}\`\n\n**Verdict: PASS WITH FINDINGS**`;
   const DIALECT_B = (sha) =>
     `## Contract review (clause ②) — **PASS WITH FINDINGS**, no blocking item · head \`${sha}\`\n\nbody`;
-  t('record reader: the NEWER of two on-head verdicts is the one dated', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), '2026-09-09T08:00:00Z'), cm51(2, DIALECT_B(HEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 2);
-  t('record reader: an on-head verdict is found past an older-head one', latestContractReviewOnHead([cm51(1, DIALECT_A(HEAD51), T51), cm51(2, DIALECT_A(OLDHEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 1);
-  t('record reader: a thread with only OLDER-head verdicts answers null', latestContractReviewOnHead([cm51(1, DIALECT_A(OLDHEAD51), T51)], HEAD51), null);
+  const DIALECT_C = (sha) => `## Contract review\n\nHead: \`${sha}\`\nServed-tier: CONTRACT_REVIEW_TIER\nVerdict: **PASS**`;
+  const DIALECT_D = (sha) => `**Director seat adoption record** — the verdict on \`${sha}\` below is adopted verbatim.\n\n---\n\n## Contract review\n\n**VERDICT: PASS**`;
+  t('record reader: the NEWER of two on-head verdicts is the one dated', latestContractReviewOnHead([cm51(1, RECORD51(HEAD51), '2026-09-09T08:00:00Z'), cm51(2, RECORD51(HEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 2);
+  t('record reader: an on-head verdict is found past an older-head one', latestContractReviewOnHead([cm51(1, RECORD51(HEAD51), T51), cm51(2, RECORD51(OLDHEAD51), '2026-09-09T09:00:00Z')], HEAD51).id, 1);
+  t('record reader: a thread with only OLDER-head verdicts answers null', latestContractReviewOnHead([cm51(1, RECORD51(OLDHEAD51), T51)], HEAD51), null);
   t('record reader: a non-array thread answers null, never a crash', latestContractReviewOnHead(undefined, HEAD51), null);
-  t('record reader: it reports WHICH spelling matched, for the sentence', latestContractReviewOnHead([cm51(1, DIALECT_B('ba3d95a4f3'), T51)], HEAD51).sha, 'ba3d95a4f3');
+  t('record reader: it reports WHICH spelling matched, for the sentence', latestContractReviewOnHead([cm51(1, RECORD51('ba3d95a4f3'), T51)], HEAD51).sha, 'ba3d95a4f3');
   t('record reader: the span floor is seven hex, git\'s own abbreviation', H51_SHA_MIN_HEX, 7);
+  // ⭐ The measured instance (PR #27964, record 6516042954): a DELTA record on head A whose prose names head B three times.
+  const DELTA51 = RECORD51(OLDHEAD51, `\nThe PR has since moved to \`${HEAD51.slice(0, 8)}\` (seat comment 6515952505); this record judges \`${OLDHEAD51.slice(0, 8)}\` alone. Runs cancelled by the push of \`${HEAD51.slice(0, 8)}\`; landing waits on \`${HEAD51}\`.\n`);
+  t('⛔ record reader: a delta record on head A whose PROSE names head B is NO review of B', latestContractReviewOnHead([cm51(1, DELTA51, T51)], HEAD51), null);
+  t('⭐ record reader: …and IS the review of A — the `Head-sha:` line alone decides', latestContractReviewOnHead([cm51(1, DELTA51, T51)], OLDHEAD51)?.sha, OLDHEAD51);
+  t('record reader: `contractReviewHeadSha` reads the line\'s span — the first line wins, decoration and a trailing span tolerated', [contractReviewHeadSha(DELTA51), contractReviewHeadSha(`- **Head-sha:** \`${HEAD51}\` (moved to \`${OLDHEAD51}\`)\nHead-sha: \`${OLDHEAD51}\``), contractReviewHeadSha(`> Head-sha: \`${HEAD51}\``)].join(), [OLDHEAD51, HEAD51, HEAD51].join());
+  t('⛔ record reader: the key folded INTO the span, a bare hex value, a lowercase key and a sub-floor span name no head', [contractReviewHeadSha(`\`Head-sha: ${HEAD51}\``), contractReviewHeadSha(`Head-sha: ${HEAD51}`), contractReviewHeadSha(`head-sha: \`${HEAD51}\``), contractReviewHeadSha('Head-sha: `ba3d95`')].join('|'), '|||');
+  t('⛔ record reader: the RETIRED dialects — head in the heading (two spellings), on the first body line, in an adoption sentence — name no head', [DIALECT_A, DIALECT_B, DIALECT_C, DIALECT_D].map((d) => latestContractReviewOnHead([cm51(1, d(HEAD51), T51)], HEAD51)).join('|'), '|||');
 
   // -- H54 — a `[Decision]`-titled card sitting in the DISPATCH pool (#16688) -
   // The fixtures are SYNTHETIC (⛔ the self-test never touches GitHub); their

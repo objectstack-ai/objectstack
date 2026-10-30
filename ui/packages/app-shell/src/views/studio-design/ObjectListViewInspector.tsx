@@ -120,6 +120,7 @@ import {
   listViewTypeBlockSchema,
   listViewTypeHeldEdit,
 } from './ListViewTypeSection.js';
+import { ListViewChartSection } from './ListViewChartSection.js';
 import {
   addedArrayElements,
   agentDraftMarkOf,
@@ -1042,7 +1043,8 @@ function KanbanCardSection({
  * width the builder needs, written as the spec's `{ field, order }[]`). On a
  * kanban view, the kanban card section comes first (`KanbanCardSection`); on
  * a calendar, gallery, timeline, gantt, map or tree view, the section of that
- * type's own settings (`ListViewTypeSection`, objectstack#27895). Above them,
+ * type's own settings (`ListViewTypeSection`, objectstack#27895); on a chart
+ * view, its dataset binding (`ListViewChartSection`, objectstack#27933). Above them,
  * the object's other list views, one pick away (objectstack#27896).
  */
 export function ObjectListViewInspector({
@@ -1220,6 +1222,7 @@ export function ObjectListViewInspector({
   // objectstack#27895 — the section of the view type's own settings, where it has one.
   const typeBlockSchema = listViewTypeBlockSchema(body.type);
   const typeBlockMark = typeBlockSchema ? markOf(String(body.type)) : null;
+  const chartMark = body.type === 'chart' ? markOf('chart') : null;
   const columnsMark = markOf('columns');
   const addedColumns = addedNames(columnsMark, columns, publishedBody?.columns);
   const filterMark = markOf('filter');
@@ -1227,6 +1230,7 @@ export function ObjectListViewInspector({
   const drawnMarks = [
     ...(body.type === 'kanban' ? [kanbanMarks.fields, kanbanMarks.title, kanbanMarks.open, kanbanMarks.groupBy] : []),
     typeBlockMark,
+    chartMark,
     columnsMark,
     filterMark,
     sortMark,
@@ -1393,6 +1397,16 @@ export function ObjectListViewInspector({
                 readOnly={readOnly}
                 locale={locale}
                 marked={!!typeBlockMark}
+              />
+            )}
+            {body.type === 'chart' && objectName && (
+              <ListViewChartSection
+                objectName={objectName}
+                body={body}
+                writeBody={writeBody}
+                readOnly={readOnly}
+                locale={locale}
+                marked={!!chartMark}
               />
             )}
             <div className="space-y-1.5" data-testid="list-view-columns">

@@ -18,13 +18,14 @@
  *
  * Not here: `grid`, which has no block; `kanban`, whose card has its own
  * section (`KanbanCardSection`); and `chart`, whose block binds an ADR-0021
- * dataset and that dataset's measures, not the object's fields — the Create
- * View dialog's dataset pickers are the editor for it.
+ * dataset and that dataset's measures, not the object's fields: its section
+ * is `ListViewChartSection` (objectstack#27933).
  *
  * A required setting can be cleared (the field picker offers "None"). That
  * edit is held, not sent, as the pillar holds every edit the spec refuses
  * only for an unset input (`listViewTypeHeldEdit`): the draft door would
- * refuse it with a 422, and every later save with it.
+ * refuse it with a 422, and every later save with it. The chart's block is
+ * held by the same rule, named by its own section's labels.
  */
 
 import * as React from 'react';
@@ -38,6 +39,7 @@ import { t, tFormat, translateSchemaFieldLabel } from '../metadata-admin/i18n.js
 import { prettifyFieldName } from '../metadata-admin/field-source-label.js';
 import { DraftChip } from './StudioDraftMark.js';
 import { objectHeldInput, type StudioHeld } from './metadataError.js';
+import { chartInputLabel } from './ListViewChartSection.js';
 
 type Row = Record<string, unknown>;
 type JsonSchema = Record<string, any>;
@@ -108,10 +110,21 @@ function typeLabelOf(type: string, locale: string): string {
  * refuses only because a required setting is unset, or `null`. Asked of the
  * spec's `ListViewSchema` (`objectHeldInput`): a block that is finished but
  * wrong is sent, and its refusal shows as before. `input` is the setting's
- * label as the section draws it, so "Show me" focuses that control.
+ * label as the section draws it, so "Show me" focuses that control. A chart's
+ * block is asked the same, its input named by `ListViewChartSection`.
  */
 export function listViewTypeHeldEdit(body: Row, locale: string): StudioHeld<null> | null {
   const type = body.type;
+  if (type === 'chart') {
+    const key = objectHeldInput(body, ListViewSchema, 'chart');
+    if (key === null) return null;
+    const input = chartInputLabel(key, locale) ?? prettifyFieldName(key);
+    return {
+      clause: tFormat('engine.studio.held.listViewTypeNeedsInput', locale, { input, type: typeLabelOf(type, locale) }),
+      target: null,
+      input,
+    };
+  }
   const schema = listViewTypeBlockSchema(type);
   if (!schema || typeof type !== 'string') return null;
   const key = objectHeldInput(body, ListViewSchema, type);

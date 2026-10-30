@@ -409,8 +409,9 @@ describe('ActionBar (action:bar)', () => {
    * of going through `ActionEngine.getActionsForLocation`, so the engine's
    * capability gate never reached `list_toolbar`: an action declaring a
    * capability nobody holds rendered as a live button, with nothing behind it
-   * for a `type: 'api'` action pointed at a custom endpoint (the platform's
-   * action route — the source of the 403 — never sees that request).
+   * for a `type: 'api'` action whose `target` is on another origin (the
+   * platform action door — the source of the 403 — never sees that request;
+   * ADR-0066 D4 as amended brings a same-origin api action under it).
    */
   describe('requiredPermissions capability gate', () => {
     const Bar = ({ actions, systemActions }: { actions?: any[]; systemActions?: any[] }) => {

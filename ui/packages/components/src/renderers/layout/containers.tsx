@@ -2034,8 +2034,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // `ActionEngine.getActionsForLocation`, so the engine's gate never ran on
       // the ONE surface `record_header` / `record_more` actions live on: a
       // button declaring a capability nobody holds rendered, and only the
-      // server's 403 stopped it — and only for platform action routes, never
-      // for a `type: 'api'` action pointed at a custom endpoint. Same rule as
+      // server's 403 stopped it — and only for a call the platform action door
+      // dispatches, never for a `type: 'api'` action whose `target` is on
+      // another origin (ADR-0066 D4 as amended: the door dispatches a declared
+      // same-origin api action too). Same rule as
       // the engine, so the two surfaces can't disagree: hide unless the caller
       // holds ALL declared capabilities.
       //
