@@ -2763,13 +2763,25 @@ export class AnalyticsService implements IAnalyticsService {
             const cube: Cube = Object.keys(minted).length > 0
               ? { ...compiled.cube, measures: { ...compiled.cube.measures, ...minted } }
               : compiled.cube;
+            // The gates run in `ensureCube`'s order, then `query()`'s, so a
+            // query with two mistakes is answered about the same one first on
+            // every face. [#28201] …and an undeclared dimension is judged as
+            // `ensureCube` judges it: one whose field the object does not have
+            // (`bogus`) is refused `INVALID_FIELD` / 400 with the same message,
+            // where the evaluator grouped every row under one `null` key. One
+            // that names a real field (`amount`) groups by it, here as there.
             this.assertMeasureFields(q, cube, Object.keys(compiled.cube.measures));
-            this.assertCallerMeasuresResolvable(q, compiled.cube, compiled.cube, compiled.durations, context);
-            // [#21044] …and the aggregate × field-type table, which the
-            // published path also asks in `ensureCube`: a minted `region_sum`
-            // over a text field is refused there, and here it would sum no
-            // number at all and read `0`.
+            this.assertDimensionFields(q, cube, Object.keys(compiled.cube.dimensions));
+            // [#21044] …and the aggregate × field-type table: a minted
+            // `region_sum` over a text field is refused there, and here it
+            // would sum no number at all and read `0`.
             this.assertMeasureFieldTypes(q, cube);
+            // [ADR-0144 D6] …and the record-currency door: a draft preview
+            // must not serve the sum across currencies that the published
+            // dataset refuses.
+            this.assertRecordCurrencyGrouped(q, cube);
+            // [#21156] `query()` asks the caller-member gate after `ensureCube`.
+            this.assertCallerMeasuresResolvable(q, compiled.cube, compiled.cube, compiled.durations, context);
             // [#21120] The body-column refusal rides this preview path too —
             // a drafted seed row carries the same stored body the published
             // ones do.
@@ -2778,10 +2790,6 @@ export class AnalyticsService implements IAnalyticsService {
             // carries the same `internal` fields the published ones do.
             this.assertNoInternalFieldsQueried(q, cube, previewScope);
             await this.assertFieldsReadable(q, cube, previewScope, context);
-            // [ADR-0144 D6] …and the record-currency door, which the published
-            // path meets in `ensureCube`: a draft preview must not serve the
-            // sum across currencies that the published dataset refuses.
-            this.assertRecordCurrencyGrouped(q, cube);
             return evaluateAnalyticsQueryOverRows(
               q,
               cube,
