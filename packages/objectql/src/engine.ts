@@ -5,7 +5,7 @@ import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/s
 // [commit 74155c735] The defaulting node schema `fillQueryAstDefaults` runs author input
 // through — the declared `.default()` stays in `packages/spec`, the engine
 // only invokes it.
-import { SortNodeSchema } from '@objectstack/spec/data';
+import { SortNodeSchema, FullTextSearchSchema } from '@objectstack/spec/data';
 import {
   EngineQueryOptions,
   DataEngineInsertOptions,
@@ -734,6 +734,40 @@ const ENGINE_AGGREGATE_OPTION_KEYS: ReadonlySet<string> = new Set([
   'context', 'where', 'groupBy', 'aggregations', 'having', 'timezone',
   'search', 'searchFields',
 ]);
+
+/**
+ * [#27732] A search-field override — `searchFields`, or the object-form
+ * `search.fields` — that names no field is refused `400 VALIDATION_ERROR`:
+ * an empty list, or a comma string with no name in it (the `GET` door's
+ * transport spelling, which reaches the engine as sent). Absent (or `null`)
+ * still searches the object's default search fields.
+ *
+ * `resolveSearchFields` reads an empty override as absent, so the search
+ * widened to the whole default set: the caller wrote the key to narrow and was
+ * not told. The door refuses this set (`assertSearchFieldsAreSearchable`,
+ * #27484) and `QuerySchema.searchFields` / `FullTextSearchSchema.fields`
+ * declare the same refusal (#27683); the words are read off that declaration
+ * rather than copied, and the status and code are the door's, so
+ * `mapDataError` answers an in-process caller and a REST caller alike. Any
+ * other value is left to the expansion's existing tolerance.
+ */
+function refuseSearchOverrideNamingNoField(object: string, requested: unknown, param: string): void {
+  const names = typeof requested === 'string'
+    ? requested.split(',').map((s) => s.trim()).filter(Boolean)
+    : Array.isArray(requested) ? requested : undefined;
+  if (names === undefined || names.length > 0) return;
+  const declared = FullTextSearchSchema.shape.fields.safeParse([]).error?.issues[0]?.message;
+  const err: any = new Error(
+    `ObjectQL search on '${object}' names no field in '${param}': got ${JSON.stringify(requested)}. The query was not run: `
+    + "an empty search-field list was read as no narrowing, which scans the object's default search fields. "
+    + `${declared}.`,
+  );
+  err.status = 400;
+  err.code = 'VALIDATION_ERROR';
+  err.param = param;
+  err.object = object;
+  throw err;
+}
 
 /**
  * Rows per page for the autonumber seeding scan (#6249). This is a PAGE size,
@@ -13372,6 +13406,11 @@ export class ObjectQL implements IObjectQLEngine {
     // unknown option — rejected at the entry point, not silently dropped
     // (#4371).
     const raw = (ast as any).search;
+    // [#27732] An override naming no field is refused, never read as absent.
+    // Judged before the expansion and so before any driver read, whether or
+    // not a search term rode along, on both slots, as the door does.
+    refuseSearchOverrideNamingNoField(ast.object, (ast as any).searchFields, 'searchFields');
+    if (raw !== null && typeof raw === 'object') refuseSearchOverrideNamingNoField(ast.object, raw.fields, 'search.fields');
     if (raw != null && schema?.fields) {
       const requestedFields = (ast as any).searchFields
         ?? (typeof raw === 'object' ? raw?.fields : undefined);
