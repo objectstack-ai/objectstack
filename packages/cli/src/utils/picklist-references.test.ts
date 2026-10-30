@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   judgePicklistReferences,
+  picklistRefusalHeading,
   PICKLIST_REFERENCE_UNKNOWN,
   PICKLIST_REFERENCE_UNVERIFIED,
   PICKLIST_RESIDUAL_UNREFERENCED,
@@ -420,5 +421,26 @@ describe('judgePicklistReferences — a composed stack\'s residual picklist that
   it('CONTROL: a stack without `packages[]` has no residual — its unnamed picklist is not refused', () => {
     expect(judgePicklistReferences({ manifest: manifest('com.example.pk'), picklists: [industry, unused], objects: [account('industry')] }))
       .toEqual({ refusals: [], notices: [] });
+  });
+});
+
+describe('picklistRefusalHeading — the text face\'s heading names what each rule refused', () => {
+  const finding = (rule: string) => ({ severity: 'error' as const, rule, where: 'w', path: 'p', message: 'm', hint: 'h' });
+
+  it('CONTROL: reference refusals alone keep the heading they always had', () => {
+    expect(picklistRefusalHeading([finding(PICKLIST_REFERENCE_UNKNOWN), finding(PICKLIST_REFERENCE_UNKNOWN)]))
+      .toBe('A picklist reference names a picklist this stack does not declare (2 references)');
+  });
+
+  it('a residual refusal is headed as the boot\'s refusal, not as a reference', () => {
+    const heading = picklistRefusalHeading([finding(PICKLIST_RESIDUAL_UNREFERENCED)]);
+    expect(heading).toBe('A top-level picklist of this composed stack is one the boot refuses: no package body declares it '
+      + 'and no object field the engine registers names it (1 picklist)');
+  });
+
+  it('both kinds together are both named', () => {
+    const heading = picklistRefusalHeading([finding(PICKLIST_REFERENCE_UNKNOWN), finding(PICKLIST_RESIDUAL_UNREFERENCED)]);
+    expect(heading).toContain('(1 reference)');
+    expect(heading).toContain('(1 picklist)');
   });
 });

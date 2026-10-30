@@ -76,7 +76,7 @@ import { findViewContainerNameRefusals } from '../utils/view-container-names.js'
 // A field `picklist` that names no picklist the stack declares — refused, or
 // reported when the declaring package depends on packages outside the stack.
 // Walked the way the load path registers, like the refusal above.
-import { judgePicklistReferences, printPicklistReferenceNotices } from '../utils/picklist-references.js';
+import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
 
 export default class Validate extends Command {
   static override description =
@@ -479,9 +479,8 @@ export default class Validate extends Command {
           });
           this.exit(1);
         }
-        const n = picklistJudgement.refusals.length;
         console.log('');
-        printError(`A picklist reference names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printError(picklistRefusalHeading(picklistJudgement.refusals));
         printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }

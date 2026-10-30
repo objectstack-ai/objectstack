@@ -443,3 +443,22 @@ export function printPicklistReferenceNotices(notices: readonly AuthoringFinding
     console.log(chalk.dim(`      → ${n.hint}`));
   }
 }
+
+/**
+ * The text face's heading over {@link judgePicklistReferences}'s refusals, for
+ * `os validate` and `os build` alike: one line naming what was refused, by the
+ * rules that refused it.
+ */
+export function picklistRefusalHeading(refusals: readonly AuthoringFinding[]): string {
+  const residual = refusals.filter((r) => r.rule === PICKLIST_RESIDUAL_UNREFERENCED).length;
+  const references = refusals.length - residual;
+  const parts: string[] = [];
+  if (references > 0) {
+    parts.push(`a picklist reference names a picklist this stack does not declare (${references} reference${references > 1 ? 's' : ''})`);
+  }
+  if (residual > 0) {
+    parts.push(`a top-level picklist of this composed stack is one the boot refuses: no package body declares it and no object field the engine registers names it (${residual} picklist${residual > 1 ? 's' : ''})`);
+  }
+  const line = parts.join('; and ');
+  return line.charAt(0).toUpperCase() + line.slice(1);
+}
