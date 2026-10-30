@@ -1457,6 +1457,10 @@ export class AutomationServicePlugin implements Plugin {
                         // policy reading `current_user.email` resolves for the
                         // run as it does for the user's own request.
                         ...(grants.email ? { email: grants.email } : {}),
+                        // The rung the request path carries for this user
+                        // (`resolveAuthzContext` copies it off this same
+                        // resolution), derived once there and never here.
+                        ...(grants.posture ? { posture: grants.posture } : {}),
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });
