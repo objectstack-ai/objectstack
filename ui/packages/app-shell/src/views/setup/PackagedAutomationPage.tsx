@@ -95,7 +95,9 @@
  *
  * `actionErrorDetail` is the one place this repo reads an ADR-0112 error
  * envelope's message; a fallback string is used ONLY when the response carried
- * no message at all, never in place of one.
+ * no message at all, never in place of one. The toggle and clone requests live
+ * in `packagedFlowLedger.ts`, shared with Studio's Automations pillar, which
+ * offers the same two doors on a read-only package's flow (ADR-0146 D4).
  *
  * ## How this page is reached
  *
@@ -139,7 +141,6 @@ import {
   TableRow,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { actionErrorDetail } from '@object-ui/core';
 
 // The LEAF module, not `previews/useFlowNodePalette.js` which re-exports it:
 // this page is imported eagerly by `services/builtinComponents`, so anything
@@ -148,14 +149,13 @@ import { actionErrorDetail } from '@object-ui/core';
 import { apiBase } from '../../utils/apiBase.js';
 import {
   activationReading,
-  envelopeData,
-  envelopeRefused,
   joinPackagedFlows,
   readMetadataItems,
   readRuntimeStates,
   type FlowRuntimeStateRow,
   type PackagedFlowRow,
 } from './packagedFlows.js';
+import { requestFlowClone, requestFlowToggle, type FlowToggleOutcome } from './packagedFlowLedger.js';
 import { PackagedActionsSection } from './PackagedActionsSection.js';
 import { studioOrgScopePath } from '../studio-design/studioScope.js';
 import { PageHeader } from '../../layout/PageHeader.js';
@@ -238,8 +238,7 @@ interface CloneResult {
   switchRefusal: string | null;
 }
 
-/** The toggle's answer: the flag the server reports, or its refusal verbatim. */
-type ToggleOutcome = { ok: true; enabled: boolean } | { ok: false; message: string };
+type ToggleOutcome = FlowToggleOutcome;
 
 /* -------------------------------------------------------------------------- */
 /* The reason disclosure                                                       */
@@ -364,43 +363,16 @@ export function PackagedAutomationPage() {
    * refusal comes back as the server's sentence, verbatim.
    */
   async function requestToggle(name: string, enabled: boolean): Promise<ToggleOutcome> {
-    try {
-      const res = await fetch(`${apiBase()}/automation/${encodeURIComponent(name)}/toggle`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { ...JSON_HEADERS, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-      const json = await readJson(res);
-      if (!res.ok || envelopeRefused(json)) {
-        // VERBATIM. The posture gate (403) and the subflow guard (409) both
-        // carry the whole of what the admin needs in this string — the second
-        // one names the callers, which nothing on the client could reconstruct.
-        return {
-          ok: false,
-          message: actionErrorDetail(
-            json,
-            // A SEPARATE key from the catch arm's below: this one has a status
-            // to name and that one does not, and one key cannot carry a hole
-            // only half its call sites can fill.
-            t('packagedAutomation.toggleFailedHttp', {
-              defaultValue: 'Could not change activation (HTTP {{status}}).',
-              status: res.status,
-            }),
-          ),
-        };
-      }
-      const reported = envelopeData(json).enabled;
-      return { ok: true, enabled: typeof reported === 'boolean' ? reported : enabled };
-    } catch (e) {
-      return {
-        ok: false,
-        message:
-          e instanceof Error && e.message
-            ? e.message
-            : t('packagedAutomation.toggleFailed', { defaultValue: 'Could not change activation.' }),
-      };
-    }
+    return requestFlowToggle(name, enabled, {
+      // Two keys: the HTTP one has a status to name and the network one does
+      // not, and one key cannot carry a hole only half its call sites can fill.
+      http: (status) =>
+        t('packagedAutomation.toggleFailedHttp', {
+          defaultValue: 'Could not change activation (HTTP {{status}}).',
+          status,
+        }),
+      network: t('packagedAutomation.toggleFailed', { defaultValue: 'Could not change activation.' }),
+    });
   }
 
   /** A toggle the server accepted: the row shows its answer, and the runtime is re-read. */
@@ -464,60 +436,32 @@ export function PackagedAutomationPage() {
 
   async function onCloneSubmit(draft: CloneDraft) {
     setClone({ ...draft, busy: true, refusal: null });
-    try {
-      const res = await fetch(`${apiBase()}/automation/${encodeURIComponent(draft.source)}/clone`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { ...JSON_HEADERS, 'Content-Type': 'application/json' },
-        // ⛔ EXACTLY the two keys the clone body declares. The carried-over
-        // definition (nodes, triggers, connectors) is NOT offered as editable
-        // form fields: a clone copies the whole definition and the copy is
-        // edited in Studio afterwards, like any other flow.
-        body: JSON.stringify({ name: draft.name.trim(), label: draft.label.trim() }),
-      });
-      const json = await readJson(res);
-      if (!res.ok || envelopeRefused(json)) {
-        setClone({
-          ...draft,
-          busy: false,
-          refusal: actionErrorDetail(
-            json,
-            // Separate key from the catch arm's below, for the same reason as
-            // the toggle pair: a status hole only one of the two can fill.
-            t('packagedAutomation.cloneFailedHttp', {
-              defaultValue: 'Could not clone this flow (HTTP {{status}}).',
-              status: res.status,
-            }),
-          ),
-        });
-        return;
-      }
-      const data = envelopeData(json);
-      const created = (data.flow as { name?: unknown } | undefined)?.name;
-      const notice = data.notice;
-      setClone(null);
-      setCloneResult({
-        name: typeof created === 'string' && created ? created : draft.name.trim(),
-        notice: typeof notice === 'string' ? notice : '',
-        source: draft.source,
-        sourceLabel: rows?.find((r) => r.name === draft.source)?.label ?? draft.source,
-        switchBusy: false,
-        switchRefusal: null,
-      });
-      // The clone is a tenant artifact, so it does NOT join this packaged
-      // list. Refetch anyway: the source flow's own state is re-read, and a
-      // stale list is the one thing an operational page must not show.
-      setNonce((n) => n + 1);
-    } catch (e) {
-      setClone({
-        ...draft,
-        busy: false,
-        refusal:
-          e instanceof Error && e.message
-            ? e.message
-            : t('packagedAutomation.cloneFailed', { defaultValue: 'Could not clone this flow.' }),
-      });
+    const outcome = await requestFlowClone(draft.source, draft, {
+      // Separate keys for the same reason as the toggle pair.
+      http: (status) =>
+        t('packagedAutomation.cloneFailedHttp', {
+          defaultValue: 'Could not clone this flow (HTTP {{status}}).',
+          status,
+        }),
+      network: t('packagedAutomation.cloneFailed', { defaultValue: 'Could not clone this flow.' }),
+    });
+    if (!outcome.ok) {
+      setClone({ ...draft, busy: false, refusal: outcome.message });
+      return;
     }
+    setClone(null);
+    setCloneResult({
+      name: outcome.name,
+      notice: outcome.notice,
+      source: draft.source,
+      sourceLabel: rows?.find((r) => r.name === draft.source)?.label ?? draft.source,
+      switchBusy: false,
+      switchRefusal: null,
+    });
+    // The clone is a tenant artifact, so it does NOT join this packaged
+    // list. Refetch anyway: the source flow's own state is re-read, and a
+    // stale list is the one thing an operational page must not show.
+    setNonce((n) => n + 1);
   }
 
   const title = t('packagedAutomation.title', { defaultValue: 'Packaged automation' });
