@@ -74,6 +74,7 @@ import {
   userActionPredicates,
   resolveAffordance,
   isDeadlineSettled,
+  isActionSwitchedOff,
   type FilterNode,
 } from '@object-ui/core';
 import { useSafeFieldLabel } from '@object-ui/react';
@@ -855,7 +856,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    */
   const mayInvoke = useCapabilityGate();
   const permittedToolbarActions = React.useMemo(
-    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions)),
+    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a)),
     [toolbarActions, mayInvoke],
   );
 

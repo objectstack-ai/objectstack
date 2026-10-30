@@ -9,7 +9,7 @@ import {
 import { expandViewContainer } from '@objectstack/spec/ui';
 import { ActiveOrganizationStorage, TokenStorage, useAuth } from '@object-ui/auth';
 import { isMetaItemAbsentError, MetadataNotFoundError, type ObjectStackAdapter } from '@object-ui/data-objectstack';
-import { normalizeSchemaReferenceKeys } from '@object-ui/core';
+import { markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import { resolveInlineMode } from '@object-ui/plugin-form';
 import { MetadataCtx, useMetadata, type MetadataContextValue, type MetadataCacheState, type MetadataTypeStatus } from '@object-ui/react';
@@ -899,6 +899,12 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           // (objectui#11070 round 4). Idempotent, in place.
           if (type === 'object') {
             for (const it of items) normalizeSchemaReferenceKeys(it);
+            // [objectstack#27504] The list envelope's `disabledActions`, keyed
+            // by object: each object's switched-off action entries are stamped
+            // (symbol key) so the action gates stop offering them.
+            if (res && typeof res === 'object' && !Array.isArray(res)) {
+              markSwitchedOffActionsByObject(items, (res as { disabledActions?: unknown }).disabledActions);
+            }
           }
           entry.items = items;
           entry.status = 'ready';
