@@ -37,7 +37,7 @@ import { toast } from 'sonner';
 import { useObjectTranslation, useObjectLabel, recordSaveMessage } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
-import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '../providers/writeWarningToast.js';
+import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
 import {
   ExpressionProvider,
   createExpressionEvaluator,
