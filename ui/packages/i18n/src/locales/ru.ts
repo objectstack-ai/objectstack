@@ -143,6 +143,13 @@ const ru = {
       defaultTitle: 'Сохраните это значение сейчас',
       acknowledge: 'Я сохранил(а) это',
       copyAll: 'Копировать всё',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: 'Копировать: {{label}}',
+      copyValue: 'Копировать значение',
+      copyFieldItem: 'Копировать: {{label}}, элемент {{index}}',
+      copyItem: 'Копировать элемент {{index}}',
+      copied: 'Скопировано в буфер обмена',
     },
     notAvailableHere: '«{{action}}» недоступно на текущей странице.',
     notAvailableForRecord: 'Недоступно для этой записи',

@@ -136,6 +136,13 @@ const ko = {
       defaultTitle: '이 값을 지금 저장하세요',
       acknowledge: '저장했습니다',
       copyAll: '모두 복사',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: '{{label}} 복사',
+      copyValue: '값 복사',
+      copyFieldItem: '{{label}} 항목 {{index}} 복사',
+      copyItem: '항목 {{index}} 복사',
+      copied: '클립보드에 복사되었습니다',
     },
     notAvailableHere: '"{{action}}"은(는) 현재 페이지에서 사용할 수 없습니다.',
     notAvailableForRecord: '이 레코드에서는 사용할 수 없습니다',

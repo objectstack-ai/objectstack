@@ -136,6 +136,13 @@ const ja = {
       defaultTitle: 'この値を今すぐ保存してください',
       acknowledge: '保存しました',
       copyAll: 'すべてコピー',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: '{{label}}をコピー',
+      copyValue: '値をコピー',
+      copyFieldItem: '{{label}}の項目 {{index}} をコピー',
+      copyItem: '項目 {{index}} をコピー',
+      copied: 'クリップボードにコピーしました',
     },
     notAvailableHere: '「{{action}}」は現在のページでは利用できません。',
     notAvailableForRecord: 'このレコードでは利用できません',

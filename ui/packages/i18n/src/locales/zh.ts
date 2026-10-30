@@ -141,6 +141,13 @@ const zh = {
       defaultTitle: '请立即保存此值',
       acknowledge: '我已保存',
       copyAll: '全部复制',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: '复制{{label}}',
+      copyValue: '复制值',
+      copyFieldItem: '复制{{label}}第 {{index}} 项',
+      copyItem: '复制第 {{index}} 项',
+      copied: '已复制到剪贴板',
     },
     notAvailableHere: '「{{action}}」在当前页面不可用。',
     notAvailableForRecord: '对此记录不可用',
