@@ -3051,6 +3051,7 @@ const es = {
     aiAssistant: "Asistente de IA",
     designInStudio: "Diseñar en Studio",
     editApp: "Editar aplicación",
+    openAppInStudio: "Ver la aplicación en Studio",
   },
   home: {
     build: {
@@ -3185,6 +3186,7 @@ const es = {
       appsAvailable: "{{count}} aplicaciones disponibles",
       allApps: "Todas las aplicaciones",
       editAppInStudio: "Editar {{app}} en Studio",
+      openAppInStudio: "Ver {{app}} en Studio",
       backToHome: "Volver al inicio",
       settings: "Configuración",
       productHome: "Inicio de {{product}}",

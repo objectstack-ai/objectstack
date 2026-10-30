@@ -137,10 +137,19 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // with the `branding` namespace, which is offered only where no
       // organization wall stands (#24766) — so the entry lives and dies with it.
       { id: 'nav_settings_auth', type: 'url', label: 'Authentication', url: '/apps/setup/system/settings/auth', icon: 'lock-keyhole', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_mail', type: 'url', label: 'Email', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
+      // Every entry below opening a settings page carries that page's hub
+      // title, and every hub page has one (#27854): the sidebar and the
+      // "All Settings" hub are two lists of one set of pages. Pinned against
+      // the registered manifests and both translation bundles in
+      // `@objectstack/service-settings` (`setup-nav-hub-parity.test.ts`).
+      { id: 'nav_settings_mail', type: 'url', label: 'Mail Delivery', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
+      { id: 'nav_settings_sms', type: 'url', label: 'SMS Delivery', url: '/apps/setup/system/settings/sms', icon: 'message-square', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
+      // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered
+      // wherever a settings service is mounted, like the entries above.
+      { id: 'nav_settings_lifecycle', type: 'url', label: 'Data Lifecycle', url: '/apps/setup/system/settings/lifecycle', icon: 'timer', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_feature_flags', type: 'url', label: 'Feature Flags', url: '/apps/setup/system/settings/feature_flags', icon: 'flag' },
     ],
   },

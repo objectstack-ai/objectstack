@@ -22,6 +22,20 @@
  * Studio opened a read-only package in its browse-only posture with nothing
  * to edit, so an entry drawn there promised an edit Studio cannot deliver.
  *
+ * ## The posture: edit or view (#27356 row 12)
+ *
+ * `useStudioEntryGate(path)` answers the same read with a posture: `edit` for
+ * a package the list carries as writable, `view` for one it carries as
+ * read-only (a code or installed package), `null` for everything this gate
+ * refuses. The app bar and the app switcher read it, so an admin can open a
+ * read-only package's app in Studio to look at it (the maintainer's ruling:
+ * objectui#12615's reasoning rules out the pencil, not the entry), behind an
+ * eye that promises a look, never an edit. Both halves above still hold for
+ * `view`; a kernel package and an unread list still answer `null`.
+ * `useStudioDesignGate` is the `edit` half of the same answer, for the
+ * entries that only ever offer a design (the sidebar's Design, a page's
+ * pencil). ⛔ The posture is the server's `writable` read once, here.
+ *
  * ## A package the list does not carry is not designable
  *
  * `parsePackages` leaves out the kernel packages (manifest scope `system` or
@@ -29,7 +43,10 @@
  * (`READ_ONLY_PACKAGE_SCOPES` in the server's package-writability predicate).
  * The console's own Setup, Studio and Account apps belong to such packages, so
  * they fall out of this read with no app-id list (ADR-0060). An id the list
- * does not name has no Studio package page to open either.
+ * does not name has no Studio package page to open either. A kernel package
+ * the registry half serves flat (its `scope` top level, which the list's
+ * visibility filter does not read) stays listed read-only; `PkgEntry.kernel`
+ * marks it, and it gets no entry in either posture.
  *
  * ## Unknown is not designable
  *
@@ -74,43 +91,74 @@ export function studioPathPackageId(path: string | null | undefined): string | n
   }
 }
 
+/** How Studio opens a package: to design it, or to look at it. */
+export type StudioPosture = 'edit' | 'view';
+
+/** An app → Studio entry the gate lets a principal draw: where it lands, and how. */
+export interface StudioEntry {
+  path: string;
+  posture: StudioPosture;
+}
+
+/**
+ * How Studio would open `packageId`: `edit` when its package list carries it
+ * with a writable verdict, `view` when it carries it read-only, and `null`
+ * when it leaves it out or marks it a kernel package (`PkgEntry.kernel`, a
+ * row served flat with a kernel `scope`): the console's own apps get no entry
+ * in either posture.
+ */
+export function packageStudioPosture(packages: readonly PkgEntry[], packageId: string): StudioPosture | null {
+  const pkg = packages.find((p) => p.id === packageId);
+  if (!pkg || pkg.kernel) return null;
+  return pkg.writable ? 'edit' : 'view';
+}
+
 /**
  * May `packageId` be designed? Only when Studio's package list carries it with
  * a writable verdict; a package the list leaves out (a kernel package) is not.
  */
 export function isDesignablePackage(packages: readonly PkgEntry[], packageId: string): boolean {
-  return packages.some((pkg) => pkg.id === packageId && pkg.writable);
+  return packageStudioPosture(packages, packageId) === 'edit';
 }
 
 /**
- * The verdict for `packageId`, read once per id. It carries the id it answers
+ * The posture for `packageId`, read once per id. It carries the id it answers
  * for, so an answer for the previous app is never read as this one's.
  */
-function usePackageDesignable(packageId: string | null): boolean {
-  const [verdict, setVerdict] = useState<{ packageId: string; designable: boolean } | null>(null);
+function usePackagePosture(packageId: string | null): StudioPosture | null {
+  const [verdict, setVerdict] = useState<{ packageId: string; posture: StudioPosture | null } | null>(null);
   useEffect(() => {
     if (packageId === null) return undefined;
     let cancelled = false;
     fetchPackages().then(
       (packages) => {
-        if (!cancelled) setVerdict({ packageId, designable: isDesignablePackage(packages, packageId) });
+        if (!cancelled) setVerdict({ packageId, posture: packageStudioPosture(packages, packageId) });
       },
       () => {
-        if (!cancelled) setVerdict({ packageId, designable: false });
+        if (!cancelled) setVerdict({ packageId, posture: null });
       },
     );
     return () => {
       cancelled = true;
     };
   }, [packageId]);
-  return packageId !== null && verdict?.packageId === packageId && verdict.designable;
+  return packageId !== null && verdict?.packageId === packageId ? verdict.posture : null;
 }
 
-/** `path` when this principal may design the package it opens, else `null`. */
-export function useStudioDesignGate(path: string | null | undefined): string | null {
+/**
+ * The entry this principal may draw for `path`, with its posture, else `null`:
+ * `edit` into a writable package, `view` into a read-only one.
+ */
+export function useStudioEntryGate(path: string | null | undefined): StudioEntry | null {
   const { isAdmin } = useWorkspaceAdminStatus();
   const canAuthorMetadata = useCanAuthorMetadata();
   const packageId = isAdmin && canAuthorMetadata ? studioPathPackageId(path) : null;
-  const designable = usePackageDesignable(packageId);
-  return designable && path ? path : null;
+  const posture = usePackagePosture(packageId);
+  return posture && path ? { path, posture } : null;
+}
+
+/** `path` when this principal may design the package it opens, else `null`: the `edit` half of `useStudioEntryGate`. */
+export function useStudioDesignGate(path: string | null | undefined): string | null {
+  const entry = useStudioEntryGate(path);
+  return entry?.posture === 'edit' ? entry.path : null;
 }

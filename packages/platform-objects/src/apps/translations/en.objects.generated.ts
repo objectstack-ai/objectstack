@@ -2531,9 +2531,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Severity",
         help: "Severity hint for rendering / filtering",
         options: {
-          info: "info",
-          warning: "warning",
-          critical: "critical"
+          info: "Info",
+          warning: "Warning",
+          critical: "Critical"
         }
       },
       suppressed_channels: {
