@@ -73,8 +73,8 @@ const manifest = {
       visible: "${data.adapter === 'turso'}",
       description:
         'Works against managed Turso (libsql://…), local file (file:./knowledge.db), ' +
-        'or in-memory (:memory:). For per-tenant cloud deployments, leave blank to ' +
-        'reuse the tenant\'s primary libSQL connection.' },
+        'or in-memory (:memory:). In a cloud deployment with a database per organization, leave blank to ' +
+        'reuse that organization\'s own database connection.' },
     { type: 'text', key: 'turso_url', label: 'Connection URL', required: false,
       description: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
       visible: "${data.adapter === 'turso'}" },
@@ -95,12 +95,12 @@ const manifest = {
       visible: "${data.adapter === 'ragflow'}" },
     { type: 'text', key: 'ragflow_default_dataset', label: 'Default dataset id',
       required: false,
-      description: 'Used when a KnowledgeSource does not specify its own RAGFlow dataset.',
+      description: 'Used when a knowledge source does not name its own RAGFlow dataset.',
       visible: "${data.adapter === 'ragflow'}" },
 
     // ── Indexing defaults ─────────────────────────────────────────
     { type: 'group', id: 'indexing', label: 'Indexing defaults', required: false,
-      description: 'Per-source values on KnowledgeSource.adapterConfig take precedence.',
+      description: 'A value set on a knowledge source itself wins over these defaults.',
       visible: "${data.adapter !== 'memory'}" },
     { type: 'number', key: 'chunk_target', label: 'Target chunk size (chars)',
       required: false, default: 800, min: 64, max: 8192,
@@ -112,14 +112,14 @@ const manifest = {
       visible: "${data.adapter !== 'memory'}" },
     { type: 'number', key: 'over_fetch', label: 'Over-fetch multiplier',
       required: false, default: 4, min: 1, max: 20,
-      description: 'Internal `topK * overFetch` candidates fetched so JS-side metadata filtering still has rows to return.',
+      description: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.',
       visible: "${data.adapter === 'turso'}" },
 
     // ── Permissions ───────────────────────────────────────────────
     { type: 'group', id: 'permissions', label: 'Permissions', required: false },
     { type: 'toggle', key: 'enforce_rls', label: 'Enforce RLS on search',
       required: false, default: true,
-      description: 'Re-check every hit against the caller\'s record-level permissions via IDataEngine.' },
+      description: 'Re-check every hit against the caller\'s record-level permissions.' },
     { type: 'info_banner', id: 'enforce_rls_warning', label: 'Leave RLS on in production',
       required: false, bannerSeverity: 'warning',
       bannerText:

@@ -64,9 +64,12 @@ const UPLOAD_SCOPE_DESCRIPTION =
   + 'carries no acl; every upload is stored private.';
 
 export const GetPresignedUrlRequestSchema = lazySchema(() => z.object({
-  filename: z.string().describe('Original filename'),
-  mimeType: z.string().describe('File MIME type'),
-  size: z.number().describe('File size in bytes'),
+  // [#27598] What the presigned door refuses, declared: an empty `filename` or
+  // `mimeType` (400 INVALID_REQUEST, as the chunked-init sibling declares
+  // since #27801), and a `size` that is not a whole, non-negative byte count.
+  filename: z.string().min(1).describe('Original filename (non-empty)'),
+  mimeType: z.string().min(1).describe('File MIME type (non-empty)'),
+  size: z.number().int().min(0).describe('File size in bytes: a non-negative whole number (0 is an empty file)'),
   scope: UploadScopeSchema.default('user').describe(UPLOAD_SCOPE_DESCRIPTION),
   bucket: z.string().optional().describe('Specific bucket override (admin only)'),
 }));

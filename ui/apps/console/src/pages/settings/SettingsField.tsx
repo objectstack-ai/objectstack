@@ -6,7 +6,7 @@
  * (which carries provenance and lock state).
  */
 
-import { cloneElement, isValidElement, lazy, Suspense, useId, type ReactElement } from 'react';
+import { cloneElement, isValidElement, lazy, Suspense, useId, useState, type ReactElement } from 'react';
 import {
   Input,
   Textarea,
@@ -274,6 +274,15 @@ function FieldError({ id, message }: { id: string; message: string }) {
  * refused by the server with `invalid_value` + `constraint: { valueDomain }`,
  * which lands in the field-error slot the wrapper already owns.
  *
+ * The box shows NAMES, the draft holds CODES (objectstack#28068). A stored
+ * value that equals an option's `value` is shown as that option's label, and
+ * the suggestions are the labels, so picking "Germany (DE)" leaves the name in
+ * the box while `DE` is what is committed. A datalist commits its option's
+ * `value` attribute into the box verbatim, which is why the suggestions carry
+ * the label there and `committedValue` maps it back. Typed text that equals an
+ * option's `value` is a code and is committed as typed; any other text is
+ * committed verbatim, as before.
+ *
  * Props beyond its own are forwarded to the `<input>` so `wrapper`'s
  * `aria-invalid` / `aria-describedby` reach the focusable control rather than a
  * wrapping node (same seam as Combobox's trigger pass-through, objectui#3318).
@@ -284,6 +293,7 @@ function DomainCombobox({
   options,
   disabled,
   onChange,
+  onBlur,
   ...inputProps
 }: {
   id: string;
@@ -293,6 +303,17 @@ function DomainCombobox({
   onChange: (next: unknown) => void;
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'id'>) {
   const listId = `${id}-domain`;
+  const stored = value == null ? null : String(value);
+  const displayOf = (code: string | null): string =>
+    code === null ? '' : options.find((opt) => opt.value === code)?.label ?? code;
+  const committedValue = (text: string): string | null => {
+    if (text === '' || options.some((opt) => opt.value === text)) return textOrUnset(text);
+    return options.find((opt) => opt.label === text)?.value ?? text;
+  };
+  // What the admin typed, kept while it still stands for the stored value; a
+  // value changed from outside (a reset, a re-read after save) shows as its name.
+  const [typed, setTyped] = useState<string | null>(null);
+  const shown = typed !== null && committedValue(typed) === stored ? typed : displayOf(stored);
   return (
     <>
       <Input
@@ -301,17 +322,23 @@ function DomainCombobox({
         // `list` only when there is something to suggest: an empty <datalist>
         // renders a dead dropdown affordance on some browsers.
         list={options.length > 0 ? listId : undefined}
-        value={value == null ? '' : String(value)}
+        value={shown}
         disabled={disabled}
-        onChange={(e) => onChange(textOrUnset(e.target.value))}
+        onChange={(e) => {
+          setTyped(e.target.value);
+          onChange(committedValue(e.target.value));
+        }}
+        onBlur={(e) => {
+          // A code typed by hand reads as its name once the admin moves on.
+          setTyped(null);
+          onBlur?.(e);
+        }}
         {...inputProps}
       />
       {options.length > 0 ? (
         <datalist id={listId}>
           {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
+            <option key={opt.value} value={opt.label} />
           ))}
         </datalist>
       ) : null}

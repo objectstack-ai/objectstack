@@ -474,7 +474,7 @@ export const zhCN: PlatformTranslationData = {
       description: '平台 AI 与知识库服务使用的 LLM 提供商、模型、凭据与向量化配置。',
       groups: {
         provider: { title: '提供商', description: '选择 LLM 后端。Memory 模式仅原样回显输入,仅用于测试,严禁用于生产。' },
-        gateway: { title: 'Vercel AI Gateway', description: '多提供商路由器。模型规格遵循 `provider/model` 格式,例如 `openai/gpt-4o`。' },
+        gateway: { title: 'Vercel AI Gateway', description: '多提供商路由器。模型写作 provider/model,例如 openai/gpt-4o。' },
         openai: { title: 'OpenAI' },
         anthropic: { title: 'Anthropic' },
         google: { title: 'Google' },
@@ -504,21 +504,21 @@ export const zhCN: PlatformTranslationData = {
             openrouter: 'OpenRouter(OpenAI 兼容)',
           },
         },
-        gateway_model: { label: 'Gateway 模型', help: '作为 AI_GATEWAY_MODEL 转发。示例:openai/gpt-4o' },
+        gateway_model: { label: 'Gateway 模型', help: '代替服务器配置中设定的模型。示例:openai/gpt-4o' },
         gateway_api_key: { label: 'Gateway API Key', help: '可选 —— 仅当 Gateway 强制鉴权时需要。' },
-        openai_api_key: { label: 'OpenAI API Key', help: '作为 OPENAI_API_KEY 转发,加密存储。' },
+        openai_api_key: { label: 'OpenAI API Key', help: '代替服务器配置中设定的密钥,加密存储。' },
         openai_model: { label: '模型', help: '默认模型 ID。Agent 级覆盖优先生效。' },
         openai_base_url: { label: 'Base URL', help: '用于 Azure OpenAI 或自建网关。留空走 api.openai.com。' },
-        anthropic_api_key: { label: 'Anthropic API Key', help: '作为 ANTHROPIC_API_KEY 转发,加密存储。' },
+        anthropic_api_key: { label: 'Anthropic API Key', help: '代替服务器配置中设定的密钥,加密存储。' },
         anthropic_model: { label: '模型' },
-        google_api_key: { label: 'Google API Key', help: '作为 GOOGLE_GENERATIVE_AI_API_KEY 转发,加密存储。' },
+        google_api_key: { label: 'Google API Key', help: '代替服务器配置中设定的密钥,加密存储。' },
         google_model: { label: '模型' },
         deepseek_api_key: { label: 'DeepSeek API Key', help: 'sk-…,在 platform.deepseek.com 签发。' },
-        deepseek_model: { label: '模型', help: '示例:deepseek-chat(V3)、deepseek-reasoner(R1 推理)。' },
+        deepseek_model: { label: '模型', help: '示例:deepseek-chat (V3)、deepseek-reasoner (R1 推理)。' },
         dashscope_api_key: { label: 'DashScope API Key', help: 'sk-…,在 dashscope.console.aliyun.com 签发。' },
         dashscope_model: { label: '模型' },
         cloudflare_account_id: { label: 'Cloudflare Account ID', help: '来自 Cloudflare 控制台 URL 的 32 位十六进制 ID。' },
-        cloudflare_gateway_id: { label: 'Gateway ID', help: '在 Cloudflare → AI Gateway 中配置的网关名称,默认为 `default`。' },
+        cloudflare_gateway_id: { label: 'Gateway ID', help: '在 Cloudflare → AI Gateway 中配置的网关名称,默认为「default」。' },
         cloudflare_api_key: { label: 'Cloudflare AI Gateway Token', help: '在 AI Gateway →「API tokens」标签页签发(cfut_… 或 sk_…)。' },
         cloudflare_model: { label: '模型' },
         siliconflow_api_key: { label: 'SiliconFlow API Key' },
@@ -530,7 +530,7 @@ export const zhCN: PlatformTranslationData = {
         temperature: { label: '温度', help: '0 = 确定性,2 = 高度发散。' },
         max_tokens: { label: '最大输出 tokens', help: '单次响应生成的硬上限。' },
         request_timeout_ms: { label: '请求超时(毫秒)' },
-        trace_enabled: { label: '记录 Trace', help: '将 prompt/response 落入 sys_ai_trace,便于调试与回放。' },
+        trace_enabled: { label: '记录 Trace', help: '记录每次 AI 请求及其响应,出现问题时可以查看并回放对话。' },
         log_prompts: { label: '记录完整 Prompt', help: '在 trace 行中包含完整 prompt 而非仅元数据。' },
         embedder_provider: {
           label: '提供商',
@@ -551,7 +551,7 @@ export const zhCN: PlatformTranslationData = {
         embedder_model: { label: '模型', help: '示例 — OpenAI: text-embedding-3-small · 阿里通义: text-embedding-v3 · 智谱: embedding-3 · 硅基流动: BAAI/bge-m3 · Ollama: bge-m3' },
         embedder_base_url: { label: 'Base URL', help: '端点根路径(不含 /embeddings)。预设会自动填充,可覆盖为代理或自建网关。' },
         embedder_dimensions: { label: '维度', help: '覆盖输出维度(仅 Matryoshka 模型支持)。留空使用模型默认值。' },
-        embedder_batch_size: { label: '批量大小', help: '单次 embed() 调用的 chunk 数。命中速率/大小限制时调小。' },
+        embedder_batch_size: { label: '批量大小', help: '每次请求发送给嵌入服务商的 chunk 数。命中速率/大小限制时调小。' },
       },
       actions: {
         test: { label: '测试连接' },
@@ -570,7 +570,7 @@ export const zhCN: PlatformTranslationData = {
         adapter: { title: '后端', description: '选择文档分块及其向量的存储位置。' },
         turso: { title: 'Turso / libSQL', description: '支持托管 Turso、本地文件、内存三种模式。' },
         ragflow: { title: 'RAGFlow', description: '外部 RAGFlow 部署。自部署文档见 https://ragflow.io 。' },
-        indexing: { title: '索引默认值', description: 'KnowledgeSource.adapterConfig 上的逐源覆盖优先生效。' },
+        indexing: { title: '索引默认值', description: '在知识源上单独设定的值优先于这些默认值。' },
         permissions: { title: '权限' },
       },
       keys: {
@@ -586,11 +586,11 @@ export const zhCN: PlatformTranslationData = {
         turso_auth_token: { label: 'Auth Token', help: '仅托管 Turso URL 需要。' },
         ragflow_base_url: { label: 'Base URL', help: '示例:http://localhost:9380' },
         ragflow_api_key: { label: 'API Key' },
-        ragflow_default_dataset: { label: '默认 Dataset ID', help: 'KnowledgeSource 未指定时使用。' },
+        ragflow_default_dataset: { label: '默认 Dataset ID', help: '知识源未指定自己的 RAGFlow 数据集时使用。' },
         chunk_target: { label: '目标 chunk 大小(字符)', help: '在按 token 切分之前的软上限。' },
         chunk_overlap: { label: 'Chunk 重叠(字符)', help: '保留上一个 chunk 末尾的字符,以保证跨界上下文。' },
-        over_fetch: { label: '过取倍数', help: '内部按 topK × overFetch 拉取候选,以便 JS 端元数据过滤仍有行可返回。' },
-        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中通过 IDataEngine 再次校验调用方的行级权限。' },
+        over_fetch: { label: '过取倍数', help: '检索时按请求结果数的这一倍数取回候选,以便按文档信息过滤后仍有足够结果可返回。' },
+        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中再次校验调用方的行级权限。' },
       },
       actions: {
         test: { label: '测试连接' },
@@ -598,6 +598,35 @@ export const zhCN: PlatformTranslationData = {
       banners: {
         adapter_switch_warning: { title: '已有索引不会迁移', text: '切换适配器不会迁移已有索引。' },
         enforce_rls_warning: { title: '生产环境请保持开启', text: '关闭将跳过平台对向量存储数据外泄的独有防护。' },
+      },
+    },
+
+    lifecycle: {
+      title: '数据生命周期',
+      description: '系统数据保留多久：覆盖保留期、为每张表设定行数上限，并在表意外增长时发出告警。平台在周期性清理时应用这些设置。',
+      keys: {
+        enabled: {
+          label: '执行生命周期策略',
+          help: '周期性清理的总开关。关闭后，已声明的保留期、TTL 与轮转策略不再执行（数据重新无限增长）。',
+        },
+        retention_overrides: {
+          label: '保留期覆盖',
+          help: '按对象覆盖保留窗口：{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }。时长单位为 h/d/w/y。'
+            + '按组织设置，因此受监管的组织可以保留数年，开发用的组织只保留数天。'
+            + '短于某项平台功能所需最短窗口（例如作业队列的重复检测窗口）的覆盖会被忽略并记为错误，继续沿用默认窗口。',
+        },
+        quotas: {
+          label: '行数配额',
+          help: '按对象的最大行数：{ "<object>": 1000000 }。超出时触发治理告警——配额绝不会删除已声明策略之外的数据。',
+        },
+        quota_defaults: {
+          label: '按类别的默认配额',
+          help: '按生命周期类别的兜底配额：{ "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }。',
+        },
+        growth_alert_rows: {
+          label: '增长告警阈值（每次清理的行数）',
+          help: '声明了生命周期的表在两次清理之间增长超过此行数时发出告警。0 表示关闭增长告警。',
+        },
       },
     },
   },
