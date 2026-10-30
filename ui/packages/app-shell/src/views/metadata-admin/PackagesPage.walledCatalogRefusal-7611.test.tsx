@@ -113,7 +113,7 @@ afterEach(() => {
 describe.each<Posture>(['group', 'isolated'])(
   'Packages page — a walled catalog-package refusal shows its reason, under `%s` (objectui#7611)',
   (posture) => {
-    it('Delete app: the `DELETE /api/v1/packages/:id` refusal is shown with its code', async () => {
+    it('Delete package: the `DELETE /api/v1/packages/:id` refusal is shown with its code', async () => {
       serve(() =>
         json(403, { success: false, error: { code: 'PERMISSION_DENIED', message: deleteRefusal(posture), httpStatus: 403 } }, 'Forbidden'),
       );
@@ -122,7 +122,7 @@ describe.each<Posture>(['group', 'isolated'])(
           <PackageDetailSheet pkg={PKG} open onOpenChange={() => {}} onChanged={() => {}} />
         </MemoryRouter>,
       );
-      fireEvent.click(await screen.findByRole('button', { name: 'Delete app' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete package' }));
       const dialog = await screen.findByTestId('pkg-detail-delete-dialog');
       fireEvent.click(within(dialog).getByTestId('pkg-detail-delete-mode-all'));
       fireEvent.change(within(dialog).getByTestId('pkg-detail-delete-name-input'), { target: { value: PKG_NAME } });

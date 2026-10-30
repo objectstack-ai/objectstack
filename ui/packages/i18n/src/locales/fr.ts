@@ -1184,7 +1184,7 @@ const fr = {
     loading: "Chargement…",
     copyToClipboard: "Copier dans le presse-papiers",
     copied: "Copié !",
-    deleteConfirmation: "Êtes-vous sûr de vouloir supprimer cet enregistrement ?",
+    deleteConfirmation: "Êtes-vous sûr de vouloir supprimer cet enregistrement ? Ceci est irréversible.",
     deleted: "Enregistrement supprimé",
     editRecord: "Modifier l'enregistrement",
     viewAll: "Tout afficher",
@@ -1778,7 +1778,7 @@ const fr = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio.",
+      accessRequired: "Vous avez besoin de l'accès à Studio pour ouvrir Studio. Un administrateur peut vous l'accorder avec un ensemble d'autorisations dans Configuration → Ensembles d'autorisations.",
     },
     saveAdvisoryTitle: "Enregistré — le contrôle de création a signalé {{count}} recommandation(s)",
     saveAdvisoryTitle_one: "Enregistré — le contrôle de création a signalé {{count}} recommandation",
@@ -2851,7 +2851,9 @@ const fr = {
         title: "Votre mot de passe a expiré",
         resetTitle: "Vous devez changer votre mot de passe",
         fallbackMessage: "Veuillez définir un nouveau mot de passe pour continuer.",
+        resetBody: "Un administrateur vous a attribué un mot de passe temporaire. Choisissez votre propre nouveau mot de passe pour continuer.",
         current: "Mot de passe actuel",
+        temporary: "Mot de passe temporaire",
         next: "Nouveau mot de passe",
         confirm: "Confirmer le nouveau mot de passe",
         submit: "Changer le mot de passe et continuer",
@@ -3292,9 +3294,10 @@ const fr = {
   },
   objectActions: {
     deleteSuccess: "{{label}} supprimé avec succès",
+    deletedNamed: "{{label}} \"{{name}}\" supprimé",
     deleteFailed: "Impossible de supprimer {{label}}",
     noRecordId: "Aucun ID d'enregistrement fourni",
-    deleteConfirm: "Supprimer cet enregistrement ?",
+    deleteConfirm: "Supprimer cet enregistrement ? Ceci est irréversible.",
     deleteConfirmTitle: "Supprimer {{label}} \"{{name}}\" ?",
     bulkDeleteConfirmTitle: "Supprimer {{count}} enregistrement(s) {{label}} ?",
     bulkDeleteConfirmTitle_one: "Supprimer {{count}} enregistrement {{label}} ?",
@@ -4480,10 +4483,10 @@ const fr = {
       detailChangedKeys: 'Également modifié :',
       detailNewKeys: 'Inclut :',
       generatedGroup: 'Généré par la plateforme ({{n}})',
-      confirmNote: 'La publication libère atomiquement les {{count}} brouillons en attente de ce paquet.',
-      confirmNote_one: 'La publication libère atomiquement {{count}} brouillon en attente de ce paquet.',
-      confirmNote_many: 'La publication libère atomiquement les {{count}} de brouillons en attente de ce paquet.',
-      confirmNote_other: 'La publication libère atomiquement les {{count}} brouillons en attente de ce paquet.',
+      confirmNote: 'La publication libère ensemble les {{count}} brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
+      confirmNote_one: 'La publication libère {{count}} brouillon en attente de ce paquet : il est mis en ligne, ou rien ne change.',
+      confirmNote_many: 'La publication libère ensemble les {{count}} de brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
+      confirmNote_other: 'La publication libère ensemble les {{count}} brouillons en attente de ce paquet : tous sont mis en ligne, ou aucun.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'La publication libère les {{count}} brouillons en attente un par un : celui qui échoue reste en attente, les autres sont publiés quand même.',
@@ -4811,6 +4814,11 @@ const fr = {
     actionsEmptyTitle: "Aucune action de package",
     actionsEmptyBody: "Aucun package installé ne déclare d'action sur ce déploiement. Les actions que vous créez vous-même se trouvent dans Studio.",
     actionsLoadFailed: "Impossible de charger les actions des packages.",
+    switchedOn: "« {{label}} » est activé.",
+    switchedOff: "« {{label}} » est désactivé pour ce déploiement.",
+    actionOffTitle: "Désactiver « {{label}} » ?",
+    actionOffBody: "Il cesse de s’exécuter partout où il est proposé dans ce déploiement, pour tous les utilisateurs, jusqu’à ce qu’il soit réactivé.",
+    actionOffConfirm: "Désactiver",
   },
   element: {
     number: {

@@ -641,13 +641,14 @@ const VIEW_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'objectActions.bulkDeleteConfirmTitle_one': 'Delete {{count}} {{label}} record?',
   'objectActions.bulkDeleteConfirmTitle_other': 'Delete {{count}} {{label}} records?',
   'objectActions.deleteConfirmButton': 'Delete',
-  'objectActions.deleteConfirm': 'Are you sure you want to delete this record?',
+  'objectActions.deleteConfirm': 'Are you sure you want to delete this record? This cannot be undone.',
   'console.objectView.bulkDeleteConfirm': 'Delete {{count}} selected records? This cannot be undone.',
   // Count families (objectui#11445): `fallbackT` reads a family's `_one` /
   // `_other` row for a numeric `count`, as i18next reads the `en` pack.
   'console.objectView.bulkDeleteConfirm_one': 'Delete {{count}} selected record? This cannot be undone.',
   'console.objectView.bulkDeleteConfirm_other': 'Delete {{count}} selected records? This cannot be undone.',
   'objectActions.deleteSuccess': '{{label}} deleted successfully',
+  'objectActions.deletedNamed': '{{label}} "{{name}}" deleted',
   'objectActions.deleteFailed': 'Failed to delete {{label}}',
   'objectActions.bulkDeleteSuccess': 'Deleted {{count}} {{label}} records',
   'objectActions.bulkDeleteSuccess_one': 'Deleted {{count}} {{label}} record',
@@ -3377,6 +3378,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
                 {
                   objectName: schema.objectName,
                   label: deleteLabel,
+                  objectDef: objectSchema,
                   dataSource,
                   t: tView,
                   toast,

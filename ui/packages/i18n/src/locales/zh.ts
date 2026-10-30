@@ -1233,7 +1233,7 @@ const zh = {
     loading: '加载中…',
     copyToClipboard: '复制到剪贴板',
     copied: '已复制！',
-    deleteConfirmation: '确定要删除此记录吗？',
+    deleteConfirmation: '确定要删除此记录吗？此操作无法撤销。',
     deleted: '记录已删除',
     editRecord: '编辑记录',
     viewAll: '查看全部',
@@ -1794,7 +1794,7 @@ const zh = {
   console: {
     studio: {
       title: 'Studio',
-      accessRequired: '你需要 Studio 访问权限才能打开 Studio。',
+      accessRequired: '你需要 Studio 访问权限才能打开 Studio。管理员可以在“设置 → 权限集”中通过权限集授予。',
     },
     saveAdvisoryTitle: '已保存 — 编辑检查提出了 {{count}} 条建议',
     saveAdvisoryTitle_one: '已保存 — 编辑检查提出了 {{count}} 条建议',
@@ -2873,7 +2873,9 @@ const zh = {
         title: '您的密码已过期',
         resetTitle: '您必须修改密码',
         fallbackMessage: '请设置新密码后继续。',
+        resetBody: '管理员为您设置了临时密码。请设置您自己的新密码后继续。',
         current: '当前密码',
+        temporary: '临时密码',
         next: '新密码',
         confirm: '确认新密码',
         submit: '修改密码并继续',
@@ -3321,9 +3323,9 @@ const zh = {
       detailChangedKeys: '其他变更：',
       detailNewKeys: '包含：',
       generatedGroup: '平台生成（{{n}}）',
-      confirmNote: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
-      confirmNote_one: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
-      confirmNote_other: '发布将一次性（原子地）发布此包全部 {{count}} 个待发布草稿。',
+      confirmNote: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
+      confirmNote_one: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
+      confirmNote_other: '发布将一次性发布此包全部 {{count}} 个待发布草稿：要么全部生效，要么都不生效。',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: '发布会逐个单独发布这 {{count}} 个待发布草稿：发布失败的草稿仍保持待发布，其余草稿照常发布。',
@@ -3446,9 +3448,10 @@ const zh = {
   },
   objectActions: {
     deleteSuccess: '{{label}} 删除成功',
+    deletedNamed: '{{label}}“{{name}}”已删除',
     deleteFailed: '删除 {{label}} 失败',
     noRecordId: '未提供记录 ID',
-    deleteConfirm: '确定要删除此记录吗？',
+    deleteConfirm: '确定要删除此记录吗？此操作无法撤销。',
     deleteConfirmTitle: '删除{{label}}“{{name}}”？',
     bulkDeleteConfirmTitle: '删除 {{count}} 条 {{label}} 记录？',
     bulkDeleteConfirmTitle_one: '删除 {{count}} 条 {{label}} 记录？',
@@ -4754,6 +4757,11 @@ const zh = {
     actionsEmptyTitle: '没有打包动作',
     actionsEmptyBody: '本部署中没有任何已安装软件包声明动作。你自己编写的动作在 Studio 中。',
     actionsLoadFailed: '无法加载打包动作。',
+    switchedOn: '「{{label}}」已开启。',
+    switchedOff: '「{{label}}」已在本部署中关闭。',
+    actionOffTitle: '关闭「{{label}}」？',
+    actionOffBody: '在重新开启之前，它将在本部署中所有提供它的地方对所有用户停止运行。',
+    actionOffConfirm: '关闭',
   },
   element: {
     number: {

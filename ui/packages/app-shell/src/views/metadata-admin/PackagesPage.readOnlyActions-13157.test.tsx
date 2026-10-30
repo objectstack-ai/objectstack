@@ -35,7 +35,7 @@ import { t } from './i18n';
 const label = (key: string) => t(`engine.packages.detail.${key}`, 'en');
 
 /** Every write action the sheet offers on a writable package. */
-const WRITES = ['edit', 'publish', 'revert', 'disable', 'duplicate', 'adoptOrphans', 'deleteApp'];
+const WRITES = ['edit', 'publish', 'revert', 'disable', 'duplicate', 'adoptOrphans', 'deletePackage'];
 /** The read actions, offered on every package. */
 const READS = ['viewInfo', 'export'];
 

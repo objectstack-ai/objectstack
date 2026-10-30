@@ -1187,7 +1187,7 @@ const es = {
     loading: "Cargando…",
     copyToClipboard: "Copiar al portapapeles",
     copied: "¡Copiado!",
-    deleteConfirmation: "¿Está seguro de que desea eliminar este registro?",
+    deleteConfirmation: "¿Está seguro de que desea eliminar este registro? Esto no se puede deshacer.",
     deleted: "Registro eliminado",
     editRecord: "Editar registro",
     viewAll: "Ver todo",
@@ -1782,7 +1782,7 @@ const es = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Necesita acceso a Studio para abrir Studio.",
+      accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Conjuntos de permisos.",
     },
     saveAdvisoryTitle: "Guardado: la comprobación de creación generó {{count}} recomendación(es)",
     saveAdvisoryTitle_one: "Guardado: la comprobación de creación generó {{count}} recomendación",
@@ -2855,7 +2855,9 @@ const es = {
         title: "Su contraseña ha caducado",
         resetTitle: "Debe cambiar su contraseña",
         fallbackMessage: "Establezca una nueva contraseña para continuar.",
+        resetBody: "Un administrador le asignó una contraseña temporal. Elija una contraseña nueva propia para continuar.",
         current: "Contraseña actual",
+        temporary: "Contraseña temporal",
         next: "Nueva contraseña",
         confirm: "Confirmar nueva contraseña",
         submit: "Cambiar contraseña y continuar",
@@ -3296,9 +3298,10 @@ const es = {
   },
   objectActions: {
     deleteSuccess: "{{label}} eliminado correctamente",
+    deletedNamed: "{{label}} \"{{name}}\" eliminado",
     deleteFailed: "No se pudo eliminar {{label}}",
     noRecordId: "No se proporcionó ID de registro",
-    deleteConfirm: "¿Eliminar este registro?",
+    deleteConfirm: "¿Eliminar este registro? Esto no se puede deshacer.",
     deleteConfirmTitle: "¿Eliminar {{label}} \"{{name}}\"?",
     bulkDeleteConfirmTitle: "¿Eliminar {{count}} registros de {{label}}?",
     bulkDeleteConfirmTitle_one: "¿Eliminar {{count}} registro de {{label}}?",
@@ -4484,10 +4487,10 @@ const es = {
       detailChangedKeys: 'También cambió:',
       detailNewKeys: 'Incluye:',
       generatedGroup: 'Generado por la plataforma ({{n}})',
-      confirmNote: 'Publicar libera atómicamente los {{count}} borradores pendientes de este paquete.',
-      confirmNote_one: 'Publicar libera atómicamente {{count}} borrador pendiente de este paquete.',
-      confirmNote_many: 'Publicar libera atómicamente los {{count}} de borradores pendientes de este paquete.',
-      confirmNote_other: 'Publicar libera atómicamente los {{count}} borradores pendientes de este paquete.',
+      confirmNote: 'Publicar libera juntos los {{count}} borradores pendientes de este paquete: o se publican todos, o ninguno.',
+      confirmNote_one: 'Publicar libera {{count}} borrador pendiente de este paquete: se publica, o no cambia nada.',
+      confirmNote_many: 'Publicar libera juntos los {{count}} de borradores pendientes de este paquete: o se publican todos, o ninguno.',
+      confirmNote_other: 'Publicar libera juntos los {{count}} borradores pendientes de este paquete: o se publican todos, o ninguno.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'Publicar libera los {{count}} borradores pendientes uno por uno: el que falle sigue pendiente y los demás se publican igualmente.',
@@ -4815,6 +4818,11 @@ const es = {
     actionsEmptyTitle: "Sin acciones de paquete",
     actionsEmptyBody: "Ningún paquete instalado declara una acción en esta implementación. Las acciones que creas tú están en Studio.",
     actionsLoadFailed: "No se pudieron cargar las acciones de paquete.",
+    switchedOn: "\"{{label}}\" está activado.",
+    switchedOff: "\"{{label}}\" está desactivado en esta implementación.",
+    actionOffTitle: "¿Desactivar \"{{label}}\"?",
+    actionOffBody: "Dejará de ejecutarse en todos los lugares donde se ofrece en esta implementación, para todos los usuarios, hasta que se vuelva a activar.",
+    actionOffConfirm: "Desactivar",
   },
   element: {
     number: {

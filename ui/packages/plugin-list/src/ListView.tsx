@@ -6431,11 +6431,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 the empty state. `DataErrorState` grew three icon props for this
                 migration and no fourth — an `action` prop would be a second
                 spelling of an affordance it already has. */}
-            {loadErrorKind === 'api-disabled' ? null : (
-              // No Retry for an `enable`-block denial. The verdict is a pure
-              // function of the object's metadata, so every retry re-fetches
-              // the identical refusal — offering the button is the same wrong
+            {loadErrorKind === 'api-disabled' || loadErrorKind === 'forbidden' ? null : (
+              // No Retry for an `enable`-block denial or a permission refusal
+              // (403). Neither verdict is one a retry can change (the first is
+              // a pure function of the object's metadata, the second a grant
+              // only an administrator can give), so every retry re-fetches the
+              // identical refusal — offering the button is the same wrong
               // advice as "check your connection", just spelled as a control.
+              // A transient failure (network, 5xx) keeps it.
               <Button
                 variant="outline"
                 size="sm"

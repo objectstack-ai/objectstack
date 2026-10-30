@@ -445,7 +445,7 @@ const CONDITION_EN = [
   'Always — no condition.',
   'Expression',
   'Add condition',
-  'field / context',
+  'Pick a field',
   'Remove condition',
   'value',
   'equals',

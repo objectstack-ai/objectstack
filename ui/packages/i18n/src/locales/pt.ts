@@ -1184,7 +1184,7 @@ const pt = {
     loading: "Carregando…",
     copyToClipboard: "Copiar para área de transferência",
     copied: "Copiado!",
-    deleteConfirmation: "Tem certeza de que deseja excluir este registro?",
+    deleteConfirmation: "Tem certeza de que deseja excluir este registro? Isso não pode ser desfeito.",
     deleted: "Registro excluído",
     editRecord: "Editar registro",
     viewAll: "Ver tudo",
@@ -1777,7 +1777,7 @@ const pt = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Você precisa de acesso ao Studio para abrir o Studio.",
+      accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Conjuntos de permissões.",
     },
     saveAdvisoryTitle: "Salvo — a verificação de criação gerou {{count}} recomendação(ões)",
     saveAdvisoryTitle_one: "Salvo — a verificação de criação gerou {{count}} recomendação",
@@ -2850,7 +2850,9 @@ const pt = {
         title: "Sua senha expirou",
         resetTitle: "Você precisa alterar sua senha",
         fallbackMessage: "Defina uma nova senha para continuar.",
+        resetBody: "Um administrador definiu uma senha temporária para você. Escolha uma nova senha sua para continuar.",
         current: "Senha atual",
+        temporary: "Senha temporária",
         next: "Nova senha",
         confirm: "Confirmar nova senha",
         submit: "Alterar senha e continuar",
@@ -3291,9 +3293,10 @@ const pt = {
   },
   objectActions: {
     deleteSuccess: "{{label}} excluído com sucesso",
+    deletedNamed: "{{label}} \"{{name}}\" excluído",
     deleteFailed: "Não foi possível excluir {{label}}",
     noRecordId: "Nenhum ID de registro fornecido",
-    deleteConfirm: "Excluir este registro?",
+    deleteConfirm: "Excluir este registro? Isso não pode ser desfeito.",
     deleteConfirmTitle: "Excluir {{label}} \"{{name}}\"?",
     bulkDeleteConfirmTitle: "Excluir {{count}} registros de {{label}}?",
     bulkDeleteConfirmTitle_one: "Excluir {{count}} registro de {{label}}?",
@@ -4479,10 +4482,10 @@ const pt = {
       detailChangedKeys: 'Também alterado:',
       detailNewKeys: 'Inclui:',
       generatedGroup: 'Gerado pela plataforma ({{n}})',
-      confirmNote: 'Publicar libera atomicamente todos os {{count}} rascunhos pendentes deste pacote.',
-      confirmNote_one: 'Publicar libera atomicamente {{count}} rascunho pendente deste pacote.',
-      confirmNote_many: 'Publicar libera atomicamente todos os {{count}} de rascunhos pendentes deste pacote.',
-      confirmNote_other: 'Publicar libera atomicamente todos os {{count}} rascunhos pendentes deste pacote.',
+      confirmNote: 'Publicar libera juntos todos os {{count}} rascunhos pendentes deste pacote: ou todos entram no ar, ou nenhum.',
+      confirmNote_one: 'Publicar libera {{count}} rascunho pendente deste pacote: ele entra no ar, ou nada muda.',
+      confirmNote_many: 'Publicar libera juntos todos os {{count}} de rascunhos pendentes deste pacote: ou todos entram no ar, ou nenhum.',
+      confirmNote_other: 'Publicar libera juntos todos os {{count}} rascunhos pendentes deste pacote: ou todos entram no ar, ou nenhum.',
       // objectui#11591 — the package-less sheet: no package to batch, so each
       // draft publishes by itself and one that fails stays pending.
       confirmNoteSeparate: 'Publicar libera os {{count}} rascunhos pendentes um a um: o que falhar continua pendente e os demais são publicados mesmo assim.',
@@ -4810,6 +4813,11 @@ const pt = {
     actionsEmptyTitle: "Nenhuma ação de pacote",
     actionsEmptyBody: "Nenhum pacote instalado declara uma ação nesta implantação. As ações que você mesmo cria ficam no Studio.",
     actionsLoadFailed: "Não foi possível carregar as ações de pacote.",
+    switchedOn: "\"{{label}}\" está ativado.",
+    switchedOff: "\"{{label}}\" está desativado nesta implantação.",
+    actionOffTitle: "Desativar \"{{label}}\"?",
+    actionOffBody: "Ele deixa de ser executado em todos os lugares onde é oferecido nesta implantação, para todos os usuários, até ser ativado novamente.",
+    actionOffConfirm: "Desativar",
   },
   element: {
     number: {
