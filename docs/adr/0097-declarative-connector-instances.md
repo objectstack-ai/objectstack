@@ -208,10 +208,10 @@ that one instance instead of failing the run:
 > held instance is not retried: the backoff timer skips it
 > (`packages/services/service-automation/src/plugin.ts#scheduleDeclarativeRetry`), and so does a
 > reconcile while its signature is unchanged
-> (`packages/services/service-automation/src/plugin.ts#reconcileDeclaredConnectors`). Only an
-> edit of its declaration, setting its stored credential again (the row's revision is part of
-> the signature), or a restart re-attempts it. Clearing the stored credential re-attempts it
-> too, since the reference's fingerprint changes: the instance then degrades for the missing
+> (`packages/services/service-automation/src/plugin.ts#reconcileDeclaredConnectors`). An edit
+> of its declaration, setting its stored credential again (the row's revision is part of the
+> signature), or a restart re-attempts it. Clearing the stored credential also ends the hold,
+> since the reference's fingerprint changes: the instance then degrades for the missing
 > reference and goes back on the backoff. Its husk carries the hold
 > (`packages/services/service-automation/src/engine.ts#getConnectorDegradedHold`), and a
 > `connector_action` dispatch to it names what unblocks it instead of promising a retry
