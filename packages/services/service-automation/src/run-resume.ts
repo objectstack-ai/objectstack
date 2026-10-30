@@ -23,6 +23,7 @@ import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { noteTenantCurrencyReadFault } from './builtin/template.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`
 // and `applyResumeSignal`) are read only inside the function bodies, at call
@@ -165,13 +166,15 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
     // every trigger type, like the identity above. A context that already
     // carries one (a `subflow` / `map` child, a resumed leg) keeps it. A failed
     // or empty read leaves it unset: such a hole then refuses by name, and no
-    // currency is guessed.
+    // currency is guessed. [#28056] A FAILED read (the resolver rejected) is
+    // noted beside this context, so that refusal is graded a runtime failure,
+    // not a guard refusal (`gradeAfterTenantCurrencyReadFault`).
     if (runContext.currency === undefined && this.tenantCurrencyResolver) {
         try {
             const currency = await this.tenantCurrencyResolver(runContext.tenantId);
             if (typeof currency === 'string' && currency !== '') runContext.currency = currency;
-        } catch {
-            // Tolerated, like the grants resolver: the hole's own refusal is the loud answer.
+        } catch (err) {
+            noteTenantCurrencyReadFault(runContext, err);
         }
     }
 
@@ -276,7 +279,9 @@ export async function resolveDecisionSegmentContext(
  * the persisted one carries none: a run parked before run setup seeded
  * `currency` would otherwise refuse a `{{ amount | currency }}` hole whose
  * remedy, the setting, is already in place. A copy, never the persisted
- * context; a failed or empty read leaves it as it was.
+ * context; an empty read leaves it as it was. [#28056] A failed read answers a
+ * copy noted as such, as at run setup: the note is this segment's, and the
+ * persisted context never carries it into a later resume.
  */
 async function withTenantCurrency(
     this: Pick<RunResumeHost, 'tenantCurrencyResolver'>,
@@ -286,8 +291,10 @@ async function withTenantCurrency(
     try {
         const currency = await this.tenantCurrencyResolver(context?.tenantId);
         if (typeof currency === 'string' && currency !== '') return { ...(context ?? {}), currency } as AutomationContext;
-    } catch {
-        // Tolerated, as at run setup: the hole's own refusal is the loud answer.
+    } catch (err) {
+        const noted = { ...(context ?? {}) } as AutomationContext;
+        noteTenantCurrencyReadFault(noted, err);
+        return noted;
     }
     return context;
 }

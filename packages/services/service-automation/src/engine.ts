@@ -828,10 +828,16 @@ export type FlowUserGrantsResolver = (
  * `{{ amount | currency }}` hole with no argument formats in it. Injected by
  * the host — the automation plugin bridges it to `@objectstack/core`'s
  * `resolveLocalizationContext`, the read a request resolves
- * `ExecutionContext.currency` with. Returns `undefined` (or throws, tolerated)
- * when the organization has none; run setup then leaves
+ * `ExecutionContext.currency` with. Returns `undefined` when the read succeeded
+ * and the organization has none; run setup then leaves
  * {@link AutomationContext.currency} unset, and such a hole refuses the node by
- * name. When unwired, the same: nothing is guessed.
+ * name, a guard refusal. When unwired, the same: nothing is guessed.
+ *
+ * [#28056] Rejects when the read FAILED: it learned nothing, so it is never
+ * read as `undefined`. Run setup leaves `currency` unset and notes the failure
+ * for that run, and a hole that then refuses for want of a default fails its
+ * node as a runtime failure instead: a `fault` edge routes it, and the run can
+ * succeed once the read does (`gradeAfterTenantCurrencyReadFault`).
  */
 export type FlowTenantCurrencyResolver = (
   tenantId: string | undefined,
