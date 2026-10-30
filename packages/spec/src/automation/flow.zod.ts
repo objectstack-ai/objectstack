@@ -862,6 +862,40 @@ function flowNodeObject() { return strictObject(
 }); }
 
 /**
+ * [#27968] Every property of a flow node OTHER than `config` — the sibling
+ * blocks `connectorConfig`, `waitEventConfig`, `boundaryConfig` and the rest —
+ * as JSON Schema, keyed by the property name, memoized.
+ *
+ * The third channel the expression ledger's reconciliation ratchet reads
+ * (`config-expression-ledger.test.ts` in `service-automation`), beside a
+ * descriptor's `configSchema` and `getSchemalessNodeConfigJsonSchemas()`: a
+ * `.meta({ xExpression })` marker inside a block declares a slot the ledger
+ * roots in that block (`FlowNodeExpressionPath.block`), and the ratchet maps
+ * the block to its node type through `FLOW_NODE_SIBLING_EXPRESSION_BLOCKS` —
+ * every block is handed over, not only the listed ones, so a marker on a block
+ * the ledger cannot address fails it instead of going unseen.
+ *
+ * Derived in `input` mode, like the schemaless channel, which is what carries
+ * the markers through verbatim.
+ */
+let cachedFlowNodeSiblingBlockJsonSchemas: Readonly<Record<string, unknown>> | undefined;
+export function getFlowNodeSiblingBlockJsonSchemas(): Readonly<Record<string, unknown>> {
+  if (cachedFlowNodeSiblingBlockJsonSchemas === undefined) {
+    const json = z.toJSONSchema(flowNodeObject(), {
+      target: 'draft-2020-12',
+      io: 'input',
+      unrepresentable: 'any',
+    }) as { properties?: Record<string, unknown> };
+    const out: Record<string, unknown> = {};
+    for (const [key, schema] of Object.entries(json.properties ?? {})) {
+      if (key !== 'config') out[key] = schema;
+    }
+    cachedFlowNodeSiblingBlockJsonSchemas = out;
+  }
+  return cachedFlowNodeSiblingBlockJsonSchemas;
+}
+
+/**
  * Flow Edge Schema
  * Connections between nodes.
  */
