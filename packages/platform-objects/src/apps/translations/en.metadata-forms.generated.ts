@@ -2391,7 +2391,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       name: {
         label: "Name",
-        helpText: "Derived from the label when you create the set; snake_case"
+        helpText: "Filled in from the label's Latin letters and digits when you create the set; if the label has none, type it yourself. snake_case"
       },
       description: {
         label: "Description",

@@ -2391,7 +2391,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       name: {
         label: "名称",
-        helpText: "创建权限集时由显示名称自动生成；snake_case"
+        helpText: "创建权限集时由显示名称中的拉丁字母和数字自动填写；显示名称不含这些字符时（如全为中文）请自行输入。snake_case"
       },
       description: {
         label: "描述",
