@@ -87,7 +87,7 @@
  *
  * ⚠️ The healthy control is deliberately driven with `{ operations: [] }` and
  * not with a real op. On the MULTI-KERNEL wiring a real op continues past this
- * door's engine line into `resolveProtocol`/`loadObjectItems`, which this
+ * door's engine line into `resolveProtocol`/`loadObjectItem`, which this
  * harness's auth-only kernel cannot serve — measured, that answers 500
  * INTERNAL_ERROR for a HEALTHY engine too, which would make a 500 read here
  * ambiguous between "the seam answered" and "the harness ran out of kernel".
