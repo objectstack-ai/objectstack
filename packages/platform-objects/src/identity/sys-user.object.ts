@@ -283,8 +283,13 @@ export const SysUser = ObjectSchema.create({
       bodyExtra: { generatePassword: true },
       params: [
         // The endpoint requires email OR phone (phone-only users get a
-        // placeholder address; requires auth.plugins.phoneNumber).
-        { field: 'email', required: false },
+        // placeholder address; requires auth.plugins.phoneNumber). So Email is
+        // required exactly when phone sign-in is off: two params on the one
+        // field, of which the dialog shows one (it collects and submits only
+        // the visible params). The required one's gate is `phoneNumber`'s
+        // opt-in gate negated, so the two predicates never both hold.
+        { field: 'email', required: true, visible: 'features.phoneNumber != true' },
+        { field: 'email', required: false, requiresFeature: 'phoneNumber' },
         {
           name: 'phoneNumber',
           label: 'Phone Number',

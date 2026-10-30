@@ -407,7 +407,7 @@ const SECOND_SPELLING: Array<{ reader: string; routes: SecondSpellingRoute[] }> 
   {
     reader: 'G. admin-user-endpoints.ts parseJson',
     routes: [
-      { path: '/admin/create-user', truncated: '{"email": "pin-new@example.test", "name": "Pin New"', echo: 'pin-new@example.test', empty: 'Either email or phoneNumber is required' },
+      { path: '/admin/create-user', truncated: '{"email": "pin-new@example.test", "name": "Pin New"', echo: 'pin-new@example.test', empty: 'Email is required' },
       { path: '/admin/set-user-password', truncated: '{"userId": "usr_pin_target", "newPassword": "Pin-Passw0rd!"', echo: 'usr_pin_target', empty: 'userId is required' },
     ],
   },
