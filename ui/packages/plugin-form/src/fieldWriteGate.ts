@@ -226,6 +226,13 @@ export interface GateFormFieldsOptions extends ApplyFieldPermissionsOptions {
    * the record has not loaded, and always absent on a create form.
    */
   previousValues?: Record<string, unknown> | null;
+  /**
+   * The values a create form opens with — its seeded defaults overlaid with
+   * the caller's pre-fill. On a create form a select governed by a blocking
+   * `state_machine` that declares `initialStates` offers only those, plus the
+   * value it opens on (#27763). Ignored on every other mode.
+   */
+  openingValues?: Record<string, unknown> | null;
 }
 
 /**
@@ -345,10 +352,11 @@ export function closedFormAffordance({
  *     `disabled`, not `readOnly`: the default arm's lock always drew a
  *     disabled input, and the submit button is left as it is.
  *
- * Between the two, on an edit form handed its persisted record
- * (`previousValues`), a select governed by a blocking `state_machine` keeps
- * only the moves the server accepts from the stored value
- * ({@link narrowStateMachineOptions}, #25933). It lives in this step for the
+ * Between the two, a select governed by a blocking `state_machine` keeps only
+ * the values the server accepts ({@link narrowStateMachineOptions}): on an
+ * edit form handed its persisted record (`previousValues`), the moves from the
+ * stored value (#25933); on a create form, the machine's `initialStates` plus
+ * the value the form opens with (`openingValues`, #27763). It lives in this step for the
  * same reason the lock does: every layout draws through here, so no arm can
  * offer a move another arm withholds.
  *
@@ -364,7 +372,7 @@ export function closedFormAffordance({
  */
 export function gateFormFields<T extends Record<string, any>>(
   fields: T[] | undefined,
-  { objectSchema, previousValues, ...options }: GateFormFieldsOptions,
+  { objectSchema, previousValues, openingValues, ...options }: GateFormFieldsOptions,
 ): T[] | undefined {
   const permitted = applyFieldPermissions(fields, options);
   if (!Array.isArray(permitted)) return permitted;
@@ -372,6 +380,7 @@ export function gateFormFields<T extends Record<string, any>>(
     objectSchema,
     mode: options.mode,
     previousValues,
+    openingValues,
   });
   if (!managedModeLocked(objectSchema, options.perms, options.objectName, options.mode)) {
     return narrowed;
