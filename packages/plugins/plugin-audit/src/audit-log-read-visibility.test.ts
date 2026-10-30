@@ -446,6 +446,8 @@ describe('[#26750, ruling A] the deployment-level rows: the platform administrat
   it('the platform administrator is the carried PLATFORM_ADMIN rung, and nothing else', () => {
     expect(PLATFORM_OPERATOR_POSTURE).toBe('PLATFORM_ADMIN');
     expect(readsDeploymentLevelLedgerRows({ userId: 'u1', posture: 'PLATFORM_ADMIN' })).toBe(true);
+    const adminCapabilities = ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? [];
+    expect(adminCapabilities.length).toBeGreaterThan(0);
     for (const context of [
       { userId: 'u1', posture: 'TENANT_ADMIN' },
       { userId: 'u1', posture: 'MEMBER' },
@@ -455,7 +457,7 @@ describe('[#26750, ruling A] the deployment-level rows: the platform administrat
       { userId: 'u1' },
       { userId: 'u1', positions: ['platform_admin'] },
       { userId: 'u1', permissions: ['admin_full_access'] },
-      { userId: 'u1', systemPermissions: [...ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions] },
+      { userId: 'u1', systemPermissions: [...adminCapabilities] },
       undefined,
     ]) {
       expect(readsDeploymentLevelLedgerRows(context), JSON.stringify(context)).toBe(false);

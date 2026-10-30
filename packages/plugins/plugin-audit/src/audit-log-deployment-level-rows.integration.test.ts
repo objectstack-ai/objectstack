@@ -83,9 +83,9 @@ const keys = (rows: Row[]) => rows.map(key).sort();
 describe.each(['single', 'group', 'isolated'] as const)('[#26750] deployment-level ledger rows under `%s`', (posture) => {
   /** The organization the readers and the note belong to: the Default Organization under `single`. */
   const ORG = posture === 'single' ? DEFAULT_ORGANIZATION_ID : 'org_a';
-  const HOLDER = { userId: 'u_holder', tenantId: ORG, positions: ['org_member'], systemPermissions: [CAP], posture: 'MEMBER' };
-  const ORG_ADMIN = { userId: 'u_org_admin', tenantId: ORG, positions: ['org_admin'], posture: 'TENANT_ADMIN' };
-  const PLATFORM_ADMIN = { userId: 'u_platform', tenantId: ORG, positions: ['platform_admin'], systemPermissions: [CAP], posture: 'PLATFORM_ADMIN' };
+  const HOLDER = { userId: 'u_holder', tenantId: ORG, positions: ['org_member'], systemPermissions: [CAP], posture: 'MEMBER' as const };
+  const ORG_ADMIN = { userId: 'u_org_admin', tenantId: ORG, positions: ['org_admin'], posture: 'TENANT_ADMIN' as const };
+  const PLATFORM_ADMIN = { userId: 'u_platform', tenantId: ORG, positions: ['platform_admin'], systemPermissions: [CAP], posture: 'PLATFORM_ADMIN' as const };
 
   let kernel: ObjectKernel;
   let engine: ObjectQL;

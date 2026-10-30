@@ -54,7 +54,7 @@ const ADMIN = { userId: 'u_admin', tenantId: 'org_1', positions: ['org_admin'] }
 const HOLDER = { userId: 'u_auditor', tenantId: 'org_1', positions: ['org_member'], systemPermissions: ['view_all_audit_log'] };
 /** [#26750] The platform administrator: the carried rung, holding the capability as `admin_full_access` grants it. */
 const PLATFORM_ADMIN = {
-  userId: 'u_platform', tenantId: 'org_1', positions: ['platform_admin'], posture: 'PLATFORM_ADMIN', systemPermissions: ['view_all_audit_log'],
+  userId: 'u_platform', tenantId: 'org_1', positions: ['platform_admin'], posture: 'PLATFORM_ADMIN' as const, systemPermissions: ['view_all_audit_log'],
 };
 
 const ownedObject = {
