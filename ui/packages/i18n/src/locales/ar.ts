@@ -3228,6 +3228,7 @@ const ar = {
     aiAssistant: "مساعد الذكاء الاصطناعي",
     designInStudio: "التصميم في Studio",
     editApp: "تعديل التطبيق",
+    openAppInStudio: "عرض التطبيق في Studio",
   },
   home: {
     build: {
@@ -3368,6 +3369,7 @@ const ar = {
       appsAvailable: "{{count}} من التطبيقات المتاحة",
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
+      openAppInStudio: "عرض {{app}} في Studio",
       backToHome: "العودة إلى الرئيسية",
       settings: "الإعدادات",
       productHome: "الصفحة الرئيسية لـ {{product}}",
