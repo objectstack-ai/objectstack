@@ -399,8 +399,9 @@ self-signed.
 - **Supply chain.** Per-file `integrity`; server-side scan for secrets and
   known-vuln deps; SBOM stored on the version row; **always** `--ignore-scripts`
   (no `postinstall`). *v2:* no lockfile ships (bundled only, §3.3), so install
-  runs no package manager at all; `integrity` is re-verified at install and at
-  every boot (M1); the scans are M3 (§3.4).
+  runs no package manager at all; `integrity` is re-verified at install, and at
+  every boot the install directory is held byte-equal to the signed artifact
+  (M1); the scans are M3 (§3.4).
 - **Reversible disable.** Reuse the package enable/disable + disable-state-store
   (ADR-0016 §9.5/§9.7): disabling a plugin stops loading its code and unregisters
   its contributions on next boot.
