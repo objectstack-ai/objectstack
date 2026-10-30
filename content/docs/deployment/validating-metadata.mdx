@@ -810,10 +810,14 @@ validated after, so the envelope describes the effective item.
 | `type` | every type | One metadata type, singular or plural | A misspelling of a declared type (the message names the accepted spellings), or a name that is neither a declared type nor a type this deployment carries |
 | `package` | every package | One package; `all` sweeps every package | A package that is not installed and that no item is bound to |
 
-An empty value keeps the default. Every refusal answers in the nested
+An empty value keeps the default. These three are the only parameter names the route
+accepts: any other name (`?typ=view`, `?packageId=…`) is refused with
+`400 INVALID_REQUEST`, even with an empty value, and the message names it and the
+supported set; it never answers the full sweep. Every refusal answers in the nested
 `{ error: { code, message } }` envelope; a repeated parameter (`?type=view&type=object`)
-is refused the same way with `VALIDATION_ERROR`. An installed package with no items
-answers zero counts, not a refusal.
+is refused the same way with `VALIDATION_ERROR`. The name check runs first, so an
+unknown name beside a repeated one answers `INVALID_REQUEST`. An installed package with
+no items answers zero counts, not a refusal.
 
 The response carries `entries` (each `{ type, name, diagnostics }`), `total`,
 `scannedTypes`, `scannedItems` and per-type `stats`. `stats` and each entry's `type` use
