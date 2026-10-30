@@ -542,3 +542,142 @@ describe('ADR-0130 D4 — the manifest service registers every other residual ty
     }
   });
 });
+
+/**
+ * [ADR-0130 D4] A residual PICKLIST that no object field of the stack names is
+ * refused at boot. The residual's picklists stay metadata only (the objects
+ * rule above is judged on that premise), so one that no field names was
+ * neither registered nor refused: the boot booted, and the list was missing
+ * from the engine with nothing said. One that a field names is loud already,
+ * and stays as it is: a residual object's field makes that object listed and
+ * not served (above), and a body's field fails the boot's picklist audit.
+ */
+describe('ADR-0130 D4 — a residual picklist that no object field names', () => {
+  const unusedList = (name = 'acme_unused') => ({ name, label: 'Unused', options: [{ label: 'A', value: 'a' }] });
+  const refusalOf = (booting: Promise<unknown>): Promise<unknown> => booting.then(() => undefined, (e: unknown) => e);
+
+  it('refuses the boot, naming the picklist and the stack, with the prescription', async () => {
+    const refusal = await refusalOf(boot(registering('app', [residualStack(noteObj(), { picklists: [unusedList()] })])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
+    const message = (refusal as Error).message;
+    expect(message).toContain(`Picklist 'acme_unused' is declared on the top level of stack '${RELEASE_ID}'`);
+    expect(message).toContain('no package body declares it and no object field the engine registers names it');
+    expect(message).toContain('Declare it inside the `packages[]` entry of the package whose objects use it');
+    expect(message).toContain('name it from a field of the object meant to use it');
+    expect(message).toContain('remove it from the top level');
+  });
+
+  it('names every such picklist in one refusal, and not one a field names', async () => {
+    const refusal = await refusalOf(boot(registering('app', [
+      residualStack(noteObj(statusField), { picklists: [statusList(), unusedList(), unusedList('acme_spare')] }),
+    ])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    const message = (refusal as Error).message;
+    expect(message).toContain(`Picklists 'acme_unused', 'acme_spare' are declared on the top level of stack '${RELEASE_ID}'`);
+    expect(message).not.toContain("'acme_status'");
+  });
+
+  it('refuses a stack whose `packages: []` leaves only such a picklist', async () => {
+    const refusal = await refusalOf(boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      picklists: [unusedList()],
+      packages: [],
+    })])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    expect((refusal as Error).message).toContain(`Picklist 'acme_unused' is declared on the top level of stack '${RELEASE_ID}'`);
+  });
+
+  it('after start(), refuses the artifact before anything of it registers', async () => {
+    const { kernel } = await boot();
+    const manifest = kernel.getService<ManifestService>('manifest');
+    const refusal = await refusalOf(Promise.resolve().then(() =>
+      manifest.register(residualStack(noteObj(), { picklists: [unusedList()] }))));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    expect(owners(engineOf(kernel))).toEqual({ acme_account: undefined, acme_case: undefined, acme_note: undefined });
+    expect(acmePackageIds(engineOf(kernel))).toEqual([]);
+  });
+
+  /** A residual `acme_status` that only an item the engine never registers in a composed stack names. */
+  const isTopLevelOnlyRefusal = (refusal: unknown): void => {
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    expect((refusal as Error).message).toContain(`Picklist 'acme_status' is declared on the top level of stack '${RELEASE_ID}'`);
+  };
+
+  it('refuses one that only a top-level `objectExtensions` entry names — no door registers that entry in a composed stack', async () => {
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [residualStack(noteObj(), {
+      picklists: [statusList()],
+      objectExtensions: [{ extend: 'acme_case', fields: statusField }],
+    })]))));
+  });
+
+  it('refuses one that only a top-level copy of a body-declared object names, its fields diverging from the body\'s', async () => {
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      objects: [{ ...caseObj(), fields: { ...caseObj().fields, ...statusField } }, accountObj()],
+      picklists: [statusList()],
+      packages: [
+        { manifest: { ...svc, objects: [caseObj()] } },
+        { manifest: { ...app, objects: [accountObj()] } },
+      ],
+    })]))));
+  });
+
+  it('refuses one that only a body\'s `picklistExtensions` entry extends — at boot, and after start() before anything registers', async () => {
+    const extending = () => residualStack(noteObj(), { picklists: [statusList()] }, {
+      picklistExtensions: [{ extend: 'acme_status', options: [{ label: 'Closed', value: 'closed' }] }],
+    });
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [extending()]))));
+
+    const { kernel } = await boot();
+    isTopLevelOnlyRefusal(await refusalOf(Promise.resolve().then(() =>
+      kernel.getService<ManifestService>('manifest').register(extending()))));
+    expect(owners(engineOf(kernel))).toEqual({ acme_account: undefined, acme_case: undefined, acme_note: undefined });
+    expect(acmePackageIds(engineOf(kernel))).toEqual([]);
+  });
+
+  it('CONTROL: one a residual object\'s field names keeps the objects rule\'s line — boots, listed and not served, list unregistered', async () => {
+    const { kernel, recorder } = await boot(registering('app', [
+      residualStack(noteObj(statusField), { picklists: [statusList()] }),
+    ]));
+    const ql = engineOf(kernel);
+    expect(kernel.getState()).toBe('running');
+    expect(owners(ql).acme_note).toBeUndefined();
+    expect(ql.registry.resolvePicklistOptions('acme_status')).toBeUndefined();
+    expect(unservedLines(recorder)).toHaveLength(1);
+  });
+
+  it('CONTROL: one a BODY object\'s field names still fails the boot\'s picklist audit, not this refusal', async () => {
+    const refusal = await refusalOf(boot(registering('app', [
+      residualStack(noteObj(), { picklists: [statusList()] }, { objects: [{ ...caseObj(), fields: { ...caseObj().fields, ...statusField } }] }),
+    ])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    const message = (refusal as Error).message;
+    expect(message).toContain("field 'acme_case.status'");
+    expect(message).toContain('that no loaded package declares');
+    expect(message).not.toContain('is declared on the top level of stack');
+  });
+
+  it('CONTROL: a picklist a body declares registers as today, whether or not the top level repeats it', async () => {
+    for (const extra of [{ picklists: [statusList()] }, {}]) {
+      const { kernel, recorder } = await boot(registering('app', [residualStack(noteObj(), extra, { picklists: [statusList()] })]));
+      const ql = engineOf(kernel);
+      expect(kernel.getState()).toBe('running');
+      expect(ql.registry.resolvePicklistOptions('acme_status')?.map((o) => o.value)).toEqual(['open']);
+      expect(unservedLines(recorder)).toEqual([]);
+      await kernel.shutdown();
+    }
+  });
+
+  it('CONTROL: a stack with no residual picklist boots unchanged', async () => {
+    const { kernel, recorder } = await boot(registering('app', [residualStack()]));
+    expect(kernel.getState()).toBe('running');
+    expect(owners(engineOf(kernel))).toEqual({ acme_account: APP_ID, acme_case: SERVICE_ID, acme_note: RELEASE_ID });
+    expect(unservedLines(recorder)).toEqual([]);
+  });
+
+  it('CONTROL: a stack without `packages[]` has no residual — its unnamed picklist registers as today', async () => {
+    const { kernel } = await boot(registering('app', [payload({ manifest: app, objects: [noteObj()], picklists: [unusedList()] })]));
+    expect(kernel.getState()).toBe('running');
+    expect(engineOf(kernel).registry.resolvePicklistOptions('acme_unused')?.map((o) => o.value)).toEqual(['a']);
+  });
+});
