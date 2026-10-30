@@ -2385,13 +2385,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     },
     fields: {
-      name: {
-        label: "名称",
-        helpText: "唯一标识符（snake_case）"
-      },
       label: {
         label: "显示名称",
         helpText: "面向管理员的显示标签"
+      },
+      name: {
+        label: "名称",
+        helpText: "创建权限集时由显示名称自动生成；snake_case"
       },
       description: {
         label: "描述",
