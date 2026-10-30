@@ -177,6 +177,8 @@ describe('a failed comment write is never rendered as sent (objectui#10899)', ()
     expect(dataSource.create).toHaveBeenCalledWith(
       'sys_comment',
       expect.objectContaining({ thread_id: `${OBJECT_NAME}:${RECORD_ID}`, body: 'Called the customer, follow up Friday' }),
+      // The per-call listener for the answer's `withheldMentions` (objectstack#28218).
+      { onMentionsWithheld: expect.any(Function) },
     );
     // The panel still says there is nothing — the comment is not "sent".
     expect(feedRow('Called the customer, follow up Friday')).toBeNull();
@@ -243,6 +245,7 @@ describe('a failed comment write is never rendered as sent (objectui#10899)', ()
         parent_id: 'c1',
         body: 'Countersigned copy attached',
       }),
+      { onMentionsWithheld: expect.any(Function) },
     );
     // The reply is not "sent": no reply row, and the parent shows no reply count.
     expect(feedRow('Countersigned copy attached')).toBeNull();

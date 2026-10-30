@@ -37,6 +37,7 @@
     "ui/Action:outcomeMessages",
     "ui/Action:params",
     "ui/Action:patch",
+    "ui/Action:pressed",
     "ui/Action:recordIdField",
     "ui/Action:recordIdParam",
     "ui/Action:refreshAfter",

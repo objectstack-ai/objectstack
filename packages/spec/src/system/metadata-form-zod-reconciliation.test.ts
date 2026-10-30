@@ -365,6 +365,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // #27946 — an action's pressed-state predicate lands spec-first the same
+  // way: `planned` in the liveness ledger, drawn by no action surface until
+  // the console card that draws `aria-pressed` on the header buttons.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'pressed',
+    why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
+  },
   // #27973 — the same declared-not-enforced shape: `percentDisplay` is the spec
   // half of a percent field's read-only face, `planned` in `liveness/field.json`
   // until the console's percent face reads it.
