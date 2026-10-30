@@ -5928,7 +5928,7 @@ export class ObjectQL implements IObjectQLEngine {
     this.logger.info(
       `ACTION_DISABLED: packaged action '${actionName}' refused — it is switched off in the activation ledger ` +
         '(sys_metadata_activation, ADR-0126 §8 item 2).',
-      { action: actionName, code: 'ACTION_DISABLED' },
+      { action: actionName, refusal: 'ACTION_DISABLED' },
     );
     return this.actionActivation.describeDisabled(actionName);
   }

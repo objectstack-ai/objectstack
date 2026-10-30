@@ -396,7 +396,7 @@ describe('ObjectQL engine — the projection the dispatch doors consult', () => 
         expect(line).toContain("'convert_lead'");
         expect(line).toContain('sys_metadata_activation');
         expect(line).toContain('ADR-0126 §8');
-        expect(meta).toEqual({ action: 'convert_lead', code: 'ACTION_DISABLED' });
+        expect(meta).toEqual({ action: 'convert_lead', refusal: 'ACTION_DISABLED' });
     });
 
     it('setActionActive flips the row and the projection together, in that order', async () => {
