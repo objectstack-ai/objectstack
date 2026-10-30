@@ -1085,9 +1085,11 @@ export function buildDefaultTabs(
   // （审批）: the timeline stream is ONE tab, second for every object
   // (objectstack#27524, Target 5: 动态 is a panel, the first of the right
   // column, for every object — no object-derived default places it);
-  // attachments close the Related tab, as they close the right column.
+  // attachments close the Related tab, as they close the right column. The
+  // stream tab's token is `Activity stream`, which the strip reads as
+  // `detail.timeline` (「动态」); a bare `Timeline` is an author's word.
   const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
-  if (timeline.length > 0) items.push({ label: 'Timeline', value: 'timeline', children: timeline });
+  if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
   // Attachments (objectstack#4358) — for `enable.files: true` objects; the
   // tab strip's count badge reads the `record:attachments` node.
   const relatedChildren = [

@@ -229,7 +229,7 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
       related: [{ objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' }],
     });
     const parsed = PageTabsProps.parse(tabs.properties) as any;
-    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Timeline', 'Related']);
+    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Activity stream', 'Related']);
     expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'timeline', 'related']);
     expect(parsed.items[0].children[0].type).toBe('record:details');
     expect(parsed.items[2].children[0].properties.objectName).toBe('task');

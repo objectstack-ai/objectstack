@@ -384,7 +384,7 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Timeline']);
+      expect(labels).toEqual(['Details', 'Activity stream']);
       expect(tabItems(tabs)[0].children.map((c: any) => c.type)).toContain('record:related_list');
     });
 
@@ -397,7 +397,7 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Timeline', 'Related']);
+      expect(labels).toEqual(['Details', 'Activity stream', 'Related']);
       const related = tabItems(tabs).find((t: any) => t.label === 'Related');
       expect(related.children).toHaveLength(2);
       expect(related.children.map((c: any) => props(c).objectName)).toEqual(['task', 'note']);
@@ -425,7 +425,7 @@ describe('buildDefaultPageSchema', () => {
       expect(values).not.toContain('activity');
       expect(values).not.toContain('history');
       const timeline = tabItems(tabs).find((t: any) => t.value === 'timeline');
-      expect(timeline.label).toBe('Timeline');
+      expect(timeline.label).toBe('Activity stream');
       expect(timeline.children[0]).toEqual({
         type: 'record:activity',
         properties: { showCompleted: true, enableThreading: true, enableReactions: true },
@@ -449,7 +449,7 @@ describe('buildDefaultPageSchema', () => {
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Timeline',
+        'Activity stream',
         'Related',
         'Approvals',
       ]);
@@ -516,7 +516,7 @@ describe('buildDefaultPageSchema', () => {
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Timeline',
+        'Activity stream',
         'Related',
       ]);
       expect(tabItems(tabs)[0].children).toEqual([{ type: 'div', id: 'custom-details' }]);
@@ -598,7 +598,7 @@ describe('buildDefaultPageSchema', () => {
       expect(tabs.type).toBe('page:tabs');
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Timeline',
+        'Activity stream',
         'Related',
       ]);
     });
