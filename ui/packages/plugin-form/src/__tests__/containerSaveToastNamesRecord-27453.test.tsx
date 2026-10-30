@@ -137,10 +137,11 @@ describe.each(['drawer', 'modal'] as const)('`object-form` `formType: %s` — th
 
   it('a record with nothing nameable keeps the object-label toast', async () => {
     const onSuccess = vi.fn();
-    // No name field, and no name-ish key on the record: the resolver's floor is `Record #<id>`.
-    const ds = makeDS({ name: 'showcase_task', label: 'Task', fields: { priority: { type: 'text', label: 'Priority' } } });
+    // No text field to derive a name from, and no name-ish key on the record:
+    // the resolver's floor is `Record #<id>`.
+    const ds = makeDS({ name: 'showcase_task', label: 'Task', fields: { estimate: { type: 'number', label: 'Estimate' } } });
     render(<ObjectFormContainer schema={createSchema(formType, { onSuccess })} dataSource={ds} />);
-    await fillAndSubmit({ priority: 'high' });
+    await fillAndSubmit({ estimate: '3' });
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
     expect(toastSuccess).toHaveBeenCalledWith('Task created successfully');
