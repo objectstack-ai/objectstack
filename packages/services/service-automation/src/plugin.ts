@@ -842,7 +842,13 @@ export class AutomationServicePlugin implements Plugin {
      * registration per publish, not two.
      */
     private mutationArmedFlows = new Map<string, string>();
-    /** [#21725] The `onMetadataMutation` subscription; dropped at destroy. */
+    /**
+     * [#28002] A connector reconcile the metadata mutation signal queued and
+     * that has not started yet: every connector mutation reported before it
+     * starts is answered by that one run, which re-reads the whole declaration.
+     */
+    private connectorMutationReconcilePending = false;
+    /** [#21725] The `onMetadataMutation` subscription (flows, and connectors since #28002); dropped at destroy. */
     private unsubscribeFlowMutations?: () => void;
 
     constructor(options: AutomationServicePluginOptions = {}) {
@@ -3642,6 +3648,9 @@ export class AutomationServicePlugin implements Plugin {
      * run on the flow sync queue ({@link syncMutatedFlows}). The save's own
      * answer therefore precedes the arming by that one read.
      *
+     * [#28002] A `connector` mutation queues a connector reconcile instead
+     * ({@link queueConnectorMutationReconcile}); every other type is ignored.
+     *
      * Resolved at `start()`, once every plugin has inited, so a protocol that
      * registers after this plugin is seen.
      */
@@ -3668,12 +3677,47 @@ export class AutomationServicePlugin implements Plugin {
             return;
         }
         this.unsubscribeFlowMutations = protocol.onMetadataMutation((evt) => {
-            if (evt?.type !== 'flow' || evt.state === 'draft') return;
+            if (!evt || evt.state === 'draft') return;
             if (typeof evt.name !== 'string' || evt.name === '') return;
+            if (evt.type === 'connector') {
+                this.queueConnectorMutationReconcile(ctx);
+                return;
+            }
+            if (evt.type !== 'flow') return;
             const idle = this.pendingFlowMutations.size === 0;
             this.pendingFlowMutations.add(evt.name);
             // One queued sync drains every name reported before it starts.
             if (idle) void this.enqueueFlowSync(() => this.syncMutatedFlows(ctx)).catch(() => undefined);
+        });
+    }
+
+    /**
+     * [#28002] Reconcile this replica's connectors after a connector was saved
+     * active, published or deleted — the reconcile `metadata:reloaded` runs
+     * ({@link materializeDeclaredConnectors}, soft mode), on the reconcile
+     * queue. The mutation signal is what reaches a PEER: lane 2 of the cluster
+     * family replays a write made on another replica into this protocol's
+     * listeners, while `metadata:reloaded` is a kernel-local hook. It also
+     * covers a direct active save (`PUT /api/v1/meta/connector/:name`), which
+     * raises no reload anywhere.
+     *
+     * A publish on this replica raises both signals; the second reconcile
+     * finds every signature unchanged and leaves the instances alone.
+     * Coalesced: a reconcile queued and not yet started answers every
+     * connector mutation reported before it starts.
+     */
+    private queueConnectorMutationReconcile(ctx: PluginContext): void {
+        if (this.connectorMutationReconcilePending) return;
+        this.connectorMutationReconcilePending = true;
+        void this.onReconcileQueue(async () => {
+            this.connectorMutationReconcilePending = false;
+            await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+        }).catch((err) => {
+            ctx.logger.warn(
+                '[Automation] reconciling the connectors after a connector metadata change failed; '
+                    + 'the next metadata reload or restart reconciles them.',
+                describeThrownForLog(err),
+            );
         });
     }
 
