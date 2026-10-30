@@ -28,12 +28,20 @@ import {
 import { FlowSchema, resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { FieldSchema } from '@objectstack/spec/data';
 import { checkFieldCompleteness, FIELD_SUMMARY_WITHOUT_OPERATIONS } from '@objectstack/spec/kernel';
-import { ActionSchema, DashboardSchema, DashboardWidgetSchema, resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
+import {
+  ActionSchema,
+  DashboardSchema,
+  DashboardWidgetSchema,
+  ReportSchema,
+  resolveI18nLabel,
+  type I18nLabel,
+} from '@objectstack/spec/ui';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
 import type { MetadataSelection } from '../metadata-admin/preview-registry.js';
 import { t, tFormat, translateSchemaFieldLabel, translateValidationMessage } from '../metadata-admin/i18n.js';
 import { getDashboardForm } from '../metadata-admin/dashboard-schema.js';
+import { getReportForm } from '../metadata-admin/report-schema.js';
 import { prettifyFieldName } from '../metadata-admin/field-source-label.js';
 import type { FormFieldSpec, FormViewSpec } from '../metadata-admin/form-spec.js';
 import {
@@ -1094,6 +1102,11 @@ export function dashboardHeldEdit(draft: SentBody, locale: string): StudioHeld<M
 /** The dashboard list whose items are widgets: judged by {@link widgetMissingInputs}, never as a list item. */
 const DASHBOARD_WIDGET_LIST: ReadonlySet<string> = new Set(['widgets']);
 
+/** A leaf's own spec schema, as the held rules ask it of a body. */
+type LeafSpecSchema = {
+  safeParse: (value: unknown) => { success: boolean; error?: { issues: ReadonlyArray<{ path: PropertyKey[] }> } };
+};
+
 /** An item of a leaf's list property held for an unset input. */
 export interface HeldListItem {
   /** The path of the list property in the leaf body, e.g. `['header', 'actions']`. */
@@ -1116,7 +1129,7 @@ export interface HeldListItem {
  */
 export function listItemHeldInput(
   body: SentBody,
-  schema: { safeParse: (value: unknown) => { success: boolean; error?: { issues: ReadonlyArray<{ path: PropertyKey[] }> } } },
+  schema: LeafSpecSchema,
   skip: ReadonlySet<string> = new Set(),
 ): HeldListItem | null {
   const parsed = schema.safeParse(body);
@@ -1198,5 +1211,72 @@ export function heldListItem(
     }),
     target: null,
     input: list,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// objectstack#27785 — a report held until its new list item, or its chart, is
+// filled in.
+//
+// The report's properties append the same unfinished items the dashboard's do
+// (Order → "Add item", a joined report's Blocks → "Add item"), and the chart
+// panel writes `chart: { type }` as soon as a chart type is picked, before its
+// axes. The draft door refused each with a 422, and every later save with it.
+// The same rule holds them: the judge is `ReportSchema`, asked of the body.
+//
+// The chart is an object property, not a list item, so it is asked on its own
+// ({@link objectHeldInput}) rather than by widening {@link listItemHeldInput}
+// to every nested object: that would change what the dashboard holds too, and
+// the chart's inputs live in the inspector's own chart panel, not in the
+// spec form whose rows name the list items.
+// ---------------------------------------------------------------------------
+
+/**
+ * The first input of the object property `key` of `body` that `schema`
+ * refuses `body` for only because the object leaves it unset, or `null`.
+ *
+ * Only issues under `key` are this rule's. The object is held only when every
+ * one of them names an unset input directly below it; one issue on the object
+ * itself, or on an input it gives a value, makes it finished but wrong.
+ */
+export function objectHeldInput(body: SentBody, schema: LeafSpecSchema, key: string): string | null {
+  const object = body[key];
+  if (!isSentBody(object)) return null;
+  const parsed = schema.safeParse(body);
+  if (parsed.success || !parsed.error) return null;
+  let held: string | null = null;
+  for (const issue of parsed.error.issues) {
+    if (String(issue.path[0]) !== key) continue;
+    const input = issue.path.length === 2 ? String(issue.path[1]) : undefined;
+    if (input === undefined || !itemInputUnset(object[input])) return null;
+    held ??= input;
+  }
+  return held;
+}
+
+/** The report inspector's chart panel label for a chart input it edits. */
+const REPORT_CHART_INPUT_KEYS: Readonly<Record<string, string>> = {
+  xAxis: 'engine.inspector.report.chartX',
+  yAxis: 'engine.inspector.report.chartY',
+};
+
+/**
+ * The edit the Interfaces pillar holds for `draft`, the report its leaf
+ * autosave would send, or `null`: the first item of one of its list properties
+ * `ReportSchema` refuses only for inputs it leaves unset, named by the report
+ * form's labels; else its chart, refused only for unset inputs, named by the
+ * chart panel's own label. Both are placed on the report's properties.
+ */
+export function reportHeldEdit(draft: SentBody, locale: string): StudioHeld<MetadataSelection | null> | null {
+  const item = listItemHeldInput(draft, ReportSchema);
+  if (item) return heldListItem(item, getReportForm(), locale);
+  const key = objectHeldInput(draft, ReportSchema, 'chart');
+  if (key === null) return null;
+  const labelKey = REPORT_CHART_INPUT_KEYS[key];
+  const input = labelKey ? t(labelKey, locale) : prettifyFieldName(key);
+  return {
+    clause: tFormat('engine.studio.held.reportChartNeedsInput', locale, { input }),
+    target: null,
+    input,
   };
 }

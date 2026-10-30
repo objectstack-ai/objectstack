@@ -115,7 +115,7 @@ describe('committed .env files carry no third-party telemetry endpoint', () => {
   it('parses real assignments out of the console production env', () => {
     const parsed = parseEnv(readFileSync(path.join(repoRoot, 'apps/console/.env.production'), 'utf8'));
     expect(parsed.map((entry) => entry.key)).toContain('VITE_SERVER_URL');
-    expect(parsed.find((entry) => entry.key === 'VITE_USE_MOCK_SERVER')?.value).toBe('false');
+    expect(parsed.find((entry) => entry.key === 'VITE_SERVER_URL')?.value).toBe('');
   });
 
   it('flags an offending file — proving the rules can actually fire', () => {
@@ -133,7 +133,7 @@ describe('committed .env files carry no third-party telemetry endpoint', () => {
     expect(violationsIn('OS_TELEMETRY_CLIENT_ERROR_REPORTING_SEND_DEFAULT_PII=true')).not.toEqual([]);
     // …and does not fire on the commentary that documents the recipe.
     expect(violationsIn('# VITE_SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<p>')).toEqual([]);
-    expect(violationsIn('VITE_SERVER_URL=\nVITE_USE_MOCK_SERVER=false')).toEqual([]);
+    expect(violationsIn('VITE_SERVER_URL=\nVITE_BASE_PATH=/')).toEqual([]);
   });
 
   it.each(envFiles)('%s', (file) => {
