@@ -1,0 +1,37 @@
+{
+  "number": 27761,
+  "kind": "pull_request",
+  "title": "fix(service-datasource)!: a datasource create may not name a stored credential reference; the settings handle door is pinned as it holds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:33:29Z",
+  "updated_at": "2026-10-29T23:26:33Z",
+  "closed_at": "2026-10-29T23:26:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T23:26:31Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27761",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DXVCzWzmBkGHAYQZPucaktq)_\n\nFixes #27722\n\ndomain:server#3 · os-elon-musk · session_016WV4cy83ynufEsjN8PwPoh (card thread)\n\n## 维护者速读\n\n- 改了什么：数据源管理入口的「新建」不再接受请求里自带的 `external.credentialsRef`，一律以 400 拒绝，且不写入任何东西；新建记录只保存它自己这次 `secret` 封存后得到的那个引用。设置服务的密文句柄写入口经实测本来就关着（每个值都重新封存、从不收引用），本 PR 只给它加钉。\n- 为什么改：卡上要求按 #27582 的同一条规则审两个凭据引用写入口：「非系统写入只能封存新值，或保留本记录自己的引用」。实测数据源新建入口会原样保存请求带来的引用，不符合规则；编辑入口与设置入口符合。\n- 风险与回滚：拒绝发生在任何记录、密文或连接池写入之前；无论引用指向什么，答复都相同，消息里不出现引用值。控制台的数据源表单从不发送这个键，不受影响。编辑行为不变。回滚只需 revert 本 PR。\n- 先看：`packages/services/service-datasource/src/datasource-admin-service.ts`（`createDatasource` 开头的 `assertNoDraftCredentialsRef`），两个新测试文件。\n- 两分钟验证：`pnpm --filter @objectstack/service-datasource exec vitest run src/__tests__/datasource-credentials-ref-own-reference.test.ts`（10/10）与 `pnpm --filter @objectstack/service-settings exec vitest run src/settings-secret-handle-own-reference.pin.test.ts`（2/2）。\n- 需要你做的：无需操作；本 PR 是收窄（narrowing），落地前需一次契约复审，由席位安排。\n\n## What changes\n\nThe card audits two credential-reference write doors against the rule #27582 set (PR #27695): **a non-system write may only seal a new value or keep its own record's stored reference.**\n\n**Door 2, datasource `external.credentialsRef` (fixed).** The admin door's create (`POST /api/v1/datasources`, `IDatasourceAdminService.createDatasource`) now refuses a draft that names `external.credentialsRef`:\n\n- A create has no stored reference of its own, so the only reference it may store is the one its own `secret` is bound under.\n- The refusal is thrown before anything is written (no record, no secret, no pool), as the route's `400`. The message names the key and never its value, and the answer is the same whatever the value names.\n- Every caller of this door is a signed-in operator through the admin routes; nothing system-side writes through it, so there is no pass-through to keep.\n- The update path already keeps the record's own reference unless a supplied secret rewraps it. It is pinned here, unchanged.\n\n**Door 1, settings-service credential handles (holds, pinned).** `setMany` seals every value it is handed for a declared-encrypted key and stores the handle that seal minted, so no caller can make the stored handle one it did not mint. The pin names a live handle another organization's write minted.\n\nThe #27695 helper (`SecretRefWriteError`, `encryptSecretFields`) is not shareable here: it lives in an `@objectstack/objectql` internal module that nothing re-exports, this package does not depend on objectql, and its judge reads a record's stored column, which a create does not have. The refusal here is the door's own, in the shape its sibling validation refusals already take.\n\n## Why\n\nThe card's audit, measured on `origin/main` at 3702be40: door 2's create stored a draft's `external.credentialsRef` as given; door 2's update and door 1 did not let a caller set the stored reference. Only the door that measured open is changed.\n\n## Verification\n\n- New pins: `service-datasource` `datasource-credentials-ref-own-reference.test.ts` (10 cases) and `service-settings` `settings-secret-handle-own-reference.pin.test.ts` (2 cases).\n- Ablations, each restored: removing the create refusal reds the 5 refusal cases; letting an update keep the patch's reference reds the 2 update pins; letting the settings door store a submitted value as the handle reds both settings pins.\n- Package suites: `service-datasource` 1021/1021, `service-settings` 1016/1016. `pnpm typecheck` in both packages: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` at the committed head, plus `pnpm lint`: 61 commands derived. 60 exit 0 (`check:engine-double-contract` first flagged the settings pin's secret-store fake as an engine double; the fake was trimmed to the store members the pin uses, and the gate re-runs exit 0). `check:dual-build-cjs-loads` exits 3 (prerequisite: a whole-tree build); it is re-run after `pnpm build` and reported in the report comment. `pnpm lint`: exit 0.\n\nClause-②: no (narrowing) — the datasource admin door's create refuses a draft that names `external.credentialsRef`, where it stored the value as given before. Nothing is widened.\nMetadata-protocol: none\n\nThe changeset is `patch` on `@objectstack/service-datasource` with the BREAKING banner and its ADR-0087 disposition. `service-settings` gains a test file only and publishes nothing.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: no.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the maintainer brief excepted).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cy83ynufEsjN8PwPoh\n"
+}

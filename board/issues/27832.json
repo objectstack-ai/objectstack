@@ -1,0 +1,35 @@
+{
+  "number": 27832,
+  "kind": "pull_request",
+  "title": "feat(studio): long flow-node help opens behind Learn more; list column descriptions are help, not placeholders",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T01:08:47Z",
+  "updated_at": "2026-10-30T01:58:13Z",
+  "closed_at": "2026-10-30T01:58:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T01:58:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27832",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CaJoinvGQSbHeDaWBe\n<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg4i9JiKjEjwtuVzd4gKy9hB)_\n\n## 维护者速读\n\n- 改了什么：Studio 流程节点检查器里，超过 120 个字符的字段帮助默认折成两行，带「了解更多 / 收起」开关；列表列（如审批节点的审批人）的 schema 说明不再塞进输入框占位符，改成列下方的帮助。\n- 为什么改：HotCRM 浏览器走查（#27356 第 15 行）看到节点帮助是一整段引擎说明，占位符里写着「ADR-0105 D9 — organization…」，被截断，一打字就消失。\n- 风险与回滚：只改展示，不改存储的值，也不改文字本身；回滚就是 revert 本 PR。\n- 先看：`FlowFieldHelp.tsx`（折叠逻辑），`json-schema-to-fields.ts` 里 `columnsFor` 的两处（说明从 placeholder 改成 help），`FlowObjectListField.tsx` 渲染列帮助的四处。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/inspectors/FlowFieldHelp.learnMore-27356.test.tsx`，应见 4 passed。\n- 需要你做的：无，席位落地。\n\nPart of #27356 (row 15, hotcrm#2320 Studio S4: node inspector help and placeholder)\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nRow 15 has two halves. This PR is the Studio half: how help is shown. The words half is not Studio's (see Acceptance notes).\n\n- **Long help opens clamped.** `FlowFieldHelp` (new, `views/metadata-admin/inspectors/`) renders the help line under a flow inspector field. Help longer than `FLOW_HELP_CLAMP_CHARS` (120) opens clamped to two lines (`line-clamp-2`) with a **Learn more** button (`aria-expanded`, `aria-controls`); **Show less** folds it again. Shorter help renders in full with no button, as before. The full text stays in the DOM in both states. `FlowNodeConfigField` uses it for every field's help (its only help site).\n- **Column descriptions are help, not placeholders.** `jsonSchemaToFlowFields` used to put an objectList column's schema `description` into the column's `placeholder`. On the approval node's Approvers list this put the served `organization` description (\"ADR-0105 D9 — organization whose directory resolves this approver: …\") into the input as a cut-off placeholder, and the served `value` description likewise. `FlowConfigColumn` gains `help`; both `columnsFor` sites (scalar columns and nested-list columns) now write the description there, and `FlowObjectListField` shows it under the column with `FlowFieldHelp`, in the default row layout, the decision branch cards and under nested list columns. A hand-written column `placeholder` (the offline table) is unchanged.\n- **i18n.** Two keys added to the studio namespace, en and zh: `engine.inspector.flowNode.help.learnMore`, `engine.inspector.flowNode.help.showLess`. No key renamed.\n\nBoundary: the Add-node menu is #27521 row 39 and is not touched here; this PR changes the node inspector only.\n\n## Tests\n\n- New `FlowFieldHelp.learnMore-27356.test.tsx` (4 tests). The column half reads the installed contract: `z.toJSONSchema(ApprovalNodeConfigSchema, { io: 'input' })` through `jsonSchemaToFlowFields`, then asserts the `organization` column carries the description as `help` and no `placeholder`, and that a rendered Approvers row has no element whose placeholder is that description while a help line shows it. The clamp half renders `FlowNodeConfigField` with a long and a short help.\n- `json-schema-to-fields.test.ts`: the approver `value` column assertion moved from `placeholder` to `help` (plus `placeholder` undefined). That line pinned the behaviour this PR changes.\n\n<details><summary>Readings (head 491ca521 for gates; tests on bc2046aa, merge of origin/main touched none of these packages)</summary>\n\n- New file: 4/4 passed.\n- Every ui test file naming `FlowNodeConfigField`, `FlowObjectListField`, `json-schema-to-fields`, `FlowNodeInspector` or `FlowFieldHelp` (72 files): 72 passed, 1065 passed / 1 skipped.\n- `pnpm --filter @object-ui/app-shell --filter @object-ui/i18n run type-check`: both Done, exit 0 (lock VERDICT command-exit 0).\n- Ablation 1, through `scripts/ablation-replace.mjs` (anchor 1 to 0): the scalar column's `help: prop.description` back to `placeholder: prop.description`: 2 failed / 2 passed (both column tests red); restored blob = HEAD blob `f12818610a37`, `git diff HEAD` empty.\n- Ablation 2: `const long = text.length > FLOW_HELP_CLAMP_CHARS;` to `const long = false;`: 1 failed / 3 passed (the clamp test red); restored blob = HEAD blob `c4b6a6f0cf77`, `git diff HEAD` empty.\n- vitest resolves `@object-ui/*` to source here, so neither ablation needed a rebuild.\n\n</details>\n\n## Acceptance notes\n\n- **The words are the engine's.** The help and column descriptions on an approval node come from `@objectstack/spec` `automation/approval.zod.ts` (`.describe()` / `.meta({ description })`), published by the server as the node's `configSchema`; Studio shows the producer's sentence and keeps only the zh rendering (`FLOW_FIELD_ZH`). Rewriting them in business words (for example `excludeSubmitter`'s paragraph naming `submitter_id` and `onEmptyApprovers`, and the `organization` description that opens with an ADR citation) is a spec change, outside this Studio surface. It is filed as #27838 (domain:spec, together with #27521 row 39), not done here.\n- The 120-character threshold is a length, not a measured overflow: jsdom has no layout, and a length keeps the behaviour deterministic. The threshold was chosen, not measured against a rendered width.\n- Hand-written help in the offline field table that runs past 120 characters (for example the decision branches help) now also opens clamped. That is the intended reading of row 15 (\"the detail behind learn more\").\n\n## Verification\n\nOn head `491ca521`: `dispatch-gates --commands` derived 34 families for this diff; all 34 were run locally, each exit 0, and `--ran` reconciled 34 run, 0 NOT-MEASURED, 0 UNRUN (`node scripts/check-sdui-manifest.mjs` among them). `check:new-line-citations`: 0 new. CI check-runs were in progress when this was opened.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZrsFMFmWFsxTaq2Bu)_\n"
+}

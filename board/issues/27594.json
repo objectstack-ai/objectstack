@@ -14,18 +14,20 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T14:19:47Z",
-  "updated_at": "2026-10-29T14:19:47Z",
+  "updated_at": "2026-10-30T01:59:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27594",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled from the record-page epic #26676 as a sub-issue (the maintainer, 2026-10-29: 「另立两张 ui 卡：…列表视图选择器改下拉 + 收藏进侧栏」; the reasoning, verbatim: 「我们是元数据开发平台，类似 salesforce，每一种元数据的视图数量都不一定的」 and, on Attio: 「他可以把某个列表视图加到收藏，显示在左侧菜单上」). It is list-page work; it also frees a 44 px row inside #27545's narrowed list.\n\n## Source (main `273137d227`)\n\n- The object list page draws its views as a flat tab row (e.g. HotCRM leads: 全部线索 · 我的线索 · 🔥 高热度线索 · 高优先级 · 还有 N 个 ▾) under the list header; authored views come from the object's `*.view.ts` (`views:` / `navigation.tabs`), reader-saved views join the same row. The row overflows at five and is cramped at 464 px (the split's list width).\n- Apps already pin a view into the sidebar on the AUTHOR side: `crm.app.ts` `{ type: 'object', objectName: 'crm_lead', viewName: 'my_leads', label: 'My Leads' }` (nav_my_tasks, nav_my_deals, nav_my_leads, nav_my_calendar). There is no reader-side equivalent.\n- Salesforce (list view picker with search and pin), Attio (「All Deals ▾」 + favorites in the sidebar) and Twenty (「All People · 5 ▾」) all switch views from a dropdown on the title.\n\n## Target\n\n1. **The list title is the view switcher**: 「<view label> ▾ · <count>」 at the top-left of the list header (the object name stays in the breadcrumb and the sidebar highlight); the flat view-tab row retires. The filter / sort / display controls keep their own row.\n2. **The dropdown**: a search box at the top (always, not only past N views); sections 📌 固定 · 最近 · 全部; in 全部 the authored views first in their declared order, then the reader's saved views; each row with its view-type icon (grid / kanban / calendar / gantt / gallery / map) and, on hover, ☆ and 📌; 「＋ 新建视图」 at the bottom (the existing save-view flow).\n3. **Pinned = default**: one pinned view per object per reader opens by default; stored in #27052's `workspacePreference` module, scope `object:NAME`; with none pinned the authored default (`isDefault`, else the first) opens.\n4. **☆ Favorite → sidebar 收藏 group**: starring a view adds 「<object icon> <view label>」 to a 收藏 group at the top of the app's sidebar (reader preference, same module, scope `app:NAME`); unstarring removes it; drag to reorder inside the group; authored `viewName` navigation items are untouched and not duplicated (a view that is already an authored item shows ☆ disabled with the tooltip 「已在菜单中」).\n5. The split pane's list (#27545) uses the same title switcher; nothing else is special-cased. No metadata key; ⛔ `packages/spec/**`.\n\n## File surface\n\n`ui/packages/plugin-list/src/**` (the view tab row → the title switcher), `ui/packages/app-shell/src/views/ObjectView.tsx` + `objectViewListRenderer.tsx` (header), `ui/packages/app-shell/src/components/UnifiedSidebar.tsx` (收藏 group), `ui/packages/app-shell/src/workspacePreference*` (pinned / favorites), i18n in all ten packs, tests beside, changeset; ⛔ `packages/spec/**`.\n\n## Acceptance\n\n1. Tests: the title opens the dropdown with search, sections and the authored-then-reader order; pin stores and restores the default per object; star adds / removes the sidebar entry and reorders; an authored `viewName` item is not duplicated; the tab row no longer renders; the split pane's list shows the same switcher at 464 px.\n2. Screenshots on HotCRM leads (dropdown open at 1440; the sidebar with a 收藏 entry) and in the split pane, on a never-merged evidence branch.\n3. The epic seat verifies in the console preview before ACCEPT (maintainer: 「车队开发完后你审核效果」)."

@@ -1,0 +1,35 @@
+{
+  "number": 27753,
+  "kind": "pull_request",
+  "title": "fix(rest): a refused json export answers the 400 envelope, not a truncated 200 stream",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:21:40Z",
+  "updated_at": "2026-10-29T23:06:55Z",
+  "closed_at": "2026-10-29T23:06:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T23:06:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27753",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DM77tsfTXyZb3uxqJzawYo9)_\n\ndomain:server#3 · os-elon-musk · session_016WV4d1cSb5LKsNDntVL6VG\n\nFixes #27682\n\n## What changes\n\n- `packages/rest/src/data-action-routes.ts`: the json export writes its opening `[` after the first `findData` answers, not before it. One line moved into the read loop (`if (format === 'json' && firstChunk) res.write('[')`), placed before the zero-row break so an empty export is still `[]`. Nothing else in the route changes, and the import-job region (#27711) is untouched.\n- `packages/rest/src/export-json-refusal-envelope.test.ts` (new): pins both halves through the real `HonoHttpServer`.\n- `.changeset/27682-json-export-read-first.md`: patch for `@objectstack/rest`.\n\n## Why\n\nThe first `res.write` commits the Hono adapter to a streaming 200. Writing `[` before the first read meant a query that read refused reached the client as a 200 whose body was a lone `[`, while `format=csv` answered the 400 envelope. Triage 6504427279: the json export reads its first page before it writes any byte and answers the same envelope. A refusal on a later page is not widened here.\n\n## Verification\n\n- Pin, over a real `SqlDriver` (SQLite): `?search=x&searchFields=nope` (the card's repro, `400 INVALID_FIELD`) and `?search=x&searchFields=,` (`400 VALIDATION_ERROR`) answer the same status and body for `format=json` as for `format=csv`. Ablation: with the early write restored, both json rows are red (200); restored, green.\n- Byte identity: a successful json export over one page, three pages (`page=50`, 120 rows) and zero rows answers exactly `[` + rows joined by `,` + `]` (or `[]`), `Content-Type: application/json; charset=utf-8`, with the same number of reads. Green on the unfixed code too, so the success path did not move.\n- `dispatch-gates --ran`: 59 derived families, 58 run green, 1 NOT MEASURED (`check:dual-build-cjs-loads`, exit 3, needs a whole-tree build). `pnpm lint` green; `@objectstack/rest` typecheck and full suite green (343 files, 6702 passed) after merging `main`.\n\nOut of scope finding: `format=xlsx` has the same early commit. Its workbook writer is created before the first read, and the card's repro answers 200 there too (measured). Not fixed or pinned here; the seat can file it.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1cSb5LKsNDntVL6VG\n"
+}

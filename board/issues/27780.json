@@ -1,0 +1,35 @@
+{
+  "number": 27780,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): an object draft's verdict names the namespace-prefix refusal its publish gives (#27444)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T23:00:44Z",
+  "updated_at": "2026-10-30T00:02:07Z",
+  "closed_at": "2026-10-30T00:02:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T00:02:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27780",
+  "body": "domain:server#2 · os-sales · session_01L6bhgUCizoYWQVJWjhdR6F\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPMZ8BHWtPf6nBTp51qSM64)_\n\nFixes #27444\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — no file under `skills/**` describes what a draft's `_diagnostics` carries; the namespace-prefix rule itself is unchanged.\n\n## 维护者速读\n\n- 改了什么:对象草稿的读取诊断(`_diagnostics`)现在会带上包命名空间前缀的拒绝项 `NAMESPACE_PREFIX`,与\"全部发布\"拒绝时的代码和原话一致。\n- 为什么改:之前草稿缺前缀时一直显示\"有效\",直到发布整批时才被拒、连同其它草稿一起回滚,作者在编辑处看不到问题。\n- 风险与回滚:只读诊断多一条错误;草稿保存、发布行为都不变。回滚即还原 `protocol-authoring-gate.ts` 的这一处调用。\n- 先看:`packages/metadata-protocol/src/protocol-authoring-gate.ts`(`draftPublishVerdict` 末尾新增的前缀判定)、`protocol.ts`(宿主接线一行)、`protocol.draft-publish-verdict.test.ts`(新增两例)。\n- 两分钟验证:`pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.draft-publish-verdict.test.ts`,预期 17/17 通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `draftPublishVerdict` (the draft read's publish verdict, folded into `_diagnostics` by `withPublishVerdict`) now asks, for an `object` draft, `objectNamespacePrefixViolation` — the one judge the publish pre-flight (`publishPackageDrafts`), the per-item publish (`promoteDraftForPublish`) and the direct publish-mode save already ask. One check, not a copy: the host is handed the class's own method (`protocol.ts`, host wiring only).\n- It judges against the package the draft is staged into (the draft row's `package_id`, the package \"Publish all\" promotes it under and passes as `request.packageId`). A draft bound to no package, or to a package that declares no namespace, gets nothing — the judge's own skip.\n- Finding shape: one `errors[]` entry with `code: 'NAMESPACE_PREFIX'`, `path: 'name'`, and `message` = the exact sentence publish-drafts refuses with (`Object 'qa_formula_pkg_r2' is missing the package namespace prefix. Rename it to 'r2_qa_formula_pkg_r2' (namespace = 'r2').`); `valid: false`. It is listed before the gate's own issues, the order the batch pre-flight reports it in.\n- Unchanged: the draft save is still ungated (ADR-0129 D2, #4463 D1) and answers 200 `state: \"draft\"`; publish-drafts and the per-item publish refuse exactly as before.\n\n## Tests\n\nTwo cases in `packages/metadata-protocol/src/protocol.draft-publish-verdict.test.ts`, through the real save, draft read and publish-drafts doors (the #26707 harness):\n\n- an unprefixed object draft in a namespaced package saves 200 `state: draft`; publish-drafts refuses it `outcome: refused` / `NAMESPACE_PREFIX`; its draft read is `valid: false` and its `NAMESPACE_PREFIX` entry's message equals the publish-drafts `error` string, compared in the same test;\n- control: a prefixed object draft in the same package reads `{ valid: true }` and publishes.\n\nRed before the fix (`expected true to be false` on `diagnostics.valid`, 1 failed / 16 passed); green after.\n\n<details><summary>Ablation (scripts/ablation-replace.mjs)</summary>\n\nMutation: the new call `? this.objectNamespacePrefixViolation(draft.name, draft.packageId)` replaced with `? null` in `protocol-authoring-gate.ts`. The test imports `./protocol.js` from `src/` (relative), so no `dist/` hop is involved.\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob c477eabc961a -> ad467a0d1c65\n     × saves as a draft, and its read carries the NAMESPACE_PREFIX refusal publish-drafts gives 16ms\nAssertionError: expected true to be false // Object.is equality\n      Tests  1 failed | 16 passed (17)\nablation-replace: ok restored: blob == HEAD (c477eabc961a) and `git diff HEAD` is empty\n```\n</details>\n\n## Acceptance notes\n\n- The per-item publish skips sealed managed content before asking the prefix judge; the draft verdict follows the batch pre-flight instead, which has no such skip. Not measured whether a draft of a sealed managed object can exist at all; noted, not filed.\n- No UI change in this PR: the entry rides the same `_diagnostics.errors` the #26707 findings already ride.\n\n## Verification\n\nRun on `dda53adf` (after merging `origin/main` once):\n\n<details><summary>Local gates</summary>\n\n- `pnpm --filter '@objectstack/metadata-protocol^...' build` :: exit 0\n- `pnpm --filter @objectstack/metadata-protocol typecheck` :: exit 0\n- `pnpm --filter @objectstack/metadata-protocol test` :: exit 0 — Test Files 280 passed, 4 skipped (284); Tests 21804 passed, 26 skipped (21830)\n- `eslint --no-inline-config packages/metadata-protocol` :: exit 0\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 61 derived; 60 exit 0. `pnpm check:lean-entry-closure` first exited 3 (objectql `dist/` absent), re-run after `pnpm --filter @objectstack/objectql build` :: exit 0. `pnpm check:dual-build-cjs-loads` :: exit 3 — NOT MEASURED, PREREQUISITE NOT MET (needs every package's `dist/`; CI's `Lint & Repo Gates` runs it).\n- `--ran` reconciliation: 61 derived, 60 run, 1 NOT-MEASURED (the one above), 0 UNRUN.\n- Open PRs on the changed files: none of the 16 open PRs touches them, so no `merge-tree` probe applies.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUCizoYWQVJWjhdR6F)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUCizoYWQVJWjhdR6F\n"
+}

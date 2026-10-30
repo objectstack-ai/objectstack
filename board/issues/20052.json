@@ -2,7 +2,7 @@
   "number": 20052,
   "kind": "pull_request",
   "title": "feat(spec)!: split the assembled-stage package API declarations off ./api into @objectstack/spec/api-assembled",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-24T23:46:05Z",
-  "updated_at": "2026-09-25T01:51:26Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-25T02:30:31Z",
+  "closed_at": "2026-09-25T02:30:30Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": "2026-09-25T02:30:30Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20052",

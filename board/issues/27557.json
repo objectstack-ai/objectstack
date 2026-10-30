@@ -2,7 +2,7 @@
   "number": 27557,
   "kind": "pull_request",
   "title": "fix(studio): an uncommitted nav rename raises the held-edit guard",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T12:38:28Z",
-  "updated_at": "2026-10-29T19:46:51Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-29T20:25:13Z",
+  "closed_at": "2026-10-29T20:25:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T20:25:10Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27557",

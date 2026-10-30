@@ -1,0 +1,34 @@
+{
+  "number": 27718,
+  "kind": "pull_request",
+  "title": "qa(authz-conformance), docs(api): record that POST /api/v1/keys mints only for a signed-in session",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T20:34:55Z",
+  "updated_at": "2026-10-29T21:12:23Z",
+  "closed_at": "2026-10-29T21:12:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T21:12:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27718",
+  "body": "Fixes #27708\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:授权一致性矩阵新增一行 `keys-mint-session-required`,记录「只有登录会话才能创建 API key」;两处文档各加一句说明这条规则。\n- 为什么改:#27536 已上线该规则(用 API key 调 `POST /api/v1/keys` 得到 403 `PERMISSION_DENIED`),但矩阵和文档都没写,脚本作者只能从 403 才发现。\n- 风险与回滚:零运行时改动,只动一个私有测试包的数据文件和两页文档;回滚即 revert 本 PR。\n- 先看:`packages/qa/dogfood/test/authz-conformance.matrix.ts` 新行的 `enforcement`(对照 `runtime/domains/keys.ts` 第 146 行);`content/docs/api/index.mdx` 的 API key 条目;`content/docs/ai/connect-mcp.mdx` 的 \"Or mint one over REST\" 一句。\n- 两分钟验证:`pnpm --filter @objectstack/dogfood exec vitest run test/authz-conformance.test.ts test/authz-probe-blind-spot.test.ts`,预期 2 个文件、70 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/qa/dogfood/test/authz-conformance.matrix.ts`\n  - New row `keys-mint-session-required` beside `anonymous-deny-keys`, `state: 'enforced'`. Its `enforcement` is read from `packages/runtime/src/domains/keys.ts`: the domain-wide positive check `context.admission?.credential === 'session'` (L146), directly below the anonymous decision (L129) and ahead of the body read and the method check. Every other admission (an API key in any of its three header spellings, or no recorded admission) answers 403 `PERMISSION_DENIED`. The `note` names the pin file `runtime/domains/keys-mint-interactive-session.pin.test.ts` (14 cases).\n  - The row carries no `covers` key. This is a predicate inside a domain that `anonymous-deny-keys` already classifies, so it adds no entry point for `discover()`. A `covers` key that no probe mints fails as STALE. This is the matrix's in-resolver convention, and the row's `note` says so.\n  - `anonymous-deny-keys`: \"a signed-in caller reaches the mint exactly as before\" now reads \"a session-admitted caller ... (a caller admitted by an API key is refused by the next row, `keys-mint-session-required`)\", so the two rows agree.\n  - Docblock covers census: \"49 of 67 ... 43 of the file's 60 `enforced` rows\" now reads \"51 of 69 ... 45 of 62\". See the Acceptance notes.\n- `content/docs/api/index.mdx` (the **API key** bullet): one sentence saying that minting needs a signed-in session, a request authenticated with an API key is refused `403 PERMISSION_DENIED`, and so a key cannot mint another key. \"Send it as\" becomes \"Send the key as\" so the pronoun stays unambiguous.\n- `content/docs/ai/connect-mcp.mdx` (under \"Or mint one over REST\"): the lead-in now names the signed-in session (the `-b cookies.txt` in the snippet) and the 403 for an API-key request. Open PR #27649 edits this file only at its L242 and L392 hunks, so the two do not overlap.\n\nNo runtime change. `packages/qa/dogfood` is `private: true` and `content/docs` does not publish, so no changeset is owed and the PR carries `skip-changeset`.\n\n## Tests\n\nEvery reader of the matrix that imports or reads its text was run. `authz-conformance.test.ts` imports `AUTHZ_CONFORMANCE`. `authz-probe-blind-spot.test.ts` reads the matrix text. The other files that grep the name only mention it in comments.\n\n<details><summary>Matrix readers: 2 files, 70 tests, pass (head 2ba6263244)</summary>\n\n```\npnpm --filter @objectstack/dogfood exec vitest run --maxWorkers=2 test/authz-conformance.test.ts test/authz-probe-blind-spot.test.ts\n Test Files  2 passed (2)\n      Tests  70 passed (70)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>The pin the new row cites: 14 tests, pass</summary>\n\n```\npnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/domains/keys-mint-interactive-session.pin.test.ts\n Test Files  1 passed (1)\n      Tests  14 passed (14)\n```\n</details>\n\n<details><summary>Dogfood typecheck: exit 0, and the program does include the matrix file</summary>\n\n`pnpm --filter @objectstack/dogfood run typecheck` exits 0. With `--listFiles` the program holds 409 files under `packages/qa/dogfood/test/`, one of them `authz-conformance.matrix.ts`.\n</details>\n\n## Acceptance notes\n\n- The docblock's covers census was already stale at base `2140821ea6`. It said 67 rows and 60 `enforced`, but a count at base read 68 rows, 50 with no `covers`, 61 `enforced` and 44 `enforced` with no `covers`. The new row moves each figure by one more, so they were corrected to the measured values: 69, 51, 62 and 45. No test pins these figures. The #17111 pin reads only the two ledger group counts, which this PR does not move.\n- No ablation was run. The diff changes data rows and prose, not a behaviour that a test pins.\n\n## Verification\n\nGate families come from `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at head `2ba6263244` (3 paths). Each exit code was recorded before any pipe and reconciled with `--ran`.\n\n<details><summary>Local derived set: 71 derived, 70 run exit 0, 1 NOT MEASURED</summary>\n\n- `--ran` verdict: `71 derived famil(ies) accounted for — 70 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)`.\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads` exits 3 with PREREQUISITE NOT MET, because six packages outside this diff's build closure have no `dist/` (studio, embedder-openai, knowledge-memory, knowledge-ragflow, service-cluster-redis, service-knowledge). CI's `Lint & Repo Gates` runs it on a full build.\n- Build closure: `pnpm --filter '@objectstack/dogfood^...' build` exits 0. `@objectstack/client-react...` was also built, because `check:skill-examples` reads its `dist`. That gate exited 3 before the build and 0 after it.\n- `--ran` flagged the tree as 11 commits behind origin/main. The one derivation input that changed in that range is `scripts/pm/check-skill-line-ratchet.mjs`, which none of the 71 derived families runs.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYmTYfaPbLQD4BJfomW)_\n"
+}

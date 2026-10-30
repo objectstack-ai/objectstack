@@ -1,0 +1,35 @@
+{
+  "number": 27746,
+  "kind": "issue",
+  "title": "service-datasource: a datasource driver resolves a borrowed connector credential through ADR-0143 D4's per-dispatch resolver (D7 runtime seam) — epic #27261 P2",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:06:11Z",
+  "updated_at": "2026-10-30T01:34:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27746",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ maintainer-directed — 田騏 at 2026-10-29T21:58Z 「现在启动全部 P2」 (epic comment 6509296853, D1 amended), at 2026-10-29T21:59Z 「OData 驱动 只做 v4」 (6509311454), at 2026-10-29T22:01Z 「同意」 (generic P2 parts open source in this repository; vendor-specific drivers such as Salesforce stay out of it).\nRuling-ref: 6486145005 (#27299, Tier B = declarative OData) · 6486136301 (#27298, D7) · 6471382887 (#27261 D1–D6)\nDedupe (open AND closed): \"OData datasource driver $metadata import connector credential external datasource\" → 5 hits, none this work (#27298 is the ruled decision card).\nReader: the epic PM (#27261) dispatches it in the epic subtree.\nBlocked-by: #27742\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 让数据源驱动（先是 OData）在每次请求时通过 ADR-0143 的凭据解析器拿到连接器实例的令牌，过期自动刷新。\n- **为什么：** D7 的运行时一半；没有它 spec 的键只是声明。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] A seam through which a datasource driver obtains a request credential from the connector instance its datasource names (ADR-0143 D4 per-dispatch resolver, `service-automation/src/connector-credentials.ts`), without making `objectql` depend on `service-automation` (the ruling's open reading: name the dependency direction chosen).\n- [ ] `driver-odata` uses it when the datasource names a connector instance; token refresh on 401 once, then the floor's 503 path.\n- [ ] Tests: a borrowed static credential, an `oauth2` credential refreshed after expiry, an undeclared instance refused at build (spec side) and at connect.\n\n`Clause-②:` decided by the dev from the diff · `Metadata-protocol: none`."
+}

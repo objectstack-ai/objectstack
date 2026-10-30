@@ -2,8 +2,8 @@
   "number": 27615,
   "kind": "issue",
   "title": "approvals: a principal holding N of a step's approver slots — the chip's ×N and the eligible-approver count need the copy that reconciles them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T14:50:48Z",
-  "updated_at": "2026-10-29T20:00:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T20:25:12Z",
+  "closed_at": "2026-10-29T20:25:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

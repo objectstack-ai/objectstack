@@ -1,0 +1,34 @@
+{
+  "number": 27779,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a dynamic currency change in record History reads in the tenant currency",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T23:00:42Z",
+  "updated_at": "2026-10-29T23:45:06Z",
+  "closed_at": "2026-10-29T23:45:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T23:45:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27779",
+  "body": "domain:ui#2 · os-bill · session_01Utp6CY2n1JmZZKrHgtp9jC\n<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgP6XkfpjCfyzzG2KwQPUZfy)_\nFixes #27640\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:记录页 History 的格式化上下文现在带上租户默认币种(`useLocalization().currency`),`dynamic` 币种字段的变更显示为 `€1,500.00 → €2,500.00`,不再是裸数字。\n- 为什么改:同一字段在记录页显示 `$4,321,000.00`,History 里却是 `4,321,000.00`,两处读数不一致;原因是 History 从没拿到租户币种。\n- 风险与回滚:风险低,只是给已有的可选成员传值,`record` 模式不受影响;回滚即还原本 PR 一个提交。\n- 先看:`ui/packages/app-shell/src/views/RecordDetailView.tsx`(`fmtCtx` 一行、hook 读取、effect 依赖),再看新测试 `RecordDetailView.auditTenantCurrency-27640.test.tsx`。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/app-shell/src/views/RecordDetailView.auditTenantCurrency-27640.test.tsx`,预期 3 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`RecordDetailView`'s History effect built its format context as `{ t, locale: displayLocale, lookupLabels }`, so `formatAuditValue` → `resolveFieldCurrency` never reached its last step, the tenant default currency (`AuditValueFormatContext.tenantCurrency`, ADR-0053). A `dynamic`-mode currency change therefore read as a plain grouped number next to the record's own currency face.\n\n- The view reads `const { currency: tenantCurrency } = useLocalization();` (from `@object-ui/i18n`), the same value the record page's cells read: `DetailView` in `@object-ui/plugin-detail` takes its `tenantCurrency` from `useLocalization()` the same way. The view held no such value before, so this is the one hook read the triage allowed.\n- `fmtCtx` becomes `{ t, locale: displayLocale, lookupLabels, tenantCurrency }`.\n- `tenantCurrency` joins the History effect's dependency list beside `displayLocale`, so the stream re-formats when the tenant's localization arrives or changes, the way it already does for a display-locale switch.\n- `record`-mode fields are unchanged (out of scope per triage): `resolveFieldCurrency` answers no code for them without the row, and the tenant default is never their fallback.\n\nChangeset: `.changeset/27640-history-dynamic-currency.md`, `@object-ui/app-shell` patch.\n\n## Tests\n\nNew: `ui/packages/app-shell/src/views/RecordDetailView.auditTenantCurrency-27640.test.tsx` renders the record page on its History stream (`?tab=timeline`) under a real `I18nProvider` and a `LocalizationProvider`, with one audit entry that moves a `dynamic` field and a `record`-mode field from 1500 to 2500:\n\n- EUR tenant: the `dynamic` change reads `Amount €1,500.00 → €2,500.00` (the pin);\n- EUR tenant: the `record`-mode change stays `List price 1,500.00 → 2,500.00`;\n- control, no tenant currency: the `dynamic` change reads `Amount 1,500.00 → 2,500.00`.\n\nAblation (fix committed first, mutation through `scripts/ablation-replace.mjs`): replacing `lookupLabels, tenantCurrency };` with `lookupLabels };` landed on disk (anchor 1 → 0, blob `ab5f20a6e2c8` → `cb4dc3752561`); the pin went red (`got: Amount 1,500.00 → 2,500.00`), the record-mode case and the control stayed green, and the restore matched the HEAD blob `ab5f20a6e2c8`.\n\n## Acceptance notes\n\n- The spec seat's draft PR #27713 also edits `RecordDetailView.tsx`; its patch does not touch the hunks here (the import line, the `displayLocale` hook area, `fmtCtx` and the History effect's dependency list). Whichever lands second rebases.\n- Local verification was narrowed: the `@object-ui/app-shell` package holds about 1,900 test files, too many to run on the shared box under the verification lock, so the local run covers every test file that imports `RecordDetailView` plus the `auditHistoryDisplay` unit tests. `Test UI` in CI runs the whole package.\n\n## Verification\n\nLocal readings, on head `7be9046e` (after the one merge of `origin/main`) unless named otherwise.\n\n<details>\n<summary>Targeted tests</summary>\n\n- New test file: `Test Files 1 passed (1)`, `Tests 3 passed (3)`.\n- History siblings (`RecordDetailView.auditDisplayLocale-10442`, `auditHistoryDisplay.numericAmounts-27486`): green.\n- Every test file importing `RecordDetailView` plus the `auditHistoryDisplay` unit tests (157 files, the new one included): `Test Files 156 passed | 1 skipped (157)`, `Tests 1079 passed | 8 skipped (1087)`, lock `VERDICT command-exit 0`.\n\n</details>\n\n<details>\n<summary>Typecheck and lint</summary>\n\n- `pnpm --filter @object-ui/app-shell run type-check` (both `tsc --noEmit` and `tsconfig.test.json`), on `f804616f` (the merge brought no change to this diff's files): lock `VERDICT command-exit 0`.\n- `eslint` on the two touched source files: exit 0, 0 errors (warnings only, the existing `no-explicit-any` ones and two `as any` test doubles that mirror the sibling History test).\n- `pnpm check:new-line-citations` (run by hand per `ui/AGENTS.md`): 0 new citations.\n\n</details>\n\n<details>\n<summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 commands over the 3 changed paths; all 34 exited 0 (`node scripts/check-sdui-manifest.mjs` among them), and `--ran` reconciled 34 derived / 34 run / 0 NOT-MEASURED. Re-run in full on `7be9046e`: 34/34 exit 0, `--ran` reconciled 34/34/0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CY2n1JmZZKrHgtp9jC)_\n"
+}

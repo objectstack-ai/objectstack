@@ -1,0 +1,32 @@
+{
+  "number": 27803,
+  "kind": "issue",
+  "title": "spec: composed stacks refuse a datasource whose external.connector names no declared connector instance (composed counterpart of the #27742 check, #25211 shape) — epic #27261",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "enhancement",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T23:48:23Z",
+  "updated_at": "2026-10-30T00:15:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27803",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① should-fix (d) of the contract review of PR #27783 (record 6511230689, VERDICT PASS), not taken into that PR.\nRuling-ref: 6486136301 (#27298, D7)\nDedupe (open AND closed): \"composed external.connector datasource connector cross-reference\" → 6 hits, none this work.\nReader: the epic PM (#27261) dispatches it in the epic subtree.\nBlocked-by: #27742\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** #27742 在 `defineStack` 严格构建时拒收\"数据源点名了不存在的连接器实例\"；但多个栈合成（`composeStacks`）时，若某个输入以 `strict: false` 构建，悬空的名字会带进产物而无人报错。补上合成层的同类检查。\n- **为什么：** 运行时（#27746）会失败关闭，所以不是漏洞；但作者要等到连接时才知道写错了。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] A composed collector of the #25211 shape (`collectComposedExternalBindingDatasourceErrors` is the precedent) refuses a composed artifact in which a datasource's `external.connector` names no connector instance declared across the composed inputs, or names a descriptor (no `provider`), or an instance with nothing to lend (`auth` absent or `type: 'none'`). It uses the same three findings and fixes as `collectDatasourceConnectorErrors` in `stack.zod.ts`.\n- [ ] Tests: a cross-input pair resolved (accepted), a dangling name carried by a `strict: false` input (refused), and a per-stack strict refusal unchanged.\n\n`Clause-②: yes (narrowing)` (a composed artifact accepted today is refused) · `Metadata-protocol: none`. Touches `packages/spec/src/**`: full Fable review and a `CONTRACT_REVIEW_TIER` record before landing."
+}

@@ -2,9 +2,9 @@
   "number": 27712,
   "kind": "pull_request",
   "title": "fix(i18n): Studio trackHistory switch describes the v3 timeline, not a History tab",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T20:17:30Z",
-  "updated_at": "2026-10-29T20:18:32Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-10-29T20:54:16Z",
+  "closed_at": "2026-10-29T20:54:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T20:54:14Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27712",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg4i9JiKjEjwtuVzd4gKy9hB)_\n\nFixes #27544\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：Studio 对象设置里 trackHistory 开关的标题和说明（英文、中文），不再写「历史标签页」，改为说字段变更并入记录时间线的「变更」筛选；另修正 plugin-detail 里两处描述页签的注释。\n- 为什么改：v3 记录页已没有 History 标签页，spec 的 enable.trackHistory 说明已改，开关文案还停在旧页面，作者打开开关时会被误导。\n- 风险与回滚：只改文案和注释，开关的行为、键名和保存内容都不变；回滚即还原这三个文件。\n- 先看：ui/packages/i18n/src/namespaces/studio/en.ts（capTrackHistory 两条）、zh.ts 同两条、buildDefaultPageSchema.ts 的 buildDefaultTabs 注释。\n- 两分钟验证：打开 Studio 任一对象的设置，看「能力开关」里 trackHistory 那一行，应显示「字段变更历史」并说明并入时间线的「变更」筛选。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `engine.studio.settings.capTrackHistory` / `capTrackHistoryDesc` (studio namespace, `en` and `zh`, the only two catalogues that carry the keys; every other language falls back to `en`): the label drops \"History tab\" for \"Field change history (trackHistory)\" / 「字段变更历史(trackHistory)」, and the description reuses the spec's `enable.trackHistory` sentence: on the default record page the record's field changes join its one timeline stream, under its Changes filter. The per-field pairing and the \"audit capture is always on\" clauses are kept.\n- `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`, comments only: the `buildDefaultTabs` docblock now names the tabs it emits today (Details always, then Timeline / Related / Approvals when they have content, Timeline second for a worked object and last otherwise), and the `details` slot note names Timeline / Related / Approvals as the other tabs instead of Related / Activity / History.\n- Root changeset: `@object-ui/i18n` patch. `plugin-detail` changes comments only and publishes nothing new.\n\n## Why\n\nThe spec's `enable.trackHistory` describe text moved to the v3 record page: there is no History tab, field changes are a filter of the one timeline stream. The Studio switch an author reads while turning the flag on still promised a History tab.\n\n## Acceptance notes\n\n- No test pins these strings: the switch is found by its `cap-trackHistory` test id in `ObjectSettingsPanel.test.tsx`, and the studio namespace sits outside the all-locales parity suite by construction (its own index docblock). `en-zh-key-parity` holds the key sets, which are unchanged.\n- The spec's sentence also says an authored page's `record:history` / `record:activity` block shows field changes without reading the flag. The switch copy keeps to the default page so it stays one line; the spec carries the full text.\n- No behaviour change, so no ablation.\n\n## Verification\n\nDerived gates (`node scripts/pm/dispatch-gates.mjs --commands`, 28 families, `node scripts/check-sdui-manifest.mjs` among them) all exit 0, on `38db09df` and again on the merged head `068a9ab2`; reconciled with `--ran`: 28 derived, 28 run, 0 NOT-MEASURED. Every other family is CI's; the PR's check-runs are its record.\n\n<details><summary>Tests</summary>\n\n- `pnpm --dir ui exec vitest run packages/i18n/ packages/app-shell/src/views/studio-design/ObjectSettingsPanel.test.tsx` on `068a9ab2` (after merging main): Test Files 91 passed (91), Tests 1390 passed, 13 skipped; lock VERDICT command-exit 0.\n- `pnpm --filter @object-ui/i18n run type-check`: exit 0.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (No formatter ran; lint is not run locally, `Lint UI` and `Lint & Repo Gates` carry it.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [ ] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a: `packages/spec` untouched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CYWnyQdkzjLrt4GbWC\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CYWnyQdkzjLrt4GbWC)_\n"

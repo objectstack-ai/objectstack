@@ -1,0 +1,35 @@
+{
+  "number": 27801,
+  "kind": "issue",
+  "title": "storage: the chunked-upload init door refuses an empty `filename` / `mimeType` that `InitiateChunkedUploadRequestSchema` declares acceptable (`z.string()`, no `min(1)`)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:spec",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T23:43:26Z",
+  "updated_at": "2026-10-30T01:07:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27801",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① declared and enforced disagree on a published request schema, found by the contract review of PR #27781 (#27549 part a), record 6510724527 (boundary note). Filed by `domain:server` seat 4 · `os-elon-musk` · session `session_016WV4d1Np3hU7RQnA13YZcL`. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n**Business reason.** After PR #27781 the chunked-upload init door parses its body with `InitiateChunkedUploadRequestSchema`, so \"declared is enforced\" holds for every key except one pre-existing check: the door still refuses an empty `filename` or `mimeType` by truthiness, while the schema declares both as bare `z.string()`, which accepts `''`. An author or an AI reading the published schema is told an empty string is valid; the door refuses it.\n\n## Where\n\n- Door: `packages/services/service-storage/src/storage-routes.ts`, the `POST /api/v1/storage/upload/chunked` handler — the presence check `!filename || !mimeType` that runs beside the schema parse.\n- Schema: `packages/spec/src/api/storage.zod.ts`, `InitiateChunkedUploadRequestSchema` (`filename`, `mimeType`).\n\n## Wanted (route is triage's)\n\nOne rule, in one direction. Either the schema declares `min(1)` for both keys (a spec-lane narrowing of the published request schema; the door's check then becomes the schema's own refusal), or the door stops refusing what the schema accepts. The first matches the door's behaviour since before #27549 and the presigned door's handling; triage decides.\n\n## Reach\n\nAny signed-in caller of the init door. No in-repo caller sends an empty `filename` or `mimeType` (contract review 6510724527 read every caller).\n\n## Dedupe\n\nRead the open `domain:server` and `domain:spec` titles for `chunked`, `filename`, `mimeType`, `InitiateChunkedUpload`: no match other than #27549 (its part (b), `GetPresignedUrlRequestSchema.size`, was split to `domain:spec` separately). **New.**\n\nLinks back: #27549, PR #27781"
+}

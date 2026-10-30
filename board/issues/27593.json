@@ -14,18 +14,20 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T14:19:40Z",
-  "updated_at": "2026-10-29T14:19:40Z",
+  "updated_at": "2026-10-30T01:51:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27593",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled from the record-page epic #26676 as a sub-issue (the maintainer, 2026-10-29: 「另立两张 ui 卡：侧栏窄窗自动折叠、…」; earlier, looking at Attio on a narrow pane: 「窄屏幕左侧菜单自动折叠，点击弹出，这个你也可以参考」). It is console shell work, not record-page anatomy; it makes #27545's default split fit on common laptop windows.\n\n## Source (main `273137d227`)\n\n- `ui/packages/app-shell/src/layout/ConsoleLayout.tsx` uses `useIsMobile()`; `ui/packages/components/src/ui/sidebar.tsx` is the shadcn Sidebar with `collapsible: \"offcanvas\" | \"icon\" | \"none\"` (default `offcanvas`), a Sheet below the mobile breakpoint, and a resizable rail (200–480 px, remembered in `localStorage`) above it. Between the mobile breakpoint and any width the sidebar stays expanded, so a 1280 px window leaves 1024 px of content — below what the split (list ≥ 440 + pane 720 = 1160) needs, which #27545 then handles by falling back to the overlay drawer.\n- Attio collapses its sidebar to a single icon on narrow windows and expands it as an overlay on click; Twenty keeps a collapsible rail.\n\n## Target\n\n1. **Auto-collapse below a window width of 1100 px**: the sidebar renders as the icon rail (`collapsible=\"icon\"`, the existing `--sidebar-width-icon`), the content area takes the rest; above 1100 px the sidebar behaves as today. The threshold is one named constant beside the record page's 1120 / 760 ones, not a magic number.\n2. **Click to expand as an overlay**: clicking the rail (or the sidebar toggle, `⌘B` as today) expands the full sidebar OVER the content, not pushing it; choosing a navigation item, clicking outside, or Esc collapses it again. Hover alone does not expand.\n3. **Reader override, remembered**: a reader who expands the sidebar and pins it (the existing toggle in the expanded state) keeps it expanded below 1100 px for that browser; stored where the rail width is stored today. The mobile Sheet below 768 px is unchanged.\n4. No metadata key; no spec change; the app's navigation items are untouched.\n\n## File surface\n\n`ui/packages/app-shell/src/layout/ConsoleLayout.tsx`, `ui/packages/app-shell/src/components/UnifiedSidebar.tsx` (rail rendering of groups and items with tooltips), `ui/packages/components/src/ui/sidebar.tsx` (overlay expand mode), `ui/packages/components/src/hooks/use-mobile.ts` (a second breakpoint hook beside it), i18n for the tooltips, tests beside, changeset; ⛔ `packages/spec/**`.\n\n## Acceptance\n\n1. Tests: at 1280 px the sidebar mounts as the icon rail and the content width is the window minus the rail; a rail click expands an overlay that does not change the content width; a navigation choice / outside click / Esc collapses it; the pinned override persists across a reload; at 1440 px nothing changes; at 700 px the Sheet still mounts.\n2. Screenshots at 1280 (rail, overlay expanded) and 1440 (unchanged) on HotCRM, on a never-merged evidence branch.\n3. The epic seat verifies in the console preview before ACCEPT (maintainer: 「车队开发完后你审核效果」)."

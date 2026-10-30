@@ -1,0 +1,33 @@
+{
+  "number": 27822,
+  "kind": "issue",
+  "title": "spec(search): no test pins SEARCH_AUTO_EXCLUDED_TYPES to cover every credential type in MASKED_ON_READ_FIELD_TYPES, so a new masked type could reach REST $searchFields while the engine withholds it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T00:49:52Z",
+  "updated_at": "2026-10-30T01:00:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27822",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a should-fix that a contract review marked as owed (record 6512125643 on PR #27811, ④ \"Does the search-fields vocabulary drift from the mask table?\"). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade yet: triage sets the grade.\nReader: the `domain:spec` seat; the next PR is one assertion in `packages/spec/src/data/search-fields.test.ts` or `masked-field-types.test.ts`.\nDedupe (open AND closed): semantic search \"SEARCH_AUTO_EXCLUDED_TYPES MASKED_ON_READ_FIELD_TYPES search exclusion credential types pin\" → 9 hits, all closed and about other gaps (#13716 dead set members, #6934 an unreachable guard, #20141 the masked-type set itself, #7922 the aggregate type-vs-flag gap); none pins the two sets together; #27705 / PR #27811 made the mask table the one credential vocabulary and is the source. **New.**\nreach: none today (no current type drifts; the engine fails closed). Latent: it opens the first time someone adds a type to the mask table without adding it to the search exclusion set.\n\n## Measured (PR #27811 head `257e83df`, per the record)\n\n- `SEARCH_AUTO_EXCLUDED_TYPES` (`packages/spec/src/data/search-fields.ts:67`) names `secret` and `password` by hand; `search-fields.test.ts:189` pins only that `secret` is in it.\n- After PR #27811, `isCredentialFieldType` reads the keys of `MASKED_ON_READ_FIELD_TYPES` (`packages/spec/src/data/masked-field-types.ts`), and the engine's search withhold, the aggregate refusal, the evaluation guard and the lint check all judge credential types from it.\n- The REST ingress (`assertSearchFieldsAreSearchable`, `packages/metadata-protocol/src/protocol-query-validation.ts:930`) resolves the allowed set over the unfiltered registry map with `SEARCH_AUTO_EXCLUDED_TYPES`. A type added to the mask table but not to that set would be withheld by the engine and refused by lint, yet admitted at the REST door in an auto-default `$searchFields`: a narrower request answered wider.\n\n## Wanted\n\n- One pin: for every own key of `MASKED_ON_READ_FIELD_TYPES`, `SEARCH_AUTO_EXCLUDED_TYPES.has(key)`. (Or derive the two credential members of the set from the table, if that is a one-line change.)\n- Lands after PR #27811. Test-only unless the derivation route is taken.\n\n**Clause-②:** `no`. **Metadata-protocol:** `none`.\n\nRelated: the REST-ingress reading in PR #27811's acceptance notes (a declared credential `$searchFields` entry is admitted and then dropped), which the seat measures before filing.\n"
+}

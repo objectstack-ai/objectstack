@@ -1,0 +1,37 @@
+{
+  "number": 27788,
+  "kind": "pull_request",
+  "title": "fix(service-datasource)!: reconnect requires `previous`, and the engine read-back answers the stored driver id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T23:12:00Z",
+  "updated_at": "2026-10-30T00:50:33Z",
+  "closed_at": "2026-10-30T00:50:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T00:50:30Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27788",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiEe1mThB51wBSHAzPk8xmuG)_\n\n**Fable review owed.** This PR was built on Opus while the Fable quota was out (maintainer order: finish on Opus, then wait for the contract review). It touches `packages/spec/src/**`, so it does not land until a `CONTRACT_REVIEW_TIER` contract review record PASS is on its current head.\n\nFixes #27727 (epic #27261). The four should-fixes and the prose note from the contract review of PR #27715 (6508089206, ④ and ③). Claim 6509213861.\n\n## What changes\n\n- `IDataEngine.registerDatasourceDef?` member doc (`packages/spec/src/contracts/data-engine.ts`): \"last write wins, except an absent `driver` keeps the id stored before it\", so the member doc and the `EngineDatasourceDef.driver` key doc no longer disagree. The engine's own `registerDatasourceDef` doc says the same. The key doc now also says the read-back answers the stored id.\n- `ObjectQL.listDatasourceDefs` answers each definition's stored `driver` id when it has one (chosen over documenting the omission: the id is what decides the floor, so a sweep asking which datasources name a plugin driver can now be written against the contract). A definition that never named a driver is listed without the key, as before; the existing `toEqual` pins carry no driver and are unchanged.\n- `DatasourceConnectionService.reconnect`: `opts.previous` is required (type level), and a call without `previous.driver` (absent or empty) is refused at runtime BEFORE anything is evicted or rebuilt, so the live pool keeps serving. Before this, a host calling `reconnect` without `previous` got a kept pool restored under a definition naming no driver, which serves a plugin driver unfloored, silently. Both in-repo callers (the admin plugin's `reregisterPool` and two test seams) already pass it.\n- `external-driver-floor.test.ts`: the #27277 keep test now names the caller class it models (a registration of the write-gate facts only) and says the connection service is not that caller.\n- `content/docs/data-modeling/virtual-objects.mdx`: the \"ADR-0015 ... Tier A\" line is gone (Tier A is epic #27261's term, not ADR-0015's); the ADR-0015 reference stays, describing what the ADR does govern on that page.\n\n## Why\n\nContract review 6508089206 ④ on #27666: no must-fix, and none of these opens a path today, but each leaves the next caller a way to write a datasource the floor does not protect, or a contract that says two things about one member.\n\n## Verification\n\nLocal, on `a5f0c8b5` (branch merged with `origin/main` at `34dc09b6`):\n\n- New pins, each red with the fix reverted and green with it (reverse-verified from a committed state):\n  - objectql `external-driver-floor.test.ts`, `[#27727]` block: `listDatasourceDefs` answers the named id, the kept id, and the manifest-declared id (2 of 3 red without the engine change; the third is the control that a def with no driver is listed without the key).\n  - service-datasource `datasource-connection-service.test.ts`, `[#27727]` block: a `reconnect` without `previous` (and with an empty `driver`) rejects, the live driver and the def list are untouched, and the factory built nothing (red without the guard); a failed rebuild restores the kept pool under the OLD driver id. A `@ts-expect-error` pins `previous` as required in a file the package's `tsc` compiles.\n- `pnpm --filter @objectstack/objectql test`: 9247/9247. `pnpm --filter @objectstack/service-datasource test`: 1013/1013. cli `secret-reference-union` and `absent-table-reads`: 49/49.\n- `typecheck` clean for objectql, service-datasource and spec; `pnpm lint` exit 0; spec `check:generated` exit 0 (all 14 artifacts current).\n- `dispatch-gates --ran`: 109 derived families, 109 run, 0 not measured, all exit 0 (after a full `pnpm build`).\n\nClause-②: yes (narrowing)\nMetadata-protocol: none\n\nThe claim declared `Clause-②: no (narrowing)` for the required `previous`; the diff also widens `listDatasourceDefs`'s answer by the stored `driver` key, so this PR and its changeset say `yes (narrowing)`, as the epic PM asked. The changeset carries the BREAKING banner (a host calling `reconnect` without `previous`; none in-repo) and the ADR-0087 marker `not-required (no-migration-prescription)`.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed (doc-only change to a contract interface; `pnpm --filter @objectstack/spec check:generated` exits 0 against the freshly built dist, nothing to regenerate).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2fhwqSBmy1XBXfcoU1\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017ihL2fhwqSBmy1XBXfcoU1)_\n"
+}

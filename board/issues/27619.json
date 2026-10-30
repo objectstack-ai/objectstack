@@ -2,7 +2,7 @@
   "number": 27619,
   "kind": "pull_request",
   "title": "ci(live-e2e-ui): run on server-only diffs too (|| core), and pin the 2-minute spec budget",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "ci/cd",
-    "needs-user-decision",
     "size/s",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T14:55:06Z",
-  "updated_at": "2026-10-29T20:11:18Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-29T20:45:41Z",
+  "closed_at": "2026-10-29T20:43:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-29T20:43:45Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27619",

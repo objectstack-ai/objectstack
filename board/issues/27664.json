@@ -2,7 +2,7 @@
   "number": 27664,
   "kind": "pull_request",
   "title": "docs(adr): ADR-0066 D4 api clause — same-origin `type: 'api'` actions are dispatched by the platform action door",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "protocol:ui",
     "size/s",
     "tooling"
@@ -21,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T16:48:26Z",
-  "updated_at": "2026-10-29T20:12:01Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-29T20:49:21Z",
+  "closed_at": "2026-10-29T20:49:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-29T20:49:19Z",
   "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/27664",

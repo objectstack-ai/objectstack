@@ -1,0 +1,35 @@
+{
+  "number": 27825,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): the draft promotion answers NO_DRAFT before a permission-set name collision",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T00:55:59Z",
+  "updated_at": "2026-10-30T01:51:32Z",
+  "closed_at": "2026-10-30T01:51:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T01:51:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27825",
+  "body": "domain:server#2 · os-sales · session_01L6bhgUCizoYWQVJWjhdR6F\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuPMZ8BHWtPf6nBTp51qSM64)_\n\nFixes #27707\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — a refusal-order change with no new authorable capability; nothing in `skills/**` teaches the promotion's refusal order.\n\n## 维护者速读\n\n- **改了什么:** 草稿发布(promotion)时,权限集\"重名\"检查改为只在确实读到草稿时才执行,与其他三个同类检查一致;另在 objectql 注册表的私有成员上加一行注释,注明 metadata-protocol 按名字调用它。\n- **为什么改:** 以前没有草稿却去发布一个别人已占用名字的权限集,会先报 `NAMESPACE_CONFLICT`(别人的事),而不是 `NO_DRAFT`(调用方自己没草稿);现在先告诉调用方它自己的状态。\n- **风险与回滚:** 极低——只是\"拒绝换拒绝\"的顺序调整,无草稿时之前和现在都拒绝,有草稿时检查与顺序不变;回滚即 revert 本 PR。\n- **先看:** `packages/metadata-protocol/src/protocol.ts`(promotion 处 `if (draftForGate)` 一处);`packages/metadata-protocol/src/protocol.permission-set-name-cross-package.test.ts`(新增一条 pin);`packages/objectql/src/registry.ts`(仅注释)。\n- **两分钟验证:** `pnpm --filter @objectstack/metadata-protocol exec vitest run --maxWorkers=2 src/protocol.permission-set-name-cross-package.test.ts`,预期 18/18 通过。\n- **需要你做的:** 无,席位落地。\n\n## What changes\n\n- `packages/metadata-protocol/src/protocol.ts`, the draft promotion (`publishMetaItem`'s promotion step, which `publishPackageDrafts` also goes through): the `permissionSetNameCollisionRefusal` call now sits under `if (draftForGate)`, like its siblings `savedItemNameRefusal`, `permissionSetOwnerBindingRefusal`, `defaultRecordPageSaveRefusal` and `externalBindingSaveRefusal`. Before, it ran in a bare block.\n- **Refusal before/after.** If you promote with no draft while another owner holds the name, the answer used to be `NAMESPACE_CONFLICT` / 422 and is now `NO_DRAFT` / 404, the repository's answer from `repo.promoteDraft`.\n- **The accept set does not change.** With `draftForGate` null, `repo.promoteDraft` gets `expectedDraftHash: null`. It then answers `NO_DRAFT` when no draft row exists, or `DraftConflictError` when a draft was saved after the gate read. A promotion with no judged draft never succeeds, before or after this change. With a draft, the same refusals run in the same order.\n- `packages/objectql/src/registry.ts`: the doc comment of the private `packageHeldSecurityCatalogNames` now says that `protocol-save-door-refusals.ts` (`registryPackageHoldersOf`) reads it by name. Renaming the member means updating that caller and `protocol-permission-set-name-registry-reading.test.ts`. This is a comment only.\n- Changeset: `patch` for `@objectstack/metadata-protocol`. objectql gets none because its change is a comment, so nothing published changes.\n\n## Tests\n\n- New pin, through the real promotion door (`publishMetaItem`, using the harness the PR #27535 tests use): B holds the active name and A has no draft. Promoting as A answers `NO_DRAFT` / 404 and leaves only B's active row stored.\n- Control, a draft plus a collision: the existing pins still answer `NAMESPACE_CONFLICT` / 422, for both `publishMetaItem` and `publishPackageDrafts`.\n- Control, a clean promote: the existing CONTROL pin still succeeds, for a first publish and a re-publish.\n\n## Acceptance notes\n\n- None out of scope.\n\n## Verification\n\n<details><summary>Red before the fix (test committed first, 83e4daac)</summary>\n\n```\n× with no draft at the address, the caller is told about its own state first: the repository's NO_DRAFT (404), not the collision another owner's name would raise\nExpected: \"NO_DRAFT\"\nReceived: \"NAMESPACE_CONFLICT\"\nTests  1 failed | 17 passed (18)\n```\n</details>\n\n<details><summary>Ablation (scripts/ablation-replace.mjs) on the fix commit</summary>\n\nAnchor `if (draftForGate) {` + newline + `const nameCollision` was replaced by `if (true /* ablation: guard removed */) {`, landing x1 to x0, blob 5fb0787b to 2d3ef72c.\n\n```\n× with no draft at the address ... Expected: \"NO_DRAFT\" Received: \"NAMESPACE_CONFLICT\"\nTests  1 failed | 17 passed (18)\nok restored: blob == HEAD (5fb0787b1465) and `git diff HEAD` is empty\n```\nThe first ablation attempt used a replacement that was a substring of the anchor. The tool refused it before running anything and restored the file (blob == HEAD), so that attempt was a no-op and is not counted as a reading.\n</details>\n\n<details><summary>Local gates at 98bfa9de (after merging origin/main 8f25cee2)</summary>\n\n- `@objectstack/metadata-protocol` test: 280 files passed, 4 skipped; 21803 tests passed, 26 skipped. Exit 0.\n- `@objectstack/objectql` test: 490/490 files, 9244/9244 tests. Exit 0.\n- typecheck for both packages: exit 0.\n- eslint `--no-inline-config` on `packages/metadata-protocol` and `packages/objectql`: exit 0 each.\n- `dispatch-gates --commands`: 63 families derived, and every one exits 0. `check:dual-build-cjs-loads` and `check:type-check-debt` exited 3 (PREREQUISITE NOT MET) the first time and exited 0 when re-run after the build. `--ran` reconciliation: 63 run, 0 NOT-MEASURED (a derived zero).\n- Overlap check: `git merge-tree` against #27780 (the other open PR on `protocol.ts`) is clean. No other open PR touches these files.\n- Dogfood: not owed, because the title has no `!` and there is no `(narrowing)` arm.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgUCizoYWQVJWjhdR6F)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUCizoYWQVJWjhdR6F\n"
+}

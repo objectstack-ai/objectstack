@@ -1,0 +1,37 @@
+{
+  "number": 27771,
+  "kind": "pull_request",
+  "title": "fix(types): a write to a registered object whose table is missing answers 500 DATABASE_ERROR, as the read does, not 404 OBJECT_NOT_FOUND",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:46:04Z",
+  "updated_at": "2026-10-29T23:43:33Z",
+  "closed_at": "2026-10-29T23:43:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T23:43:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27771",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DJwKZqSF8gKyXHHSquun4GK)_\n\nFixes #27702\n\n## What changes\n\nThe shared data-error classification (`packages/types/src/data-error-classification.ts`, `classifyDataError`) no longer answers a driver's missing-relation line (`no such table: …`, Postgres `relation \"…\" does not exist`) with `404 OBJECT_NOT_FOUND` \"Object '…' is not registered\" when the relation names the request's object. Every missing-relation line is now the sanitised, logged `500 DATABASE_ERROR` (`DATA_STORE_FAULT`), the verdict the SQL driver already declares at its read exits for the same table. The attribution helper `missingRelationIsObject` had no other reader and is removed.\n\n`404 OBJECT_NOT_FOUND` for an unregistered object is unchanged: its source is the structured `code: 'OBJECT_NOT_FOUND'` that the protocol's `assertObjectRegistered` and the engine's name resolution (`resolveObjectName`) throw before any driver sees the name, and the classification matches that arm far above the text limbs.\n\n## Why\n\nMeasured on `origin/main` 81d00a4e with a real `ObjectQL` + `SqlDriver` + protocol + `RestServer`, an object registered after the DDL (its table never created), on better-sqlite3 and on a live PostgreSQL 16:\n\n| door | producer of the answer | before | after |\n|---|---|---|---|\n| `GET /data/:object`, `GET /data/:object/:id` | driver-sql's declared read-exit fault (`backendStatementFault`) | `500 DATABASE_ERROR` | `500 DATABASE_ERROR` |\n| `POST /data/:object` | the boundary's text classification of the raw driver error | `404 OBJECT_NOT_FOUND` | `500 DATABASE_ERROR` |\n| `PATCH` / `DELETE /data/:object/:id` | — | — | `500 DATABASE_ERROR` |\n| unregistered object, `POST` and `GET` | registry gate | `404 OBJECT_NOT_FOUND` | `404 OBJECT_NOT_FOUND` |\n\nThe PM's second hypothesis (the objectql insert path re-throwing the registry's \"is not registered\" error) was falsified: the insert leaves the dialect error undeclared (driver-sql's `backendStatementFault` docblock says the write paths are classified at the boundary on purpose), and the 404 came from the classifier's missing-relation limb. The fix is that one place, so no second copy of the rule exists and `packages/objectql/src/engine.ts` is untouched. No new error code: `DATABASE_ERROR` is an existing catalog code.\n\n## Verification\n\n- New pin `packages/rest/src/data-door-missing-relation-registered-object.test.ts` (SQLite cell always; live Postgres cell under `OS_TEST_POSTGRES_URL`, a named skip otherwise): POST, PATCH and DELETE answer what GET answers, never `OBJECT_NOT_FOUND`; control: an unregistered object is still `404` on both doors. Run first against the unfixed classifier: **4 red** (the insert cell and the agreement cell, on both SQLite and live PG 16; the POST answered `404 OBJECT_NOT_FOUND`), 6 green. With the fix: 12/12 green on both cells.\n- Pins that asserted the old 404 for a driver missing-table line were rewritten to the new verdict: `rest-unknown-object-heuristic.test.ts` (§2 attribution cells, §3 driver limb, the quiet-404 route cell now uses the gate's error, §5d), `rest.test.ts` (gate vs. driver envelope), `core/src/utils/import-runner-sandbox-fault-row.test.ts` (the #22868 control). A stale comment in `qa/http-conformance` was corrected.\n- `@objectstack/types` 809/809, `@objectstack/rest` full run (local + repo projects) green after the `rest.test.ts` rewrite, `@objectstack/core` 2962/2962.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 62 families; all ran plus `pnpm lint` (results in the report comment). `check:dual-build-cjs-loads` exits 3 (needs every package's dist) — NOT MEASURED.\n\nClause-②: no\nMetadata-protocol: none\n\n_Keep one value on each of the two lines above, each line starting with its key.\n[Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum)\nitem 5 says what they mean._\n\n## Human Minimum\n\nEach item is one rule from\n[CONTRIBUTING.md › Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum),\nwhich links the AGENTS.md text that states it.\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1GY2PJ12VgyKNvfDK\n"
+}

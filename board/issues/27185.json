@@ -2,8 +2,8 @@
   "number": 27185,
   "kind": "issue",
   "title": "platform-objects: `sys_exchange_rate` { currency, rate, effective_date, source } — tenant-scoped, admin-only, audited; Setup list view (multi-currency M1-1, epic #8345; released with M2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,24 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
   "assignees": [
-    "os-bill"
+    "os-elon-musk"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:37:03Z",
-  "updated_at": "2026-10-28T12:48:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T00:07:03Z",
+  "closed_at": "2026-10-30T00:04:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27185",
   "body": "Filing gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** 新系统对象 `sys_exchange_rate`：`currency`（ISO 4217 值域）、`rate`（1 本位币 = rate 外币，12 位有效小数）、`effective_date`、`source`（manual / import / app）；唯一键 (currency, effective_date)；租户隔离；仅组织管理员可写；审计开。Setup → Localization 下一个列表页。\n- **为什么改：** 写入时折算的唯一数据源。\n- **风险与回滚：** ⛔ 不单独发版：它唯一的读者是 M2-2，与 M2 同一次发布，否则是无读者的惰性对象。\n- **先看：** 先例 `packages/platform-objects/src/audit/sys-*.object.ts`（142–294 行）与 `apps/setup.app.ts` 导航。\n- **两分钟验证：** 管理员能录一行、非管理员被拒、同币种同日第二行被拒。\n- **需要您做的：** 参数 2（仅管理员）已按默认裁定。\n\n## Task\n\n- [ ] Object definition + tests (uniqueness, tenant isolation, permission set, audit).\n- [ ] Setup nav entry and list view under Localization; the page states the rate direction once.\n- [ ] Docs line: how finance records a month's rates.\n\nLane: server · Size: M · Review: default. `Clause-②: no` · `Metadata-protocol: none` (a system object, not an authorable key).\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."

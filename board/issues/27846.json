@@ -1,0 +1,26 @@
+{
+  "number": 27846,
+  "kind": "issue",
+  "title": "pm-dispatch: triage parks a card `pm:blocked` \"on PR #N\" in prose, with no `Blocked-by:` line, so the unlock never fires when the PR merges (14 domain:server cards stranded 2026-10-30)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T01:55:20Z",
+  "updated_at": "2026-10-30T01:55:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27846",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ② process defect with a measured reach and a named fix site.\n\n**Found by:** `domain:server` seats 3 and 4, in a manual re-scan the maintainer asked for on 2026-10-30 01:42Z (「任务很多啊，看看」). Measured on the board.\n\n## What is wrong\n\nWhen triage parks a card, it writes `pm:blocked on PR #N` in the heading of its triage comment (prose), and sometimes \"serial behind PR #N\" in a bullet. It writes no canonical `Blocked-by: #N` line in either channel. The unlock paths read only that line:\n\n- the seat unlock scan greps the body for `Blocked-by:` (state-machine.md, platform-readings.md);\n- `scheduled-full-run` releases only body `Blocked-by:` targets that are closed issues in this repo;\n- `check-half-states` H4 flags `pm:blocked` with no `Blocked-by:` line, but that is a report, not a release.\n\n**Measured on 2026-10-30 ~01:45Z:** 17 open, non-epic `domain:server` cards were in `pm:blocked`. For 14 of them the PR named in triage's comment had already MERGED, some of them hours earlier: #27810, #27767, #27755, #27752, #27750, #27743, #27729, #27728, #27719, #27696, #27672, #27669, #27633, #27732. Nothing released them, and lane seats skipped them as blocked. The seats unlocked them by hand when they claimed.\n\n## Wanted\n\nOne of these, triage's call:\n\n1. When triage parks a card, it writes a canonical, line-anchored `Blocked-by: #N` line (an issue or PR number) in the card body, beside the label. The existing unlock paths then catch it. For a PR target, the release condition is \"merged\".\n2. Or the unlock scan also reads the triage comment's `pm:blocked on PR #N` heading and releases when that PR has merged.\n\nOption 1 keeps one marker. Either way, `triage-duties.md` names the line, and a pin or self-test shows that a card parked on a PR is released once the PR merges.\n\n## Business reason\n\nCards that are ready sit unclaimed while seats report \"nothing claimable\". The maintainer saw an idle lane with a full board.\n\n**Reader:** the triage routine's owner and the pm-dispatch protocol (`.claude/skills/pm-dispatch/references/triage-duties.md`, `state-machine.md`, `scripts/ci/scheduled-full-run.mjs`).\n\n**Dedupe:** I searched \"pm:blocked Blocked-by unlock triage prose\". #24322 (closed) covers the CI-card refresh wording only. None covers this.\n\nFiled without `domain:*`; grading is triage's."
+}

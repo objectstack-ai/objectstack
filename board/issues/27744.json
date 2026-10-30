@@ -1,0 +1,35 @@
+{
+  "number": 27744,
+  "kind": "issue",
+  "title": "objectql: publish a driver conformance kit that out-of-repo plugin drivers run in their own CI, so a contract change here is caught there — epic #27261 P2",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "enhancement",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:04:52Z",
+  "updated_at": "2026-10-30T01:35:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27744",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ maintainer-directed — 田騏 at 2026-10-29T21:58Z 「现在启动全部 P2」 (epic comment 6509296853, D1 amended), at 2026-10-29T21:59Z 「OData 驱动 只做 v4」 (6509311454), at 2026-10-29T22:01Z 「同意」 (generic P2 parts open source in this repository; vendor-specific drivers such as Salesforce stay out of it).\nRuling-ref: 6486145005 (#27299, Tier B = declarative OData) · 6486136301 (#27298, D7) · 6471382887 (#27261 D1–D6)\nDedupe (open AND closed): \"OData datasource driver $metadata import connector credential external datasource\" → 5 hits, none this work (#27298 is the ruled decision card).\nReader: the epic PM (#27261) dispatches it in the epic subtree.\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 把插件驱动必须满足的行为（读、筛选下推与兜底、计数、写入拒绝映射、`introspectSchema`）做成一个可发布的测试套件，仓库外的驱动（如闭源的 Salesforce 驱动）在自己的 CI 里跑。\n- **为什么：** 厂商专属驱动按 22:01Z 的决定放在仓库外；这套用例是开源仓接口变化时及时发现不兼容的唯一手段。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] An exported kit (in `@objectstack/objectql` or a small test-kit package) taking a driver factory and a fixture set, asserting the floor contract (#27277): reads, `supports`-declared pushdown agrees with the in-memory evaluator on the spec conformance case tables, counts, write refusal statuses, and `introspectSchema` shape when present.\n- [ ] `driver-odata` runs it in this repository as the first consumer; the guide's plugin-driver section points to it.\n- [ ] It stays the oracle the epic's P3 \"verified-pushdown credential\" will build on.\n\n`Clause-②:` decided by the dev (a new public export) · `Metadata-protocol: none`."
+}

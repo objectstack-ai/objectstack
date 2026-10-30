@@ -1,0 +1,33 @@
+{
+  "number": 27821,
+  "kind": "pull_request",
+  "title": "fix(ui/.claude): make the console-build-test launch entry repository-relative",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T00:49:06Z",
+  "updated_at": "2026-10-30T01:25:44Z",
+  "closed_at": "2026-10-30T01:25:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-30T01:25:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27821",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DPwjLgyx7d9VWknu12BbjRU)_\n\nFixes #27668\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`ui/.claude/launch.json` 里指南让 agent 照抄的 `console-build-test` 条目，去掉写死的本机 `/Users/...` 旧 objectui worktree 路径，改为从 `ui/` 出发 `cd apps/console`，端口换成指南示例的每 agent 端口（后端 4010、前端 5190）。\n- 为什么改：原条目只能在一位维护者的笔记本上、按合仓前目录跑通，照抄它的 agent 起不来 preview，也绕开了多 agent 端口隔离的约定。\n- 风险与回滚：仅改一条桌面 preview 配置的两处字面量，不碰产品代码与指南规则；回滚即 revert 本 PR。\n- 先看：`ui/.claude/launch.json:19-21`（`console-build-test` 的命令与 `port`）。\n- 两分钟验证：在 `ui/` 下跑 `bash -lc \"cd apps/console && VITE_SERVER_URL= DEV_PROXY_TARGET=http://localhost:4010 exec pnpm dev --port 5190 --strictPort\"`，预期 vite 在 :5190 就绪，`/api` 代理指向 :4010。\n- 需要你做的：无，席位落地（contract review owed，Tier S 由席位复核 PASS 且 CI 全绿后落地）。\n\n## What changes\n\n`ui/.claude/launch.json`, entry `console-build-test` (the one `ui/.claude/skills/objectui-contributor/guides/console-development.md:564` tells agents to imitate):\n\n- command: `cd /Users/…/objectui/.wt-aipicker/apps/console && … DEV_PROXY_TARGET=http://localhost:4000 … --port 5181 --strictPort` → `cd apps/console && VITE_SERVER_URL= DEV_PROXY_TARGET=http://localhost:4010 exec pnpm dev --port 5190 --strictPort`\n- `port`: 5181 → 5190\n\nThe entry name and shape are unchanged, so the guide's pointer line already matches and is not touched. No change to the guide.\n\n## Acceptance notes\n\n- **Launch runner cwd = `ui/`** (measured from the file itself): the sibling entries `grid-bulk-demo` / `gantt-demo` run `pnpm --dir packages/plugin-grid …`, a path that only resolves from `ui/`, the directory that holds this `.claude/`. So `cd apps/console` is the right relative path.\n- **Ports** are the per-agent example the guide's 「每个 agent 独立测试栈」 section uses (backend `-p 4010`, console `--port 5190 --strictPort`), and stay clear of the guide's 「绝不动 :3000 / :5180」.\n- `VITE_SERVER_URL=` is kept: it pins the same-origin relative `/api` that `apps/console/.env.development` documents, even when the shell exports a value.\n\n## Verification\n\n- `grep -n '/Users/' ui/.claude/launch.json` → no hits (exit 1). File parses as JSON.\n- Fresh worktree at `origin/main` b83baed2 + `pnpm install --frozen-lockfile --ignore-scripts`: ran the entry's command from `ui/` → `VITE v8.3.5 ready`, `GET http://localhost:5190/` → 200, `GET /api/v1/discovery` → 502 with `connect ECONNREFUSED 127.0.0.1:4010` (no backend started; proves the proxy target). Stopped by its own PID.\n\n<details><summary>dispatch-gates: 12 derived, 12 run, 0 NOT-MEASURED</summary>\n\n```\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:published-files :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:tier-file-adoption :: exit 0\npnpm check:undeclared-dep-imports :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n`check:commit-card-trailers --range origin/main..HEAD` → pass. No changeset: nothing published from a released package changes, so `skip-changeset`.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czXm398fHr62UfVR9E\n"
+}

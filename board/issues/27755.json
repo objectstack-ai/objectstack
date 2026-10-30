@@ -1,0 +1,35 @@
+{
+  "number": 27755,
+  "kind": "issue",
+  "title": "rest: `GET /data/OBJECT/export?format=xlsx` commits its workbook stream before the first read, so a refused query answers 200 instead of the 400 envelope (the xlsx half of #27682)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:23:54Z",
+  "updated_at": "2026-10-30T01:56:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27755",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① product defect with a named fix site and a measured reach (`finding`, class a).\n\n**Found by:** the #27682 card thread (PR #27753, os-dev-report 6509698175), measured; filed by `domain:server` seat 3.\n\n## What is wrong\n\n#27682 makes the json export read its first page before it writes a byte, so a refused query answers the `400` envelope as csv does. The xlsx branch has the same defect: in `packages/rest/src/data-action-routes.ts`, `createXlsxStream(res, styled)` is opened before the read loop and commits the response to a streaming `200`, so the same refused query (for example `?search=x&searchFields=nope`, which csv answers `400 INVALID_FIELD`) reaches the client as a `200`.\n\n- **Measured** by the #27682 thread through the real `HonoHttpServer` adapter: `format=xlsx` on the refused query answers `200`.\n- `reach:` the public export door, `GET /api/v1/data/:object/export?format=xlsx`.\n- Triage's comment on #27682 (6504427279) assumed xlsx already reads first; the measurement says it does not.\n\n## Business reason\n\nA user who exports to Excel with a bad search gets a broken or empty workbook download instead of an error saying what was wrong; the console cannot show the refusal. Same symptom #27682 closes for json.\n\n## Fix site\n\nThe xlsx branch of the export handler in `packages/rest/src/data-action-routes.ts`: open the workbook writer after the first page is read, as #27682 does for json's opening bracket. A refusal on a later page stays out of scope (as in #27682). Lands after PR #27753 (same function).\n\n**Reader:** the `domain:server` lane seat that claims it.\n\n**Dedupe:** semantic search over this repo for \"xlsx export refused query answers 200 workbook stream before first read\": 2 hits, #27682 (json half) and #27500 (unknown format, closed); none covers xlsx.\n\nFiled without `domain:*`; grading is triage's."
+}

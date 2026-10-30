@@ -1,0 +1,33 @@
+{
+  "number": 27827,
+  "kind": "issue",
+  "title": "lint: the dataset save door's object-reference-unknown hint does not name the dependency declaration, though the flow and list-view doors do and the declaration is the fix",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T00:58:29Z",
+  "updated_at": "2026-10-30T01:59:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27827",
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a wrong remedy printed by a shipped gate, with named locations. Found by the contract review of PR #27812 (#27616, ADR-0141 text), delta record on head `e3f2b4f6` (S-remedy, half b). Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. Filed without `domain:*`: the fix is in `packages/lint`; triage sets the lane.\n\nBusiness reason: at the runtime save door, a dataset whose base object belongs to a package outside the writing package's declared closure is refused `422` with `object-reference-unknown`. The right fix is to declare a dependency on the package that defines the object (ADR-0141 D1). The printed hint instead says \"Point it at one of this stack's objects, or at a platform object by its full name\", which sends an author, human or AI, away from the fix that works. The two sibling doors that judge the same closure already print the declaration.\nReader who acts: the lane triage assigns. One os-dev, one small PR.\nDedupe: issues searched for `object-reference-unknown hint` and `dataset closure remedy` → no card.\n\n## Measured (read from source on `main`, not run live)\n\n- Flow trigger door: `packages/lint/src/validate-flow-trigger-readiness.ts` — under a package scope its hint reads \"Declare a dependency on the package that defines '…' in the manifest `dependencies`\".\n- List view door: `packages/lint/src/validate-list-view-field-refs.ts` `reportOutsideClosure` — the same declaration hint.\n- Dataset door: `packages/lint/src/validate-object-references.ts` (`runtimeTypes: ['flow', 'dataset']`) takes no `packageScope`; its hint is the generic \"Point it at one of this stack's objects, or at a platform object by its full name\", and `OBJECT_REFERENCE_UNKNOWN_EXPLANATION` (`rule-explanations.ts`) says \"point the reference at an object this stack or its artifact defines\". `packages/lint/src/runtime-gate.dataset-writes.test.ts` pins no closure remedy.\n\n## Wanted\n\n- When the runtime gate judges a dataset's base object under a package closure (`narrowObjectsToPackageClosure`), the `object-reference-unknown` hint names the declaration, as the two sibling doors do; the CLI reading (no closure) keeps today's hint.\n- Pin it in the dataset-writes suite, both ways (closure in force → declaration hint; no closure → today's hint).\n\n## Related observation (not this card's scope; for the #25805 reopen)\n\nADR-0141 D1 (as corrected by PR #27812) states that the save door does not judge a field lookup. Read in the tree, an object written at the runtime door with a lookup to a name that exists nowhere is judged by no door (`validateObjectReferences` is not dispatched on an `object` write). That gap belongs with the build-time closure gap the maintainer deferred in the ruling on #25805.\n\n## Acceptance\n\n- A dataset write refused for an object outside the closure prints a hint that names the manifest `dependencies` declaration; a test pins it; the CLI hint is unchanged."
+}

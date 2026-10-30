@@ -1,0 +1,38 @@
+{
+  "number": 27727,
+  "kind": "issue",
+  "title": "spec/service-datasource: tidy the EngineDatasourceDef.driver contract after #27666 — member doc, listDatasourceDefs read-back, required reconnect previous, stale test and guide lines (epic #27261)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:epic",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T20:56:39Z",
+  "updated_at": "2026-10-30T01:26:22Z",
+  "closed_at": "2026-10-30T00:50:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27727",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① should-fix findings owed by landed work (#27666, PR #27715), from its contract review 6508089206 (④ should-fix 1–4 and the ③ prose note). No must-fix; none opens a path today.\nReader: the epic PM (#27261), by pull; the fix spans `packages/spec/src/contracts/data-engine.ts`, `packages/objectql/src/engine.ts`, `packages/services/service-datasource/src/datasource-connection-service.ts`, `packages/objectql/src/external-driver-floor.test.ts`, `content/docs/data-modeling/virtual-objects.mdx`.\nDedupe (open AND closed): follow-ups of #27666 filed by the epic PM → none.\nreach: read on the reviewed head `df7e3c66`; see 6508089206 ④ for each file:line.\ntype: Bug\n\n## 维护者速读\n\n- **现象：** #27666 加了 `EngineDatasourceDef.driver` 后，契约文字、读回接口和一个可选参数还没完全跟上。\n- **原因：** 复核找出的 4 条 should-fix，外加指南里一处旧说法。\n- **影响：** 目前没有可触发的问题；主要防止下一个调用方照旧文档写出不受兜底层保护的数据源。\n- **最小修法：** 见下方 Task。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] `IDataEngine.registerDatasourceDef?` member doc: \"last write wins, except an absent `driver` keeps the id stored before it\".\n- [ ] `ObjectQL.listDatasourceDefs` returns `driver`, or the key doc says the read-back omits it.\n- [ ] `DatasourceConnectionService.reconnect`: `previous` becomes required, or the restore refuses to register a def whose driver it cannot name (a host calling `reconnect` without `previous` would serve a kept plugin pool unfloored).\n- [ ] `external-driver-floor.test.ts` ~:468-469: the keep test names the caller class it models (write-gate facts only), not the connection service.\n- [ ] `virtual-objects.mdx` ~:634: drop \"ADR-0015 … Tier A\" (epic #27261's term, not ADR-0015's).\n\n`Clause-②:` decided by the dev from the diff (making `previous` required narrows an exported method's accept set) · `Metadata-protocol: none`. Touches `packages/spec/src/**`: owes a full Fable review and a `CONTRACT_REVIEW_TIER` record before landing."
+}

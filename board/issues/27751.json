@@ -1,0 +1,35 @@
+{
+  "number": 27751,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): match an @mention email case-insensitively",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:18:52Z",
+  "updated_at": "2026-10-29T23:06:34Z",
+  "closed_at": "2026-10-29T23:06:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T23:06:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27751",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DNCXw1AehBds7qLHmy85L4E)_\n\nFixes #27503\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:评论里按邮箱 @提及同事时,邮箱改为不区分大小写匹配(先去首尾空格再转小写),与登录查找用户的方式一致。\n- 为什么改:以前按原样精确匹配,大小写不同的地址(例如 `Carol@Example.com`)评论照样 201 成功,但被提及的人永远收不到通知,作者也看不到任何报错。\n- 风险与回滚:风险低,只改了一处查询条件;谁能收到通知仍由记录与评论的读权限决定,没有放宽。回滚即 revert 本 PR。\n- 先看:`packages/plugins/plugin-audit/src/mention-recipient-gate.ts` 里 `resolveMentionedUser` 的 `where` 那一行;然后看 `mention-recipient-gate.integration.test.ts` 新增的两个用例。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-audit exec vitest run src/mention-recipient-gate.integration.test.ts`,预期 Tests 17 passed (17)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`resolveMentionedUser` (plugin-audit's @mention recipient gate) looked an email-shaped mention up with `where: { email: value }`, an exact match on `sys_user.email`. Identity stores that column lowercased, so `G4B.MEMBER@EXAMPLE.COM` resolved nobody. The comment was still accepted with 201, and the gate logged `mention notification withheld` with reason `unknown_email`.\n\nThe lookup now passes the address through `normalizePlatformAdminEmail` from `@objectstack/core`. That is the one exported email normalisation in core (trim, then lowercase), and it is already the comparison the platform-admin derivation and the Layer 0 wall use. For an address that has already been trimmed, it gives exactly the spelling sign-in queries:\n\n- `findSignInAccount` (plugin-auth) queries `where: { email: email.toLowerCase() }`;\n- better-auth's `/sign-in/email` calls `internalAdapter.findUserByEmail(email.toLowerCase())`, and `createUser` / `updateUser` write `email.toLowerCase()`, so stored addresses are already normalised.\n\nNo second matcher is added. Who may be notified does not change: the record read and the comment read in the mentioned user's own envelope still decide.\n\n## Tests\n\n`packages/plugins/plugin-audit/src/mention-recipient-gate.integration.test.ts` (real kernel, ObjectQL, SQLite driver, AuditPlugin) gets two new cases:\n\n- **isolated:** a comment mentioning `Carol@A.Test`, and one mentioning ` CAROL@A.TEST ` with spaces around it, each notify the user stored as `carol@a.test`. Both go through the real `afterInsert` mention writer.\n- **withheld-recipient log:** `admitMentionRecipients` with `CAROL@A.TEST` admits CAROL and logs nothing, so there is no `unknown_email`.\n\n## Acceptance notes\n\n- **Normaliser name.** `normalizePlatformAdminEmail` carries a platform-admin name, but its docblock calls it the one email normalisation, and it is the only exported one in `@objectstack/core`. Renaming it is a naming question only, so no card was filed.\n- **Rows outside identity.** A `sys_user` row written with a mixed-case email outside the identity write paths (for example a raw system-context insert) cannot be found by sign-in. After this change it cannot be found by a mention either, so a mention now reaches exactly the users sign-in reaches.\n- **Unknown user ids.** The card's diagnostic-only note says an unknown user id (`mentions: [\"nosuchuser123\"]`) is logged as `cannot_read_thread`. It is unchanged here: it affects only the log text, and nobody is notified who should not be. This is an observation, not filed.\n- **Fresh `origin/main`.** `origin/main` moved after the single merge (to `34dc09b68`). The only family file that changed in that range is `scripts/check-route-envelope.mjs`, and it is not one this diff derives. CI runs on the merged head.\n\n## Verification\n\nAll readings are on head `e7119109` (fix commit `5febd38e` plus one merge of `origin/main` `ef359b95`).\n\n<details><summary>Red before the fix (built closure, test only)</summary>\n\n```\n× resolves an email mention whatever its casing, the way sign-in finds the user\n× logs no unknown_email for a differently-cased address of a stored user\nAssertionError: expected [] to deeply equal [ [ 'u_carol' ] ]\nTests  2 failed | 15 passed (17)\n```\n</details>\n\n<details><summary>Green after the fix</summary>\n\n```\nTest Files  1 passed (1)\n     Tests  17 passed (17)\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n<details><summary>Ablation (fix committed first; scripts/ablation-replace.mjs; suite resolves core and this package from src, so no dist leg)</summary>\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob 8f07337134ce -> e29091174dd9\n× resolves an email mention whatever its casing, the way sign-in finds the user\n× logs no unknown_email for a differently-cased address of a stored user\nTests  2 failed | 15 passed (17)\nablation-replace: ok restored: blob == HEAD (8f07337134ce) and `git diff HEAD` is empty\n```\n</details>\n\n<details><summary>Package test, typecheck, lint (head e7119109)</summary>\n\n```\npnpm --filter @objectstack/plugin-audit test       -> Test Files 65 passed (65) · Tests 1051 passed (1051) · VERDICT command-exit 0\npnpm --filter @objectstack/plugin-audit typecheck  -> VERDICT command-exit 0 (check:test-typecheck OK, 0 debt)\neslint --no-inline-config (the two changed .ts files) -> exit 0, no output\n```\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, 61 commands, head e7119109)</summary>\n\n```\n61 run, 61 exit 0\ndispatch-gates --ran: 61 derived famil(ies) accounted for — 61 run, 0 NOT-MEASURED\n```\n\nOn the first pass three commands exited 3 (PREREQUISITE NOT MET, nothing was measured). Each was re-run after its prerequisite was met:\n\n- `check-plugin-teardown-shape --self-test`: fetched the pinned fixture commit, then exit 0 (48 cases).\n- `check:i18n`: built its stated closure, then exit 0 (10 packages in sync).\n- `check:dual-build-cjs-loads`: full `pnpm build` (114 tasks), then exit 0 (112 entries across 69 packages).\n\nThe PR's check-runs cover all other CI families.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czuTWNgKR22fKv7jia\n"
+}

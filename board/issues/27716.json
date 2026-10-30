@@ -1,0 +1,33 @@
+{
+  "number": 27716,
+  "kind": "pull_request",
+  "title": "docs(qa): re-point records-forms.crud-roundtrip and record-edit-undo from the removed History tab to the record page v3 audit read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T20:23:13Z",
+  "updated_at": "2026-10-29T20:54:16Z",
+  "closed_at": "2026-10-29T20:54:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T20:54:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27716",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D69GmjeuSJCh6knnX8McNVE)_\n\nFixes #27654\n\ndomain:devx#1 · os-elon-musk · session_016WV4cwDe31dqqFpKC87EUg (card thread)\n\n## 维护者速读\n\n- 改了什么：清单条目 `records-forms.crud-roundtrip` 与 `records-forms.record-edit-undo` 里还让巡检去点 History 标签页的步骤和断言，改指向记录页 v3 的真实形态：记录页的 `sys_audit_log` 读取，结果在时间线「变更」筛选里（按宽度分层定位）。另改了 showcase 账户对象上一行注释。\n- 为什么改：记录页 v3（#27055）在所有宽度下都没有 History 标签页，旧步骤让每轮巡检多出假红。\n- 风险与回滚：只动一份清单 JSON 和一行注释，无产品行为变化。回滚即 revert。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nSame shape as #27651 gave `records-forms.field-history-tracking`. No product code.\n\n- **`records-forms.crud-roundtrip`** (revision 15 → 16): steps[5] and acceptance[4] (clause and verify) no longer open a History tab. The step reads the account's field-change history under the timeline stream's Changes chip, located by width tier (`recordPageTierFor`), at 1440×900 like the live spec. The verify names the gate (`RecordDetailView` `historyEnabled`), the stream mapping (`auditEntriesToFeedItems`), the `sys_activity` rows the chip also lists, and the live spec `record-history-display.spec.ts`. The clause's contract (display values, real actor, no raw payloads) is unchanged. History row added.\n- **`records-forms.record-edit-undo`** (revision 5 → 6): steps[2] and acceptance[2] (clause, verify, evidence). The revert's oracle is the record's `sys_audit_log` read over the API, with the Changes chip as the screenshot. The item stays `blocked(fixture)`. History row added.\n- **`examples/app-showcase/src/data/objects/account.object.ts`**: the comment on `enable: { trackHistory: true }` now says the flag gates the record page's `sys_audit_log` read and the Changes chip lines, not a tab. **Comment only, no behaviour.** This file is outside `domain:devx`; it is declared here under triage's cross-domain grant (#27654, comment 6503022089).\n\n## Why\n\nRecord page v3 (#27055) draws no History tab at any width (`buildDefaultTabs` emits Details / Timeline / Related / Approvals; `buildDefaultPageSchema.test.ts` asserts it). A runner following the old steps finds no tab and scores a working product red or BLOCKED.\n\n## Verification\n\n- `git grep -n -i 'history tab' -- docs/qa/platform-checklist/areas examples/app-showcase`, history rows excluded: 0 hits in this card's locations. Two hits remain, both in `records-forms.field-history-tracking` (steps[3] and acceptance[2].verify, landed by #27651); they are negations (\"Record page v3 has no History tab\", \"Nor is a History tab\"), not instructions, and that item is outside this card's file surface. The new text here avoids the literal phrase.\n- `node scripts/check-platform-checklist.mjs`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 40 commands at the committed head. 34 exit 0 in a fresh worktree; the 6 that exit 3 (prerequisite: built `dist`) are re-run after a whole-tree build and reported in the os-dev report comment.\n\nClause-②: no\nMetadata-protocol: none\n\nChangeset: none (`skip-changeset`): docs and an example comment, nothing publishes.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [ ] 3. No formatter ran. `pnpm lint` was not run locally (a JSON and a comment change); CI runs it.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset (nothing publishes), and both declaration lines are filled in here.\n- [x] 6. `packages/spec` touched: no.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the maintainer brief excepted).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwDe31dqqFpKC87EUg\n"
+}

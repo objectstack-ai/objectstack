@@ -1,0 +1,37 @@
+{
+  "number": 27762,
+  "kind": "issue",
+  "title": "secrets: confirm the metadata save door for a datasource applies the #27582 own-reference rule to `external.credentialsRef` (a third write door beside #27722's two)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "domain:server",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:35:08Z",
+  "updated_at": "2026-10-30T01:26:43Z",
+  "closed_at": "2026-10-30T01:25:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27762",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① security audit with a named door, rule level only (`security`).\n\n**Found by:** the #27722 card thread (PR #27761), from a code read outside its claimed surface; NOT measured. Filed by `domain:server` seat 3. Rule level only; any mechanism goes to the maintainer off GitHub.\n\n## What to confirm\n\n#27722 audits two write doors against the #27582 own-reference rule (a non-system write may only seal a new value or keep its own record's stored reference). A third door can write the same stored reference: the metadata save door for a `datasource` item (`PUT /api/v1/meta/datasource/:name`, `packages/metadata-protocol`). Its later readers (boot pool rehydration, the admin remove and rewrap paths) act on whatever reference is stored.\n\nMeasure whether a non-system caller's save through that door can set `external.credentialsRef` to a value it did not mint, and pin the answer. If it can, fix it to the same rule (refused `400` with one answer whatever it names, before anything is written; the system principal keeps its pass-through), as #27722 does for the admin create door.\n\n## Business reason\n\nA stored credential reference is the key to another connection's secret. If any write door accepts one the caller did not mint, the #27582 rule has a hole; the audit closes the family.\n\n**Reader:** the `domain:server` lane seat that claims it. The fix site is `packages/metadata-protocol/src/protocol.ts` (a seat-1 hot file, `#25467` serial queue) or a helper beside it.\n\n**Dedupe:** the #27722 survey and this seat's searches for \"credentialsRef own-reference rule write door\": #27722 (two doors), #27582/#27695 (`Field.secret()` family); none covers the metadata save door.\n\nFiled without `domain:*`; grading is triage's."
+}

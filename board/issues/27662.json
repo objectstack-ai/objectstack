@@ -2,8 +2,8 @@
   "number": 27662,
   "kind": "issue",
   "title": "plugin-sharing: the #8418 phantom-anchor write-deny diagnostic goes silent on a federated object that maps owner_id through external.columnMap over a plugin driver that ignores the map (epic #27261)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:server",
     "pm:epic",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T16:43:26Z",
-  "updated_at": "2026-10-29T16:43:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-29T23:27:47Z",
+  "closed_at": "2026-10-29T23:26:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27662",
   "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ① operator-diagnostic regression owed by landed work (#27425, PR #27476 `f57eddcf`), from the post-landing contract review 6493803142 (④ should-fix 3) and the seat carry 6493297056.\nReader: the epic PM (#27261) dispatches it in the epic subtree; the fix is in `packages/plugins/plugin-sharing/src/` (`notePhantomAnchorWriteDeny` and its caller).\nDedupe (open AND closed): \"phantom anchor write-deny diagnostic notePhantomAnchorWriteDeny columnMap map-ignoring plugin driver\" → 0 hits.\nreach: read on `main`, not measured live. `notePhantomAnchorWriteDeny` (#8418) keys on `hasPhantomOwnerAnchor`, which answers `false` since #27425 when `external.columnMap` maps a remote column onto `owner_id`. A plugin driver does not apply `columnMap`, so its rows carry no `owner_id`; every member write is refused (fail closed, correct), but the one-line server log that tells the operator why no longer fires. `security-external-owner-unmapped` still warns at author time.\ntype: Bug\n\n## 维护者速读\n\n- **现象：** 外部对象用 `columnMap` 把远端列映到 `owner_id`，但用的是不应用映射的插件驱动时，成员写入全部被拒（正确），但服务器不再打出那行「为什么被拒」的诊断日志。\n- **原因：** 诊断按 `hasPhantomOwnerAnchor` 触发，#27425 把这种映射算作已证 owner，于是诊断不再触发。\n- **影响：** 只影响运维排查；不泄露、不改判。作者侧的 lint 警告仍在。\n- **最小修法：** 对 mapped 对象，在按 owner 判写时读到的 owner 为空时也打这行诊断，文字点名「驱动没有返回映射的 owner 列」。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] On a federated object whose `columnMap` maps onto `owner_id`, a refused member write whose pre-image carries no `owner_id` logs the #8418 diagnostic once per object (same rate limit), naming that the driver returned no value for the mapped owner column.\n- [ ] Pins: a map-ignoring plugin driver logs it; a map-applying driver (owner present) and a declared-owner control do not. Verdicts unchanged.\n\n`Clause-②: no` (log text only) · `Metadata-protocol: none`."

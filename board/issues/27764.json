@@ -1,0 +1,35 @@
+{
+  "number": 27764,
+  "kind": "pull_request",
+  "title": "docs(skills): the objectui data-integration guide stops teaching the MSW plugin removed in 12.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:36:04Z",
+  "updated_at": "2026-10-30T01:41:15Z",
+  "closed_at": "2026-10-30T01:41:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-30T01:41:13Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27764",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DEgy1aicRXWh4AbhmimiUdx)_\n\nFixes #27678\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：已发布的 `objectui` 技能不再教 12.0 已删除的 MSW 插件；数据集成指南的「前端先行开发」一节改教树上真有的两条路（无后端用静态 scope，或本地 `os dev` 起真服务 + Vite 代理 `/api`），对应 eval 改判这个答案；顺手删掉 console 里没人读的 `VITE_USE_MOCK_SERVER` 等 MSW 残留。\n- 为什么改：客户 agent 加载技能后照抄会去装 11.0.0 的旧插件（npm 上未弃用、能装上），装进 18.x 栈；eval 还给这个错答案打满分。\n- 风险与回滚：纯文档、eval 与 console 构建配置，无运行时行为变化；回滚即 revert 本 PR。技能净减 35 行、约 171 token。\n- 先看：`skills/objectui/guides/data-integration.md`（新「Frontend-first development」一节的每条事实）、`skills/objectui/evals/data-integration.json`（eval 2）、`ui/apps/console/vercel.json`（rewrite 正则少了 `mockServiceWorker.js` 排除项）。\n- 两分钟验证：`git grep -n 'plugin-msw\\|MSWPlugin' -- skills; git grep -n 'VITE_USE_MOCK_SERVER\\|vendor-msw' -- ui/apps` 两条都无输出；`node ui/scripts/check-skill-eval-tokens.mjs` 退出 0。\n- 需要你做的：受管面（`skills/**`），席位契约复核通过后请批准；npm 上是否弃用 `@objectstack/plugin-msw` 是发版动作，另由你定。\n\n## What changes\n\n- `skills/objectui/guides/data-integration.md`: the section \"MSW mock setup (frontend-first development)\" (a browser kernel built on the MSW plugin package, removed in 12.0 by `7087cfe6e3`) becomes \"Frontend-first development\". It names the two paths the tree supports today:\n  - no backend: the existing \"Static data (no backend)\" scope;\n  - a real API locally: `os dev` from the ObjectStack app, with the Vite dev server proxying `/api` to `http://localhost:3000` so page and API share one origin (the same shape `ui/apps/console/vite.config.ts` uses).\n  It also states what `os dev` does with data: it persists to a SQLite file, `--fresh` gives a throwaway database, a dev admin is seeded on an empty database, the retired in-memory driver is refused, and `--database :memory:` is SQLite's in-memory database. The two MSW pitfall bullets are removed.\n- `skills/objectui/evals/data-integration.json`, eval 2: the prompt asks for a working local API before the backend is deployed. `must_contain` is `os dev`, `proxy`, `objectstack.config`; `must_not_contain` is `enableBrowser` and `setupWorker` (the MSW plugin option and the MSW worker API).\n- Console remnants (cross-domain exception granted by triage 6504442774):\n  - `VITE_USE_MOCK_SERVER=false` leaves `ui/apps/console/.env.development`, `.env.production` and the Vercel `buildCommand`. No source reads the key: `git grep VITE_USE_MOCK_SERVER -- ui` outside these files, the test below and the CHANGELOG finds one comment in `ui/playwright.import-console.config.ts`.\n  - The Vercel rewrite stops excluding `mockServiceWorker.js`; `ui/apps/console/public` holds no such file.\n  - The `vendor-msw` row leaves the chunk table in `ui/apps/console/docs/deployment.md`; `vite.config.ts` declares no such chunk.\n- `ui/packages/app-shell/src/observability/committed-telemetry-endpoint.test.ts`, measured first as the card asked:\n  - `:118` is a vacuum guard that the parser reads real assignments out of `.env.production`. It used `VITE_USE_MOCK_SERVER` only as a known line, not as live behaviour. It now asserts `VITE_SERVER_URL` parses to the empty string.\n  - `:136` is a synthetic negative probe that reads no file; its second line becomes `VITE_BASE_PATH=/`.\n- Changeset `27678-objectui-skill-msw-removed.md`: `@objectstack/skills` and `@object-ui/console` patch.\n\n### Published-skills readings\n\n| reading | before | after |\n|---|---|---|\n| `skills/objectui/guides/data-integration.md` lines / ratchet tokens | 514 / 4451 | 479 / 4280 (ceiling 4451, headroom 171) |\n| `skills/objectui/evals/data-integration.json` lines / ratchet tokens | 54 / 471 | 54 / 466 (ceiling 471, headroom 5) |\n| `skills/objectui/**` lines | 5446 | 5411 |\n| all `skills/**/SKILL.md` lines | 4610 | 4610 |\n\nCeilings are left where they are; the shrink shows as headroom.\n\n## Tests\n\n- `pnpm exec vitest run packages/app-shell/src/observability/committed-telemetry-endpoint.test.ts` (from `ui/`): Test Files 1 passed, Tests 5 passed.\n- `node ui/scripts/check-skill-eval-tokens.mjs`: exit 0, \"Every must_contain token is taught by its own skill bundle.\"\n- `node ui/scripts/check-skills-paths.mjs`: exit 0 (85/86 stated paths resolve, 1 baselined, unchanged).\n\n## Acceptance notes\n\n- `git grep -n 'plugin-msw\\|MSWPlugin' -- skills`: 0 hits.\n- `git grep -n 'VITE_USE_MOCK_SERVER\\|vendor-msw' -- ui/apps`: 0 hits.\n- Survivors outside `ui/apps`, out of scope: `ui/CHANGELOG.md:392` (history, not edited) and a comment in `ui/playwright.import-console.config.ts:24` that sets the variable in a recipe.\n- The dispatch's mechanism assumption (\"`objectstack dev` with an in-memory driver\") did not hold on `origin/main`: the in-memory engine is no longer a boot store (`packages/cli/src/commands/dev.ts` header; `dev-default-db.test.ts` pins the refusal). The guide teaches what the tree does instead.\n- `npm view @objectstack/plugin-msw version deprecated` on 2026-10-29: `11.0.0`, not deprecated. Deprecating it is the maintainer's release action and is not part of this PR.\n\n## Verification\n\n<details><summary>dispatch-gates: 57 derived families, all exit 0, at a5cbb8fc</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran`: \"57 derived famil(ies) accounted for — 57 run, 0 NOT-MEASURED\". The first pass recorded exit 1 on `pnpm --dir ui exec vitest run scripts/` (unbuilt `@objectstack/spec` dist) and on two gates that read the generated `packages/spec/src/migrations/registry.ts` before it existed, plus exit 3 on six build-prerequisite gates. After `turbo run build --filter='@objectstack/client-react...' --filter=@objectstack/lint...`, every one of them re-ran at exit 0. The pre-push checks `check-regen-pending` and `check-commit-card-trailers --range origin/main..HEAD` both exit 0.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cymVzRLDH1j6gwgGAk\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cymVzRLDH1j6gwgGAk)_\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 27763,
+  "kind": "issue",
+  "title": "showcase \"New Project + Tasks\": the master-detail create form offers every project status, but `project_status_flow` admits only `planned` on create, so four picks end in 400 invalid_initial_state",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:engine",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:35:57Z",
+  "updated_at": "2026-10-29T22:35:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27763",
+  "body": "domain:ui#3 · os-bill · session_01Utp6CaJoinvGQSbHeDaWBe\n\nFiling gate: ① product defect, measured · reach: the showcase \"New Project + Tasks\" page (`showcase_project_workspace`), any user who picks a status other than `planned`; the server refusal is correct, the form offers a dead end\nReader: the lane that owns `examples/app-showcase` pages (sibling #14311 sat in `domain:engine`); the input is `showcase_project`'s `project_status_flow` (`initialStates: ['planned']`), which the object metadata already declares\nDuplicate search: MCP search \"create form status select offers values state machine initialStates refuses invalid_initial_state\", incl. closed → 5 hits, 0 open duplicates. Closest: #14311 (closed completed: the same gap on the New Project **wizard**, fixed by removing `status` from that page), #25933 (closed completed: edit form and board offer illegal **transitions**, not create).\n\nFound while landing #27551 (PR #27759), on `main` 481ade61.\n\n## What happens\n\n`examples/app-showcase/src/ui/pages/project-workspace.page.ts:46` lists `status` among the master-detail form's fields: `['name', 'account', 'status', 'health', 'budget', 'end_date']`. The select renders all five options. `project_status_flow` declares `initialStates: ['planned']` (`examples/app-showcase/src/data/objects/project.object.ts:159`), so picking `active` (or any non-`planned` value) and pressing **Create Project + Tasks** gets `POST /api/v1/batch → 400 VALIDATION_FAILED` with `invalid_initial_state`, and nothing is created. The e2e spec `ui/e2e/live/master-detail.spec.ts` had to switch its second test to `planned` for this reason (PR #27759).\n\nThe sibling wizard already fixed this on its own page: `new-project-wizard.page.ts:34-58` drops `status` and lets the `default: true` option (`planned`) supply it server-side, and `test/new-project-wizard-initial-status.test.ts` pins that invariant against the real metadata. The master-detail page was not covered by that fix or its test.\n\n## Expected\n\nThe showcase must not demo a dead end. Same remedy as #14311: omit `status` from the master-detail create form (the default supplies `planned`), and extend the invariant test so any showcase **create** form that lists a state-machine-governed field either omits it or offers only `initialStates`. The general console feature (a create form deriving its options from the object's `stateMachine`) stays out of scope here, as the wizard's comment already says.\n\n## Acceptance\n\n- On `showcase_project_workspace`, a create with no status pick stores `status = planned`, and no option on the form leads to `invalid_initial_state`.\n- The invariant test covers both the wizard and the master-detail page, and fails if `status` is re-added to either while `initialStates` stays `['planned']`.\n- `ui/e2e/live/master-detail.spec.ts` stops selecting `status` (or keeps `planned` only), consistent with the page."
+}

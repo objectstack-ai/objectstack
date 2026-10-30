@@ -1,0 +1,35 @@
+{
+  "number": 27748,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): a runtime managed datasource syncs its bound objects' tables on create and after a restart",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:14:10Z",
+  "updated_at": "2026-10-29T22:52:24Z",
+  "closed_at": "2026-10-29T22:52:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T22:52:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27748",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D1H8LKUgLcNior93UM4jPpL)_\n\ndomain:server#3 · os-elon-musk · session_016WV4czbMpdApCUbUuNyHt7\n\nFixes #27701\n\n## What changes\n\n- `registerPool` (`packages/services/service-datasource/src/datasource-admin-plugin.ts`) now opens a runtime datasource's pool with `objects`: the names of the objects bound to it in the engine registry. The connect's existing sync loop gives them their tables. This covers the admin create, the boot rehydration, and a peer replica's convergence on a new datasource, which all go through `registerPool`.\n- ⛔ The objects are passed only when the datasource is managed. Its mode is read with `resolveDatasourceSchemaMode`, the same read the driver factory uses. An `external` or `validate-only` datasource passes none and never gets DDL (triage ruling `6506923793`).\n- The registry read that `listObjectsBoundTo` already did is lifted into one local helper, `objectsBoundTo`, which both readers call. `listObjectsBoundTo`'s answer is byte-for-byte the same.\n- Neither `datasource-connection-service.ts` (open PR #27715) nor `objectql/src/engine.ts` is touched.\n\n## Why\n\nA code object bound to a Setup-created managed datasource never got its table. Boot's schema sync skipped it, because the driver did not exist yet. `registerPool` then called `connect(record, { context })` with no `objects`, so the sync loop had nothing to sync. The datasource answered `ok`, and every read of the object was a 500 (Postgres `42P01`), the same after a restart.\n\n## Verification\n\nNew pin: `src/__tests__/runtime-datasource-bound-object-storage.test.ts`. It uses the real `DatasourceAdminServicePlugin` through `init()` and `start()`, a real `ObjectQL` engine on the `objectql` and `data` slots, and the real default driver factory over SQLite files.\n\n| Case | `origin/main` plugin | this PR |\n|---|---|---|\n| on create, the bound object's table exists and the object reads | red | green |\n| after a restart, the rehydrated pool creates a missing table and the object reads | red | green |\n| control: an object bound to another datasource is not synced | red | green |\n| ⛔ `schemaMode: external`: the pool opens, nothing is synced | green | green |\n| ⛔ `schemaMode: validate-only`: the pool opens, nothing is synced | green | green |\n\nAblations, each restored afterwards:\n- Dropping the `objects` argument turns the 3 positive cases red.\n- Forcing the managed gate open turns both negative cases red (`syncObjectSchema` called 2 times).\n\nLocal readings at `6f773675`:\n- `@objectstack/service-datasource` `test`: 62 files, 1016/1016 passed. `typecheck`: exit 0.\n- `dispatch-gates --commands`: 59 families derived, 58 exit 0. `pnpm check:dual-build-cjs-loads` exited 3, so it is NOT MEASURED (it needs a whole-tree build; CI runs it).\n- `dispatch-gates --ran`: 59 accounted for.\n- `pnpm lint`: exit 0.\n\nClause-②: no\nMetadata-protocol: none\n\n## Acceptance notes\n\n- **Out of scope, measured (class a).** An edit that rebuilds the pool still syncs nothing. That covers a changed `config`, credential, `schemaMode` or `active` (`updateDatasource` → `reregisterPool` → `DatasourceConnectionService.reconnect`). `reconnect` takes no `objects`, and its inner `connect(record, { context })` is in `datasource-connection-service.ts`.\n  - Measured with the same rig: create `warehouse` on `a.db`, then update its `config` to `b.db`. The result is `hasTable('wh_note') === false`, and the read is refused by the database.\n  - `reach:` the admin update door (`PATCH /api/v1/datasources/:name` → `updateDatasource`). The fix belongs in the connection service, serial behind #27715.\n- A federated object (`external` set) on a managed datasource would go through `syncObjectSchema`'s DDL-free `registerExternalObject` branch. The admin door already refuses that binding at write time (#25277).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4czbMpdApCUbUuNyHt7\n"
+}

@@ -2,7 +2,7 @@
   "number": 20072,
   "kind": "pull_request",
   "title": "fix(service-analytics): the ObjectQL face refuses a read scope carrying a placeholder the engine cannot resolve in the withheld READ_SCOPE_COMPILE_FAILED / 500 envelope (#19995)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-25T01:34:56Z",
-  "updated_at": "2026-09-25T01:55:50Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-25T02:30:31Z",
+  "closed_at": "2026-09-25T02:30:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-25T02:30:30Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/20072",

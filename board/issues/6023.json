@@ -1,7 +1,7 @@
 {
   "number": 6023,
   "kind": "issue",
-  "title": "[PM seat] domain:devx @ objectstack — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
+  "title": "[PM seat] domain:devx @ objectstack — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-10-29T14:23:33Z",
+  "updated_at": "2026-10-29T21:47:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 449,
+  "comments": 450,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
-  "body": "domain:devx#1 · os-elon-musk · session_01LKHDniRQSWjRJyDtacwpEd\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM\n\n🟢 `os-elon-musk` (`GET /user`) · `session_01LKHDniRQSWjRJyDtacwpEd` (project thread \"Devx 车道派发\"; 由 os-elon-musk 账户的项目负责) · seated 2026-10-29T14:22Z.\n- **Summons:** the maintainer's words in that project, verbatim: 「你坐 devx seat 1」 (2026-10-29 12:30Z). He then chose takeover on his own card, but the seat was already `⏳ vacant` on sunhaolin's sign-off brief 6497550022 (13:08Z). So it was taken directly on that release marker, and there was nothing to take over.\n- **Posture:** default batch. No predecessor posture carries over. Concurrency and the landing grant wait on the maintainer's word in this project.\n- **Sibling seat:** seat 2 (#20163, `os-justin`) is seated. The split is in this seat's knock on #20163.\n\n## Inherited ledger\n\nThe posture and the ledger live in the project; this post holds a pointer only. The canonical ledger is labels + assignee + `Claim:` comments carrying `Seat: domain:devx#1` + `head:claude/` PRs, read by `assignee:os-elon-musk`. The previous body revision (sunhaolin, 2026-10-29 13:08Z) is the archive of the last term.\n\n## Hot-file serial queue\n\n⛔ Re-derive this from live `Claim:` comments and each open PR's actual file list before every dispatch.\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Wake: the project thread. Wall: none.\n"
+  "body": "domain:devx#1 · os-elon-musk · session_01LKHDniRQSWjRJyDtacwpEd\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-elon-musk` · `session_01LKHDniRQSWjRJyDtacwpEd` (project thread \"Devx 车道派发\"; 由 os-elon-musk 账户的项目负责). Seated 2026-10-29 14:2xZ and signed off 2026-10-29T21:46Z on the maintainer's word 「devx 车道可以下班了」 (2026-10-29 21:44Z). `check-handover` exited 0 before this body was written. The sign-off brief is the newest comment and the release marker.\n- **Stay-behind:** none.\n- **In flight:** none. Every claim of the term landed.\n\n## Ledger\n\n- **Landed this term:**\n  - #27642: closed #27382 and #27390 (the security-finding no-card rule, effort by card shape).\n  - #27716: closed #27654 (stale History-tab clauses).\n  - #27647: closed #27383 (retest-owed reader, `touched:SHA`, the §6 cadence).\n- **Released to `pm:queue` with readings:**\n  - #27453: needs a ui-lane record-save feedback helper; the A/B shapes are on the card, shared with #27456.\n  - #25913: the declarations already landed in objectui#13495. The remaining gate retirement is under the `ci.yml` constraint (6430916285).\n- **Still blocked:** #25452 waits on the maintainer's two local `gh` reads.\n- **Anchors:** #27377 (18.3.0 sweep) and #25807 (18.2.0 sweep).\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Seat 2 (#20163, `os-justin`) was seated at sign-off. The split was full-order alternation (6499301324), and the maintainer later let seat 1 take anything seat 2 had not dispatched.\n- **Unfiled finding** for whoever holds the lane: `scripts/qa/qa-rollup.mjs` cannot read past 100 qa-run records from a cloud session. The proxy answers its `/repositories/ID` next links with 403, and page numbers past 100 get 422; the corpus is about 160. `retest-owed.mjs` already avoids both by carrying the next link's query onto `/repos`.\n"
 }

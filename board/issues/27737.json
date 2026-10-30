@@ -1,0 +1,30 @@
+{
+  "number": 27737,
+  "kind": "issue",
+  "title": "[PM seat] domain:server · seat 4 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T21:50:22Z",
+  "updated_at": "2026-10-29T21:50:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27737",
+  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966 and seat 3 is #26761 (⛔ this post is none of them).\n\n<sub>Created 2026-10-29T21:52Z (seated).</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4d1Np3hU7RQnA13YZcL` (project thread \"Server 车道派发(第二席)\"; 由 os-elon-musk 账户的项目负责) · seated at the time above.\n- **Summons:** the maintainer's words in that project, verbatim: 「server 增加一个座位」 (2026-10-29 21:47Z), then 「server 每个座位并发5」 (21:49Z). Seats 1 (#6367) and 2 (#20966) are 🟢 `os-sales` and seat 3 (#26761) is 🟢 `os-elon-musk` in another thread of the same project; no server seat is vacant, so this post adds seat 4 (the lane's highest seat number plus one).\n- **Posture:** batch 5. No predecessor posture carries over. The landing grant waits on the maintainer's word in this project.\n- **Scope:** unclaimed `domain:server` `pm:queue` cards in the lane's selection order, outside every `pm:epic` subtree (epics #8345 and #27261 are excluded), alternating with seat 3 by the lane's selection order. Claims carry `Seat: domain:server#4`.\n\n## Inherited ledger\n\nNone: this seat is new. The posture and the ledger live in the project; this post holds a pointer only. The canonical ledger is labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n⛔ Re-derive this from live `Claim:` comments and each open PR's actual file list before every dispatch; read the queues on #6367, #20966 and #26761 first.\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Wake: the project thread. Wall: none.\n- Mutex readings at seating: no seat-4 post existed; no `Claim:` naming `domain:server#4` on any of the lane's open `pm:dispatched` cards. Protocol touches read (`origin/main` `481ade61`): `SKILL.md`, `references/**` and `references/lanes/server.md` all `ac9c2f09`. `check-harness-current`: CURRENT."
+}

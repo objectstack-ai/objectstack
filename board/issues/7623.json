@@ -1,7 +1,7 @@
 {
   "number": 7623,
   "kind": "issue",
-  "title": "[PM seat] domain:skills — 🟢 marchtian",
+  "title": "[PM seat] domain:skills — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "marchtian"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-11T09:13:50Z",
-  "updated_at": "2026-10-29T10:33:17Z",
+  "updated_at": "2026-10-29T21:58:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 162,
+  "comments": 163,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/7623",
-  "body": "domain:skills#1 · marchtian · session_017ihL2dPRZXfgE1A2Vct3FU\n\n**This post is the single authoritative registration of the skills seat (seat 1, `domain:skills#1`).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/skills.md`, ⛔ not copied here. The previous body (⏳ vacant, written by `session_017xRBcUi2qhP1eKRbZJ1Ze1`, `sunhaolin`, with its 收班简报 6477362488) is the prior revision of this body.\n\n## Current PM\n\n🟢 `marchtian` · `session_017ihL2dPRZXfgE1A2Vct3FU` (a thread of the Claude Code project \"Objectstack 本体 skills\" on the `marchtian` account) · seated 2026-10-29T10:28Z on the maintainer's summons in that project (「再开一个 skills 车道」).\n\n- Posture, round ledger and round reports live in the project, ⛔ not here (project-seat stub).\n- Seat 2 (`domain:skills#2`, #19287) is ⏳ vacant since its 收班简报 6493936299; this seat reads the whole lane queue until a seat-2 sitter posts a `split`.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `issue-create.mjs`) as `objectstack-fleet[bot]`; ⛔ GitHub MCP writes; ⛔ the `marchtian` account writes no content (assignee only).\n\n## Inherited ledger\n\nIn flight at seating: none (`pm:dispatched` with `Seat: domain:skills#1`: 0; the predecessor's brief 6477362488 lists every seat-1 card as landed or handed over). Carried from seat 2's brief 6493936299, not re-measured: #26940 in the decision box; #27354, #26303, #26184 `pm:blocked`; #26617 `pm:on-hold`; #26717, #26768, #25583 `pm:awaiting-maintainer`.\n\n## Hot-file serial queue\n\n- Every lane file: FREE (no claim, no open PR of this seat yet). Claims on the cards carry each in-flight surface.\n- Ratchet readings left by the two predecessors on `origin/main` `ded67bfb`: `SKILL.md` 319 / 319, `references/{contract-review,triage-duties,dispatch-runbook,execution-duties}.md` at their ceilings (headroom 0); `skills/objectstack-platform/evals/config-plugins-ops.json` 1689 / 1690 tokens.\n\n## Notes\n\n- Mailbox: opened at seating; its number is on the round-open marker below this edit.\n- Merges are published to customers through `@objectstack/skills` (`skills/**`) only on a release the maintainer runs; verification layer = the token ratchet, the skill evals and the seat's contract review.\n"
+  "body": "domain:skills#1 · marchtian · session_017ihL2dPRZXfgE1A2Vct3FU\n\n**This post is the single authoritative registration of the skills seat (seat 1, `domain:skills#1`).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/skills.md`, ⛔ not copied here. The previous body (🟢 `marchtian`, seated 2026-10-29) is the prior revision of this body; its 收班简报 is the comment posted right after this edit.\n\n## Current PM\n\n⏳ vacant since 2026-10-29T21:55Z. Predecessor: `marchtian` · `session_017ihL2dPRZXfgE1A2Vct3FU` (a thread of the Claude Code project \"Objectstack 本体 skills\"), clocked out on the maintainer's words 「skills 当前任务处理完，合并后就下班」 (2026-10-29). No stay-behind: no open PR and no claimed card of this seat.\n\n- Seat 2 (`domain:skills#2`, #19287) is 🟢 `os-elon-musk` at this edit and reads the whole lane queue while seat 1 is empty.\n- Write path for the next sitter: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `issue-create.mjs`) as `objectstack-fleet[bot]`; ⛔ GitHub MCP writes.\n\n## Ledger at clock-out\n\n- In flight: none. `check-handover.mjs --session=session_017ihL2dPRZXfgE1A2Vct3FU --account=marchtian`: clear (exit 0).\n- Queue snapshot (open `domain:skills`, not re-triaged):\n  - `pm:queue`: #27637 (p1, one mailbox per seat; touches `.claude/skills`, Tier H), #27726, #27684, #27678, #27668, #27660, #27616, #27580, #27265, #27260 (p2); #27331 also carries `pm:epic`.\n  - `pm:blocked`: #27694 (`Blocked-by: #27649`), #27688, #27609, #27587, #27354, #26303, #26184.\n  - Decision box: #26940 (`needs-user-decision`). `pm:on-hold`: #26617. `pm:awaiting-maintainer`: #25583.\n- Review constraint at clock-out: Fable is out (HTTP 429 since about 2026-10-29T17:05Z), and every `skills/**`, `.claude/skills/**`, spec or ADR change waits for a full Fable review before it lands.\n\n## Hot-file serial queue\n\n- Every lane file: FREE (no claim, no open PR of this seat).\n\n## Notes\n\n- Mailbox #27523 is the `marchtian` account's and stays OPEN: spec seat 4 (#18917, same account) is still seated and reads it.\n- Merges reach customers through `@objectstack/skills` (`skills/**`) only on a release the maintainer runs.\n"
 }

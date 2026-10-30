@@ -1,0 +1,36 @@
+{
+  "number": 27776,
+  "kind": "pull_request",
+  "title": "docs(service-messaging): name the sys_webhook edit check behind the redeliver door",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:51:47Z",
+  "updated_at": "2026-10-30T00:04:52Z",
+  "closed_at": "2026-10-30T00:04:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T00:04:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27776",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9D9b2XhMFsspWMmP1eQ3G4mk)_\n\ndomain:server#3 · os-elon-musk · session_016WV4cyh2cxBQ2LKn2VVfxq\n\nFixes #27706\n\n## What changes\n\nComments only, in `packages/services/service-messaging`:\n\n- `src/http-outbox.ts`, doc comment of `assertHttpRedeliverable` (\"Why this is a security refusal and not a tidiness one\"): the sentence \"`POST /api/v1/webhooks/redeliver` is reachable by any authenticated user\" and the \"that user\" clause after it now name the current check: edit (`update`) access to `sys_webhook`, as decided by `packages/plugins/plugin-webhooks/src/redeliver-entitlement.ts`. The refusal's own reason (a parked row carries no signature) is unchanged.\n- `src/http-outbox-parked-record.integration.test.ts`, header comment: the same clause (\"which any authenticated user can reach\") is corrected the same way.\n\nNo code and no assertion changed.\n\n## Why\n\nAfter #27474 the redeliver door admits only a caller with edit access to `sys_webhook`. A security doc comment that names the wrong check misleads the next person deciding what the door allows.\n\n## Verification\n\n- `git diff origin/main`: 2 files, +7 / -3, all inside comment blocks.\n- All 53 gate families derived by `dispatch-gates --commands` plus `pnpm lint` were run. 46 exit 0, plus `pnpm lint`.\n- `check:dispatcher-error-vocabulary` and `check:query-options-erasure` went red on the first pass only because the gitignored, generated `packages/spec/src/migrations/registry.ts` did not yet exist in the fresh worktree. Re-run after it was generated: both exit 0.\n- Exit 3 (prerequisite not met, needs a whole-tree build), NOT MEASURED locally: `check:dts-closure`, `check:dual-build-cjs-loads`, `check:i18n`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. A comment-only diff cannot move them; CI measures them.\n- `check:commit-card-trailers --range origin/main..HEAD`: pass.\n\nOut of scope, reported and not edited: `src/messaging-service.ts:389-391` (the `redeliver` doc comment, #10740 paragraph) still says the door \"is open to any authenticated user\". The package `CHANGELOG.md` has the same historical phrase, which is a release record and is not hand-edited.\n\nNo changeset: comments only (`skip-changeset` requested from the seat).\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n## 维护者速读\n\n- 改了什么：webhook 重投递入口的两处代码注释，改为写明现行权限（对 sys_webhook 有编辑权）。\n- 为什么改：#27474 后权限已收紧，注释还写着\"任何登录用户可达\"，会误导后来判断安全面的人。\n- 风险与回滚：只改注释，无行为变化；回滚即 revert。\n- 先看：http-outbox.ts 中 assertHttpRedeliverable 的注释段。\n- 两分钟验证：看 diff，只有注释行变动。\n- 需要你做的：无。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cyh2cxBQ2LKn2VVfxq\n"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 27742,
+  "kind": "issue",
+  "title": "spec: an API-backed datasource's external block names a declared connector instance and borrows its credential (D7, ruling 6486136301) — epic #27261 P2",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:spec",
+    "enhancement",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:04:08Z",
+  "updated_at": "2026-10-30T01:40:47Z",
+  "closed_at": "2026-10-30T01:37:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27742",
+  "body": "epic:#27261#1 · marchtian · session_017ihL2c5z3q4h8inrn5kwqV\nFiling gate: ③ maintainer-directed — 田騏 at 2026-10-29T21:58Z 「现在启动全部 P2」 (epic comment 6509296853, D1 amended), at 2026-10-29T21:59Z 「OData 驱动 只做 v4」 (6509311454), at 2026-10-29T22:01Z 「同意」 (generic P2 parts open source in this repository; vendor-specific drivers such as Salesforce stay out of it).\nRuling-ref: 6486145005 (#27299, Tier B = declarative OData) · 6486136301 (#27298, D7) · 6471382887 (#27261 D1–D6)\nDedupe (open AND closed): \"OData datasource driver $metadata import connector credential external datasource\" → 5 hits, none this work (#27298 is the ruled decision card).\nReader: the epic PM (#27261) dispatches it in the epic subtree.\ntype: Feature\n\n## 维护者速读\n\n- **做什么：** 数据源的 `external` 块加一个可选键，点名一个已声明的连接器实例，借用它的授权（静态、oauth2、app-credential、signed 都行）。实例不存在则构建时拒收。\n- **为什么：** SAP / Dynamics 365 都用 OAuth2；一次授权让流程动作和虚拟对象读数共用，重连一次两边都恢复。这是 D7 裁决。\n- **注意：** 改已发布 spec，落地前需 Fable 完整复审与契约复审，Tier H 需您批准。\n- **需要您做的：** 合并前批准。\n\n## Task\n\n- [ ] One optional member of the datasource `external` block naming a connector instance (`Metadata-protocol: added`); refused at build when the instance is not declared; mutually exclusive with `credentialsRef` (or the precedence named and pinned).\n- [ ] ADR-0015 amendment note for D7, and §4 item 8 of the epic's design as amended (credentials through `credentialsRef`, or a declared connector instance for an API-backed datasource).\n- [ ] Execution identity unchanged: ADR-0143 Q1 = A (organization-shared); object permissions and RLS stay the only gate on what a user sees.\n- [ ] Open reading from the ruling, answered in the PR: does the `(organization, connector instance)` binding fit an environment-level datasource (#27230 S1)?\n\n`Clause-②: yes` · `Metadata-protocol: added` (minor). Touches `packages/spec/src/**`: full Fable review and a `CONTRACT_REVIEW_TIER` record before landing; Tier H."
+}

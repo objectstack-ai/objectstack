@@ -1,0 +1,31 @@
+{
+  "number": 27852,
+  "kind": "pull_request",
+  "title": "fix(plugin-approvals): a field approver id or an out-of-office delegate that names no account adds no phantom slot",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:10:07Z",
+  "updated_at": "2026-10-30T02:11:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27852",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DMNav4GoJtdKDeq5tRaBC9R)_\n\nFixes #27752\n\n## 维护者速读\n\n- 改了什么：审批节点里，按记录字段取的审批人（`field`）如果对应的账号不存在，不再生成一个没人能处理的空槽位；外出委托指向一个已删除的账号时，审批退回给原审批人本人。\n- 为什么改：#27749 已经把直接指定用户（`user`）的这种情况修好了，这两条兄弟路径还是老样子，审批单会卡在一个不存在的人身上，日志里也没有任何提示。\n- 风险与回滚：只改 `plugin-approvals` 的审批人展开；目录读取失败时一律保留原槽位，不会因为一次读失败清空审批人。回滚即还原这一个提交。\n- 先看：`approval-service.ts` 里 `resolveApproverSpec` 的 `field` 分支和 `applyOooDelegation` 末尾的退回逻辑。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-approvals exec vitest run src/approval-service.test.ts -t 27752`，9 条用例全绿。\n- 需要你做的：无。\n\n## What changes\n\n- **`type: 'field'`** (`resolveApproverSpec`): each id the record field holds now takes #27749's `user` treatment. The id is a slot only when an account carries it, asked through the same predicate (`reassignTargetRefusal` with no organization). An id no account carries logs the shared \"expanded to nobody\" warning (naming the field and the id), adds no slot, and a slate it empties reaches the node's `onEmptyApprovers`. A failed directory read keeps the slot.\n- **Out-of-office delegation** (`applyOooDelegation`): a chain that ends on a delegate no account carries routes the slot back to the original approver, per the triage ruling (6510482313). It logs an \"expanded to nobody\" warning naming delegator and delegate, and the chain's hops are taken back out of the substitution collector, so no `ooo_substitute` action or notification is written for a reroute that did not happen. A failed read keeps the delegate. A removed delegator with a live delegate still routes to the delegate (#24065). The fallback lives in `applyOooDelegation`, so it covers every caller: `user`, `field`, `manager` and `expression` with `resolveAs: 'user'`.\n- A small private `namesNoAccount(value)` wraps the predicate plus its fail-open catch, and the `user` branch now uses it too (same behaviour).\n\n## Why\n\n#27749 (#27397) closed the phantom-slot path for `user` approvers. The `field` branch and the delegation step still handed an id no account carries straight to the slate: the request opened on a slot nobody could take, with no warning and no `onEmptyApprovers`.\n\n## Verification\n\n- Measured on `main` first: of the 9 new cases, 5 were red (the two `field` cases and the three dead-delegate cases) and the 4 pins (live ids quiet, failed-read keeps the slot for both paths, live delegate routes with its substitution) were green.\n- Ablation: disabling the `field` check reds the 2 `field` cases. Disabling the delegate check reds the 3 delegate cases. Keeping the check but dropping the collector rollback reds the 2 cases that assert no substitution. Restored: all green.\n- `plugin-approvals` full suite: 105 files, 1347 tests pass. Four existing cases routed to ids their test double's directory did not carry (`u4`, `u7`, `bob`). Their fixtures now staff those accounts, test-only, as #27749 did for `user`.\n- Every `dispatch-gates --commands` family plus `pnpm lint`: reported on the card thread.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwhsfZfJRshUTzrYYT\n"
+}

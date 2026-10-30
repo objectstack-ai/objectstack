@@ -1,0 +1,28 @@
+{
+  "number": 27868,
+  "kind": "issue",
+  "title": "metadata-protocol: `rollbackToPackageCommit` drops `revertCommit`'s per-item `failed[]`, so an item the restore refuses is reported as a successful rollback",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T02:21:53Z",
+  "updated_at": "2026-10-30T02:21:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/27868",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① product defect with a named fix site (`finding`, class b: code read, not measured).\n\n**Found by:** the #27818 card thread (PR #27860), from a code read outside its claimed surface. Filed by `domain:server` seat 3.\n\n## What is wrong\n\n`rollbackToPackageCommit` (`packages/metadata-protocol/src/protocol.ts`) calls `revertCommit` once per commit, and only a **thrown** error lands in its own `failed[]`. `revertCommit` reports an item it refuses (for example, a restored body the save door's rules refuse) in its **returned** per-item `failed[]`, without throwing. `rollbackToPackageCommit` discards that return value. So a package rollback where some items were refused answers `success: true`, and nothing lists the refused items.\n\nThis predates #27818 and holds for every restore refusal; #27818 adds one more refusal that reaches it.\n\n## Expected\n\n`rollbackToPackageCommit` carries each `revertCommit` result's per-item failures into its answer (commit id, item, and the refusal's client-facing text), and `success` is false when any item was refused. Pin it with one refused item in a multi-commit rollback.\n\n## Business reason\n\nAn administrator who rolls a package back is told it succeeded while some items stayed as they were, so the package is left half-rolled-back without any notice.\n\n**Reader:** the `domain:server` lane seat. `protocol.ts` is a hot file on the `#25467` serial queue, so keep the edit inside the method.\n\n**Dedupe:** I searched \"rollbackToPackageCommit failed revertCommit per-item\". #21821 (on hold) is the revertCommit plural-type finding and does not cover this.\n\nFiled without `domain:*`; grading is triage's."
+}

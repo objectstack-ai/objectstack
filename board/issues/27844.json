@@ -1,0 +1,34 @@
+{
+  "number": 27844,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the discussion header shows no count when a feed read was refused",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T01:43:22Z",
+  "updated_at": "2026-10-30T02:14:40Z",
+  "closed_at": "2026-10-30T02:14:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T02:14:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27844",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgDFH4S5pR1C8YvYCWWsZfXx)_\n\n## 维护者速读\n- 改了什么：记录页讨论区在评论（或活动）读取被拒时，标题不再显示 `(0)` 这样的条数，只显示「Discussion」；折叠按钮也不再写 `Show Discussion (0)`。\n- 为什么改：没有权限看评论的成员看到「Discussion (0)」紧挨着「你没有权限查看评论」，会以为没人讨论过，而服务器只是不给看。\n- 风险与回滚：只影响读取被拒这一种状态；可读的记录条数照旧（包括 0 条）。回滚即 revert 本 PR。\n- 先看：`RecordActivityTimeline.tsx` 标题里的计数 span；`RecordChatterPanel.tsx` 的 `showLabel`；新测试文件。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/RecordChatterPanel.refusedReadCount-27820.test.tsx`，预期 7 条全部通过。\n- 需要你做的：无，席位落地。\n\nFixes #27820\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- `RecordActivityTimeline` draws its heading's `(N)` count only when neither of the feed's reads was refused. The signal is the existing `activityDenied` / `commentsDenied` props, the same ones that draw the refusal line; no second permission check.\n- `RecordChatterPanel`'s collapsed inline toggle reads `detail.openDiscussion` (\"Open discussion panel\", an existing key) instead of `Show Discussion (N)` under the same condition.\n- Changeset: `@object-ui/plugin-detail` patch.\n\n## Tests\n\n`ui/packages/plugin-detail/src/__tests__/RecordChatterPanel.refusedReadCount-27820.test.tsx`, through the real `en` pack and the `record:chatter` block under a host `DiscussionContext` (the record page's mount):\n\n- refused comment read, no rows: heading is exactly `Discussion`, refusal line shows;\n- refused comment read beside a readable activity row: no count, row and refusal line both show;\n- refused activity read: no count;\n- controls: readable with 0 comments shows `(0)`, with 3 shows `(3)`;\n- collapsed toggle: refused shows no count; readable keeps `Show Discussion (0)`.\n\n<details><summary>Readings at head 64fcb00f</summary>\n\n- `pnpm --dir ui exec vitest run --reporter=verbose packages/plugin-detail/` (under os-verify-lock): VERDICT command-exit 0, Test Files 339 passed / 1 skipped (340), Tests 3085 passed / 18 skipped (3103). Run on the fix commit 97c4beb7; the later commit 64fcb00f changes only the new test's item type.\n- `pnpm --filter @object-ui/plugin-detail run type-check` (both the src and the test tsconfig): VERDICT command-exit 0 at 64fcb00f; the new file: Tests 7 passed (7).\n- Ablation (fix committed first): `git restore --source=359e935d` on `RecordActivityTimeline.tsx` and `RecordChatterPanel.tsx`, mutation shown on disk (the count's `activity-count` marker 1 → 0, `showLabel` 3 → 0), new file run: VERDICT command-exit 1, Tests 4 failed / 3 passed (7). The four refused cases went red (first one: `expected 'Discussion(0)' to be 'Discussion'`), the three controls stayed green. Restored with `git checkout HEAD --`, `git diff HEAD` empty, `git status --porcelain` empty.\n\n</details>\n\n## Acceptance notes\n\n- Measured repro on `main` (`359e935d`): the `(0)` is drawn by `RecordActivityTimeline`'s heading (`({filtered.length})`), which `RecordChatterPanel` mounts with `titleLabel={t('detail.discussion')}` on both its sidebar and inline paths. `DetailView`'s Discussion tab trigger draws no count. The new refused-read cases go red on `main`'s component (the ablation under Tests).\n- Same-class in-place fix, declared: the card names the comment refusal; a refused activity read leaves the count just as unknown, in the same heading, so it is withheld too. The collapsed toggle's `Show Discussion (0)` is the same claim in the same panel and uses an existing key, so `Clause-②: no` holds and no i18n key was added.\n- `RecordDetailView.tsx` (the `apiHandler` in #27793) is untouched.\n\n## Verification\n\n<details><summary>Derived gates at head 64fcb00f</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 34 commands, each run and recorded as `command :: exit code` before any pipe; all 34 exit 0, including `node scripts/check-sdui-manifest.mjs`. Reconciliation with `--ran`: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN. `pnpm check:new-line-citations` (under `ui/`): 0 new citations. Every other family is left to this PR's CI check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Cagj5WeiH9xGApkpYm)_\n"
+}

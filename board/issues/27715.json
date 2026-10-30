@@ -1,0 +1,37 @@
+{
+  "number": 27715,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): a plugin-driver datasource connected or reconnected through the connection service keeps the engine's floor",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T20:22:31Z",
+  "updated_at": "2026-10-29T21:20:21Z",
+  "closed_at": "2026-10-29T21:20:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T21:20:19Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27715",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiVy7F2atKWpo5rp3YPrqddh)_\n\n**Fable review owed.** This PR was finished on Opus while the Fable quota was out (maintainer order: finish on Opus, then wait for the contract review). It touches `packages/spec/src/**`, so it does not land until an independent full Fable review and a same-shape `CONTRACT_REVIEW_TIER` record PASS on its current head.\n\nCard #27666 (epic #27261), from the post-landing contract review of PR #27403 (6502877381, ③).\n\n## What changes\n\n- `EngineDatasourceDef` (`@objectstack/spec/contracts`) gains an optional `driver`, the datasource's driver id.\n- `DatasourceConnectionService.connect` registers the def with `record.driver`. `reconnect`'s keep-old-pool restore registers the old record's driver id (`previous.driver`). Before this, a plugin-driver datasource built through the connection service was never held behind the #27277 floor, and a reconnect dropped the floor because `unregisterDriver` deletes the stored def.\n- The engine comment on `registerDatasourceDef` now says the stored id is a keep, not a source.\n- Riders from the same review (④, comment-only): the `EXTERNAL_ROW_CAP_EXCEEDED` ledger row says why it is deliberately not the standard `MAX_RECORDS_EXCEEDED`, and the \"ADR-0015 Tier A\" citations in objectql name the epic ruling instead.\n\n## Evidence (local, at `df7e3c66`)\n\n- `packages/spec` `src/contracts/data-engine.test.ts`: 36/36.\n- `packages/objectql` `src/external-driver-floor.test.ts`: 54/54, including the unregister-then-connect sequences.\n- `packages/services/service-datasource`: connection-service and update-rebuild suites, 114/114.\n- `tsc --noEmit` clean for spec, objectql and service-datasource.\n- spec `check:api-surface`, `check:export-origins`, `check:docs`, `check:generated` and `check:error-code-provenance` all exit 0.\n\nImplementation: the #27666 card thread's commit (picked onto this branch after the thread stalled on the quota) plus the epic PM's changeset declaration.\n\nClause-②: yes (narrowing)\nMetadata-protocol: none\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017ihL2c5z3q4h8inrn5kwqV\n"
+}

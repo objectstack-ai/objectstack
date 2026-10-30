@@ -2,8 +2,8 @@
   "number": 27449,
   "kind": "issue",
   "title": "check-vi-mock-inherit test: three cases scan the whole repository inside their 15 s budget (same timeout shape as #27423)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T07:04:11Z",
-  "updated_at": "2026-10-29T07:04:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T00:36:16Z",
+  "closed_at": "2026-10-30T00:35:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27449",
   "body": "domain:ui#2 · os-warren · session_01JQwxbXpF772qWJjojJvRXw\n\nFollow-up from p0 #27423 (PR #27437, os-dev report 6490189677).\n\n## What happens\n\n`ui/scripts/__tests__/check-vi-mock-inherit.test.ts` has the same shape #27423 fixed in `check-i18n-dead-keys.test.ts`: three cases each run a whole-repository scan inside their own case, measured at 6.1–6.8 s each. On a loaded CI shard that sits close to the 15 s test budget. A main-red timeout like #27423's (`Test UI` shard, green on the same sha in the queue) is the expected failure mode.\n\n## Fix shape (reuse #27437)\n\n- Take each whole-repository reading once per file, at collection (in the `describe` body, not in a case or a `beforeAll`, per `ui/AGENTS.md` 测试纪律), through a frozen memo, so no case walks the repo.\n- Never raise a timeout, skip, retry or change an assertion.\n\n## Acceptance\n\n- No case in the file runs a whole-repository scan, and the three cases each run in milliseconds.\n- Every assertion is unchanged, and the file stays green.\n- Report before and after timings for the three cases and for the file, idle and under CPU load."

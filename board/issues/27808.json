@@ -1,0 +1,34 @@
+{
+  "number": 27808,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the permission set's Add user picker shows each person's email beside their name",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T00:00:27Z",
+  "updated_at": "2026-10-30T00:50:33Z",
+  "closed_at": "2026-10-30T00:50:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T00:50:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27808",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgDFH4S5pR1C8YvYCWWsZfXx)_\n\n## 维护者速读\n- 改了什么：设置 › 权限集 › 已分配用户 › 添加用户 的选人框，原来只有姓名一列，现在多一列邮箱。\n- 为什么改：同名的两个人在选人框里分不出来，授予权限集前也没法确认账号；同页已分配的列表本来就显示邮箱。\n- 风险与回滚：只改选人框的列与表头，授予写法、成员过滤、AI 席位上限提示都不变；回滚即 revert 本 PR。\n- 先看：`AssignedUsersSection.tsx` 里 `RecordPickerDialog` 新增的 `objectSchema` 与 `columns` 两个属性；新测试 `AssignedUsersSection.pickerColumns-27433.test.tsx`。\n- 两分钟验证：打开任一权限集 › 已分配用户 › 添加用户，预期选人框出现「姓名」「邮箱」两列；无权读 `sys_user.email` 的角色只看到姓名列。\n- 需要你做的：无，席位落地。\n\nFixes #27433\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\nOn a Setup permission-set page, **Assigned users › Add user** opened `RecordPickerDialog` on `sys_user` with no `columns`, so the picker drew the name alone. It now passes, in the same shape as Position › Add holder (#27427):\n\n- `columns` for `name` and `email`, headed from the section's own en/zh copy (`Name`/`Email`, `姓名`/`邮箱`) — no new `@object-ui/i18n` key, so `Clause-②: no`;\n- `objectSchema` set to `sys_user` from the `useMetadata()` objects the section already holds — no new fetch;\n- no permission check of its own: the picker's own `readableColumns` rule decides what is drawn.\n\nFiles: `ui/packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx`, one new test beside it, `.changeset/27433-permission-set-user-picker-email.md` (`@object-ui/app-shell` + `@object-ui/console` patch, as #27427's).\n\n## Tests\n\n`AssignedUsersSection.pickerColumns-27433.test.tsx`, against the real `RecordPickerDialog` (not a stub) and a real `PermissionProvider`:\n\n- the picker draws a Name column and an Email column (cells read by `data-lookup-cell`);\n- CONTROL: the picker offers the active organization's members only (a `sys_user` in another organization is not drawn);\n- CONTROL: choosing a person still writes `sys_user_permission_set` `{ user_id, permission_set }` by name;\n- CONTROL: an AI-seat cap refusal from the grant write still shows inline;\n- CONTROL: under a policy that denies `sys_user.email` (grant writes allowed), only the name column is drawn and no email text appears in the dialog.\n\nAblation (one-shot, not kept): `scripts/ablation-replace.mjs` deleted the `columns` prop (anchor 1 → 0, blob `6e003bf1` → `495a0d0e`) → the column test went red (1 failed / 4 passed), the four CONTROLs stayed green; restored to blob == HEAD, `git diff HEAD` empty. The later commit `3b0005b0` only changes the schema cast's type.\n\n## Acceptance notes\n\n- Every acceptance line of #27433 is pinned by a test above.\n- The seat-cap test asserts the inline sentence by a regex on its leading words only (the card names the inline refusal as the CONTROL; the copy is the section's own).\n- No out-of-scope findings.\n\n## Verification\n\nAll on head `3b0005b0` (base `968cacfd`), locally:\n\n<details><summary>Tests</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/AssignedUsersSection.pickerColumns-27433.test.tsx` — Test Files 1 passed, Tests 5 passed (verify lock VERDICT command-exit 0).\n- Every test file naming `AssignedUsersSection` (44 files: the section's own six, the PermissionMatrixEditor family, `setupHoldersGrant-12082`, `trailDoorsGate-12475`, `openPathObjectReaders-12811`, `affordanceGrantMap-12082` and others) — Test Files 44 passed, Tests 332 passed (VERDICT command-exit 0).\n- `pnpm --filter @object-ui/app-shell run type-check` — VERDICT command-exit 0.\n- Ablation as above: deleting `columns` → 1 failed / 4 passed; restored, `git diff HEAD` empty.\n\n</details>\n\n<details><summary>Derived gates (34)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, each run with its exit code recorded before any pipe; reconciled with `--ran`: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN.\n\n```text\nnode scripts/check-adr-0087-registration.mjs --base origin/main :: exit 0\nnode scripts/check-adr-0087-registration.mjs --self-test :: exit 0\nnode scripts/check-changeset-no-major.mjs --base origin/main :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/check-empty-changeset.mjs --base origin/main :: exit 0\nnode scripts/check-empty-changeset.mjs --self-test :: exit 0\nnode scripts/check-sdui-manifest.mjs :: exit 0\nnode scripts/check-sdui-manifest.mjs --self-test :: exit 0\nnode scripts/pm/release-rehearsal-clone.mjs --self-test :: exit 0\nnode scripts/release-pending-publish.mjs --self-test :: exit 0\npnpm --dir ui exec vitest run scripts/ :: exit 0\npnpm --filter @objectstack/spec run check:duration-unit-keys :: exit 0\npnpm check:changeset-gate-self-tests :: exit 0\npnpm check:closed-ceremony-text :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:dispatcher-error-vocabulary :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:engine-double-contract :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-changeset-deadline-census :: exit 0\npnpm check:published-files :: exit 0\npnpm check:query-options-erasure :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-identifier-liveness :: exit 0\npnpm check:test-source-alias :: exit 0\npnpm check:tier-file-adoption :: exit 0\npnpm check:type-check-coverage :: exit 0\npnpm check:type-check-debt :: exit 0\npnpm check:undeclared-dep-imports :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:where-matcher :: exit 0\n```\n\n</details>\n\n`origin/main` moved 13 commits since the base; none touches the three changed files or `RecordPickerDialog`, so the branch is not merged with it (no overlap). Every CI family (Test UI, Type Check UI, Lint & Repo Gates, …) is the PR's own check-runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CazvDXxebLfghuZZ7t)_\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 27777,
+  "kind": "pull_request",
+  "title": "fix(plugin-dashboard): a viewer whose every tile is refused sees one no-access panel, not a blank canvas",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:52:10Z",
+  "updated_at": "2026-10-29T23:43:33Z",
+  "closed_at": "2026-10-29T23:43:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T23:43:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27777",
+  "body": "domain:ui#2 · os-bill · session_01Utp6CY2n1JmZZKrHgtp9jC\n<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgP6XkfpjCfyzzG2KwQPUZfy)_\n\nFixes #27491\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：观看者在仪表盘上的每个卡片都被服务器以读权限拒绝（403 / PERMISSION_DENIED）时，画布里显示一个「无权访问」面板（锁图标 + 标题 + 一句说明），不再是标题下一片空白；部分卡片被拒、设计模式、非权限错误的表现都不变。\n- 为什么改：CRM 的 Pipeline 仪表盘六个卡片共用一个数据集，普通成员打开只看到标题和「Refresh All」；维护者裁决 A（6508997538）：保留逐卡隐藏，什么都不剩时说一次。\n- 风险与回滚：只动渲染层和十个语言包，不动 spec、服务端、DatasetWidget、DashboardView；403 仍是唯一判据。回滚即 revert 本 PR。\n- 先看：`ui/packages/plugin-dashboard/src/DashboardRenderer.tsx`（`nothingLeftForViewer` 与 `allTilesRefusedPanel`，桌面和移动两处挂载）→ 新测试 `DashboardRenderer.allTilesRefused-27491.test.tsx` → `ui/packages/i18n/src/locales/en.ts` 新键。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-dashboard/src/__tests__/DashboardRenderer.allTilesRefused-27491.test.tsx`，预期 5/5 通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nOutside design mode, a dataset tile whose query the server refuses as a read refusal is left out of the dashboard for that viewer (the rule the spec states in the dashboard widget docblock). When that leaves nothing to draw, the viewer saw the dashboard header over an empty canvas, with no message. Ruling-ref: 6508997538 (maintainer ruling A).\n\n- `DashboardRenderer` renders its tiles once per layout (`desktopTiles`; `metricTiles` and `otherTiles` in the mobile stack) and asks `nothingLeftForViewer(tiles)`: not design mode, at least one refused tile, at least one widget, and every rendered tile is `null`. The only `null` a tile renders is the refusal drop, so the trigger is exactly \"every widget was left out as refused\". A dashboard that still has any drawable widget (a non-dataset widget, a readable tile, a tile that failed for another reason) draws it and no panel.\n- The panel is the `Empty` composition the console draws for a dashboard the viewer may not open (`dashboard-access-denied` in `DashboardView`): lock icon, title `dashboard.widgetForbiddenTitle`, and one new message `dashboard.allWidgetsForbiddenMessage`. It carries `data-testid=\"dashboard-all-widgets-forbidden\"` and spans the full grid (`col-span-full`). The header, its description and the refresh control are untouched.\n- `@object-ui/i18n`: `dashboard.allWidgetsForbiddenMessage` in all ten locales, beside `widgetForbiddenMessage`. en: \"You don’t have permission to view the data behind this dashboard.\" (the typographic apostrophe the neighbouring `dashboard.*` strings use).\n\n## Tests\n\nNew `ui/packages/plugin-dashboard/src/__tests__/DashboardRenderer.allTilesRefused-27491.test.tsx` (5 tests), with the refusal shape `AnalyticsForbiddenError` carries (`httpStatus: 403`, `code: 'PERMISSION_DENIED'`):\n\n- every tile refused: the panel with both strings, both tiles queried, no tile title, no per-tile no-access face;\n- the same in the mobile layout (non-vacuity: the 2-column metric grid is drawn);\n- partial refusal: no panel, the readable tile present, the refused ones gone;\n- CONTROL design mode, every tile refused: no panel, each tile's objectui#10899 face present;\n- CONTROL a 400 on every tile: no panel, every tile and its error alert present.\n\n`DashboardRenderer.refusedTile-26971.test.tsx` and `DatasetWidget.forbiddenState-10899.test.tsx` pass unchanged.\n\n<details><summary>Readings</summary>\n\n- Premise (before the ruling, report 6508422494): the real `examples/app-crm` `pipeline_dashboard` through the real `ObjectStackAdapter` with fetch answering 403 `PERMISSION_DENIED` rendered an empty canvas; ablating the refusal drop brought the six frames back. Scratch test, never committed.\n- Ablation of this change, through `scripts/ablation-replace.mjs` on commit 76be3079: the trigger's `tiles.length > 0 && tiles.every((tile) => tile == null)` replaced by `false` (anchor 1 → 0, blob c9adcbb0354a → eb6c069cbd78): the two all-refused tests red, the three others green (2 failed / 3 passed); restored, blob == HEAD c9adcbb0354a, `git diff HEAD` empty. The test imports the renderer by relative path, so no dist leg.\n- After merging `main` (head 24bc0b97), closure `pnpm --filter '@object-ui/plugin-dashboard^...' build` VERDICT command-exit 0; `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-dashboard/ packages/i18n/`: Test Files 286 passed (286), Tests 3266 passed, 19 skipped; lock VERDICT command-exit 0.\n- Gates: see the os-dev-report on #27491.\n\n</details>\n\n## Acceptance notes\n\n- The trigger is \"nothing left to draw\", not \"every dataset tile refused\", per the ruling: a dashboard that keeps any other widget draws no panel.\n- A refused tile is still not re-queried until remount; \"Refresh All\" stays as #27065 left it (ruling item 2).\n- Option C of the ruling (the CRM app declaring `requiredPermissions` on `pipeline_dashboard` and its nav item) is a separate app-lane card, not this PR.\n\n## Verification\n\n`pnpm --dir ui exec vitest run packages/plugin-dashboard/src/__tests__/DashboardRenderer.allTilesRefused-27491.test.tsx packages/plugin-dashboard/src/__tests__/DashboardRenderer.refusedTile-26971.test.tsx packages/plugin-dashboard/src/__tests__/DatasetWidget.forbiddenState-10899.test.tsx` → 3 files, 11 tests passed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CXTsLkvW2GpvDwNQre\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CXTsLkvW2GpvDwNQre)_\n"
+}

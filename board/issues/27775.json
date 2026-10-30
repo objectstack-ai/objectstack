@@ -1,0 +1,34 @@
+{
+  "number": 27775,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the bell header breakdown names its unit, unread topics",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T22:51:37Z",
+  "updated_at": "2026-10-29T23:43:32Z",
+  "closed_at": "2026-10-29T23:43:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-29T23:43:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27775",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgDFH4S5pR1C8YvYCWWsZfXx)_\n\n## 维护者速读\n\n- 改了什么：铃铛弹层顶部明细的第一项从「N 条通知」改成「N 个未读主题」（十个语言包同键改文案），数字算法不变。\n- 为什么改：同一主题 3 条未读 + 3 个待审批时，顶部写「1 条通知」，下面唯一的合并行写「×3 · 3 条未读」，读者分不清等着的是一件事还是三件。现在顶部说「1 个未读主题」，正是那一行。\n- 风险与回滚：只动文案和测试；没有新 i18n 键、没有新导出，徽标算术（#7233）不变。回滚 revert 本 PR 即可。\n- 先看：`ui/packages/i18n/src/locales/en.ts`（badgeNotifications 三行）、`ui/packages/app-shell/src/layout/__tests__/InboxPopover.oneStory-27704.test.tsx`、`InboxPopover.tsx` 默认文案一行。\n- 两分钟验证：`cd ui && pnpm exec vitest run packages/app-shell/src/layout/__tests__/InboxPopover.oneStory-27704.test.tsx`，预期 2 个测试通过。\n- 需要你做的：无，席位落地。\n\nFixes #27704\n\nClause-②: no\nMetadata-protocol: none\n\n## What changes\n\n- `notifications.badgeNotifications` (the first addend of the bell header breakdown) now names its unit in all ten packs: en \"1 unread topic / 3 unread topics\", zh \"N 个未读主题\", and the matching wording in de/es/fr/pt/ru/ja/ko/ar. Same key, same plural family (every slot keeps `{{count}}`, as `inboxBadgeBreakdown-i18n-7233.test.ts` pins).\n- `InboxPopover.tsx`: the `defaultValue` follows the new copy; the breakdown comment says why the unit is named.\n- The badge arithmetic is untouched: `unreadTopics + pendingApprovalsCount`.\n- The grouped row's other ask (expand to list its records) was measured first: `toggleGroup` already expands a coalesced row to one line per record. The new test pins that too; no code change was needed there.\n\n## Tests\n\n- New `InboxPopover.oneStory-27704.test.tsx` (real i18next + shipped `en` pack): 3 unread rows of one topic + 3 pending approvals read \"4 total · 1 unread topic + 3 pending approvals\", and the one row reads \"×3 … 3 unread\"; clicking the row lists D-1, D-2, D-3.\n- Updated string pins: `AppHeader.inboxVariant.test.tsx` (×2), `InboxPopover.badgeBreakdown.test.tsx` (×2), `InboxPopover.badgePlural-13133.test.tsx` (×2). A grep of `ui/` (apps and packages) for the old strings and for `inbox-badge-breakdown-notifications` found no other pin.\n\n## Acceptance notes\n\n- Wording chose \"topic\", the unit the badge already counts (`groupNotifications` groups by `(topic, title)`), over counting the same unit in both places: counting messages in the header would change the #7233 badge arithmetic, which is ruled.\n- ar uses one counter-style form (\"مواضيع غير مقروءة: N\") in every plural slot, as that pack already does for `groupUnread`.\n\n## Verification\n\nAll readings at head `d86a60a2`.\n\n<details><summary>Tests (local, under the shared lock)</summary>\n\n- `pnpm --filter '@object-ui/app-shell^...' build` → VERDICT command-exit 0.\n- `cd ui && pnpm exec vitest run --maxWorkers=2 packages/app-shell/src/layout/__tests__/ packages/i18n/src/__tests__/ apps/console/src/__tests__/approvalsInboxComponentRef.test.tsx` → Test Files 210 passed (210), Tests 2155 passed / 13 skipped; VERDICT command-exit 0.\n- `pnpm --filter @object-ui/i18n run type-check && pnpm --filter @object-ui/app-shell run type-check` → VERDICT command-exit 0.\n- Ablation (one-shot, not kept): `node scripts/ablation-replace.mjs` set en `badgeNotifications_one` back to `{{count}} notification` (anchor 1 → 0, blob e66ea04c → cd754a52); the new test went red (1 failed, 1 passed: \"names the unit\"); restored, blob == HEAD and `git diff HEAD` empty.\n\n</details>\n\n<details><summary>Derived gates (34 + 2 extra), each exit recorded before any pipe</summary>\n\n- All 34 derived families exit 0; `dispatch-gates --ran` reconciles 34 derived, 34 run, 0 NOT-MEASURED. Extra: `pnpm check:changeset-fixed` and `pnpm check:i18n-stale-fill` exit 0. `node scripts/check-sdui-manifest.mjs` exit 0.\n- `pnpm --dir ui exec vitest run scripts/` exited 1 on its first run (`check-i18n-en-drift`: `badgeNotifications_one` \"wrong\") because it overlapped my own ablation of `en.ts`; a second run overlapped other gates rebuilding `packages/spec/dist`. Re-run alone: Test Files 169 passed, Tests 4902 passed, exit 0.\n- Type-check lanes, the artifact rosters and the wide-population families are CI's; see this PR's check-runs.\n\n</details>\n\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6Ca8dn8NpfgEtvP4VTt\n"
+}

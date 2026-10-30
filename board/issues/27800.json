@@ -1,0 +1,34 @@
+{
+  "number": 27800,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): a returnType currency formula reads as money in related lists and the quick-look panel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-29T23:38:38Z",
+  "updated_at": "2026-10-30T00:50:32Z",
+  "closed_at": "2026-10-30T00:50:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T00:50:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/27800",
+  "body": "domain:ui#2 · os-bill · session_01Utp6CY2n1JmZZKrHgtp9jC\n<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgP6XkfpjCfyzzG2KwQPUZfy)_\nRefs #27430 (row 1's remainder only; rows 2 to 4 stay open)\nRefs #27494\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：声明了 `returnType: 'currency'` 的公式字段（如「剩余预算」），在相关列表的单元格和快速查看面板里现在显示为货币 `$90,000.00`，与它所依据的货币字段一致；声明为 `number` 或未声明的公式仍显示普通数字。\n- **为什么改**：这两处各自从一份手挑的键列表重建字段，漏了 `returnType`，公式单元格已有的货币分支看不到它。列表网格和记录页已在 #27689 修好，这是 #27430 第 1 行剩下的两处。\n- **风险与回滚**：只多转发一个已在 spec 中声明的键，不改 spec、不加新的金额格式化器；只影响声明了 `returnType` 的公式字段的显示。回滚即 revert 本 PR。\n- **先看**：`ui/packages/plugin-detail/src/RelatedList.tsx` 中 `makeCell` 字段包里 `currencyConfig` 旁新增的一行；`RecordDetailPanel.tsx` 中 `buildRecordDetailFields` 新增的一行。\n- **两分钟验证**：`pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/formulaReturnTypeRelay-27430.test.tsx`，预期 4 个用例全部通过。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nTriage ruling (6495354739 on #27494): the formula cell reads `returnType` and uses the currency field's existing currency face. PR #27689 did that for the list grid's configured columns and the record page's `ENRICHED_FIELD_METADATA_KEYS`. Two more places in `@object-ui/plugin-detail` rebuild a field from a hand-picked key list and dropped `returnType`, so `FormulaCellRenderer` / `FormulaField`'s existing `currency` branch never saw it:\n\n1. `RelatedList.tsx`, the `makeCell` field bag: `returnType` is forwarded beside `currencyConfig`, only when the def declares it (the bag's own `...(x && { k })` idiom).\n2. `RecordDetailPanel.tsx`, `buildRecordDetailFields` (the quick-look overlay, a published export): `returnType` is copied beside `currencyConfig`.\n\nNo second money formatter, no spec change, no new key. `buildRecordDetailFields`'s signature and return type (`Array of Record string-to-any`) are unchanged, so `Clause-②: no`; `returnType` is already a declared `FieldSchema` key, so `Metadata-protocol: none`.\n\nChangeset: `@object-ui/plugin-detail` patch.\n\n## Tests\n\nNew `ui/packages/plugin-detail/src/__tests__/formulaReturnTypeRelay-27430.test.tsx`, the same pin shape as #27689 (a formula with `returnType: 'currency'`, `currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' }`, `scale: 2`, value 90000; a `returnType: 'number'` control at 1234.5):\n\n- CONTROL: the fixture formula is spec-valid (`FieldSchema.safeParse`).\n- `buildRecordDetailFields` carries `returnType` for both formulas.\n- `RecordDetailPanel` draws `$90,000.00` beside `$150,000.00`; the number formula draws `1,234.50` with no currency sign.\n- `RelatedList` table cells: `$90,000.00`; the number formula cell is `1,234.50` with no currency sign.\n\nAblation (`scripts/ablation-replace.mjs`, each fix line deleted on its own, anchor 1 to 0, restored to the HEAD blob with `git diff HEAD` empty; vitest resolves the package from src):\n\n- RelatedList line deleted: 1 failed, 3 passed; the cells read `[\"Tower\",\"$150,000.00\",\"90,000.00\",\"1,234.50\"]`.\n- RecordDetailPanel line deleted: 2 failed, 2 passed (`expected undefined to be 'currency'`; the panel text lacks `$90,000.00`).\n\n## Acceptance notes\n\n- The related list's page totals (`BodyTableTotals`) sum only `TOTALLED_FIELD_TYPES` and take the currency from a `currency` field's def; a formula column gets no total, as before. Not changed here.\n\n## Verification\n\n<details><summary>Targeted tests, typecheck and lint</summary>\n\n- New file: `Test Files 1 passed (1)`, `Tests 4 passed (4)`.\n- `pnpm --filter @object-ui/plugin-detail test` (whole package, before the `origin/main` merge): `Test Files 338 passed | 1 skipped (339)`, `Tests 3078 passed | 18 skipped (3096)`, lock VERDICT command-exit 0.\n- `pnpm --filter @object-ui/plugin-detail type-check` exit 0 and `lint` exit 0 (before the merge); `type-check` exit 0 again at merged head `60638520`.\n- At merged head `60638520` (main moved 8 commits, none under `ui/packages/plugin-detail`, `fields` or the components renderers): the new file plus `currencyConfigRelay-12242` and `formulaReturnTypeRelay-27494`, exit 0.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 34 families)</summary>\n\nRun twice, at `4d4d462b`+changeset and again at merged head `60638520`; the derivation was identical both times. All 34 exit 0; `dispatch-gates --ran`: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN. Includes `check-sdui-manifest` (and its self-test), `check:nul-bytes`, `check:type-check-debt`, `check:type-check-coverage`, `check:published-files`, `check:test-source-alias`, `check-empty-changeset`, `check-changeset-no-major`, `check-closing-keyword-parity`. Every other family is CI's; the seat reads the PR's check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CYEbuRp8dS61F3RKwo)_\n"
+}

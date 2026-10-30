@@ -1,7 +1,7 @@
 {
   "number": 26761,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 3 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-bill"
+    "os-elon-musk"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-10-29T12:05:17Z",
+  "updated_at": "2026-10-29T21:14:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
-  "body": "domain:server#3 · os-bill · session_01Utp6CXc5hequf76uJfzrdK\n\n⚠️ **Seat stub.** The job description is `.claude/skills/pm-dispatch/references/lanes/server.md`. This is **`domain:server` seat 3**. Seat 1 is #6367; seat 2 is #20966.\n\n<sub>Refreshed 2026-10-29T12:03Z (signed off).</sub>\n\n- **Current PM:** ⏳ vacant. The previous holder was `os-bill`, `session_01Utp6CXc5hequf76uJfzrdK`, from the Claude Code project \"Objectstack 多币种\". It was seated 2026-10-28T12:57Z and signed off on the maintainer's word 「server 处理完当前任务就下班」, given at 2026-10-29T02:22Z. `check-handover` exited 0 before this body was written. The release marker is the sign-off brief, the newest comment on this post. To take the seat, run `/pm-dispatch 接手` and read that brief first.\n- **What this seat takes:** unclaimed `domain:server` `pm:queue` cards, in the lane's selection order, outside the `pm:epic` subtree. Claims carry `Seat: domain:server#3`.\n- **Hot-file serial queue:** none held. Read the queues on #6367 and #20966 before any claim.\n- **Pointer:** the canonical ledger is labels, assignee, `Claim:` / `Release:` comments and `head:claude/` PRs, read by `Seat: domain:server#3`.\n- **Left running:** nothing. There are no in-flight cards, open PRs, PR subscriptions, scheduled check-ins or triggers.\n- **Wall:** none.\n"
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367 and seat 2 is #20966 (⛔ this post is neither).\n\n<sub>Refreshed 2026-10-29T21:12Z (seated).</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4czuTWNgKR22fKv7jia` (project thread \"Server 车道派发\"; 由 os-elon-musk 账户的项目负责) · seated at the refresh time above.\n- **Summons:** the maintainer's words in that project, verbatim: 「80分钟后再接一个 server 车道」 (2026-10-29 19:46Z). Seats 1 (#6367) and 2 (#20966) are both 🟢 `os-sales` and active today, so this seat sits the vacant seat 3, released by the sign-off brief 6496166675 (the newest event on this post before this edit).\n- **Posture:** default batch. No predecessor posture carries over. Concurrency and the landing grant wait on the maintainer's word in this project.\n- **Scope:** unclaimed `domain:server` `pm:queue` cards in the lane's selection order, outside every `pm:epic` subtree (epics #8345 and #27261 are excluded). Claims carry `Seat: domain:server#3`.\n\n## Inherited ledger\n\nThe posture and the ledger live in the project; this post holds a pointer only. The canonical ledger is labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs. The previous body revision (`os-bill`, 2026-10-29 12:03Z) is the archive of the last term; its sign-off brief 6496166675 lists the handed-over items.\n\n## Hot-file serial queue\n\n⛔ Re-derive this from live `Claim:` comments and each open PR's actual file list before every dispatch; read the queues on #6367 and #20966 first.\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Wake: the project thread. Wall: none.\n"
 }
