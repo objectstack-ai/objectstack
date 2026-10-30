@@ -34,6 +34,12 @@
   VALIDATION_FAILED` naming each such field with the ADR-0114 code
   `invalid_value`, and nothing is written. See "The field refusal" in the
   2026-10-26 addendum.
+  · **Amended** (2026-10-30, #27738) — D2's unknown-key refusal admits one
+  undeclared family, on a forwarded `type: 'api'` action only: `outputs.<key>`
+  params, the per-request approval decision outputs that the action's
+  request folds into its body's `outputs` object. Every other undeclared key,
+  and the same family on any action whose request does not fold it, is
+  refused as before. See the 2026-10-30 note under D2 item 1.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -286,6 +292,46 @@ free. Three changes:
    > `packages/mcp/src/mcp-coded-refusal.test.ts` (`run_action`'s rendering of
    > a thrown code). No other decision in D2 changes: the code and shape
    > above correct the record, they add no rule.
+
+   > **Amended 2026-10-30 (#27738) — a forwarded `type: 'api'` action
+   > admits the `outputs.<key>` decision-output family.** Both action doors
+   > forward a same-origin `type: 'api'` action in process to its declared
+   > `target`, after this item's gate, and build the request body from the
+   > declaration (`packages/runtime/src/action-execution.ts#buildApiActionRequest`).
+   > That build folds every param named `outputs.<key>` (the prefix and a
+   > non-empty key) into a nested `outputs` object, which is the body the
+   > approvals decide routes read (#3447). Each such param is one decision
+   > output an approval node declares (`decisionOutputs`), and the approver
+   > fills it in while deciding. The key set belongs to the pending request,
+   > not to the action, so no `params` list can declare it, and "unknown
+   > param keys are a validation error" refused every approve or reject that
+   > carried one.
+   >
+   > **What is admitted, by whom, for which actions.** The gate
+   > (`packages/runtime/src/action-execution.ts#enforceActionParams`, at the
+   > REST door and the MCP `run_action` door alike) judges the bag without
+   > its undeclared `outputs.<key>` params when the action's request folds
+   > them, and only then. One predicate answers "folds them"
+   > (`foldsApiDecisionOutputs`): `type: 'api'`, not a declarative update,
+   > and no `bodyShape.wrap` (under a wrap the params are nested and the
+   > fold never reaches them). One predicate answers membership
+   > (`isApiDecisionOutputParam`), and the fold asks the same one. The
+   > forwarded target judges the admitted values against the request's own
+   > `decisionOutputs` (required, type), as it judges the rest of the body it
+   > receives (ADR-0066 D4).
+   >
+   > **What does not change.** A declared param is judged as declared,
+   > whatever its name. Every other undeclared key is refused with the same
+   > `400 VALIDATION_ERROR` at both doors. The family is refused on every
+   > other action (script, flow, declarative update, a wrapped api body),
+   > where nothing folds it. `OS_ALLOW_LAX_ACTION_PARAMS` is untouched. The
+   > spec's validator
+   > (`packages/spec/src/ui/action-params.zod.ts#validateActionParams`) and
+   > its built-in keys do not change: the admission lives in the runtime gate
+   > beside the fold it mirrors. Pinned in
+   > `packages/runtime/src/action-params-enforcement.test.ts` (the gate) and
+   > `packages/runtime/src/domains/api-action-forward.test.ts` (both doors,
+   > and the fold).
 
 2. **Typed handler surface.** `defineAction` today validates config only. It
    gains a typed companion so registered handlers stop being
