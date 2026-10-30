@@ -4087,7 +4087,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
   'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
-  'the record line: a `## Contract review` record\'s `Head-sha:` and `Local-runs:` lines, judged when present — an absent line is not re-judged': 17,
+  'the record line: a `## Contract review` record\'s `Head-sha:` and `Local-runs:` lines, judged when present — an absent line is not re-judged': 18,
   'the vacant body: a VACANT seat post\'s ledger holds pointers, never obligations': 27,
   'the decision facets: a decision analysis carries its marker, and a delta, a record or a quotation is not one': 22,
   'the relay transport: the same act as one op, the comment found on the board, the exit register kept apart': 13,
@@ -5318,6 +5318,7 @@ export function selfTest() {
     t('⛔ the key folded INTO the span, a bare hex value and a lowercase key are refused — each names no head to every reader', rkeys(SHA_WITH([`\`Head-sha: ${SHA_HEAD}\``])) === 'Head-sha' && rkeys(SHA_WITH([`Head-sha: ${SHA_HEAD}`])) === 'Head-sha' && rkeys(SHA_WITH([`head-sha: \`${SHA_HEAD}\``])) === 'Head-sha');
     t('⭐ a quoted line ABOVE the record\'s own passes — the reader skips the quotation and reads the line below it', rkeys(SHA_WITH([`> Head-sha: \`${'f'.repeat(40)}\``, `Head-sha: \`${SHA_HEAD}\``])) === '');
     t('⛔ ABSENT is NOT re-judged for this key either: a record with no `Head-sha` key at all passes untouched — the retired-dialect records carry none', rkeys(SHA_WITH([])) === '');
+    t('⛔ a fully QUOTED record, and a code-indented (four spaces or tab) line alone, are refused — a quoted heading opens no scope and an indented line is code', rkeys(SHA_WITH([`Head-sha: \`${SHA_HEAD}\``]).split('\n').map((l) => `> ${l}`).join('\n')) === 'Head-sha' && rkeys(SHA_WITH([`    Head-sha: \`${SHA_HEAD}\``])) === 'Head-sha' && rkeys(SHA_WITH([`\tHead-sha: \`${SHA_HEAD}\``])) === 'Head-sha');
     t('both lines unreadable ⇒ both rows, `Head-sha` first', rkeys(SHA_WITH([`> Head-sha: \`${SHA_HEAD}\``], 'Local-runs: probe')) === 'Head-sha,Local-runs');
     t('the `Head-sha` refusal prints the spelling that reads, names the owner, and quotes the offending line', (() => { const rows = recordKeyedLineRefusals(SHA_WITH([`> Head-sha: \`${SHA_HEAD}\``])); const text = recordLineRefusalText(rows); return text.includes(RECORD_KEY_SPELLINGS['Head-sha']) && text.includes('contractReviewHeadSha') && rows[0].line.includes('> Head-sha'); })());
     t('⛔ NOT a record: a claim or a report carrying a quoted `Head-sha:` line is untouched — the reader runs on the record\'s heading only', rkeys(`Claim: x\n> Head-sha: \`${SHA_HEAD}\``) === '' && rkeys(`os-dev-report\n\n> Head-sha: \`${SHA_HEAD}\``) === '');
