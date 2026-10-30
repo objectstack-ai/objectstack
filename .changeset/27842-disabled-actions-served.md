@@ -8,7 +8,7 @@
 fix: `GET /meta/object` serves which packaged actions are switched off beside the item, and a switched-off action is refused with a plain sentence
 
 Clause-②: yes (widening)
-Metadata-protocol: added
+Metadata-protocol: none
 
 - **Served beside the object** (`@objectstack/metadata-protocol`, `@objectstack/rest`). `GET /api/v1/meta/object/:name` serves `disabledActions` beside `item`: the names in `item.actions` that the deployment's activation ledger switches off. `GET /api/v1/meta/object` serves the same answer keyed by object name. The default cached door carries it too, read live on every call and kept out of the ETag, so a read that carries it is answered in full rather than `304 Not Modified`. The key is absent where no ledger answered (no engine, or an engine with no ledger attached), on a draft read, and on every type other than `object`. `item.actions` is unchanged. The protocol reads the engine's `getDisabledActions` through the kernel's service table by name and imports no engine.
 - **The fact it serves** (`@objectstack/objectql`). `ObjectQL.getDisabledActions()` returns the names the engine's activation projection switches off, the same projection both dispatch doors consult before they refuse a call, or `undefined` when no ledger is attached. `listDisabledActions()` is unchanged.

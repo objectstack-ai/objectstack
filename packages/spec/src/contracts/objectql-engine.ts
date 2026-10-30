@@ -230,9 +230,10 @@ export type EngineFilterJudgement =
  * guarded call into a `possibly undefined` error and push code back toward the
  * `any` this contract exists to remove.
  *
- * One member is optional by ruling, not by this default: {@link judgeFilter}
- * (#19995 ruling C). Its callers must work with an engine that lacks it, so the
- * optional mark states that requirement in the type.
+ * Two members are optional by ruling, not by this default: {@link judgeFilter}
+ * (#19995 ruling C) and {@link getDisabledActions} (#27842 ruling letter B,
+ * the `getFlowRegistration?` shape). Their callers must work with an engine
+ * that lacks them, so the optional mark states that requirement in the type.
  */
 export interface IObjectQLEngine extends IDataEngine {
     // ── Schema access ────────────────────────────────────────────────────
