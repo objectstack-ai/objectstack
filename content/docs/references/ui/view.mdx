@@ -109,6 +109,7 @@ Appearance and visualization configuration
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 | **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
+| **initialDate** | `Enum<'today' \| 'first_record' \| 'next_record'>` | optional | Where the calendar opens. 'today' (also what an omitted key does) opens on the period containing today; 'first_record' on the period containing the earliest start date (the startDateField value) among the records the view selects; 'next_record' on the period containing the earliest start date on or after today among those records. When no record qualifies, the calendar opens on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: a date stored on a view goes stale as time passes |
 
 
 ---
@@ -915,6 +916,7 @@ View filter rule
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 | **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
+| **initialDate** | `Enum<'today' \| 'first_record' \| 'next_record'>` | optional | Where the calendar opens. 'today' (also what an omitted key does) opens on the period containing today; 'first_record' on the period containing the earliest start date (the startDateField value) among the records the view selects; 'next_record' on the period containing the earliest start date on or after today among those records. When no record qualifies, the calendar opens on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: a date stored on a view goes stale as time passes |
 
 ### Nested Shape: `ListView.gantt`
 
@@ -1284,6 +1286,7 @@ View filter rule
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 | **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
+| **initialDate** | `Enum<'today' \| 'first_record' \| 'next_record'>` | optional | Where the calendar opens. 'today' (also what an omitted key does) opens on the period containing today; 'first_record' on the period containing the earliest start date (the startDateField value) among the records the view selects; 'next_record' on the period containing the earliest start date on or after today among those records. When no record qualifies, the calendar opens on today. The period is the month, week or day the active view mode shows. A fixed calendar date is not accepted: a date stored on a view goes stale as time passes |
 
 ### Nested Shape: `ObjectListView.gantt`
 
