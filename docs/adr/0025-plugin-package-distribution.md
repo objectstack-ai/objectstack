@@ -1,6 +1,6 @@
 # ADR-0025: Plugin Package Distribution (Code + Dependencies)
 
-**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2026-05, revised 2026-06-01, audited 2026-07-16 and 2026-09-12). Narrowed to what landed: Phase 1 (the `.osplugin` artifact, the compiled-manifest schema, `os plugin build` / `sign` / `publish`, cloud review and counter-signing), install-time permission consent for package installs (console disclosure, `sys_package_installation.granted_permissions`, re-consent on a widening upgrade, the artifact → enforcer binding at load), and M1, the local T0 install loop (2026-10-29, §3.5: `os plugin install ./x.osplugin` against the environment's trusted keys, the boot-time loader with the tier dispatch point, disable / enable / uninstall; its cloud-sample acceptance run is still open). Not yet built, carried by the M0–M3 programme on objectstack#27108: the cloud fetch of a code plugin (§3.5 — M2), runtime enforcement of the granted set (registered only today, §3.7 — M2), tier dispatch beyond `node` (T1 sandbox — M3), publish-side scans and secret-refs (M3). This revision (v2, 2026-10-28) corrects §3.3, §3.4, §3.8 and §3.10 to the code and records the maintainer's decisions Q1–Q8; amended 2026-10-30 to what M1 shipped (§3.3, §3.4, §3.5, §3.6, §7).
+**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2026-05, revised 2026-06-01, audited 2026-07-16 and 2026-09-12). Narrowed to what landed: Phase 1 (the `.osplugin` artifact, the compiled-manifest schema, `os plugin build` / `sign` / `publish`, cloud review and counter-signing), install-time permission consent for package installs (console disclosure, `sys_package_installation.granted_permissions`, re-consent on a widening upgrade, the artifact → enforcer binding at load), and M1, the local T0 install loop (2026-10-29, §3.5: `os plugin install ./x.osplugin` against the environment's trusted keys, the boot-time loader with the tier dispatch point, disable / enable / uninstall; its cloud-sample acceptance run is still open). Not yet built, carried by the M0–M3 programme on objectstack#27108: the cloud fetch of a code plugin (§3.5 — M2), runtime enforcement of the granted set (registered only today, §3.7 — M2), tier dispatch beyond `node` (T1 sandbox — M3), publish-side scans and secret-refs (M3). This revision (v2, 2026-10-28) corrects §3.3, §3.4, §3.8 and §3.10 to the code and records the maintainer's decisions Q1–Q8; amended 2026-10-30 to what M1 shipped (§3.2, §3.3, §3.4, §3.5, §3.6, §3.7, §5, §7, §8).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package + versioned releases), [ADR-0004](./0004-cloud-multi-kernel.md) (cloud multi-kernel), [ADR-0010](./0010-metadata-protection-model.md) (L1/L2/L3 protection), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (package authoring & publish, local export/import)
 **Consumers**: `@objectstack/core` (kernel, plugin-loader, security), `@objectstack/runtime` (sandbox, marketplace install), `@objectstack/cli`, `@objectstack/spec/system` (ObjectStackManifest), `@objectstack/spec/cloud`, `../objectui` (Studio)
@@ -272,7 +272,7 @@ resolve → compat check → permission consent → download+verify → material
    (`env_id`, `version_id`, `granted_permissions`, `status`; v2 §3.8, the
    `sys_plugin_installation` of the original text was never created). Persist to a local store so installs survive
    restarts (reuse the ADR-0016 §9.7 `package-state-store.ts` pattern).
-7. **Load + activate.** On next boot (or hot, when `hotReloadable`), the loader
+7. **Load + activate.** On next boot (*v2:* boot only, `hotReloadable` retired), the loader
    scans installed plugins, dynamic-imports the entry, wraps `PluginContext`
    with the enforcer scoped to the granted set, and runs `init → start` in
    dependency order. If the plugin also has `contributes` metadata, that JSON is
@@ -282,7 +282,9 @@ resolve → compat check → permission consent → download+verify → material
 plugin" upload both hit a `marketplace/install-local`-style endpoint (inline
 artifact, register-before-persist per ADR-0016 §9.3). Local artifacts need no
 cloud account; signature verification is still performed (publisher key or an
-explicit `--trust-unsigned` dev override).
+explicit `--trust-unsigned` dev override). *v2 — as built in M1:* no endpoint and
+no Studio upload; `os plugin install` is a CLI act at the host that persists at
+install (under `OS_HOME`) and registers the plugin at the next boot.
 
 *v2 — where the flow stands and how it lands (maintainer decisions Q1–Q2, 2026-10-28):*
 
@@ -394,9 +396,11 @@ self-signed.
   lands, with #11982's zero-caller measurement as its starting evidence — the
   manifest `configuration` block below records the design intent, not a live
   validator.
-- **Supply chain.** Lockfile + per-file `integrity`; server-side scan for
-  secrets and known-vuln deps; SBOM stored on the version row; **always**
-  `--ignore-scripts` (no `postinstall`).
+- **Supply chain.** Per-file `integrity`; server-side scan for secrets and
+  known-vuln deps; SBOM stored on the version row; **always** `--ignore-scripts`
+  (no `postinstall`). *v2:* no lockfile ships (bundled only, §3.3), so install
+  runs no package manager at all; `integrity` is re-verified at install and at
+  every boot (M1); the scans are M3 (§3.4).
 - **Reversible disable.** Reuse the package enable/disable + disable-state-store
   (ADR-0016 §9.5/§9.7): disabling a plugin stops loading its code and unregisters
   its contributions on next boot.
@@ -639,8 +643,10 @@ its download / scan half is M2 / M3; Phase 4 (sandbox tier) = M3; Phase 5
   objectstack#27123, letter B′):* the host's trusted-key **store** landed in M1
   in its minimal form — `sys_trusted_key` (public keys only, `source: 'local'`),
   `os plugin keygen` and `os plugin trust add | list | revoke`; install and boot
-  refuse an unknown or revoked key id by name. Rotation policy and the
-  `platform` / `cloud` sources stay M3.
+  refuse an unknown or revoked key id by name. Rotation policy stays M3; the
+  `platform` / `cloud` values of `source` are reserved for the keys M2 / M3 cache
+  from the platform chain (M2's `cloud` rows: root key → platform
+  counter-signature → publisher key).
 - **T2 RPC surface** — deferred to **M3** (T2 stays reserved; the minimal
   host-service RPC contract is designed when the sandbox tier lands).
 - **Cross-plugin dependency conflicts** — deferred to **M3** (M1 and M2 install
@@ -666,6 +672,10 @@ its download / scan half is M2 / M3; Phase 4 (sandbox tier) = M3; Phase 5
 - `packages/core/src/security/granted-permissions-not-enforced.pin.test.ts` — the registered-not-enforced measurement pin (deleted by M2)
 - `packages/core/src/security/plugin-artifact-signature.ts` — Ed25519 sign / verify / counter-sign (v2 §3.4)
 - `packages/cli/src/commands/plugin/{build,sign,publish}.ts`, `packages/cli/src/utils/osplugin.ts` — the Phase 1 pipeline as built (v2 §3.3–3.4)
+- `packages/cli/src/commands/plugin/{install,keygen,disable,enable,uninstall}.ts`, `packages/cli/src/commands/plugin/trust/{add,list,revoke}.ts` — the M1 install loop and the trusted-key commands (v2 §3.5, §7)
+- `packages/runtime/src/installed-plugin-loader.ts`, `packages/runtime/src/plugin-installation-store.ts`, `packages/cli/src/utils/installed-plugins-boot.ts` — the boot-time loader with the tier dispatch point, the local installation records, and `os serve`'s registration of what passed (v2 §3.5, §3.6)
+- `packages/core/src/security/plugin-artifact-verdict.ts` — the host's verdict `plugin-loader.ts` reads before it accepts a `signature` (v2 §3.4)
+- `packages/platform-objects/src/system/sys-trusted-key.object.ts` — `sys_trusted_key`, the environment's trusted publisher public keys (v2 §7)
 - `packages/runtime/src/security/artifact-granted-permissions.ts` — the artifact → enforcer binding at load (v2 §3.7)
 - `packages/spec/src/kernel/manifest.zod.ts` — `PluginPermissionsSchema`, `PluginEnginesSchema`, `PluginRuntimeSchema`, `PluginPackagingSchema`, `PluginIntegritySchema` (v2 §3.2)
 - objectstack#27108 — the M0–M3 programme (v2 §4)
