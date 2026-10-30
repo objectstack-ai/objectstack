@@ -505,6 +505,7 @@
     "OtelExporterType (const)",
     "OtelExporterType (type)",
     "PAGE_COMPONENT_COPY_KEYS (const)",
+    "PAGE_FORM_COMPONENT_TYPE (const)",
     "PAGE_TABS_COMPONENT_TYPE (const)",
     "PKG_CONVENTIONS (const)",
     "PLATFORM_OBJECTS_BY_PACKAGE (const)",
