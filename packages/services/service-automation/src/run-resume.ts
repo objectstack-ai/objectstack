@@ -402,7 +402,7 @@ export async function resume(this: Pick<RunResumeHost, 'refuseGatedResume' | 're
  * is what `resumeInternal` answers, and this code is answered only by the
  * public door's gate, before `resumeInternal` is reached.
  */
-export const MAP_ITEM_PENDING_REFUSAL_CODE = 'RESUME_CHILD_PENDING' satisfies NonNullable<AutomationResult['code']>;
+export const MAP_ITEM_PENDING_REFUSAL_CODE: NonNullable<AutomationResult['code']> = 'RESUME_CHILD_PENDING';
 
 /** The body of {@link AutomationEngine.refuseGatedResume}; that method's docblock is its contract. */
 export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveSuspensionChain' | 'resolveSuspendedNodeType' | 'resolveResumeAuthority' | 'resolveDeclaredResumeAuthority' | 'logger'>, runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
