@@ -496,7 +496,9 @@ export interface IDataEngine {
    * `schemaMode`, with or without a reference — `credentialsRef` is valid on
    * a managed datasource too, #8153) and answer FRESH copies: a reader must
    * not be able to reach through this accessor and mutate the write gate's
-   * own input.
+   * own input. Each entry carries the definition's stored `driver` id, and
+   * omits the key for a definition that never named one (see
+   * {@link EngineDatasourceDef.driver}).
    */
   listDatasourceDefs?(): EngineDatasourceDef[];
 

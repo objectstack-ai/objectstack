@@ -4397,7 +4397,9 @@ function collectExternalBindingDatasourceErrors(config: ObjectStackDefinition): 
  * no connection record to share. A disabled instance (`enabled: false`) is
  * accepted: the switch turns the vendor off for its actions and its records
  * alike, which is the one-grant behaviour D7 asks for, not a dangling name.
- * Runs before the object-count early return: it needs no object.
+ * Runs before the object-count early return: it needs no object. A
+ * composition runs it once more over every input's datasources and connectors
+ * ({@link collectComposedDatasourceConnectorErrors}).
  */
 function collectDatasourceConnectorErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
@@ -4468,6 +4470,35 @@ function collectComposedExternalBindingDatasourceErrors(
 ): string[] {
   const datasources = stacks.flatMap((stack) => (Array.isArray(stack.datasources) ? stack.datasources : []));
   return collectExternalBindingDatasourceErrors({ objects: composedObjects, datasources } as ObjectStackDefinition);
+}
+
+/**
+ * [ADR-0015 amendment D7] {@link collectDatasourceConnectorErrors} over a
+ * COMPOSITION: a datasource's `external.connector` against the `connectors` of
+ * every input.
+ *
+ * `defineStack` judges the reference against its own stack only, and an input
+ * built with `strict: false` never reaches that pass, so a dangling name it
+ * carries reached the composed artifact with no verdict: the datasource has no
+ * credential to borrow, and the author learns of the typo when it first
+ * connects instead of when the artifact is built. Judged here over the `datasources` and the `connectors` of every input, by
+ * the same collector, so the three findings and their fixes read exactly as
+ * the per-stack ones do.
+ *
+ * What this can newly refuse: a dangling name, a descriptor or an instance
+ * with nothing to lend, carried by an input built with `strict: false`. A
+ * cross-input pair resolves (a datasource in one input borrowing an instance
+ * another declares), because the composed artifact registers both. A
+ * connector name two inputs declare is judged against the later declaration
+ * (the collector keeps the last one it meets), which is the entry the runtime
+ * keeps ({@link SAME_STACK_ENTRY_IDENTITY}'s `connectors` row), so a strict
+ * input whose own instance a later input replaces with a descriptor is
+ * refused too: the instance it borrowed from is not the one that boots.
+ */
+function collectComposedDatasourceConnectorErrors(stacks: readonly ObjectStackDefinition[]): string[] {
+  const datasources = stacks.flatMap((stack) => (Array.isArray(stack.datasources) ? stack.datasources : []));
+  const connectors = stacks.flatMap((stack) => (Array.isArray(stack.connectors) ? stack.connectors : []));
+  return collectDatasourceConnectorErrors({ datasources, connectors } as ObjectStackDefinition);
 }
 
 /**
@@ -7489,6 +7520,9 @@ function composeBuiltStacks(
   //     [ADR-0015 §4.2 · #25211] …and an `external` object of one input bound
   //     to a datasource another input declares managed: see
   //     {@link collectComposedExternalBindingDatasourceErrors}.
+  //     [ADR-0015 amendment D7] …and a datasource's `external.connector`
+  //     against the connectors of every input: see
+  //     {@link collectComposedDatasourceConnectorErrors}.
   //     [#25234] …and one membership key declared on two objects of the
   //     composed artifact: see {@link collectComposedMembershipKeyErrors}.
   //     [#25514] …and every flow target an input resolved only through
@@ -7501,6 +7535,7 @@ function composeBuiltStacks(
     ...collectComposedDefaultRecordPageErrors(stacks, opts.manifest === 'preserve'),
     ...collectComposedMembershipKeyErrors(stacks, objects as readonly unknown[] | undefined),
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
+    ...collectComposedDatasourceConnectorErrors(stacks),
     ...collectArtifactFlowClaimErrors(stacks),
   ];
   if (artifactCrossRefErrors.length > 0) {
