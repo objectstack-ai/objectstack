@@ -417,6 +417,18 @@ const CONTRIBUTORS = [
     },
   },
   {
+    // `nav_connector_credentials` (Setup → Integrations). Registered by
+    // `AutomationServicePlugin` at `kernel:ready`, which the shared context
+    // below never fires, so the bundle the plugin registers is read directly —
+    // the `@objectstack/mcp` row's shape.
+    source: '@objectstack/service-automation (CONNECTOR_CREDENTIALS_UI_BUNDLE)',
+    apps: ['setup'],
+    async load() {
+      const { CONNECTOR_CREDENTIALS_UI_BUNDLE } = await import('@objectstack/service-automation');
+      return { manifests: [CONNECTOR_CREDENTIALS_UI_BUNDLE] };
+    },
+  },
+  {
     source: '@objectstack/cloud-connection (cloud + marketplace UI bundles)',
     apps: ['setup'],
     async load() {
