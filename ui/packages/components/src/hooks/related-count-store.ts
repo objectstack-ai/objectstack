@@ -101,6 +101,12 @@ interface InflightRead {
   read: Promise<ReadResult>;
   top: number;
   fromRows: boolean;
+  /**
+   * objectstack#27627 — the row order a seeded read's rows come in, as the
+   * content of the list's declared sort; absent for the default order, which
+   * is the only order a badge's or a rail card's own read asks for.
+   */
+  order?: string;
 }
 
 const counts = new Map<string, number>();
@@ -109,7 +115,7 @@ const inflight = new Map<string, InflightRead>();
 // the rows a badge's read fetched for that claim, held until the rail takes
 // them. See the file header.
 const claims = new Map<string, number>();
-const heldRows = new Map<string, ReadResult & { top: number }>();
+const heldRows = new Map<string, ReadResult & { top: number; order?: string }>();
 const listeners = new Set<Listener>();
 // Monotonic store version — the `useSyncExternalStore` snapshot. Bumped on
 // every change so React actually re-renders subscribers (returning the
@@ -374,12 +380,12 @@ async function fetchRows(
 ): Promise<ReadResult> {
   const k = key(objectName, relField, parentId);
   const held = heldRows.get(k);
-  if (held && held.top >= limit) {
+  if (held && held.top >= limit && held.order === undefined) {
     heldRows.delete(k);
     return { total: held.total, rows: held.rows.slice(0, limit) };
   }
   const pending = inflight.get(k);
-  if (pending && pending.top >= limit) {
+  if (pending && pending.top >= limit && pending.order === undefined) {
     const result = await pending.read;
     heldRows.delete(k);
     return { total: result.total, rows: result.rows.slice(0, limit) };
@@ -388,6 +394,83 @@ async function fetchRows(
   // A read already out with too few rows stays the one a badge joins.
   if (!pending) inflight.set(k, own);
   return own.read;
+}
+
+/**
+ * objectstack#27627 — a related list the record page's ONE read answers. The
+ * page asks its payload (`DataSource.getRecordPage`) before any consumer's
+ * effect runs, and hands each list's answer here as the read of its key, so
+ * every consumer that asks after it joins it instead of reading: a badge or a
+ * collapsed card (`fetch`) takes its total, a rail card (`fetchRows`) and a
+ * compact card (`takeRows`) its rows.
+ *
+ * Contract: `read` resolves with the list's total and its first `top` rows as
+ * the server answered them for this key's question (the parent condition AND
+ * `filter`), in `order` (the content of the list's declared sort; absent for
+ * the default order), or rejects with the list's refusal, which consumers see
+ * as a failed read of their own. A rail card takes rows only in the default
+ * order, a compact card only in the order it asks for. The seeded read REPLACES whatever the key held: a
+ * read in flight before it, rows held from an earlier open. Its answer installs
+ * the count and holds the rows for one `fetchRows` / `takeRows` to take, unless
+ * an invalidation or a newer seed overtook it.
+ */
+function seed(
+  objectName: string,
+  relField: string,
+  parentId: string,
+  filter: CountScopeFilter | undefined,
+  top: number,
+  read: Promise<ReadResult>,
+  order?: string,
+): void {
+  const k = key(objectName, relField, parentId, filter);
+  heldRows.delete(k);
+  const entry: InflightRead = { read: Promise.resolve({ total: 0, rows: [] }), top, fromRows: false, order };
+  entry.read = (async (): Promise<ReadResult> => {
+    try {
+      const result = await read;
+      if (inflight.get(k) === entry) {
+        setCount(objectName, relField, parentId, result.total, filter);
+        heldRows.set(k, { ...result, top, order });
+      }
+      return result;
+    } finally {
+      if (inflight.get(k) === entry) inflight.delete(k);
+    }
+  })();
+  // Consumers that join it see the refusal; nobody may be waiting yet.
+  entry.read.catch(() => undefined);
+  inflight.set(k, entry);
+}
+
+/**
+ * objectstack#27627 — the first `limit` rows of a list a seeded read answers,
+ * for a compact card that would otherwise read them itself. Joins the read on
+ * the wire, or takes the rows it holds (once); `undefined` when neither carries
+ * enough rows, and the caller reads for itself. Rejects as the seeded read did.
+ */
+function takeRows(
+  objectName: string,
+  relField: string,
+  parentId: string,
+  filter: CountScopeFilter | undefined,
+  limit: number,
+  order?: string,
+): Promise<ReadResult> | undefined {
+  const k = key(objectName, relField, parentId, filter);
+  const pending = inflight.get(k);
+  if (pending && pending.top >= limit && pending.order === order) {
+    return pending.read.then((result) => {
+      heldRows.delete(k);
+      return { total: result.total, rows: result.rows.slice(0, limit) };
+    });
+  }
+  const held = heldRows.get(k);
+  if (held && held.top >= limit && held.order === order) {
+    heldRows.delete(k);
+    return Promise.resolve({ total: held.total, rows: held.rows.slice(0, limit) });
+  }
+  return undefined;
 }
 
 /**
@@ -512,6 +595,9 @@ export const RelatedCountStore = {
   fetch: fetchCount,
   // objectui#13010 — the rail card's half of the shared read (file header).
   fetchRows,
+  // objectstack#27627 — the record page payload's half (`seed`, `takeRows`).
+  seed,
+  takeRows,
   claimRows,
   releaseRows,
   invalidate,

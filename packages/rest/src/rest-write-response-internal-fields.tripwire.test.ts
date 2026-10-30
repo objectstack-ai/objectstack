@@ -335,6 +335,15 @@ const DISPOSITIONS: Record<string, Disposition> = {
       return call(b, 'POST', `${D}/:object/query`, { params: { object: 'vault' }, body: {} });
     },
   },
+  // [#27627] A READ over POST as well: the record page payload's `record` is
+  // `getData`'s answer, so the same read-path strip is asserted here.
+  [`POST ${D}/:object/:id/page`]: {
+    kind: 'driven', expectRecord: true,
+    invoke: async (b) => {
+      const id = await seed(b);
+      return call(b, 'POST', `${D}/:object/:id/page`, { params: { object: 'vault', id }, body: {} });
+    },
+  },
 
   // ── NO RECORD ECHO: no user-object record in the body ─────────────────────
   // [#22437] This route used to 201 `createData`'s whole answer and was a

@@ -3823,6 +3823,7 @@ const es = {
       delete_field: "Eliminar un campo",
       describe_metadata: "Revisar los metadatos",
       describe_object: "Revisar la estructura del objeto",
+      draft_record: "Redactar el nuevo registro",
       get_active_package: "Comprobar el paquete activo",
       get_authoring_rules: "Consultar las reglas de autoría",
       get_metadata_schema: "Consultar el formato de los metadatos",

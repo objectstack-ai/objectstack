@@ -3749,6 +3749,7 @@ const de = {
       delete_field: "Ein Feld löschen",
       describe_metadata: "Die Metadaten ansehen",
       describe_object: "Die Struktur des Objekts ansehen",
+      draft_record: "Den neuen Datensatz entwerfen",
       get_active_package: "Das aktive Paket prüfen",
       get_authoring_rules: "Die Erstellungsregeln nachlesen",
       get_metadata_schema: "Das Metadatenformat nachlesen",

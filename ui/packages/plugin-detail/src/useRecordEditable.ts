@@ -274,7 +274,30 @@ function askVerdict(
 ): Promise<boolean | undefined> {
   const pending = pendingVerdicts.get(key);
   if (pending) return pending.answer;
+  return startVerdict(key, objectName, recordId, async () => {
+    const doFetch = apiFetch ?? fetch;
+    const res = await doFetch('/api/v1/security/explain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ object: objectName, operation, recordId }),
+    });
+    if (!res.ok) return undefined; // 401 / 403 / 501 → fail open
+    return res.json();
+  });
+}
 
+/**
+ * Put one question on the wire as {@link pendingVerdicts}' entry for `key`:
+ * `readDecision` yields the explain engine's decision (or `undefined` for no
+ * answer), and its record verdict is cached for every asker sharing it.
+ */
+function startVerdict(
+  key: string,
+  objectName: string,
+  recordId: string,
+  readDecision: () => Promise<unknown>,
+): Promise<boolean | undefined> {
   const probe: InFlightProbe = {
     object: objectName,
     recordIds: [recordId],
@@ -285,15 +308,7 @@ function askVerdict(
   inFlight.add(probe);
   const answer = (async (): Promise<boolean | undefined> => {
     try {
-      const doFetch = apiFetch ?? fetch;
-      const res = await doFetch('/api/v1/security/explain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ object: objectName, operation, recordId }),
-      });
-      if (!res.ok) return undefined; // 401 / 403 / 501 → fail open
-      const decision = await res.json();
+      const decision = (await readDecision()) as { record?: { visible?: unknown } } | undefined;
       const verdict = decision?.record?.visible;
       if (typeof verdict !== 'boolean') return undefined; // no record verdict → fail open
       if (probe.staled.size > 0) return undefined; // asked before the record changed → not an answer
@@ -315,6 +330,32 @@ function askVerdict(
 }
 
 export type RecordOperation = 'update' | 'delete';
+
+/**
+ * objectstack#27627 — the record page's ONE read (`DataSource.getRecordPage`)
+ * answered this question alongside the record, so the page hands its answer
+ * here as the question's read on the wire, before any asker's effect runs. An
+ * asker that arrives while it is out joins it; its answer is cached exactly as
+ * {@link askVerdict}'s, and staled by a data change exactly as that read is.
+ *
+ * `decision` resolves with the explain engine's decision for this record and
+ * operation (the body `POST /security/explain` answers), or with `undefined`
+ * when the payload carries none for it — a refused part, which fails open as
+ * a refused read does. A question already answered or already on the wire is
+ * left as it is.
+ */
+export function seedRecordVerdict(
+  principal: string | null,
+  objectName: string,
+  recordId: string,
+  operation: RecordOperation,
+  decision: Promise<unknown>,
+): void {
+  retainForPrincipal(principal);
+  const key = JSON.stringify([principal, objectName, recordId, operation] satisfies VerdictKey);
+  if (verdictCache.has(key) || pendingVerdicts.has(key)) return;
+  void startVerdict(key, objectName, recordId, () => decision);
+}
 
 export function useRecordEditable(
   objectName: string | undefined,

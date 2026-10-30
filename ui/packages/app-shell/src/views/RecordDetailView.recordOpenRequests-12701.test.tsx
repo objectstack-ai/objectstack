@@ -28,6 +28,10 @@
  * counts requests on the wire. The transport HOLDS every request until the test
  * releases it, the page's side reads first, so every consumer has mounted
  * while the reads it would share are still pending.
+ *
+ * Since objectstack#27627 the open's ONE read is the record page payload
+ * (`POST /data/{object}/{id}/page`), which carries the record and the approval
+ * state together, so the open sends no approvals read of its own at all.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -127,6 +131,7 @@ const RECORD_PAGE = {
 interface Held {
   method: string;
   path: string;
+  body?: any;
   released: boolean;
   release: () => void;
 }
@@ -137,16 +142,34 @@ function json(body: unknown): Response {
 
 const APPROVALS_LIST = `/api/v1/approvals/requests?object=${OBJECT}&recordId=${REC}`;
 const APPROVAL_SINGLE = `/api/v1/approvals/requests/${REQUEST_ID}`;
-/** Every read of the record: the page's `populate` read, or `GET /data/OBJ/ID`. */
-const isRecordRead = (h: Held) => h.method === 'GET' && h.path.startsWith(`/api/v1/data/${OBJECT}`);
+const PAGE = `/api/v1/data/${OBJECT}/${REC}/page`;
+const isPageRead = (h: Held) => h.method === 'POST' && h.path === PAGE;
+/** Every read of the record: the open's payload, the `populate` read, or `GET /data/OBJ/ID`. */
+const isRecordRead = (h: Held) => isPageRead(h) || (h.method === 'GET' && h.path.startsWith(`/api/v1/data/${OBJECT}`));
 const isApprovalsRead = (h: Held) => h.path === APPROVALS_LIST;
 const isActivityRead = (h: Held) => h.method === 'GET' && h.path.startsWith('/api/v1/data/sys_activity');
 /** The relations a record read asked the server to expand, sorted. */
 const expansionOf = (h: Held) =>
-  (new URLSearchParams(h.path.slice(h.path.indexOf('?') + 1)).get('populate') ?? '')
-    .split(',').filter(Boolean).sort();
+  (isPageRead(h)
+    ? [...(h.body?.expand ?? [])]
+    : (new URLSearchParams(h.path.slice(h.path.indexOf('?') + 1)).get('populate') ?? '').split(',').filter(Boolean)
+  ).sort();
 
 function answerFor(h: Held): unknown {
+  if (isPageRead(h)) {
+    return {
+      success: true,
+      data: {
+        object: OBJECT,
+        id: REC,
+        record: RECORD,
+        related: [],
+        explain: Object.fromEntries((h.body?.explain ?? []).map((op: string) => [op, { allowed: true, record: { recordId: REC, visible: true } }])),
+        // The pending row comes enriched by its single read, as the route folds it.
+        approvals: { requests: [{ ...PENDING, viewer: { can_act: false, is_submitter: true } }], lock: { locked: true } },
+      },
+    };
+  }
   if (h.path.endsWith('/security/explain')) return { allowed: true, record: { recordId: REC, visible: true } };
   if (h.path === APPROVALS_LIST) return { data: [PENDING] };
   if (h.path === APPROVAL_SINGLE) return { ...PENDING, viewer: { can_act: false, is_submitter: true } };
@@ -170,6 +193,7 @@ function heldTransport() {
       const h: Held = {
         method,
         path,
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
         released: false,
         release: () => {
           if (h.released) return;
@@ -269,16 +293,18 @@ afterEach(() => {
 });
 
 describe('a record open sends one approvals read and one record read (objectui#12701)', () => {
-  it('counts the requests by URL: approvals 1, record 1, no activity read on a page that draws none', async () => {
+  it('counts the requests by URL: one page read carrying the record and the approvals, no activity read on a page that draws none', async () => {
     const { held } = await openRecordPage();
     await waitFor(() => expect(screen.getAllByText(RECORD.stage).length).toBeGreaterThan(0));
 
-    expect(held.filter(isApprovalsRead), 'approvals list reads').toHaveLength(1);
-    // The pending row's single-read enrichment rides the one list read.
-    expect(held.filter((h) => h.path === APPROVAL_SINGLE), 'approvals single reads').toHaveLength(1);
+    // objectstack#27627 — the approval list, its pending row's single read and
+    // the lock ride the open's one page read.
+    expect(held.filter(isApprovalsRead), 'approvals list reads').toHaveLength(0);
+    expect(held.filter((h) => h.path === APPROVAL_SINGLE), 'approvals single reads').toHaveLength(0);
 
     const recordReads = held.filter(isRecordRead);
-    expect(recordReads.map((h) => h.path), 'record reads').toHaveLength(1);
+    expect(recordReads.map((h) => h.path), 'record reads').toEqual([PAGE]);
+    expect(recordReads[0].body?.approvals).toBe(true);
     // The one read carries every relation the page's sections draw, and more.
     expect(expansionOf(recordReads[0])).toEqual(['account', 'created_by', 'owner']);
 
