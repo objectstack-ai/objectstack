@@ -4,6 +4,7 @@ import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationEngine, ConnectorActionContext } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
+import { resolveValueSlotMap } from './value-slot-map.js';
 
 /**
  * Connector built-in node — `connector_action` (generic integration dispatch).
@@ -106,8 +107,17 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // success and the failure path read one value.
             const effect = engine.resolveConnectorActionEffect(cfg.connectorId, cfg.actionId);
 
+            // #27327 — `input` is a value-slot map: a top-level CEL envelope is
+            // evaluated in the run's scope, every other value handed on as a
+            // copy of what was written. Before, the map went to the handler as
+            // written, so an envelope reading a record field reached the
+            // provider as the object it spells. Resolved BEFORE the `try`: an
+            // envelope that faults throws with its source, like every value
+            // slot's, and nothing is sent upstream.
+            const input = resolveValueSlotMap(engine, cfg.input, variables, 'input', context);
+
             try {
-                const output = await handler((cfg.input ?? {}) as Record<string, unknown>, handlerCtx);
+                const output = await handler(input, handlerCtx);
                 return {
                     success: true,
                     output,
