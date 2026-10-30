@@ -73,6 +73,18 @@
  * the badge draws nothing, exactly as it does while a read is in flight, and
  * never a `0` it did not read.
  *
+ * ## A push channel replaces the poll (objectstack#27626)
+ *
+ * The inbox and approvals feeds poll only while no push channel is open, and
+ * then at 60 s or slower. A host that holds a channel announcing these changes
+ * reports it with {@link setUserFeedPushChannelOpen} and relays each change
+ * with {@link notifyUserFeedPushed}: while it is open neither feed arms a poll
+ * timer, a pushed change refetches its feed once, and the channel closing
+ * refetches once and resumes the fallback poll. Today no host opens one — the
+ * platform serves no realtime channel (discovery's `websockets` capability is
+ * off and the realtime service names no route) — so the 60 s fallback is what
+ * runs. The activity feed is not polled and has no push half.
+ *
  * @module
  */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
@@ -97,10 +109,18 @@ import type { ActivityItem } from '../layout/ActivityFeed.js';
 import { activityRowToActivityItem } from '../layout/activityItemType.js';
 import type { InboxNotification } from '../layout/inboxGrouping.js';
 
-/** Approvals poll cadence — the bell's original 30s (M11.C15). */
-const APPROVALS_POLL_MS = 30_000;
-/** Inbox poll cadence — the bell's original 10s (ADR-0030 L5, #4110). */
-const INBOX_POLL_MS = 10_000;
+/**
+ * Approvals poll cadence. Polling is the FALLBACK of a push channel
+ * (objectstack#27626, see "A push channel replaces the poll" above), so it is
+ * held at 60 s or slower; it was the bell's 30 s (M11.C15).
+ */
+const APPROVALS_POLL_MS = 60_000;
+/**
+ * Inbox poll cadence, the same fallback rule (objectstack#27626); it was the
+ * bell's 10 s (ADR-0030 L5, #4110). A message can therefore reach the bell up
+ * to a minute after it is written while no push channel is open.
+ */
+const INBOX_POLL_MS = 60_000;
 /**
  * Cadence while the tab is backgrounded. The bell's own poller carried this
  * (60s hidden against 10s foregrounded) plus an immediate refetch when the
@@ -229,6 +249,14 @@ type FeedRunner<T> = (ctx: {
 }) => Promise<T | undefined>;
 
 /**
+ * Whether a host reported an open push channel for the inbox and approvals
+ * feeds (objectstack#27626, {@link setUserFeedPushChannelOpen}), and the
+ * pushable feeds' reactions to it opening or closing.
+ */
+let pushChannelOpen = false;
+const pushChannelListeners = new Set<() => void>();
+
+/**
  * One feed's shared state. Consumers `attach` (from an effect) and read via
  * `useSyncExternalStore`; the first one in starts the fetch and the poll, the
  * last one out stops it.
@@ -256,11 +284,14 @@ class SharedFeed<T> {
   /** Current inter-poll delay: `pollMs`, doubled per failure, capped. */
   private backoffMs: number;
   private visibilityBound = false;
+  private pushBound = false;
 
   constructor(
     private readonly empty: T,
     /** Re-fetch cadence while at least one consumer is mounted; 0 = fetch once. */
     private readonly pollMs: number,
+    /** Whether an open push channel replaces the poll (objectstack#27626). */
+    private readonly pushable = false,
   ) {
     this.snapshot = { value: empty, status: 'idle' };
     this.idleSnapshot = this.snapshot;
@@ -309,6 +340,7 @@ class SharedFeed<T> {
     this.consumers += 1;
     if (this.consumers === 1) {
       this.bindVisibility();
+      this.bindPush();
       this.schedule();
     }
     void this.refresh();
@@ -317,8 +349,23 @@ class SharedFeed<T> {
       if (this.consumers === 0) {
         this.stopPolling();
         this.unbindVisibility();
+        this.unbindPush();
       }
     };
+  }
+
+  /**
+   * A change the push channel announced for this feed: read it now
+   * (objectstack#27626). Nothing is read for a feed nobody is showing.
+   */
+  pushedChange(): void {
+    if (!this.pushable || this.consumers === 0) return;
+    void this.refresh(true);
+  }
+
+  /** Whether an open push channel stands in for this feed's poll right now. */
+  private pushCovers(): boolean {
+    return this.pushable && pushChannelOpen;
   }
 
   /**
@@ -444,6 +491,9 @@ class SharedFeed<T> {
       return;
     }
     if (this.pollMs <= 0) return;
+    // An open push channel replaces the poll (objectstack#27626); a retired
+    // feed's probes above are not polls and keep their own cadence.
+    if (this.pushCovers()) return;
     // Backgrounded tabs poll at the slower cadence — but never FASTER than the
     // current backoff, so a failing feed stays backed off either way.
     const hidden = typeof document !== 'undefined' && document.hidden;
@@ -475,6 +525,9 @@ class SharedFeed<T> {
   private readonly onVisibilityChange = (): void => {
     if (typeof document === 'undefined' || document.hidden) return;
     if (this.consumers === 0) return;
+    // An open push channel kept the feed current while the tab was away
+    // (objectstack#27626): nothing to catch up.
+    if (this.pushCovers() && !this.unavailable) return;
     // Returning to a tab is exactly when a bell should be current, so a retired
     // feed re-probes here too — but under the same cadence gate as the timer,
     // or a user switching tabs would spend the whole budget in three seconds
@@ -496,6 +549,32 @@ class SharedFeed<T> {
     if (!this.visibilityBound || typeof document === 'undefined') return;
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.visibilityBound = false;
+  }
+
+  /**
+   * The push channel opened or closed (objectstack#27626). Opening stops the
+   * poll. Closing reads once — what the channel would have announced since is
+   * unknown — and that read's `finally` re-arms the fallback poll. A retired
+   * feed's probe timer is left alone either way.
+   */
+  private readonly onPushChannelChange = (): void => {
+    if (this.consumers === 0 || this.unavailable) return;
+    this.stopPolling();
+    if (this.pushCovers()) return;
+    this.backoffMs = this.pollMs;
+    void this.refresh(true);
+  };
+
+  private bindPush(): void {
+    if (!this.pushable || this.pushBound) return;
+    pushChannelListeners.add(this.onPushChannelChange);
+    this.pushBound = true;
+  }
+
+  private unbindPush(): void {
+    if (!this.pushBound) return;
+    pushChannelListeners.delete(this.onPushChannelChange);
+    this.pushBound = false;
   }
 
   private stopPolling(): void {
@@ -523,6 +602,7 @@ class SharedFeed<T> {
   reset(): void {
     this.stopPolling();
     this.unbindVisibility();
+    this.unbindPush();
     this.snapshot = { value: this.empty, status: 'idle' };
     this.key = null;
     this.runner = null;
@@ -728,7 +808,7 @@ const NO_APPROVALS: PendingApprovalPage = { requests: [], total: 0 };
  * the bell cannot disagree about how many are waiting (objectui#13027 moved
  * the count from the list's length to the page's `total`, still one read).
  */
-const approvalsFeed = new SharedFeed<PendingApprovalPage>(NO_APPROVALS, APPROVALS_POLL_MS);
+const approvalsFeed = new SharedFeed<PendingApprovalPage>(NO_APPROVALS, APPROVALS_POLL_MS, true);
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v : undefined;
@@ -1274,7 +1354,7 @@ export function useHumanActivityFeed(limit: number): ActivityFeedReading {
 
 // ── Inbox messages ───────────────────────────────────────────────────────────
 
-const inboxFeed = new SharedFeed<InboxNotification[]>(NO_MESSAGES, INBOX_POLL_MS);
+const inboxFeed = new SharedFeed<InboxNotification[]>(NO_MESSAGES, INBOX_POLL_MS, true);
 
 /**
  * Receipt states that count as READ (ADR-0030). `delivered` is not one of them
@@ -1360,8 +1440,8 @@ function listedNotificationIds(rows: readonly unknown[]): string[] {
  * The signed-in user's 20 most recent in-app inbox messages, joined with their
  * read-state receipts (ADR-0030 L5, the `mine` materialization).
  *
- * Two scoped reads, joined client-side, polled at 10s while the tab is
- * foregrounded — the bell's cadence, now the store's:
+ * Two scoped reads, joined client-side, polled at `INBOX_POLL_MS` (the 60 s
+ * fallback of a push channel, objectstack#27626) — the store's cadence:
  *   - `sys_inbox_message` filtered by `user_id`, newest first, `$top: 20`.
  *   - `sys_notification_receipt` filtered by `user_id` + `channel:'inbox'`,
  *     narrowed to the notification ids that message read just listed
@@ -1452,6 +1532,34 @@ export function useSharedInboxFeed(): SharedFeedSnapshot<InboxNotification[]> {
   });
 }
 
+// ── Push channel seam (objectstack#27626) ────────────────────────────────────
+
+/**
+ * Report whether a push channel that announces changes to the signed-in user's
+ * inbox and pending approvals is open. While it is, neither feed polls; when it
+ * closes, each reads once and resumes its 60 s fallback poll. The host that
+ * holds the channel calls this on its open and close, and
+ * {@link notifyUserFeedPushed} on each change it carries.
+ *
+ * No host calls it today: the platform serves no realtime channel, so the
+ * fallback poll is what runs. Package-internal: not exported from
+ * `./index.ts` or the package entry.
+ */
+export function setUserFeedPushChannelOpen(open: boolean): void {
+  if (pushChannelOpen === open) return;
+  pushChannelOpen = open;
+  for (const listener of [...pushChannelListeners]) listener();
+}
+
+/**
+ * The push channel announced a change to one feed: that feed reads once, now,
+ * whether or not its poll is running. Package-internal, like
+ * {@link setUserFeedPushChannelOpen}.
+ */
+export function notifyUserFeedPushed(feed: 'inbox' | 'approvals'): void {
+  (feed === 'inbox' ? inboxFeed : approvalsFeed).pushedChange();
+}
+
 /**
  * Test seam: drop every shared feed's cached value, key and in-flight state so
  * cases do not inherit each other's reads. Not part of the public surface.
@@ -1461,6 +1569,7 @@ export function __resetSharedUserFeeds(): void {
   // not a feed's state. A case that needs to watch for it again calls
   // `__resetFirstPaint`.
   __resetHiddenTabClock();
+  pushChannelOpen = false;
   approvalsFeed.reset();
   activityFeed.reset();
   inboxFeed.reset();

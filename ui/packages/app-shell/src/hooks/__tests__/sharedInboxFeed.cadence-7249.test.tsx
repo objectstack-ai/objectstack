@@ -142,8 +142,12 @@ vi.mock('../../providers/AdapterProvider', () => ({ useAdapter: () => fakeAdapte
 import { useSharedInboxFeed, __resetSharedUserFeeds, __markFirstPainted } from '../sharedUserFeeds';
 import { useHomeInbox } from '../useHomeInbox';
 
-/** The declared foreground cadence (`INBOX_POLL_MS`), restated as the pin's unit. */
-const INBOX_POLL_MS = 10_000;
+/**
+ * The declared foreground cadence (`INBOX_POLL_MS`), restated as the pin's
+ * unit. 60 s since objectstack#27626 made polling the fallback of a push
+ * channel; the 10 s measured in the header above is the cadence of its day.
+ */
+const INBOX_POLL_MS = 60_000;
 /** The declared backgrounded cadence (`HIDDEN_POLL_MS`). */
 const HIDDEN_POLL_MS = 60_000;
 /** The measurement window both counting cases use. */
