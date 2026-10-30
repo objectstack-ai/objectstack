@@ -8,7 +8,7 @@
  * @module
  */
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@object-ui/layout';
 import { useIsMobile } from '@object-ui/components';
@@ -31,6 +31,7 @@ import { UnifiedSidebar } from './UnifiedSidebar.js';
 import { AppHeader } from './AppHeader.js';
 import { MobileViewSwitcherProvider } from './MobileViewSwitcherContext.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
+import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider.js';
@@ -135,6 +136,9 @@ export function ConsoleLayout({
   userId,
 }: ConsoleLayoutProps) {
   const appLabel = resolveKeyedI18nLabel(activeApp?.label) || activeAppName;
+  // objectstack#28077 — once, before `AppShell`'s sidebar provider reads its
+  // cookie: a narrow window's first frame is already the rail.
+  useState(primeConsoleSidebarOpen);
   // Runtime, server-pushed AI gating (shared with the `/ai` route guard and the
   // top-bar AI link): show the chatbot only when the server actually serves AI,
   // or when an explicit `VITE_AI_BASE_URL` opt-in points at an external server.

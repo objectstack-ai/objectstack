@@ -30,8 +30,12 @@ export const permissionForm = defineForm({
         'Permission sets are the only capability container: a user gets the union of every set they hold, so sets only ever add access. Positions distribute sets to people.',
       columns: 2,
       fields: [
-        { field: 'name', required: true, colSpan: 1, helpText: 'Machine name (snake_case)' },
-        { field: 'label', colSpan: 1, helpText: 'Display label for admins' },
+        // Label first and required: an admin names the set in words, and the
+        // Console's create form fills `name` from the label until `name` is
+        // edited. `required` on a row is a form-layout flag: `PermissionSetSchema`
+        // still accepts a set with no label, so no API accept set moves.
+        { field: 'label', required: true, colSpan: 1, helpText: 'Display label for admins' },
+        { field: 'name', required: true, colSpan: 1, helpText: 'Derived from the label when you create the set; snake_case' },
         // #19331 — four declared keys had no control, so the only door to any of
         // them was the Source tab's free-text JSON. `description` is persisted on
         // sys_permission_set and shown in Setup; of the other three, `packageId`

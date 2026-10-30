@@ -162,19 +162,21 @@ function uploadScopeRefusalMessage(scope: unknown): string {
 }
 
 /**
- * [#27413] The presigned door's declared `size`: a finite, non-negative JSON
- * number, the byte count `GetPresignedUrlRequestSchema.size` declares. A
- * string (even a numeric one), `NaN`, an infinity or a negative count is
- * refused `400` / `INVALID_REQUEST` before the pending `sys_file` row is
- * written — the code the door already answers a request missing its size
- * with. `0` is a legal empty file.
+ * [#27413] The presigned door's declared `size`: a whole, non-negative JSON
+ * number, the byte count `GetPresignedUrlRequestSchema.size` declares
+ * (`int().min(0)`). A string (even a numeric one), `NaN`, an infinity, a
+ * negative count or [#27598] a fraction is refused `400` / `INVALID_REQUEST`
+ * before the pending `sys_file` row is written — the code the door already
+ * answers a request missing its size with. A fraction used to mint a URL and
+ * a pending row no upload could complete: the held byte count is whole, so
+ * the complete door's size check never matched it. `0` is a legal empty file.
  */
 function isDeclaredByteCount(size: unknown): size is number {
-  return typeof size === 'number' && Number.isFinite(size) && size >= 0;
+  return typeof size === 'number' && Number.isInteger(size) && size >= 0;
 }
 
 const PRESIGNED_SIZE_REFUSAL_MESSAGE =
-  'size must be the file size in bytes: a non-negative number, sent as a JSON number';
+  'size must be the file size in bytes: a non-negative whole number, sent as a JSON number';
 
 /**
  * [#27549] The chunked-upload init door's refusal for a body that does not

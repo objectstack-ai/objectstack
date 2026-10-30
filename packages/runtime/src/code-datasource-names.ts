@@ -16,6 +16,13 @@
  *    resolves at its first read ({@link CodeDatasourceNames} says why);
  *  - `DefaultDatasourcePlugin` — the host's own `default`.
  *
+ * …and one that arrives after boot: a package installed into the running
+ * kernel (install-local's install and its `kernel:ready` rehydrate), whose
+ * datasources `connectPackageDatasources` (`declared-datasources.ts`, #28039)
+ * registers as code and contributes here at that moment. The boot restore has
+ * run by then, so the phase argument below does not reach it; its uninstall
+ * withdraws the names again ({@link withdrawCodeDatasourceNames}).
+ *
  * `init()` is Phase 1, and Phase 1 completes before ANY `start()` runs
  * (`ObjectKernel.bootstrap()`). The datasource-admin plugin restores stored
  * rows in its `start()`, so it reads a complete set in every composition,
@@ -49,8 +56,9 @@
  *
  * ## What it does not hold
  *
- * A package installed after boot (an HTTP install, or the Phase 2 rehydrate
- * from `sys_packages`). Nothing registers such a package's datasources in the
+ * A package installed after boot through any door other than install-local
+ * (the protocol's package install, or the Phase 2 rehydrate from
+ * `sys_packages`). Nothing registers such a package's datasources in the
  * MetadataService as code, so the admin door does not treat them as code
  * either; the `/meta` door's resolver reads the installed package records
  * live, beside this set.
@@ -100,6 +108,12 @@ export class CodeDatasourceNames {
         return this.names.has(name);
     }
 
+    /** Take names out of the set — an installed package's uninstall (#28039). */
+    delete(names: Iterable<string>): void {
+        this.settle();
+        for (const name of names) this.names.delete(name);
+    }
+
     /** Every name in the set, sorted — for diagnostics and pins. */
     list(): string[] {
         this.settle();
@@ -130,7 +144,8 @@ interface ServiceRegistryContext {
 /**
  * Add a contribution to the host's code-datasource set, registering the set on
  * the kernel the first time any producer contributes. Called from a producer's
- * `init()` only — see the module header for why the phase matters.
+ * `init()` — see the module header for why the phase matters — or, for a
+ * package installed into the running kernel, by `connectPackageDatasources`.
  *
  * `getService` throws while the service is unregistered; that miss is the
  * one case that creates the set. A name occupied by something that is not this
@@ -153,4 +168,19 @@ export function contributeCodeDatasourceNames(
         ctx.registerService(CODE_DATASOURCE_NAMES_SERVICE, set);
     }
     (set as CodeDatasourceNames).add(contribution);
+}
+
+/**
+ * Take an uninstalled package's datasource names out of the host's set
+ * (#28039). A kernel with no set, or one holding something that is not this
+ * set, has nothing of this package's to withdraw.
+ */
+export function withdrawCodeDatasourceNames(ctx: ServiceRegistryContext, names: Iterable<string>): void {
+    let set: unknown;
+    try {
+        set = ctx.getService<unknown>(CODE_DATASOURCE_NAMES_SERVICE);
+    } catch {
+        return;
+    }
+    if (set instanceof CodeDatasourceNames) set.delete(names);
 }
