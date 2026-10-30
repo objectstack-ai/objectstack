@@ -577,5 +577,35 @@ export const esES: PlatformTranslationData = {
           text: 'Desactivarlo omite la salvaguarda exclusiva de la plataforma.' },
       },
     },
+
+    lifecycle: {
+      title: 'Ciclo de vida de los datos',
+      description: 'Cuánto tiempo se conservan los datos del sistema: sustituye las ventanas de retención, limita el número de filas por tabla y recibe una alerta cuando una tabla crece de forma inesperada. La plataforma los aplica en su barrido de limpieza periódico.',
+      keys: {
+        enabled: {
+          label: 'Aplicar las políticas de ciclo de vida',
+          help: 'Interruptor general del barrido periódico. Desactivado, las políticas de retención, TTL y rotación declaradas dejan de aplicarse (los datos vuelven a crecer sin límite).',
+        },
+        retention_overrides: {
+          label: 'Sustituciones de retención',
+          help: 'Sustituciones de la ventana por objeto: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. Las duraciones usan h/d/w/y. '
+            + 'Se define por organización, de modo que una organización regulada puede conservar años y una de desarrollo, días. '
+            + 'Una sustitución más corta que el mínimo que necesita una función de la plataforma (por ejemplo, la ventana de detección de duplicados de la cola de trabajos) '
+            + 'se ignora y se registra como error, y se sigue aplicando la ventana predeterminada.',
+        },
+        quotas: {
+          label: 'Cuotas de filas',
+          help: 'Número máximo de filas por objeto: { "<object>": 1000000 }. Superarlo genera una alerta de gobernanza: las cuotas nunca eliminan más allá de la política declarada.',
+        },
+        quota_defaults: {
+          label: 'Cuotas predeterminadas por clase',
+          help: 'Cuotas de respaldo por clase de ciclo de vida: { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+        },
+        growth_alert_rows: {
+          label: 'Umbral de alerta de crecimiento (filas por barrido)',
+          help: 'Avisa cuando una tabla con ciclo de vida declarado crece más de este número de filas entre dos barridos. 0 desactiva las alertas de crecimiento.',
+        },
+      },
+    },
   },
 };
