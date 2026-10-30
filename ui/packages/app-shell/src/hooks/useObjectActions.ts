@@ -109,7 +109,7 @@ export function useObjectActions({
     // success), so the runner's post-execution hook adds no second toast.
     runner.registerHandler('delete', (action: any) =>
       recordDelete.run(
-        { objectName, label: objectLabel || objectName, dataSource, t, toast, onRefresh },
+        { objectName, label: objectLabel || objectName, objectDef, dataSource, t, toast, onRefresh },
         action,
       ),
     );
@@ -128,7 +128,7 @@ export function useObjectActions({
       onRefresh?.();
       return { success: true, reload: true };
     });
-  }, [runner, objectName, dataSource, onEdit, onRefresh, navigate, baseUrl, t, objectLabel]);
+  }, [runner, objectName, dataSource, onEdit, onRefresh, navigate, baseUrl, t, objectLabel, objectDef]);
 
   const create = useCallback(() => {
     onEdit?.(null);
