@@ -2857,23 +2857,19 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         aria-busy={pendingRows > 0 || undefined}
       >
         <div
-          className={cn('group/panel-head flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold', open && 'cursor-pointer')}
+          className="group/panel-head relative flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
           data-related-panel-head=""
-          // The row is the target: a click on its free space opens the list
-          // too. Its own controls stop their clicks; a click inside the ⋯
-          // menu's portaled content bubbles here through React yet lands
-          // outside the row in the DOM, and is not the row's.
-          onClick={open ? (event) => {
-            if (event.currentTarget.contains(event.target as Node)) open();
-          } : undefined}
         >
           {open ? (
+            // The row is the target: the button's ::after stretches over the
+            // whole header, so a click on its free space opens the list too,
+            // and the row stays one control. The controls sit above it.
             <button
               type="button"
-              className="flex min-w-0 items-center gap-1.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               title={viewAll}
               data-related-panel-open=""
-              onClick={(e) => { e.stopPropagation(); open(); }}
+              onClick={() => open()}
             >
               <span className={cn('min-w-0 truncate', isEmpty && 'text-muted-foreground font-medium')}>{title}</span>
               {countChip}
@@ -2896,7 +2892,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           {/* Drawn on hover or focus, and while the ⋯ menu is open: its
               content is portaled, so neither holds there. */}
           <span
-            className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/panel-head:opacity-100 group-focus-within/panel-head:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100"
+            className="relative z-10 ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/panel-head:opacity-100 group-focus-within/panel-head:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100"
             data-related-panel-controls=""
           >
             {cardChrome && <RelatedPanelHandle chrome={cardChrome} title={title} />}

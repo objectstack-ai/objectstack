@@ -12,7 +12,8 @@
  * chrome:
  *
  *  - Target 1: the header is the title, then the count chip; the row (or the
- *    chip) opens the whole list, and its title says 「查看全部 N 条」; ⠿ ＋ ⋯ sit
+ *    chip) opens the whole list through ONE button stretched over the row,
+ *    and its title says 「查看全部 N 条」; ⠿ ＋ ⋯ sit
  *    at the RIGHT end, drawn on hover or focus; ⋯ holds 隐藏 alone; no
  *    collapse, no ⤢; ⌥↑ / ⌥↓ on the focused handle move the panel.
  *  - Target 11: the compact row's first column skips the foreign key that
@@ -91,10 +92,19 @@ describe('the related panel header (objectstack#27524, Target 1)', () => {
     const chrome = chromeOf();
     renderPanel(chrome);
     await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
-    fireEvent.click(head());
-    fireEvent.click(head().querySelector('[data-related-panel-open]')!);
+    const open = head().querySelector('[data-related-panel-open]') as HTMLButtonElement;
+    fireEvent.click(open);
     fireEvent.click(head().querySelector('[data-related-card-count]')!);
-    expect(chrome.onEnlarge).toHaveBeenCalledTimes(3);
+    expect(chrome.onEnlarge).toHaveBeenCalledTimes(2);
+    // The row is one control, not a clickable div: the button's ::after
+    // stretches over the positioned header, and the controls sit above it.
+    expect(open.tagName).toBe('BUTTON');
+    expect(open.className).toContain('after:absolute');
+    expect(open.className).toContain('after:inset-0');
+    expect(head().className).toMatch(/\brelative\b/);
+    const controls = head().querySelector('[data-related-panel-controls]') as HTMLElement;
+    expect(controls.className).toMatch(/\brelative\b/);
+    expect(controls.className).toContain('z-10');
   });
 
   it('⠿ ＋ ⋯ sit at the right end, shown on hover or focus; their clicks do not open the list', async () => {
