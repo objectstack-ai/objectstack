@@ -1186,6 +1186,43 @@ function carriesPageToken(value: unknown): boolean {
 }
 
 /**
+ * [#3447] The decision-output param family: `outputs.<key>`, one param per
+ * output an approval node declares (`decisionOutputs`), filled in by the
+ * approver while deciding. The key set belongs to the pending request, not to
+ * the action, so no `params` list can declare it. A `type: 'api'` request
+ * folds the family into its body's `outputs` object
+ * ({@link buildApiActionRequest}), the body the approvals decide routes read,
+ * and the param contract admits exactly what folds
+ * ({@link foldsApiDecisionOutputs}; ADR-0104 D2, amended 2026-10-30). The
+ * console's api handler folds the same family by the same rule.
+ */
+const API_DECISION_OUTPUT_PREFIX = 'outputs.';
+
+/** Is `key` a member of the `outputs.<key>` family — the prefix and a non-empty key? */
+export function isApiDecisionOutputParam(key: string): boolean {
+    return key.startsWith(API_DECISION_OUTPUT_PREFIX) && key.length > API_DECISION_OUTPUT_PREFIX.length;
+}
+
+/** The `bodyShape.wrap` key an api request nests its params under, when the declaration names one. */
+function apiBodyWrap(action: any): string | undefined {
+    return action?.bodyShape && typeof action.bodyShape === 'object' && typeof action.bodyShape.wrap === 'string' && action.bodyShape.wrap
+        ? action.bodyShape.wrap
+        : undefined;
+}
+
+/**
+ * [#27738] Does this action's request fold the `outputs.<key>` family? Only a
+ * forwarded `type: 'api'` action whose params sit flat in its body. Under
+ * `bodyShape.wrap` the params are nested and the fold never reaches them, and
+ * a declarative update (`operation: 'update'`, whatever its `type` says)
+ * writes its bag to the row instead of sending it anywhere — so for both, and
+ * for every other type, the family stays an unknown param.
+ */
+export function foldsApiDecisionOutputs(action: any): boolean {
+    return !isDeclarativeUpdateAction(action) && action?.type === 'api' && apiBodyWrap(action) === undefined;
+}
+
+/**
  * Assemble the request a same-origin `type: 'api'` action makes — method,
  * path and JSON body — from its DECLARATION and the dispatch inputs, by the
  * same rules the console's api handler applies at a click
@@ -1268,18 +1305,15 @@ export function buildApiActionRequest(
                 `the action from the page that owns the variable.`,
         };
     }
-    const wrap: string | undefined =
-        action?.bodyShape && typeof action.bodyShape === 'object' && typeof action.bodyShape.wrap === 'string' && action.bodyShape.wrap
-            ? action.bodyShape.wrap
-            : undefined;
+    const wrap = apiBodyWrap(action);
     const body: Record<string, unknown> = wrap ? { [wrap]: { ...input.params } } : { ...input.params };
     // [#3447] decision outputs: `outputs.<key>` params fold into `outputs`.
     for (const k of Object.keys(body)) {
-        if (k.startsWith('outputs.') && k.length > 'outputs.'.length) {
+        if (isApiDecisionOutputParam(k)) {
             const value = body[k];
             delete body[k];
             if (value === undefined || value === '') continue;
-            ((body.outputs ??= {}) as Record<string, unknown>)[k.slice('outputs.'.length)] = value;
+            ((body.outputs ??= {}) as Record<string, unknown>)[k.slice(API_DECISION_OUTPUT_PREFIX.length)] = value;
         }
     }
     // [#8018] `recordIdParam`, seeded from the row or refused — never silently
@@ -1528,9 +1562,39 @@ export function apiActionResultOf(answer: ApiActionForwardAnswer): unknown {
 }
 
 /**
+ * [#27738] The members the target's refusal ENVELOPE carries beside `code`,
+ * `message` and `httpStatus` — `details`, `userMessage`, `declaredCode`, any
+ * other — exactly as the target wrote them; `undefined` when the target did
+ * not envelope its refusal (`{ success: false, error: { code, … } }`): a stock
+ * better-auth `{ code, message }`, a non-JSON or an empty body.
+ *
+ * Both doors relay these WHOLE. The REST door used to rebuild the envelope
+ * from `code` alone, which dropped everything a caller branches on beside
+ * the code: a flow endpoint's `details.innerRefusal` and `userMessage`, an
+ * entitlement refusal's `details` (`upgrade_url`, `contact_url`, `plan`,
+ * `current`, `limit`). The forward carries the caller's own credentials
+ * through the same HTTP stack, so this is the answer the caller gets by
+ * calling the target itself: relaying it whole discloses nothing new, and
+ * the target's own boundary has already applied its message discipline.
+ */
+export function apiActionRefusalMembers(answer: ApiActionForwardAnswer): Record<string, unknown> | undefined {
+    const body = answer.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body) || body.success !== false) return undefined;
+    const error = body.error;
+    if (!error || typeof error !== 'object' || Array.isArray(error) || typeof error.code !== 'string' || !error.code) return undefined;
+    const members: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(error as Record<string, unknown>)) {
+        if (key !== 'code' && key !== 'message' && key !== 'httpStatus') members[key] = value;
+    }
+    return members;
+}
+
+/**
  * The thrown shape for a forward the target REFUSED (a non-2xx), for the MCP
  * bridge: `code` + `status` ride the error so `resolveThrownHttpError` serves
  * the target's own status and the agent reads the target's own sentence.
+ * [#27738] The envelope's `details` ride it too ({@link apiActionRefusalMembers}),
+ * which `run_action` renders beside the code, as the REST door relays them.
  */
 export function apiActionForwardRefusal(action: any, answer: ApiActionForwardAnswer): Error {
     const body = answer.body;
@@ -1542,7 +1606,8 @@ export function apiActionForwardRefusal(action: any, answer: ApiActionForwardAns
         (body && typeof body === 'object' && typeof body.error?.code === 'string' && body.error.code) ||
         (body && typeof body === 'object' && typeof body.code === 'string' && body.code) ||
         standardErrorCodeForHttpStatus(answer.status);
-    return Object.assign(new Error(message), { code, status: answer.status });
+    const details = apiActionRefusalMembers(answer)?.details;
+    return Object.assign(new Error(message), { code, status: answer.status, ...(details !== undefined ? { details } : {}) });
 }
 
 /**
@@ -2345,6 +2410,26 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
 }
 
 /**
+ * The bag ADR-0104 D2 judges: the request's own, less its UNDECLARED
+ * `outputs.<key>` decision outputs when this action's request folds them
+ * ({@link foldsApiDecisionOutputs}; D2 amended 2026-10-30, #27738). Those
+ * keys are per request, so no declaration can name them; the forwarded target
+ * (the approvals decide route) judges their values against the request's own
+ * `decisionOutputs`. A declared param stays judged as declared, whatever its
+ * name, and every other undeclared key is refused exactly as before.
+ */
+function paramBagUnderContract(action: any, resolved: ResolvedActionParam[], bag: Record<string, unknown>): Record<string, unknown> {
+    if (!foldsApiDecisionOutputs(action)) return bag;
+    const declared = new Set(resolved.map((p) => p.name));
+    const judged: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(bag)) {
+        if (isApiDecisionOutputParam(key) && !declared.has(key)) continue;
+        judged[key] = value;
+    }
+    return judged;
+}
+
+/**
  * Enforce an action's declared param contract against the request bag
  * BEFORE the handler runs (ADR-0104 D2). Returns a `400`-worthy error message
  * when the contract is violated, `null` when the bag conforms.
@@ -2377,6 +2462,13 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
  * built-ins: the same message, the same 400 at the REST door, the same
  * `OS_ALLOW_LAX_ACTION_PARAMS` escape hatch a declared-params action gets. No
  * switch of its own.
+ *
+ * ## One undeclared family a forwarded api action admits (#27738)
+ *
+ * A `type: 'api'` action whose request folds the `outputs.<key>` decision
+ * outputs is judged without them ({@link paramBagUnderContract}), so an
+ * Approve or Reject carrying the approver's decision outputs reaches the fold
+ * instead of a 400. Every other key is judged as above.
  */
 export function enforceActionParams(deps: ActionExecutionDeps,
     action: any,
@@ -2387,7 +2479,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
     if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
     const resolved = resolveDeclaredActionParams(deps, action, obj);
-    const issues = validateActionParams(resolved, bag);
+    const issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
     if (issues.length === 0) return null;
     const summary = issues.map((i) => i.message).join('; ');
     if (!laxActionParams()) {

@@ -53,6 +53,25 @@ const DELETE_LEAD = {
     name: 'purge_lead_remote', label: 'Purge', objectName: OBJECT, type: 'api', method: 'DELETE',
     target: '/api/v1/data/crm_lead/${ctx.recordId}',
 };
+/** [#27738] The showcase's recalc shape: a flow endpoint that answers `400 FLOW_FAILED` when its run is refused. */
+const RECALC_LEAD = {
+    name: 'recalc_lead', label: 'Recalculate', objectName: OBJECT, type: 'api',
+    target: '/api/v1/apps/showcase/recalc', recordIdParam: 'recordId',
+    ai: { exposed: true, description: 'Recalculate the lead.' },
+};
+/**
+ * [#27738] `plugin-approvals`' `approval_approve` shape: declared params, and the
+ * per-request decision outputs the console sends as `outputs.<key>` params.
+ */
+const APPROVE_LEAD = {
+    name: 'approve_lead', label: 'Approve', objectName: OBJECT, type: 'api', method: 'POST',
+    target: '/api/v1/approvals/requests/{id}/approve',
+    params: [
+        { name: 'comment', label: 'Comment', type: 'textarea', required: false },
+        { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
+    ],
+    ai: { exposed: true, description: 'Approve the lead.' },
+};
 
 type Injected = { url: string; init: RequestInit };
 
@@ -77,7 +96,7 @@ function boot(opts: {
     });
     const server = { getRawApp: () => ({ request }) };
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
-    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD] };
+    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD] };
     const ql: any = {
         executeAction,
         getSchema: (name: string) => (name === OBJECT ? objectDef : undefined),
@@ -415,7 +434,188 @@ describe('door 2 — the MCP `run_action` bridge forwards a same-origin api acti
     });
 });
 
+// [#27738] G1: the target's refusal envelope is relayed WHOLE. The door used
+// to rebuild it from `code` alone, so everything a console branch reads beside
+// the code was dropped on the way: a flow endpoint's `details.innerRefusal` and
+// `userMessage` (the refusal its data node met), and the entitlement members a
+// coded 403 carries in `details`. Each path is pinned with the target's member
+// deep-equal on the door's answer, never a single key.
+/** A flow endpoint's run refused by its data node: `400 FLOW_FAILED`, as the endpoint door answers it. */
+const FLOW_FAILED_ENVELOPE = {
+    success: false,
+    error: {
+        code: 'FLOW_FAILED',
+        message: "Node 'update_task' failed: update_record(showcase_task) failed: Permission denied",
+        httpStatus: 400,
+        userMessage: 'You cannot edit this task.',
+        details: {
+            errorMessage: "Node 'update_task' failed: update_record(showcase_task) failed: Permission denied",
+            summary: { selected: 0, acted: 0, skipped: 0, nodes: [], gates: [] },
+            innerRefusal: { code: 'PERMISSION_DENIED', message: 'Permission denied' },
+        },
+    },
+};
+/** A coded entitlement refusal, the shape the console's entitlement dialog reads (`error.details`). */
+const ENTITLEMENT_ENVELOPE = {
+    success: false,
+    error: {
+        code: 'DEV_ENV_LIMIT',
+        message: 'Development environment limit reached (3 of 3).',
+        httpStatus: 403,
+        details: {
+            current: 3, limit: 3, plan: 'team',
+            upgrade_url: 'https://cloud.example.test/billing/upgrade',
+            contact_url: 'https://cloud.example.test/contact',
+        },
+    },
+};
+
+describe('[#27738] G1 — the door relays the target\'s refusal envelope whole', () => {
+    it('G1a: a flow endpoint\'s 400 FLOW_FAILED keeps `details.innerRefusal` and `userMessage`', async () => {
+        const { dispatcher } = boot({ answer: { status: 400, body: FLOW_FAILED_ENVELOPE } });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${RECALC_LEAD.name}`, 'POST', { recordId: 'u_target' }, CTX());
+
+        expect(statusOf(res)).toBe(400);
+        const error = res?.response?.body?.error;
+        expect(res?.response?.body?.success).toBe(false);
+        expect(error?.code).toBe('FLOW_FAILED');
+        expect(error?.message).toBe(FLOW_FAILED_ENVELOPE.error.message);
+        expect(error?.httpStatus).toBe(400);
+        expect(error?.details).toEqual(FLOW_FAILED_ENVELOPE.error.details);
+        expect(error?.userMessage).toBe(FLOW_FAILED_ENVELOPE.error.userMessage);
+    });
+
+    it('G1b: a coded 403 keeps its entitlement members — upgrade_url, contact_url, plan, current, limit', async () => {
+        const { dispatcher } = boot({ answer: { status: 403, body: ENTITLEMENT_ENVELOPE } });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' }, CTX());
+
+        expect(statusOf(res)).toBe(403);
+        const error = res?.response?.body?.error;
+        expect(error?.code).toBe('DEV_ENV_LIMIT');
+        expect(error?.message).toBe(ENTITLEMENT_ENVELOPE.error.message);
+        expect(error?.details).toEqual(ENTITLEMENT_ENVELOPE.error.details);
+    });
+
+    it('a refusal the target did NOT envelope keeps today\'s answer: its status, code and sentence, and nothing invented', async () => {
+        // better-auth answers `{ code, message }` with no ObjectStack envelope;
+        // there is no `details` to relay, so none appears.
+        const { dispatcher } = boot({ answer: { status: 404, body: { code: 'USER_NOT_FOUND', message: 'User not found' } } });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${BAN_LEAD.name}`, 'POST', { recordId: 'u_target' }, CTX());
+
+        expect(statusOf(res)).toBe(404);
+        expect(codeOf(res)).toBe('USER_NOT_FOUND');
+        expect(messageOf(res)).toBe('User not found');
+        expect(res?.response?.body?.error?.details).toBeUndefined();
+        expect(res?.response?.body?.error?.userMessage).toBeUndefined();
+    });
+
+    it('MCP `run_action`: the target\'s `details` ride the throw, so the tool error carries them as the REST answer does', async () => {
+        const h = boot({ answer: { status: 400, body: FLOW_FAILED_ENVELOPE } });
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+
+        const thrown = await invokeBusinessAction(deps, CTX() as any, RECALC_LEAD.name, { recordId: 'u_target' }, {
+            driver: h.ql,
+            ec: { userId: 'u_agent', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        }).catch((e) => e);
+
+        expect((thrown as any).status).toBe(400);
+        expect((thrown as any).code).toBe('FLOW_FAILED');
+        expect((thrown as any).details).toEqual(FLOW_FAILED_ENVELOPE.error.details);
+    });
+});
+
+// [#27738] G2: the `outputs.<key>` decision-output family is admitted by the
+// param contract for a forwarded `type: 'api'` action (ADR-0104 D2, amended
+// 2026-10-30). The console sends one such param per output an approval node
+// declares; the key set is per request, so no action can declare them, and the
+// door already folds them into the body's `outputs`. Refused here, an Approve
+// carrying a decision output never reached that fold.
+describe('[#27738] G2 — an approve click with a decision output passes the param contract and is folded', () => {
+    const PARAMS = { comment: 'ok', 'outputs.next_reviewers': ['u_2', 'u_3'], 'outputs.note': '' };
+
+    it('REST: the `outputs.<key>` params pass and reach the target folded into `outputs` (a blank one omitted)', async () => {
+        const { dispatcher, injected } = boot({ answer: { body: { success: true, data: { request: { id: 'u_target' } } } } });
+
+        const res = await dispatcher.handleActions(
+            `/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', { recordId: 'u_target', params: PARAMS }, CTX(),
+        );
+
+        expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+        expect(injected).toHaveLength(1);
+        expect(injected[0].url).toBe('http://app.example.test/api/v1/approvals/requests/u_target/approve');
+        expect(JSON.parse(String(injected[0].init.body))).toEqual({ comment: 'ok', outputs: { next_reviewers: ['u_2', 'u_3'] } });
+    });
+
+    it('REST: an undeclared key outside the family is still refused with today\'s message, and nothing is forwarded', async () => {
+        const { dispatcher, request } = boot();
+
+        const res = await dispatcher.handleActions(
+            `/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', { recordId: 'u_target', params: { ...PARAMS, bogus: 1 } }, CTX(),
+        );
+
+        expect(statusOf(res)).toBe(400);
+        expect(codeOf(res)).toBe('VALIDATION_ERROR');
+        expect(messageOf(res)).toContain('Unknown action param "bogus"');
+        // The admitted family is not among the offenders.
+        expect(messageOf(res)).not.toContain('outputs.');
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it('MCP `run_action`: the same params pass and reach the target folded', async () => {
+        const h = boot({ answer: { body: { success: true, data: { request: { id: 'u_target' } } } } });
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+
+        const result: any = await invokeBusinessAction(deps, CTX() as any, APPROVE_LEAD.name, { recordId: 'u_target', params: PARAMS }, {
+            driver: h.ql,
+            ec: { userId: 'u_agent', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        });
+
+        expect(result.ok).toBe(true);
+        expect(JSON.parse(String(h.injected[0].init.body))).toEqual({ comment: 'ok', outputs: { next_reviewers: ['u_2', 'u_3'] } });
+    });
+});
+
 describe('buildApiActionRequest — the declaration\'s request, by the console\'s own rules', () => {
+    it('[#27738] folds the `outputs.<key>` family into `outputs`, omits a blank one, and leaves every other key flat', () => {
+        // The fold the G2 admission relies on, pinned on its own: the console's
+        // `apiHandler` folds the same family by the same rule.
+        const action = { name: 'approve', type: 'api', target: '/api/v1/approvals/requests/r1/approve' };
+        const req = buildApiActionRequest(action, {
+            params: {
+                comment: 'ok', 'outputs.next_reviewers': ['u_2'], 'outputs.reason': 'fits budget',
+                'outputs.note': '', 'outputs.skipped': undefined, 'outputs.': 'no key', 'meta.source': 'console',
+            },
+            ec: {},
+        });
+        expect((req as any).body).toEqual({
+            comment: 'ok', outputs: { next_reviewers: ['u_2'], reason: 'fits budget' }, 'outputs.': 'no key', 'meta.source': 'console',
+        });
+        // Under `bodyShape.wrap` the params are nested, and nothing is folded.
+        const wrapped = buildApiActionRequest({ ...action, bodyShape: { wrap: 'data' } }, { params: { 'outputs.reason': 'x' }, ec: {} });
+        expect((wrapped as any).body).toEqual({ data: { 'outputs.reason': 'x' } });
+    });
+
     const ec = { userId: 'u1', tenantId: 'org_9' };
 
     it('wraps params under `bodyShape.wrap`, keeps `recordIdParam` flat, merges `bodyExtra` last', () => {

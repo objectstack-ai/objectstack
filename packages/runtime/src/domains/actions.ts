@@ -75,7 +75,7 @@ import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS }
 // [#25976] The one value-shape check the run doors share — the trigger and
 // resume doors ask it of their input too.
 import { objectValueFailure } from '../object-value-shape.js';
-import { buildApiError } from '../error-envelope.js';
+import { apiErrorResponse, buildApiError } from '../error-envelope.js';
 // [ADR-0126 §5] The shared activation write-authority gates — the same two
 // tiers `/automation`'s toggle door passes, one implementation.
 import {
@@ -846,6 +846,20 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 return { handled: true, response: { ...deps.success(actionExec.apiActionResultOf(answer)), ...relayed } };
             }
             const refusal = actionExec.apiActionForwardRefusal(actionDef, answer);
+            // [#27738] An enveloped refusal is relayed WHOLE: its code and
+            // sentence, and every member beside them (`details`, `userMessage`,
+            // …) as the target wrote them — see `apiActionRefusalMembers`. Only
+            // a refusal the target did not envelope is rebuilt from its code.
+            const members = actionExec.apiActionRefusalMembers(answer);
+            if (members) {
+                return {
+                    handled: true,
+                    response: {
+                        ...apiErrorResponse({ message: refusal.message, httpStatus: answer.status, code: (refusal as any).code, extra: members }),
+                        ...relayed,
+                    },
+                };
+            }
             return {
                 handled: true,
                 response: { ...deps.error(refusal.message, answer.status, { code: (refusal as any).code }), ...relayed },
