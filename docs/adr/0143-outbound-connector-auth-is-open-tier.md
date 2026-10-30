@@ -85,7 +85,7 @@ The card's re-check `git grep -n "intentionally absent"` on that file answers no
 the sentence is still there: it wraps, "OAuth2 is intentionally" ending line 113 and "absent (enterprise
 tier, ADR-0015)." opening line 114. The file holds two shapes, for two doors:
 
-- **`ConnectorOAuth2Schema`** (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorOAuth2Schema`) is a
+- **`ConnectorOAuth2Schema`** (retired by D7; its record is `packages/spec/src/migrations/entries/semantic/18.connector-auth-config-oauth2-retired.ts`) is a
   variant of the **runtime** union `ConnectorAuthConfigSchema` (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorAuthConfigSchema`): what a plugin hands to `registerConnector`, with
   `clientSecret` and `refreshToken` **inline**. It may never be authored —
   `DeclarativeConnectorEntrySchema` refuses any non-`none` `authentication` on every published entry
@@ -234,7 +234,7 @@ and must not be revoked or replaced by an unrelated sign-in. Whatever the storag
 
 ### D7 — The unused runtime `oauth2` shape is retired
 
-`ConnectorOAuth2Schema` (`packages/spec/src/shared/connector-auth.zod.ts#ConnectorOAuth2Schema`) inlines a client secret and a refresh token
+`ConnectorOAuth2Schema` (retired by D7; its record is `packages/spec/src/migrations/entries/semantic/18.connector-auth-config-oauth2-retired.ts`) inlines a client secret and a refresh token
 and has no consumer. The spec slice that adds D2's `oauth2` variant **retires** it through ADR-0087. It
 is not redefined as a resolved shape. Under D4 a provider receives a credential source answered per
 dispatch, an interface rather than a schema, and that source is separate from `CredentialResolver`, which
