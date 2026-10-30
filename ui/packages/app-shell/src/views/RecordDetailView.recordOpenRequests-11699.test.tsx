@@ -64,6 +64,11 @@
  * Two live controls keep the key from being merely sticky: a definition whose
  * relations change, and a permission answer that denies one (objectui#7230),
  * each read the record again with the new expansion.
+ *
+ * Since objectstack#27627 the open's record read is the record page payload
+ * (`POST /data/OBJ/ID/page`), which also asks the explain questions, so the
+ * page's read below is that request, its expansion is the payload's `expand`,
+ * and each question is counted once whichever request carried it.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -188,18 +193,38 @@ function json(body: unknown): Response {
 }
 
 const RECORD_GET = `/api/v1/data/${OBJECT}/${REC}`;
-const isRecordRead = (h: Held) => h.method === 'GET' && h.path.startsWith(`/api/v1/data/${OBJECT}`);
-/** The page's own read: `findOne` with `$expand` goes out as a one-row `populate` list read. */
+const PAGE = `${RECORD_GET}/page`;
+const isPayloadRead = (h: Held) => h.method === 'POST' && h.path === PAGE;
+const isRecordRead = (h: Held) => isPayloadRead(h) || (h.method === 'GET' && h.path.startsWith(`/api/v1/data/${OBJECT}`));
+/**
+ * The page's own read: the open's payload, or `findOne` with `$expand`, which
+ * goes out as a one-row `populate` list read.
+ */
 const isPageRecordRead = (h: Held) =>
-  h.method === 'GET' && h.path.startsWith(`/api/v1/data/${OBJECT}?`) && h.path.includes('populate=');
+  isPayloadRead(h) || (h.method === 'GET' && h.path.startsWith(`/api/v1/data/${OBJECT}?`) && h.path.includes('populate='));
 /** The relations a page read asked the server to expand, sorted. */
 const expansionOf = (h: Held) =>
-  (new URLSearchParams(h.path.slice(h.path.indexOf('?') + 1)).get('populate') ?? '')
-    .split(',').filter(Boolean).sort();
+  (isPayloadRead(h)
+    ? [...(JSON.parse(h.body ?? '{}').expand ?? [])]
+    : (new URLSearchParams(h.path.slice(h.path.indexOf('?') + 1)).get('populate') ?? '').split(',').filter(Boolean)
+  ).sort();
 const pageReads = (held: Held[]) => held.filter(isPageRecordRead);
 
 /** Answer a held request the way the platform would. */
 function answerFor(h: Held): unknown {
+  if (isPayloadRead(h)) {
+    const asked = JSON.parse(h.body ?? '{}');
+    return {
+      success: true,
+      data: {
+        object: OBJECT,
+        id: REC,
+        record: RECORD,
+        related: [],
+        explain: Object.fromEntries((asked.explain ?? []).map((op: string) => [op, { allowed: true, record: { recordId: REC, visible: true } }])),
+      },
+    };
+  }
   if (h.path.endsWith('/security/explain')) return { allowed: true, record: { recordId: REC, visible: true } };
   if (h.path === RECORD_GET) return { success: true, data: { object: OBJECT, id: REC, record: RECORD } };
   if (h.path.startsWith(`/api/v1/data/${OBJECT}?`)) return { success: true, data: { records: [RECORD], total: 1 } };
@@ -386,12 +411,16 @@ describe('record page open: one record GET and one explain per distinct question
     expect(pageReads(held)).toHaveLength(1);
     expect(expansionOf(pageReads(held)[0])).toEqual(['assignee', 'project']);
 
+    // objectstack#27627 — the questions ride the page's read; none is asked
+    // on its own.
     const explains = held.filter((h) => h.method === 'POST' && h.path.endsWith('/security/explain'));
+    expect(explains).toHaveLength(0);
     const perQuestion = new Map<string, number>();
-    for (const h of explains) {
-      const q = JSON.parse(h.body ?? '{}');
-      const k = `${q.object}/${q.recordId}/${q.operation}`;
-      perQuestion.set(k, (perQuestion.get(k) ?? 0) + 1);
+    for (const h of pageReads(held)) {
+      for (const operation of JSON.parse(h.body ?? '{}').explain ?? []) {
+        const k = `${OBJECT}/${REC}/${operation}`;
+        perQuestion.set(k, (perQuestion.get(k) ?? 0) + 1);
+      }
     }
     expect(Object.fromEntries(perQuestion)).toEqual({
       [`${OBJECT}/${REC}/update`]: 1,

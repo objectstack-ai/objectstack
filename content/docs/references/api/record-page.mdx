@@ -1,0 +1,378 @@
+---
+title: Record Page schema — API Protocol reference
+navTitle: Record Page
+description: "Record page payload — POST /api/v1/data/{object}/{id}/page. Reference for RecordPageApprovals and 10 more: every property with its type and default."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Record page payload — `POST /api/v1/data/{object}/{id}/page`.
+
+One request that answers everything a record page asks of the server when it
+opens: the record (with the lookups it names resolved), the count and first
+rows of every related list the page draws, the caller's field projection of
+the record, the approval state that locks it, and the record-grained access
+verdicts its header actions are gated on.
+
+The request NAMES the parts. Which related lists a page draws (their order,
+their declared scope, which of them the reader may see) is the page's own
+derivation, so the page sends the lists and the server answers each one; the
+server never derives a list of its own. What the server owns is the parent
+condition: each list is the child records whose `field` points at this
+record, compiled to the field's arity, and AND-composed with the list's
+declared `filter` — a declared filter can only narrow it.
+
+Every part is the answer of the read it replaces, asked as the same caller:
+the record is `GET /data/{object}/{id}`, a related list is
+`GET /data/{child}` with that filter and `$count`, `fieldAccess` is
+`GET /data/{object}/{id}/field-access`, `explain` is
+`POST /security/explain` with the record id, and `approvals` is
+`GET /approvals/requests` for the record plus
+`GET /approvals/records/{object}/{id}/lock`. Object permissions, row-level
+security, sharing and field-level security therefore apply exactly as they
+apply to those reads. A part whose read refuses carries that refusal in place
+of an answer — a related list the caller may not read carries neither a
+count nor rows — and the other parts are answered. A record the caller
+cannot read refuses the whole request with the record read's own answer, so
+no part discloses a record the caller could not open.
+
+<Callout type="info">
+**Source:** `packages/spec/src/api/record-page.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { RecordPageApprovalsSchema, RecordPageExplainAnswerSchema, RecordPageExplainOperationSchema, RecordPagePartErrorSchema, RecordPagePartRefusalSchema, RecordPageRelatedAnswerSchema, RecordPageRelatedRefusalSchema, RecordPageRelatedRequestSchema, RecordPageRelatedRowsSchema, RecordPageRequestSchema, RecordPageResponseSchema } from '@objectstack/spec/api';
+import type { RecordPageApprovals, RecordPageExplainAnswer, RecordPageExplainOperation, RecordPagePartError, RecordPagePartRefusal, RecordPageRelatedAnswer, RecordPageRelatedRefusal, RecordPageRelatedRequest, RecordPageRelatedRows, RecordPageRequest, RecordPageResponse } from '@objectstack/spec/api';
+
+// Validate data
+const result = RecordPageApprovalsSchema.parse(data);
+```
+
+---
+
+## RecordPageApprovals
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **requests** | `Record<string, any>[]` | ✅ | The record's approval requests the caller may see, as `GET /approvals/requests` lists them for the record; empty when the deployment runs no approval service. |
+| **lock** | `{ locked: boolean } \| null` | ✅ | Whether a locking approval holds the record; null when the deployment answers no lock. |
+
+
+---
+
+## RecordPageExplainAnswer
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **allowed** | `boolean` | ✅ |  |
+| **object** | `string` | ✅ |  |
+| **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge' \| 'export'>` | ✅ |  |
+| **principal** | `{ userId: string \| null; positions?: string[]; permissionSets?: string[]; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>; … }` | ✅ |  |
+| **layers** | `{ layer: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>; kernelTier?: Enum<'layer_0_tenant' \| 'layer_1_business'>; verdict: Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>; detail: string; … }[]` | ✅ |  |
+| **readFilter** | `any` | optional | The composed row filter the caller would be served with — the machine artifact behind the prose (null = unrestricted). Two shapes mean zero rows — `{ id: "__deny_all__" }` and the fail-closed RLS denial (`__rls_deny__` plus a colon and a UUID-shaped suffix, which can also ride inside an $and composite) — so a consumer pattern-matching this payload alone must match both; the decision itself is allowed plus the rls layer verdict. |
+| **record** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …> }` | optional | Row-level verdict for the specific record; set only for singular record-grained requests. An id the asker (the caller of explain) cannot read answers as missing, like a filtered, deleted or never-existed id: visible false, decidedBy omitted. Explaining another principal, the asker cannot read an id its own by-id read finds no row for or refuses; a principal explaining itself cannot read an id its read finds no row for. |
+| **records** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …> }[]` | optional | Per-record verdicts for a batch request — records[i] answers recordIds[i]; set only when the request carried recordIds. |
+
+### Nested Shape: `RecordPageExplainAnswer[option 1].principal`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **userId** | `string \| null` | ✅ |  |
+| **positions** | `string[]` | optional (default: `[]`) |  |
+| **permissionSets** | `string[]` | optional (default: `[]`) |  |
+| **principalKind** | `Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>` | optional |  |
+| **onBehalfOf** | `{ userId: string }` | optional |  |
+| **posture** | `Enum<'PLATFORM_ADMIN' \| 'TENANT_ADMIN' \| 'MEMBER' \| 'EXTERNAL'>` | optional | ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object posture permits; TENANT_ADMIN sees all rows in the org; MEMBER gets business RLS; EXTERNAL (an external organization member) reaches explicit grants only — shares, sharing rules, and grant RLS — never the OWD baseline. |
+
+### Nested Shape: `RecordPageExplainAnswer[option 1].layers[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **layer** | `Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>` | ✅ |  |
+| **kernelTier** | `Enum<'layer_0_tenant' \| 'layer_1_business'>` | optional | ADR-0095 kernel layer: layer_0_tenant = the always-first org wall; layer_1_business = business RLS/sharing/ownership. |
+| **verdict** | `Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>` | ✅ |  |
+| **detail** | `string` | ✅ |  |
+| **contributors** | `{ kind: Enum<'permission_set' \| 'position' \| 'system'>; name: string; via?: string; state?: Enum<'active' \| 'expired' \| 'deactivated'> }[]` | optional (default: `[]`) |  |
+| **record** | `{ outcome: Enum<'admitted' \| 'excluded' \| 'not_evaluated'>; rowFilter?: any; matchesRecord?: boolean; rules?: object[]; … }` | optional | Row-level determination for the specific record under explanation; set only for record-grained requests. |
+
+### Nested Shape: `RecordPageExplainAnswer[option 1].record`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **recordId** | `string` | ✅ | The concrete record id this verdict is about (echoes the request recordId or recordIds[i]). |
+| **visible** | `boolean` | ✅ | Whether the operation is permitted on this specific record after all layers. |
+| **decidedBy** | `Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>` | optional | The pipeline layer that decided the record-level outcome (excluded it, or last admitted it); omitted for a missing record. |
+
+### Nested Shape: `RecordPageExplainAnswer[option 1].records[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **recordId** | `string` | ✅ | The concrete record id this verdict is about (echoes the request recordId or recordIds[i]). |
+| **visible** | `boolean` | ✅ | Whether the operation is permitted on this specific record after all layers. |
+| **decidedBy** | `Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| …>` | optional | The pipeline layer that decided the record-level outcome (excluded it, or last admitted it); omitted for a missing record. |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **error** | `{ code: string; status: integer; message: string }` | ✅ | The refusal the replaced read answers, in place of this part's answer. |
+
+### Nested Shape: `RecordPageExplainAnswer[option 2].error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | The error code the replaced read answers. |
+| **status** | `integer` | ✅ | The HTTP status the replaced read answers. |
+| **message** | `string` | ✅ | The message the replaced read answers. |
+
+---
+
+
+---
+
+## RecordPageExplainOperation
+
+### Allowed Values
+
+* `update`
+* `delete`
+* `transfer`
+
+
+---
+
+## RecordPagePartError
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **error** | `{ code: string; status: integer; message: string }` | ✅ | The refusal the replaced read answers, in place of this part's answer. |
+
+### Nested Shape: `RecordPagePartError.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | The error code the replaced read answers. |
+| **status** | `integer` | ✅ | The HTTP status the replaced read answers. |
+| **message** | `string` | ✅ | The message the replaced read answers. |
+
+
+---
+
+## RecordPagePartRefusal
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | The error code the replaced read answers. |
+| **status** | `integer` | ✅ | The HTTP status the replaced read answers. |
+| **message** | `string` | ✅ | The message the replaced read answers. |
+
+
+---
+
+## RecordPageRelatedAnswer
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object, as the request named it. |
+| **field** | `string` | ✅ | The relationship field, as the request named it. |
+| **total** | `integer` | ✅ | How many child records the list holds for this caller. |
+| **records** | `Record<string, any>[]` | ✅ | The list's first rows, as the caller may read them. |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object, as the request named it. |
+| **field** | `string` | ✅ | The relationship field, as the request named it. |
+| **error** | `{ code: string; status: integer; message: string }` | ✅ | The refusal of the list's read. |
+
+### Nested Shape: `RecordPageRelatedAnswer[option 2].error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | The error code the replaced read answers. |
+| **status** | `integer` | ✅ | The HTTP status the replaced read answers. |
+| **message** | `string` | ✅ | The message the replaced read answers. |
+
+---
+
+
+---
+
+## RecordPageRelatedRefusal
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object, as the request named it. |
+| **field** | `string` | ✅ | The relationship field, as the request named it. |
+| **error** | `{ code: string; status: integer; message: string }` | ✅ | The refusal of the list's read. |
+
+### Nested Shape: `RecordPageRelatedRefusal.error`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `string` | ✅ | The error code the replaced read answers. |
+| **status** | `integer` | ✅ | The HTTP status the replaced read answers. |
+| **message** | `string` | ✅ | The message the replaced read answers. |
+
+
+---
+
+## RecordPageRelatedRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object whose records the list shows. |
+| **field** | `string` | ✅ | The relationship field on the child object that points at this record (a lookup or master-detail field referencing the page's object). The list is the child records whose field holds this record's id. |
+| **filter** | `any` | optional | The list's own declared scope, in the filter syntax `GET /data/{object}` accepts. AND-composed with the parent condition, so it can only narrow the list. A filter that syntax refuses refuses the whole request (a located 400 at `related.N.filter`) before anything is read. |
+| **top** | `integer` | ✅ | How many of the list's first rows to return with its count; 0 returns the count alone. |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | The order of the list's first rows, as `GET /data/{object}` orders them by `$orderby`. Absent for the default order. |
+
+### Nested Shape: `RecordPageRelatedRequest.sort[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | A field of the child object. |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | The direction. |
+
+
+---
+
+## RecordPageRelatedRows
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object, as the request named it. |
+| **field** | `string` | ✅ | The relationship field, as the request named it. |
+| **total** | `integer` | ✅ | How many child records the list holds for this caller. |
+| **records** | `Record<string, any>[]` | ✅ | The list's first rows, as the caller may read them. |
+
+
+---
+
+## RecordPageRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **expand** | `string[]` | optional | Lookup fields of the record to resolve, as `GET /data/{object}/{id}?expand=` resolves them. |
+| **related** | `{ object: string; field: string; filter?: any; top: integer; … }[]` | optional | The related lists the page draws, in the order it draws them. Each is answered with its count and first rows. |
+| **explain** | `Enum<'update' \| 'delete' \| 'transfer'>[]` | optional | The operations to answer a record-grained access verdict for, as `POST /security/explain` answers them with this record id. |
+| **fieldAccess** | `boolean` | optional | Return the caller's field projection of the record, as `GET /data/{object}/{id}/field-access` does. |
+| **approvals** | `boolean` | optional | Return the record's approval requests and its approval lock. |
+
+### Nested Shape: `RecordPageRequest.related[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object whose records the list shows. |
+| **field** | `string` | ✅ | The relationship field on the child object that points at this record (a lookup or master-detail field referencing the page's object). The list is the child records whose field holds this record's id. |
+| **filter** | `any` | optional | The list's own declared scope, in the filter syntax `GET /data/{object}` accepts. AND-composed with the parent condition, so it can only narrow the list. A filter that syntax refuses refuses the whole request (a located 400 at `related.N.filter`) before anything is read. |
+| **top** | `integer` | ✅ | How many of the list's first rows to return with its count; 0 returns the count alone. |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | The order of the list's first rows, as `GET /data/{object}` orders them by `$orderby`. Absent for the default order. |
+
+
+---
+
+## RecordPageResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The record's object. |
+| **id** | `string` | ✅ | The record id. |
+| **record** | `Record<string, any>` | ✅ | The record, as `GET /data/{object}/{id}` answers it. |
+| **related** | `({ object: string; field: string; total: integer; records: Record<string, any>[] } \| { object: string; field: string; error: object })[]` | ✅ | One answer per requested related list, in request order. |
+| **fieldAccess** | `{ object: string; recordId: string; readable: string[]; editable: string[]; … } \| { error: object }` | optional | The field projection, when the request asked for it. |
+| **explain** | `{ update?: object \| object; delete?: object \| object; transfer?: object \| object }` | optional | One access decision per requested operation, keyed by operation, when the request asked for any. |
+| **approvals** | `{ requests: Record<string, any>[]; lock: object \| null } \| { error: object }` | optional | The approval part, when the request asked for it. |
+
+### Nested Shape: `RecordPageResponse.related[number][option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object, as the request named it. |
+| **field** | `string` | ✅ | The relationship field, as the request named it. |
+| **total** | `integer` | ✅ | How many child records the list holds for this caller. |
+| **records** | `Record<string, any>[]` | ✅ | The list's first rows, as the caller may read them. |
+
+### Nested Shape: `RecordPageResponse.related[number][option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object, as the request named it. |
+| **field** | `string` | ✅ | The relationship field, as the request named it. |
+| **error** | `{ code: string; status: integer; message: string }` | ✅ | The refusal of the list's read. |
+
+### Nested Shape: `RecordPageResponse.fieldAccess[option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object name |
+| **recordId** | `string` | ✅ | The record the projection was judged on |
+| **readable** | `string[]` | ✅ | Fields the caller may read on this object. Reads are judged row-blind, so this equals the object-wide read projection |
+| **editable** | `string[]` | ✅ | Fields the caller may write on this record, as field-level security judges an update of the stored row: a row-conditioned field permission locks a field only on the rows its condition names. A field absent here is refused by the write gate. The object grant, the record's row-level write scope (sharing, row-level security, ownership; see `writable`) and a field's own rules (readonly, computed types) are not part of it |
+| **writable** | `boolean` | ✅ | Whether the caller may update this record at all, judged by the write gate on the stored row: the object's edit permission, record sharing and ownership, row-level security, and a parent record's edit access for a record controlled by its parent. False means an update that leaves the record as it is stored is refused: either the caller may not edit this record, or the stored record fails a row-level security check that every save must satisfy, which a save moving the checked value back inside that check can still pass. True does not promise that a save succeeds: a pending approval that locks the record, conditional read-only and validation rules on the values sent, a data source that refuses writes, the platform's own rules for its own records (comments, attachments, mail messages, approval requests) and an object the API serves read-only are judged when the record is saved |
+
+### Nested Shape: `RecordPageResponse.fieldAccess[option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **error** | `{ code: string; status: integer; message: string }` | ✅ | The refusal the replaced read answers, in place of this part's answer. |
+
+### Nested Shape: `RecordPageResponse.approvals[option 1]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **requests** | `Record<string, any>[]` | ✅ | The record's approval requests the caller may see, as `GET /approvals/requests` lists them for the record; empty when the deployment runs no approval service. |
+| **lock** | `{ locked: boolean } \| null` | ✅ | Whether a locking approval holds the record; null when the deployment answers no lock. |
+
+### Nested Shape: `RecordPageResponse.approvals[option 2]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **error** | `{ code: string; status: integer; message: string }` | ✅ | The refusal the replaced read answers, in place of this part's answer. |
+
+
+---
+
