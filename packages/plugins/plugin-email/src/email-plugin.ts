@@ -807,7 +807,7 @@ export class EmailServicePlugin implements Plugin {
                   return {
                     ok: false,
                     severity: 'warning',
-                    message: 'No delivery transport is active — the message was only logged and recorded in sys_email. '
+                    message: 'No delivery transport is active — the message was only logged and kept in the email log. '
                       + 'Configure an SMTP host (or an API provider) and save before testing.',
                   };
                 }
@@ -819,7 +819,7 @@ export class EmailServicePlugin implements Plugin {
                     ok: false,
                     severity: 'warning',
                     message: 'Nothing was delivered — the provider on the form is "None (log only)", so the test message '
-                      + 'was only logged and recorded in sys_email; no mail left this machine. The live transport was '
+                      + 'was only logged and kept in the email log; no mail left this machine. The live transport was '
                       + `not used (${describeLiveMailTransport(svc).label}); save the form to stop delivery.`,
                   };
                 }
