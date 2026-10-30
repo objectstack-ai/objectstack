@@ -1457,7 +1457,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 let exported = 0;
                 let firstChunk = true;
                 let skip = 0;
-                const xlsx = format === 'xlsx' ? await createXlsxStream(res, styled) : null;
+                let xlsx: Awaited<ReturnType<typeof createXlsxStream>> | null = null;
 
                 while (exported < limit) {
                     const take = Math.min(chunkSize, limit - exported);
@@ -1507,6 +1507,12 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     // runs at least once (`limit` is at least 1), so the
                     // closing `]` below always has its opener.
                     if (format === 'json' && firstChunk) res.write('[');
+                    // [#27755] The xlsx workbook writer opens after the first
+                    // read for the same reason: opening it commits the stream
+                    // too, so a refused query answered 200 instead of the 400
+                    // envelope. Opened before the zero-row break, so an empty
+                    // export is still a readable workbook.
+                    if (format === 'xlsx' && firstChunk) xlsx = await createXlsxStream(res, styled);
 
                     if (rows.length === 0) break;
 
