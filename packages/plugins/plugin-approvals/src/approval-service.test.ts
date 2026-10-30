@@ -427,6 +427,7 @@ describe('ApprovalService (node era)', () => {
 
   it('expression: trigger.* reads the submit-time snapshot, not the live row (#3447 P2)', async () => {
     engine._tables['opportunity'] = [{ id: 'opp1', reviewer: 'new_reviewer' }];
+    staffDirectory(engine, 'old_reviewer'); // an `expression` id holds a slot only when an account carries it (#27879)
     const req = await svc.openNodeRequest(
       exprInput('trigger.reviewer', { record: { id: 'opp1', reviewer: 'old_reviewer' } }), CTX,
     ) as any;
@@ -434,6 +435,7 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('expression: vars.* reads flow variables; a CSV string fans out (#3447 P2)', async () => {
+    staffDirectory(engine, 'u6'); // an `expression` id holds a slot only when an account carries it (#27879)
     const req = await svc.openNodeRequest(
       exprInput('vars.approval_lead.next_reviewers', {
         variables: { approval_lead: { next_reviewers: 'u5, u6' } },
@@ -443,6 +445,7 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('expression: an array result fans out into one slot per id (#3447 P2)', async () => {
+    staffDirectory(engine, 'u4'); // an `expression` id holds a slot only when an account carries it (#27879)
     const req = await svc.openNodeRequest(
       exprInput('vars.picked', { variables: { picked: ['u2', 'u3', 'u4'] } }), CTX,
     ) as any;
@@ -4142,6 +4145,93 @@ describe('ApprovalService — a `field` id or an out-of-office delegate that nam
 
     expect(req.pending_approvers).toEqual(['u_gone']);
     expect(nobody(warnings)).toEqual([]);
+  });
+});
+
+// #27879: the third sibling of #27397 / #27752. An `expression` approver
+// resolved as users (`resolveAs: 'user'`, the default) treats each value its
+// CEL yields as a person, so an id no account carries was a phantom slot.
+describe('ApprovalService — an `expression` id that names no account (#27879)', () => {
+  const svcWithWarnings = (engine: any) => {
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+    });
+    return { svc, warnings };
+  };
+
+  const exprInput = (picked: unknown, configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    variables: { picked },
+    config: {
+      approvers: [{ type: 'expression' as const, value: 'vars.picked' }],
+      behavior: 'first_response' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+  const nobody = (warnings: any[]) => warnings.filter(([msg]) => String(msg).includes('expanded to nobody'));
+
+  it('an id no account carries warns as `user` does, and adds no slot', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u_gone']) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u2']);
+    const hits = nobody(warnings);
+    expect(hits).toHaveLength(1);
+    expect(String(hits[0][0])).toContain("approver 'expression' id 'u_gone' expanded to nobody");
+    expect(hits[0][1]).toMatchObject({ type: 'expression', value: 'vars.picked', id: 'u_gone', organizationId: 't1' });
+  });
+
+  it('a slate it empties reaches the node\'s onEmptyApprovers', async () => {
+    const engine = makeFakeEngine();
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput('u_gone', {
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'user', value: 'u_backstop' }],
+    }) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_backstop']);
+  });
+
+  it('ids an account carries stay quiet', async () => {
+    const engine = makeFakeEngine();
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput('u2,u3') as any, CTX) as any;
+
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
+    expect(nobody(warnings)).toEqual([]);
+  });
+
+  it('a failed directory read keeps the slot', async () => {
+    const engine = makeFakeEngine();
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'sys_user') throw new Error('directory down');
+      return find(object, options);
+    };
+    const { svc, warnings } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput(['u_gone']) as any, CTX) as any;
+
+    expect(req.pending_approvers).toEqual(['u_gone']);
+    expect(nobody(warnings)).toEqual([]);
+  });
+
+  it('a dead out-of-office delegate on an expression id falls back to that id', async () => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_approval_delegation'] = [{
+      id: 'del_u3', delegator_id: 'u3', delegate_id: 'u_gone',
+      valid_from: '2025-01-01T00:00:00Z', valid_until: '2027-01-01T00:00:00Z',
+      reason: 'leave', organization_id: 't1',
+    }];
+    const { svc } = svcWithWarnings(engine);
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u3']) as any, CTX) as any;
+
+    expect(req.pending_approvers.sort()).toEqual(['u2', 'u3']);
   });
 });
 

@@ -2708,11 +2708,23 @@ export class ApprovalService implements IApprovalService {
     // unstaffed-target behaviour (and #3424 admin rescue) as the static types.
     const resolveAs = String(a.resolveAs ?? 'user');
     if (resolveAs === 'user') {
+      // #27879: each value takes the `field` treatment (#27752) — the slot is
+      // the id only when an account carries it. One that resolves to no one
+      // warns and adds no slot, so a slate it leaves empty reaches the node's
+      // onEmptyApprovers; a failed read keeps the slot.
       const slots: Array<{ id: string }> = [];
       for (const id of raw) {
-        for (const routed of await this.applyOooDelegation(id, now, organizationId, substitutions)) {
-          slots.push({ id: routed });
+        const routed = await this.applyOooDelegation(id, now, organizationId, substitutions);
+        if (routed.length === 1 && routed[0] === id && !id.includes(':') && await this.namesNoAccount(id)) {
+          this.logger?.warn?.(
+            `[approvals] approver 'expression' id '${id}' expanded to nobody — the slot names no one, so no `
+            + `one is asked through it. Staff it or re-point the expression; a slate left naming no one is decided `
+            + `by the node's onEmptyApprovers.`,
+            { type: 'expression', value: source, id, organizationId: organizationId ?? null },
+          );
+          continue;
         }
+        for (const r of routed) slots.push({ id: r });
       }
       return { slots, raw };
     }
