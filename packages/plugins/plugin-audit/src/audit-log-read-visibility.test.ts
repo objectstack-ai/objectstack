@@ -10,7 +10,9 @@
  * `audit-log-read-visibility.integration.test.ts`.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import { describe, it, expect, vi } from 'vitest';
+import { PLATFORM_OPERATOR_POSTURE } from '@objectstack/metadata-core';
 import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { isReadableIds } from '@objectstack/spec/data';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
@@ -20,7 +22,9 @@ import {
   LEDGER_NAMED_PARENTS,
   installAuditLogReadVisibility,
   isLedgerRowAboutNoRecord,
+  ledgerRowAboutAnOrganizationWhere,
   ledgerRowAboutNoRecordWhere,
+  readsDeploymentLevelLedgerRows,
 } from './audit-log-read-visibility.js';
 import { AUDIT_EXCLUDED_OBJECTS } from './audit-writers.js';
 import type { CommentAccessEngine, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
@@ -75,7 +79,24 @@ async function read(mw: Mw, partial: Partial<CommentReadMiddlewareCtx> = {}) {
   await mw(ctx, async () => {
     ran = true;
   });
-  return { where: ctx.ast?.where, ran };
+  return { ...splitOrganizationBound(ctx.ast?.where), ran };
+}
+
+/** [#26750] The deployment-level rule's clause, ANDed into a read after the parent-record gate's. */
+const ORGANIZATION = ledgerRowAboutAnOrganizationWhere();
+
+/**
+ * A read's WHERE as the parent-record gate left it, and whether the
+ * deployment-level rule then ANDed its clause in. The suites below assert the
+ * gate's part exactly, as before the rule; the rule's own suite asserts both.
+ */
+function splitOrganizationBound(where: unknown): { where: unknown; organizationBound: boolean } {
+  const and = (where as { $and?: unknown[] } | undefined)?.$and;
+  if (Array.isArray(and) && and.length === 2 && isDeepStrictEqual(and[1], ORGANIZATION)) {
+    return { where: and[0], organizationBound: true };
+  }
+  if (isDeepStrictEqual(where, ORGANIZATION)) return { where: undefined, organizationBound: true };
+  return { where, organizationBound: false };
 }
 
 describe('isLedgerRowAboutNoRecord', () => {
@@ -381,13 +402,15 @@ describe('[#21260] the ledger audit capability', () => {
     expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain(LEDGER_AUDIT_CAPABILITY);
   });
 
-  it('its holder is not narrowed, on any read operation, and nothing is scanned for it', async () => {
+  it('its holder is not narrowed by the parent-record gate, on any read operation, and nothing is scanned for it', async () => {
     for (const operation of ['find', 'findOne', 'count', 'aggregate'] as const) {
       const { mw, calls } = install({ scan: unreadable, readable: { crm_case: [], sys_session: [] } });
       const existing = { action: 'delete' };
-      const { where, ran } = await read(mw, { operation, context: holder, ast: { object: 'sys_audit_log', where: existing } });
+      const { where, organizationBound, ran } = await read(mw, { operation, context: holder, ast: { object: 'sys_audit_log', where: existing } });
       expect(ran).toBe(true);
       expect(where).toBe(existing);
+      // [#26750] Only the gate: an organization holder is still kept off the deployment-level rows.
+      expect(organizationBound).toBe(true);
       expect(calls.scans).toEqual([]);
       expect(calls.probes).toEqual([]);
     }
@@ -407,6 +430,88 @@ describe('[#21260] the ledger audit capability', () => {
       const { mw, calls } = install({ scan: unreadable, readable: { crm_case: [], sys_session: [] } });
       expect((await read(mw, { context: { userId: 'u1', systemPermissions } })).where).toEqual(OUTSIDE);
       expect(calls.scans).toHaveLength(1);
+    }
+  });
+});
+
+describe('[#26750, ruling A] the deployment-level rows: the platform administrator alone', () => {
+  const unreadable = () => [{ id: 'l1', action: 'delete', object_name: 'crm_case', record_id: 'c1' }];
+  const platformAdmin = { userId: 'u_platform', posture: PLATFORM_OPERATOR_POSTURE, systemPermissions: [LEDGER_AUDIT_CAPABILITY] };
+
+  it('the clause is the rows that name an organization in tenant_id, a fresh tree per call', () => {
+    expect(ORGANIZATION).toEqual({ $and: [{ tenant_id: { $ne: null } }, { tenant_id: { $ne: '' } }] });
+    expect(ledgerRowAboutAnOrganizationWhere()).not.toBe(ledgerRowAboutAnOrganizationWhere());
+  });
+
+  it('the platform administrator is the carried PLATFORM_ADMIN rung, and nothing else', () => {
+    expect(PLATFORM_OPERATOR_POSTURE).toBe('PLATFORM_ADMIN');
+    expect(readsDeploymentLevelLedgerRows({ userId: 'u1', posture: 'PLATFORM_ADMIN' })).toBe(true);
+    for (const context of [
+      { userId: 'u1', posture: 'TENANT_ADMIN' },
+      { userId: 'u1', posture: 'MEMBER' },
+      { userId: 'u1', posture: 'EXTERNAL' },
+      { userId: 'u1', posture: 'platform_admin' },
+      // No rung carried: fail closed, whatever else the context holds.
+      { userId: 'u1' },
+      { userId: 'u1', positions: ['platform_admin'] },
+      { userId: 'u1', permissions: ['admin_full_access'] },
+      { userId: 'u1', systemPermissions: [...ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions] },
+      undefined,
+    ]) {
+      expect(readsDeploymentLevelLedgerRows(context), JSON.stringify(context)).toBe(false);
+    }
+  });
+
+  it('a caller without the audit capability gets the gate, then the clause ANDed after it', async () => {
+    const { mw } = install({ scan: unreadable, readable: { crm_case: [] } });
+    const existing = { action: 'delete' };
+    const ctx: CommentReadMiddlewareCtx = {
+      object: 'sys_audit_log', operation: 'find', ast: { object: 'sys_audit_log', where: existing }, context: { userId: 'u1' },
+    };
+    await mw(ctx, async () => {});
+    expect(ctx.ast?.where).toEqual({ $and: [{ $and: [existing, OUTSIDE] }, ORGANIZATION] });
+  });
+
+  it('an organization holder of the audit capability, on every rung but the platform administrator’s, gets the clause alone', async () => {
+    for (const posture of ['TENANT_ADMIN', 'MEMBER', 'EXTERNAL', undefined]) {
+      for (const operation of ['find', 'findOne', 'count', 'aggregate'] as const) {
+        const { mw, calls } = install({ scan: unreadable, readable: { crm_case: [] } });
+        const { where, organizationBound } = await read(mw, {
+          operation, context: { userId: 'u1', posture, systemPermissions: [LEDGER_AUDIT_CAPABILITY] },
+        });
+        expect(where, `${posture} ${operation}`).toBeUndefined();
+        expect(organizationBound, `${posture} ${operation}`).toBe(true);
+        expect(calls.scans).toEqual([]);
+      }
+    }
+  });
+
+  it('the platform administrator is not narrowed at all: its read reaches the driver as it was sent', async () => {
+    for (const operation of ['find', 'findOne', 'count', 'aggregate'] as const) {
+      const { mw, calls } = install({ scan: unreadable, readable: { crm_case: [] } });
+      const existing = { action: 'delete' };
+      const ctx: CommentReadMiddlewareCtx = {
+        object: 'sys_audit_log', operation, ast: { object: 'sys_audit_log', where: existing }, context: platformAdmin,
+      };
+      await mw(ctx, async () => {});
+      expect(ctx.ast?.where).toBe(existing);
+      expect(calls.scans).toEqual([]);
+    }
+  });
+
+  it('the platform administrator without the audit capability gets the gate, and no clause', async () => {
+    const { mw } = install({ scan: unreadable, readable: { crm_case: [] } });
+    const { where, organizationBound } = await read(mw, { context: { userId: 'u_platform', posture: PLATFORM_OPERATOR_POSTURE } });
+    expect(where).toEqual(OUTSIDE);
+    expect(organizationBound).toBe(false);
+  });
+
+  it('writes, system reads and context-less reads take no clause', async () => {
+    const { mw } = install({ scan: unreadable, readable: { crm_case: [] } });
+    for (const partial of [{ operation: 'insert' as const }, { context: { isSystem: true } }, { context: undefined }]) {
+      const { where, organizationBound } = await read(mw, partial);
+      expect(where).toBeUndefined();
+      expect(organizationBound).toBe(false);
     }
   });
 });

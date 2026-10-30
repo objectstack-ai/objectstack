@@ -37,7 +37,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 const LEDGER = 'sys_audit_log';
 /** A parent object whose records each caller reads only when it owns them. */
@@ -52,6 +52,10 @@ const OTHER = { userId: 'u_other', tenantId: 'org_1', positions: ['org_member'] 
 const ADMIN = { userId: 'u_admin', tenantId: 'org_1', positions: ['org_admin'] };
 /** [#21260] A member holding the ledger's audit capability, and owning nothing. */
 const HOLDER = { userId: 'u_auditor', tenantId: 'org_1', positions: ['org_member'], systemPermissions: ['view_all_audit_log'] };
+/** [#26750] The platform administrator: the carried rung, holding the capability as `admin_full_access` grants it. */
+const PLATFORM_ADMIN = {
+  userId: 'u_platform', tenantId: 'org_1', positions: ['platform_admin'], posture: 'PLATFORM_ADMIN', systemPermissions: ['view_all_audit_log'],
+};
 
 const ownedObject = {
   name: OWNED,
@@ -72,12 +76,19 @@ const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
 /** Parent-object read operations issued under a caller (non-system) context. */
 const parentProbes: Array<{ object: string; operation: string; userId?: string }> = [];
 
-/** The rows no CRUD write produces, by the class each stands for. */
+/**
+ * The rows no CRUD write produces, by the class each stands for, each with the
+ * organization its writer stamps in `tenant_id` (ADR-0131 D7): a tenant-scope
+ * settings change carries the organization; the user-import run and the
+ * platform-admin standing roster carry none — deployment-level rows, served to
+ * the platform administrator alone (#26750).
+ */
 const ABOUT_NO_RECORD = [
-  { action: 'config_change', object_name: 'sys_setting', record_id: null },
-  { action: 'import', object_name: 'sys_user', record_id: null },
-  { action: 'platform_admin_standing_change', object_name: 'sys_user', record_id: null },
+  { action: 'config_change', object_name: 'sys_setting', record_id: null, tenant_id: DEFAULT_ORGANIZATION_ID },
+  { action: 'import', object_name: 'sys_user', record_id: null, tenant_id: null },
+  { action: 'platform_admin_standing_change', object_name: 'sys_user', record_id: null, tenant_id: null },
 ];
+/** Rows about a record the gate cannot judge, each stamped with the organization, as the CRUD mirror stamps a record's. */
 const UNJUDGEABLE = [
   // A record action naming no record — the mirror stamps `null` when it cannot derive the id.
   { action: 'update', object_name: OWNED, record_id: null },
@@ -87,7 +98,7 @@ const UNJUDGEABLE = [
   { action: 'create', object_name: LEDGER, record_id: 'a1' },
   // A record id under no object.
   { action: 'login', object_name: null, record_id: 's1' },
-];
+].map((row) => ({ ...row, tenant_id: DEFAULT_ORGANIZATION_ID }));
 
 type Row = Record<string, any>;
 const key = (r: Row) => `${r.action}:${r.object_name ?? 'NULL'}/${r.record_id ?? 'NULL'}`;
@@ -102,7 +113,10 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
   let aboutMine: string[] = [];
   let aboutTheirs: string[] = [];
   let aboutBoards: string[] = [];
+  /** The rows about no record that are about the organization. */
   let aboutNoRecord: string[] = [];
+  /** [#26750] The rows about no organization. */
+  let deploymentLevel: string[] = [];
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
@@ -160,7 +174,8 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
     aboutMine = about(OWNED, ids.mine);
     aboutTheirs = about(OWNED, ids.theirs);
     aboutBoards = about(OPEN, ids.board);
-    aboutNoRecord = ABOUT_NO_RECORD.map((r) => key(r)).sort();
+    aboutNoRecord = ABOUT_NO_RECORD.filter((r) => r.tenant_id !== null).map((r) => key(r)).sort();
+    deploymentLevel = ABOUT_NO_RECORD.filter((r) => r.tenant_id === null).map((r) => key(r)).sort();
   }, 120_000);
 
   afterAll(async () => {
@@ -206,7 +221,7 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
     }
   });
 
-  it('find: a member reads the rows about records it can read and the rows about no record, and nothing else', async () => {
+  it('find: a member reads the rows about records it can read and the organization’s rows about no record, and nothing else', async () => {
     const rows = await engine.find(LEDGER, { context: MEMBER });
     expect(keys(rows)).toEqual([...aboutMine, ...aboutBoards, ...aboutNoRecord].sort());
   });
@@ -232,7 +247,7 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
       { groupBy: ['object_name'], aggregations: [{ function: 'count', alias: 'n' }], context: MEMBER },
     );
     const byObject = Object.fromEntries(groups.map((g: Row) => [g.object_name ?? 'NULL', Number(g.n)]));
-    expect(byObject).toEqual({ [OWNED]: aboutMine.length, [OPEN]: aboutBoards.length, sys_setting: 1, sys_user: 2 });
+    expect(byObject).toEqual({ [OWNED]: aboutMine.length, [OPEN]: aboutBoards.length, sys_setting: 1 });
   });
 
   it('a query scoped to a record the member cannot read returns nothing', async () => {
@@ -258,7 +273,7 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
     expect(perObject.sort()).toEqual([`${OPEN}:find`, `${OWNED}:find`]);
   });
 
-  it('an admin, who reads every record, keeps every row about a record that exists and every row about none', async () => {
+  it('an admin, who reads every record, keeps every row about a record that exists and the organization’s rows about none', async () => {
     const rows = await engine.find(LEDGER, { context: ADMIN });
     expect(keys(rows)).toEqual([...aboutMine, ...aboutTheirs, ...aboutBoards, ...aboutNoRecord].sort());
     expect(await engine.count(LEDGER, {}, { context: ADMIN })).toBe(rows.length);
@@ -269,13 +284,28 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
     expect(rows.length).toBe(allRows.length);
   });
 
-  it('[#21260] a holder of the ledger audit capability is served every row, deleted and unreadable records included', async () => {
+  it('[#21260] a holder of the ledger audit capability is served every row about the organization, deleted and unreadable records included', async () => {
+    const aboutTheOrganization = allRows.filter((r) => r.tenant_id !== null);
     const rows = await engine.find(LEDGER, { context: HOLDER });
-    expect(keys(rows)).toEqual(keys(allRows));
-    expect(await engine.count(LEDGER, {}, { context: HOLDER })).toBe(allRows.length);
+    expect(keys(rows)).toEqual(keys(aboutTheOrganization));
+    expect(await engine.count(LEDGER, {}, { context: HOLDER })).toBe(aboutTheOrganization.length);
     expect((await engine.findOne(LEDGER, {
       where: { object_name: OWNED, record_id: ids.mineGone, action: 'delete' }, context: HOLDER,
     }))?.record_id).toBe(ids.mineGone);
+  });
+
+  it('[#26750] the deployment-level rows are served to the platform administrator alone', async () => {
+    expect(deploymentLevel).toEqual([
+      'import:sys_user/NULL',
+      'platform_admin_standing_change:sys_user/NULL',
+    ]);
+    for (const ctx of [MEMBER, OTHER, ADMIN, HOLDER]) {
+      const served = keys(await engine.find(LEDGER, { context: ctx }));
+      for (const k of deploymentLevel) expect(served, ctx.userId).not.toContain(k);
+    }
+    const rows = await engine.find(LEDGER, { context: PLATFORM_ADMIN });
+    expect(keys(rows)).toEqual(keys(allRows));
+    expect(await engine.count(LEDGER, {}, { context: PLATFORM_ADMIN })).toBe(allRows.length);
   });
 
   it('[#21260] the same holder is still narrowed on the activity stream', async () => {
