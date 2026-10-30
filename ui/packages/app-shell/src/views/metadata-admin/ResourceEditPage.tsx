@@ -636,7 +636,9 @@ function MetadataResourceEditPageImpl({
   const [revealIssues, setRevealIssues] = React.useState(false);
   const [inlineIssueFields, setInlineIssueFields] = React.useState<ReadonlySet<string>>(() => new Set());
   const inlineIssueFieldsRef = React.useRef(inlineIssueFields);
-  inlineIssueFieldsRef.current = inlineIssueFields;
+  React.useEffect(() => {
+    inlineIssueFieldsRef.current = inlineIssueFields;
+  });
 
   // Wrap setDraft so that editing a field clears any *server-side*
   // diagnostic issues whose path begins with that field. The user
