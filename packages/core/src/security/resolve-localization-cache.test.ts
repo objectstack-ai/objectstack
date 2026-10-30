@@ -463,6 +463,7 @@ describe('resolveLocalizationContext — the failure memo survives what retires 
       timezone: 'UTC',
       locale: 'en-US',
       currency: undefined,
+      readFailed: true,
     });
     expect(ql.counts.sys_setting).toBe(1);
 

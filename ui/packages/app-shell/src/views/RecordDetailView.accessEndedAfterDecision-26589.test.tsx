@@ -33,13 +33,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
-// The decision POST. It also flips `readEnded` the way the server's step end
-// does (objectstack#26180): from then on the business record answers 404 to a
-// viewer whose only read was the pending step's.
+// The decision POST — through the action door, which forwards it to the
+// declared decide route (objectstack#27611). It also flips `readEnded` the way
+// the server's step end does (objectstack#26180): from then on the business
+// record answers 404 to a viewer whose only read was the pending step's.
 let readEnded = false;
 let revokesOnDecision = true;
 const authFetchSpy = vi.fn(async (url: string) => {
-  if (revokesOnDecision && /\/approvals\/requests\/[^/]+\/(approve|reject)$/.test(String(url))) readEnded = true;
+  if (revokesOnDecision && /\/actions\/sys_approval_request\/approval_(approve|reject)$/.test(String(url))) readEnded = true;
   return new Response(JSON.stringify({ data: {} }), {
     status: 200,
     headers: { 'content-type': 'application/json' },

@@ -23,7 +23,7 @@
 import * as React from 'react';
 import { cn } from '@object-ui/components';
 import { getIcon } from '../utils/getIcon.js';
-import { appTileColors } from './appTileColors.js';
+import { BRANDED_TILE_CLASSES, appTileColors, appTileStyle } from './appTileColors.js';
 
 /** The app fields this glyph reads — the spec's `AppSchema` names. */
 export interface AppMarkApp {
@@ -41,16 +41,6 @@ const SIZE_CLASSES: Record<AppMarkSize, { box: string; glyph: string }> = {
   sm: { box: 'size-[22px] rounded-[5px]', glyph: 'size-3.5' },
   md: { box: 'size-[26px] rounded-md', glyph: 'size-4' },
 };
-
-/**
- * The tile for a declared `primaryColor`. The utility strings are literals so
- * Tailwind emits them at build time; the author's colour reaches them only as
- * CSS custom properties, so `dark:` stays a real variant the theme controls
- * (AGENTS.md section 2, the author-declared colour carve-out).
- */
-const BRANDED_TILE_CLASSES =
-  'bg-[color:var(--os-app-tile-bg)] text-[color:var(--os-app-tile-fg)] ' +
-  'dark:bg-[color:var(--os-app-tile-bg-dark)] dark:text-[color:var(--os-app-tile-fg-dark)]';
 
 /** The tile for an app that declares no usable colour — theme tokens only. */
 const NEUTRAL_TILE_CLASSES = 'border bg-muted text-muted-foreground';
@@ -92,16 +82,7 @@ export function AppMark({ app, size = 'sm', className }: AppMarkProps) {
         colors ? BRANDED_TILE_CLASSES : NEUTRAL_TILE_CLASSES,
         className,
       )}
-      style={
-        colors
-          ? ({
-              '--os-app-tile-bg': colors.bg,
-              '--os-app-tile-fg': colors.fg,
-              '--os-app-tile-bg-dark': colors.bgDark,
-              '--os-app-tile-fg-dark': colors.fgDark,
-            } as React.CSSProperties)
-          : undefined
-      }
+      style={colors ? appTileStyle(colors) : undefined}
     >
       {/* eslint-disable-next-line react-hooks/static-components -- getIcon returns a stable icon component from a static registry, not one created during render */}
       <Icon className={sizeClasses.glyph} />

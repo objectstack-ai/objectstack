@@ -26,11 +26,12 @@ import {
   Button, Input, Label,
   Select, SelectTrigger, SelectContent, SelectItem, SelectValue,
 } from '@object-ui/components';
-import { Plus, X, Code2, ListFilter } from 'lucide-react';
+import { AlertCircle, Plus, X, Code2, ListFilter } from 'lucide-react';
 import { BOOLEAN_VALUE_TYPES, expandEmptyOperator, type EmptyOperatorArm } from '@objectstack/spec/data';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import type { CelLintIssue } from '../celAuthoring.js';
+import { useServerHoldAt } from '../draftVerdict.js';
 import { t, tFormat, useMetadataLocale } from '../i18n.js';
 
 type Op = '==' | '!=' | '>' | '<' | '>=' | '<=' | 'truthy' | 'falsy';
@@ -820,7 +821,7 @@ function initFrom(value: string, valueOf: SubjectValueOf): { rows: Row[]; join: 
   return { rows: [], join: '&&', raw: !!value };
 }
 
-export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue, labelSubjects = false }: {
+export function ConditionBuilder({ label, value, onCommit, objectName, fields: fieldsProp, disabled, onBlockingIssuesChange, subjects, scope, roots, scopeIssue, labelSubjects = false, verdictPath }: {
   label?: string;
   value: string;
   onCommit: (cel: string) => void;
@@ -911,6 +912,15 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
    * beside it. Off by default, so a mount that lists spellings keeps them.
    */
   labelSubjects?: boolean;
+  /**
+   * objectstack#27644 — the item-relative path `value` is stored at in the body
+   * the page's served verdict judged (`validations.1.condition`), forwarded to
+   * `CelPredicateField`. The server's errors there count as blocking while
+   * `value` is the text they judged, in either mode: the raw editor reports
+   * them with its lint, and the row builder, which mounts no CEL editor, shows
+   * and counts them itself. Omitted: no server verdict is read.
+   */
+  verdictPath?: string;
 }) {
   const { fields: hookFields } = useObjectFields(objectName);
   const fields = fieldsProp ?? hookFields;
@@ -1063,7 +1073,11 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
     const errs = issues.filter((i) => i.severity === 'error').length;
     setCelErrors((prev) => (prev === errs ? prev : errs));
   }, []);
-  const blockingIssues = raw ? celErrors : 0;
+  // objectstack#27644 — the row builder has no editor to report the server's
+  // errors at this path, so it counts them here; the raw editor's report
+  // already carries them.
+  const held = useServerHoldAt(verdictPath, value || '');
+  const blockingIssues = raw ? celErrors : held.length;
   // Held in a ref so an unmemoized parent callback cannot re-fire the effect.
   const onBlockingIssuesChangeRef = React.useRef(onBlockingIssuesChange);
   React.useEffect(() => {
@@ -1114,6 +1128,7 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
              roots are the engine's own, unchanged. */
           roots={offeredRoots}
           scopeIssue={scopeIssue}
+          verdictPath={verdictPath}
           t={tLocal}
         />
         {value && !parse(value, valueOf) && (
@@ -1204,6 +1219,18 @@ export function ConditionBuilder({ label, value, onCommit, objectName, fields: f
 
       {compiled && (
         <div className="rounded bg-muted/40 px-2 py-1 text-[10px] font-mono text-muted-foreground break-all">{compiled}</div>
+      )}
+
+      {/* objectstack#27644 — what the publish refuses in this condition, as served. */}
+      {held.length > 0 && (
+        <ul className="space-y-1" aria-live="polite">
+          {held.map((e, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-[11px] text-destructive" data-testid="cel-server-error">
+              <AlertCircle className="mt-[1px] h-3 w-3 shrink-0" />
+              <span>{e.message}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

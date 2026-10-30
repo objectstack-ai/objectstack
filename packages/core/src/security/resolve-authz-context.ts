@@ -2211,7 +2211,22 @@ export interface ResolveLocalizationInput {
   userId?: string;
 }
 
-type LocalizationResult = { timezone: string; locale: string; currency?: string };
+type LocalizationResult = {
+  timezone: string;
+  locale: string;
+  currency?: string;
+  /**
+   * Present only when the direct `sys_setting` read THREW (a backend fault),
+   * on a fresh read and on a memoized one alike: every value above is then the
+   * built-in default, not a stored answer. Absent, a missing `currency` means
+   * the read succeeded and the organization has no default, which is permanent
+   * until someone sets one; present, it means nothing was learned, and a caller
+   * that would refuse work for want of a default retries instead. A
+   * settings-service refusal never sets it (#11877), and it does not lengthen
+   * the failure memo. (#27257)
+   */
+  readFailed?: true;
+};
 
 /**
  * Process-local TTL cache for the FAILED-READ outcome of
@@ -2630,7 +2645,9 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  * {@link LOCALIZATION_FAILURE_CACHE_TTL_MS} per `(ql, organizationId, userId)` so
  * the failing query — and the driver's log line for it — does not repeat
  * every request (#10221). A settings-service refusal is not a backend fault
- * and never populates that memo (#11877).
+ * and never populates that memo (#11877). Such an answer carries
+ * `readFailed: true`, fresh and memoized alike, so a caller can tell "the read
+ * failed" from "the read found no default" (#27257).
  *
  * A SUCCESSFUL read is cached too, since #11966 (leg C of #11633) — but only
  * when the engine carries the write-epoch and middleware seams, and only until
@@ -2667,7 +2684,10 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
     }
   }
 
-  const { value, backendFailed } = await resolveLocalizationContextUncached(input);
+  const { value: read, backendFailed } = await resolveLocalizationContextUncached(input);
+  // [#27257] The kind travels ON the answer, and the memo stores that same
+  // answer, so a hit inside the failure TTL still says the read failed.
+  const value: LocalizationResult = backendFailed ? { ...read, readFailed: true } : read;
   if (!cacheable) return value;
 
   if (backendFailed) {
