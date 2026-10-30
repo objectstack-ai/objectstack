@@ -174,6 +174,24 @@ export const RECORD_RELATED_ARRANGEMENT_PREFERENCE = defineWorkspacePreference<R
   }),
 });
 
+/**
+ * The list view the reader pinned for an object, per object (scope
+ * `object:OBJECT_NAME`, objectstack#27594): the view the object's list opens
+ * when the address names none. Stored as `{"view":"VIEW_ID","v":1}`, and an
+ * unpin as `{"view":null,"v":1}` (`null`: none pinned). With none pinned, or a
+ * pinned view the list no longer offers, the list opens the view it declares
+ * as default (`isDefault`), else its first.
+ */
+export const LIST_PINNED_VIEW_PREFERENCE = defineWorkspacePreference<string | null>({
+  name: 'list.view.pinned',
+  codec: versionedPreferenceCodec<string | null>({
+    version: 1,
+    toRecord: (view) => ({ view }),
+    fromRecord: (record) =>
+      record.view === null ? null : typeof record.view === 'string' && record.view ? record.view : undefined,
+  }),
+});
+
 /** The storage surface a read takes — `localStorage`, or a test double. */
 export type WorkspacePreferenceReadStorage = Pick<Storage, 'getItem'>;
 

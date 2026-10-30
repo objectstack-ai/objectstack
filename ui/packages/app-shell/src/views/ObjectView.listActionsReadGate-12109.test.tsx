@@ -162,8 +162,9 @@ describe('objectui#12109 — an object\'s list actions follow the caller\'s read
     renderList(answerFor(false));
     await settle();
     // Paired positive: the page itself rendered, so the absence below is the
-    // gate's and not an empty tree's.
-    expect(screen.getAllByText('Opportunities').length).toBeGreaterThan(0);
+    // gate's and not an empty tree's. Its title is the view switcher since
+    // objectstack#27594.
+    expect(screen.getByTestId('list-view-switcher')).toBeTruthy();
     expect(updateStage()).toBeNull();
   });
 });

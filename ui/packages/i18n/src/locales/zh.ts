@@ -1109,6 +1109,16 @@ const zh = {
     addNewView: '新建视图',
     done: '完成',
     noViewsFound: '没有匹配的视图。',
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: '视图',
+      pinned: '固定',
+      recent: '最近',
+      all: '全部',
+      pin: '固定：默认打开此视图',
+      unpin: '取消固定：列表恢复打开默认视图',
+      inMenu: '已在菜单中',
+    },
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
     defaultBadge: '默认',

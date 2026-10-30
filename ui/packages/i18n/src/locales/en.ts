@@ -1353,6 +1353,16 @@ const en = {
     addNewView: 'Add new view',
     done: 'Done',
     noViewsFound: 'No views match your search.',
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: 'Views',
+      pinned: 'Pinned',
+      recent: 'Recent',
+      all: 'All views',
+      pin: 'Pin: open this view by default',
+      unpin: 'Unpin: the list opens its default view again',
+      inMenu: 'Already in the menu',
+    },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
     defaultBadge: 'default',

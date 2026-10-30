@@ -1113,6 +1113,16 @@ const pt = {
     addNewView: "Adicionar nova exibição",
     done: "Concluído",
     noViewsFound: "Nenhuma exibição corresponde à sua pesquisa.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Exibições",
+      pinned: "Fixada",
+      recent: "Recentes",
+      all: "Todas as exibições",
+      pin: "Fixar: abrir esta exibição por padrão",
+      unpin: "Desafixar: a lista volta a abrir a exibição padrão",
+      inMenu: "Já está no menu",
+    },
     dragToReorder: "Arrastar para reordenar",
     defaultView: "Exibição padrão",
     defaultBadge: "padrão",

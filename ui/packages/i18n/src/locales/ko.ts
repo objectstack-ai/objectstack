@@ -1086,6 +1086,16 @@ const ko = {
     addNewView: "새 보기 추가",
     done: "완료",
     noViewsFound: "검색과 일치하는 보기가 없습니다.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "보기",
+      pinned: "고정됨",
+      recent: "최근",
+      all: "모든 보기",
+      pin: "고정: 이 보기를 기본으로 열기",
+      unpin: "고정 해제: 목록이 기본 보기를 다시 엽니다",
+      inMenu: "이미 메뉴에 있음",
+    },
     dragToReorder: "드래그하여 순서 변경",
     defaultView: "기본 보기",
     defaultBadge: "기본",

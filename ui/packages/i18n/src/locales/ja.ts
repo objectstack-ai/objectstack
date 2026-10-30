@@ -1086,6 +1086,16 @@ const ja = {
     addNewView: "新しいビューを追加",
     done: "完了",
     noViewsFound: "検索に一致するビューはありません。",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "ビュー",
+      pinned: "固定",
+      recent: "最近",
+      all: "すべてのビュー",
+      pin: "固定：このビューを既定で開く",
+      unpin: "固定を解除：リストは既定のビューを再び開きます",
+      inMenu: "すでにメニューにあります",
+    },
     dragToReorder: "ドラッグして並べ替え",
     defaultView: "デフォルトビュー",
     defaultBadge: "デフォルト",

@@ -128,10 +128,11 @@ import { ExpressionProvider } from '../providers/ExpressionProvider';
 const OBJECT_NAME = 'duly_task';
 
 /**
- * The view under test is always `all`. `ListView` wraps the host's tab strip
- * in its own `list-toolbar-leading` node, which is the node whose identity (a)
- * reads (the view description's own row was, until objectui#12528 moved the
- * description onto the active tab).
+ * The view under test is always `all`. `ListView`'s own toolbar Filter control
+ * (`toolbar-filter-trigger`) is the node whose identity (a) reads (the host's
+ * tab strip in `list-toolbar-leading` was, until objectstack#27594 moved view
+ * switching to the page title; the view description's own row was, until
+ * objectui#12528).
  */
 function objectsWith(allView: Record<string, unknown>) {
   return [
@@ -255,7 +256,7 @@ function GanttStandIn({ schema }: any) {
 const ganttInstance = () => screen.getByTestId('gantt-stand-in').dataset.instance;
 
 /** A node rendered inside `ListView` — replaced wholesale by a key remount. */
-const listNode = () => screen.getByTestId('list-toolbar-leading');
+const listNode = () => screen.getByTestId('toolbar-filter-trigger');
 
 beforeEach(() => {
   cleanup();
@@ -368,26 +369,31 @@ describe('a list drawing a self-fetching visualization keeps its tree and the vi
 
 /**
  * objectui#12528 nail 1, end to end through the page: the view's description
- * is the active tab's tooltip (the strip is handed to `ListView` as its
- * `toolbarLeading`), and nothing draws it as a row above the toolbar, so the
- * toolbar sits at one height with or without one.
+ * is shown once, and nothing draws it as a row above the toolbar, so the
+ * toolbar sits at one height with or without one. Since objectstack#27594 moved
+ * view switching to the page title, a list face draws it as `ListView`'s own
+ * info control at the start of the toolbar row (the host hands the list no
+ * leading node any more), and the title switcher carries none; a chart face,
+ * which has no toolbar row, carries it on the switcher
+ * (`ObjectView.chartViewTabs-13114.test.tsx`).
  */
-describe('the view description rides on the active view tab (objectui#12528)', () => {
-  const activeTab = () => screen.getByTestId('list-toolbar-leading').querySelector('[aria-current="true"]');
+describe('the view description is shown once, never as a row (objectui#12528)', () => {
+  const switcher = () => screen.queryByTestId('list-view-switcher');
 
-  it('the active tab carries it as its tooltip, and no description row is drawn', async () => {
+  it('a list face draws it as the toolbar row\'s info control; the switcher carries none', async () => {
     await mountPage({ type: 'grid' });
 
     expect(screen.queryByTestId('view-description')).toBeNull();
-    expect(screen.queryByTestId('view-description-info')).toBeNull();
-    expect(activeTab()?.getAttribute('title')).toBe('Every task');
+    expect(screen.getByTestId('view-description-info')).toHaveAttribute('title', 'Every task');
+    expect(switcher()).not.toBeNull();
+    expect(switcher()?.hasAttribute('title')).toBe(false);
   });
 
   it('appearance.showDescription: false shows it nowhere', async () => {
     await mountPage({ type: 'grid', appearance: { showDescription: false } });
 
-    expect(activeTab()).not.toBeNull();
-    expect(activeTab()?.hasAttribute('title')).toBe(false);
+    expect(switcher()).not.toBeNull();
+    expect(switcher()?.hasAttribute('title')).toBe(false);
     expect(screen.queryByTestId('view-description-info')).toBeNull();
   });
 });

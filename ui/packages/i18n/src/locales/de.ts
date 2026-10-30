@@ -1086,6 +1086,16 @@ const de = {
     addNewView: "Neue Ansicht hinzufügen",
     done: "Fertig",
     noViewsFound: "Keine Ansichten entsprechen Ihrer Suche.",
+    // objectstack#27594 — the list title's view switcher.
+    switcher: {
+      label: "Ansichten",
+      pinned: "Angeheftet",
+      recent: "Zuletzt",
+      all: "Alle Ansichten",
+      pin: "Anheften: diese Ansicht standardmäßig öffnen",
+      unpin: "Lösen: die Liste öffnet wieder ihre Standardansicht",
+      inMenu: "Bereits im Menü",
+    },
     dragToReorder: "Zum Neuanordnen ziehen",
     defaultView: "Standardansicht",
     defaultBadge: "Standard",
