@@ -1437,6 +1437,9 @@ const en = {
     deleteCommentConfirm: 'Are you sure you want to delete this comment?',
     commentEditFailed: 'Your edit was not saved. The comment keeps its previous text.',
     commentDeleteFailed: 'The comment was not deleted. Please try again.',
+    // objectstack#28218 — a comment write whose answer names mentioned users the
+    // server will not notify (`withheldMentions`): one sentence naming them, no reason.
+    mentionsWithheld: '{{names}} will not be notified of this comment.',
     linkCopyFailed: 'Failed to copy link',
     claim: 'Claim',
     claimed: 'You own this record now.',
@@ -1630,6 +1633,8 @@ const en = {
     listFormat: 'List',
     inlineCode: 'Inline code',
     mentionSomeone: 'Mention someone',
+    // objectstack#28218 — the composer's row of picked-mention chips.
+    mentionedPeople: 'Mentioned',
     preview: 'Preview',
     submitComment: 'Submit (Ctrl+Enter)',
     sendComment: 'Send',

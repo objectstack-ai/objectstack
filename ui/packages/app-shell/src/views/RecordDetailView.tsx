@@ -2957,6 +2957,28 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [t],
   );
 
+  /**
+   * Say in one sentence who a comment write's mentions will not reach (ruling A
+   * on objectstack#27703). The server withholds the notification of a mentioned
+   * user the mention gate refuses and answers their ids to the author's own
+   * write as `withheldMentions`; without this the author believes they were
+   * told. The ids map to names through the picker's suggestions, the list the
+   * write's own `mentions` were extracted from. No reason is given: the
+   * disclosure is one bit per user the author named.
+   */
+  const tellMentionsWithheld = useCallback(
+    (ids: string[], suggestions: ReadonlyArray<{ id: string; label: string }>) => {
+      const names = ids.map(id => suggestions.find(s => s.id === id)?.label || id);
+      toast.warning(
+        t('detail.mentionsWithheld', {
+          defaultValue: '{{names}} will not be notified of this comment.',
+          names: names.join(t('validation.formInvalidJoiner', { defaultValue: ', ' })),
+        }),
+      );
+    },
+    [t],
+  );
+
   const handleAddComment = useCallback(
     async (text: string) => {
       if (!dataSource || !feedRecordKey) {
@@ -2986,7 +3008,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           body: text,
           mentions: JSON.stringify(mentionIds),
           created_at: newItem.createdAt,
-        });
+        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, mentionSuggestions) });
       } catch (err) {
         throw commentWriteFailed(err);
       }
@@ -2996,7 +3018,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         [key]: [...(prev[key] ?? EMPTY_FEED), newItem],
       }));
     },
-    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionSuggestions, commentWriteFailed],
+    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionSuggestions, commentWriteFailed, tellMentionsWithheld],
   );
 
   const handleAddReply = useCallback(
@@ -3027,7 +3049,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           mentions: JSON.stringify(mentionIds),
           created_at: newItem.createdAt,
           parent_id: parentId,
-        });
+        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, mentionSuggestions) });
       } catch (err) {
         throw commentWriteFailed(err);
       }
@@ -3047,7 +3069,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         };
       });
     },
-    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionSuggestions, commentWriteFailed],
+    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionSuggestions, commentWriteFailed, tellMentionsWithheld],
   );
 
   /**
@@ -3095,7 +3117,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         stored = await dataSource.update(COMMENT_OBJECT, String(itemId), {
           body: text,
           mentions: JSON.stringify(extractMentions(text, mentionSuggestions)),
-        });
+        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, mentionSuggestions) });
       } catch (err) {
         throw editFailed(err);
       }
@@ -3107,7 +3129,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         ),
       }));
     },
-    [dataSource, feedRecordKey, feedItemsByRecord, mentionSuggestions, t],
+    [dataSource, feedRecordKey, feedItemsByRecord, mentionSuggestions, t, tellMentionsWithheld],
   );
 
   /**

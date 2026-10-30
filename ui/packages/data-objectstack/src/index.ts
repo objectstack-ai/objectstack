@@ -2280,6 +2280,29 @@ function asDroppedFieldsNotice(
 const UNATTRIBUTED_STRIP_OBJECT = '';
 
 /**
+ * Hand a write answer's `withheldMentions` (objectstack#27703) to the caller's
+ * per-call listener: the string ids, once, and only when there is at least
+ * one. A runtime that predates the key, or a write that withheld nobody,
+ * calls nothing. Isolated like the subscriber fan-outs: the write has already
+ * succeeded, so a throwing listener must not turn it into a rejection.
+ */
+function notifyWithheldMentions(
+  result: unknown,
+  listener: ((ids: string[]) => void) | undefined,
+): void {
+  if (!listener) return;
+  const wire = (result as { withheldMentions?: unknown } | null | undefined)?.withheldMentions;
+  if (!Array.isArray(wire)) return;
+  const ids = wire.filter((id): id is string => typeof id === 'string' && id !== '');
+  if (ids.length === 0) return;
+  try {
+    listener(ids);
+  } catch (err) {
+    console.warn('ObjectStackAdapter: withheld-mentions listener error', err);
+  }
+}
+
+/**
  * Emitted after a create/update whose response carried `droppedFields`
  * (objectstack-ai/objectstack#3431 / objectstack-ai/objectstack#3455) or
  * `warnings` (objectui#12107). The write SUCCEEDED — this is a warning that
@@ -4411,7 +4434,22 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     return this.client.meta.getItems('view');
   }
 
-  async create(resource: string, data: Partial<T>): Promise<T> {
+  /**
+   * Create a record.
+   *
+   * Optional `opts.onMentionsWithheld` hears the write answer's
+   * `withheldMentions` (objectstack#27703): the ids of the users this
+   * `sys_comment` write @mentioned whose notification the server withheld.
+   * It is called once, after the write succeeded, and only when the answer
+   * names at least one id. The answer is the requester's own and is never
+   * stored, so this per-call listener is the only door to it; the resolved
+   * value stays the record, as for every other caller.
+   */
+  async create(
+    resource: string,
+    data: Partial<T>,
+    opts?: { onMentionsWithheld?: (ids: string[]) => void },
+  ): Promise<T> {
     await this.connect();
     try {
       const result = await this.client.data.create<T>(resource, data);
@@ -4423,6 +4461,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         (result.record as { id?: string | number } | undefined)?.id,
         data as Record<string, unknown>,
       );
+      notifyWithheldMentions(result, opts?.onMentionsWithheld);
       return result.record;
     } catch (err) {
       // `update` has always normalised; `create` did not, so a rejected insert
@@ -4443,12 +4482,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *
    * Requires `@objectstack/client@>=4.2.0`, which forwards `opts.ifMatch`
    * as an `If-Match` HTTP header.
+   *
+   * Optional `opts.onMentionsWithheld` hears the answer's `withheldMentions`,
+   * as on {@link create}: on an update, only for a mention the update added.
    */
   async update(
     resource: string,
     id: string | number,
     data: Partial<T>,
-    opts?: { ifMatch?: string },
+    opts?: { ifMatch?: string; onMentionsWithheld?: (ids: string[]) => void },
   ): Promise<T> {
     await this.connect();
     try {
@@ -4462,6 +4504,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // the protocol id, whatever this method's wider parameter admitted.
       this.emitMutation({ type: 'update', resource, id: String(id), record: { ...result.record } });
       this.notifyDroppedFields('update', resource, result, id, data as Record<string, unknown>);
+      notifyWithheldMentions(result, opts?.onMentionsWithheld);
       return result.record;
     } catch (err) {
       throw normaliseClientError(err);
