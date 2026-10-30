@@ -38,7 +38,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AutomationEngine, InMemorySuspendedRunStore, installBuiltinNodes } from '@objectstack/service-automation';
+import { AutomationEngine, InMemorySuspendedRunStore, ObjectStoreSuspendedRunStore, installBuiltinNodes } from '@objectstack/service-automation';
 import { APPROVAL_REVISE_NODE_TYPE, defineActionDescriptor } from '@objectstack/spec/automation';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { ApprovalService } from './approval-service.js';
@@ -158,6 +158,47 @@ const RELEASE_SIGNOFF = {
   ],
 };
 
+/** Ticking clock: rounds of a revise loop must not share created_at. */
+function tickingClock() {
+  let t = Date.parse('2026-10-30T00:00:00Z');
+  return { now: () => new Date((t += 1000)) };
+}
+
+/**
+ * One process: an automation engine over `store` and an approval service over
+ * `fake`. Two of these over one durable store and one `fake` are two replicas
+ * (or one process before and after a restart).
+ */
+function wireReplica(
+  fake: ReturnType<typeof makeFakeEngine>,
+  store: InMemorySuspendedRunStore | ObjectStoreSuspendedRunStore,
+  clock: { now: () => Date },
+  onPeek: (seen: { results: unknown; count: unknown }) => void,
+) {
+  const service = new ApprovalService({ engine: fake as any, logger: silentLogger(), clock });
+  const automation = new AutomationEngine(silentLogger(), store);
+  installBuiltinNodes(automation, { logger: silentLogger(), getService() { throw new Error('none'); } } as any);
+  registerApprovalNode(automation, service, silentLogger());
+  automation.registerNodeExecutor({
+    type: 'decided',
+    async execute(node: any, variables: Map<string, unknown>) {
+      variables.set('decision', node.config.decision);
+      return { success: true };
+    },
+  } as never);
+  automation.registerNodeExecutor({
+    type: 'peek',
+    async execute(_node: any, variables: Map<string, unknown>) {
+      onPeek({ results: variables.get('signoffResults'), count: variables.get('signoffs.count') });
+      return { success: true };
+    },
+  } as never);
+  automation.registerFlow('task_signoff', TASK_SIGNOFF as never);
+  automation.registerFlow('release_signoff', RELEASE_SIGNOFF as never);
+  service.attachAutomation(automation);
+  return { automation, service };
+}
+
 describe('a revise-window recall on a batch item resumes the batch (#28183)', () => {
   let automation: AutomationEngine;
   let service: ApprovalService;
@@ -167,29 +208,7 @@ describe('a revise-window recall on a batch item resumes the batch (#28183)', ()
   beforeEach(() => {
     seen = undefined;
     fake = makeFakeEngine();
-    // Ticking clock: rounds of a revise loop must not share created_at.
-    let t = Date.parse('2026-10-30T00:00:00Z');
-    service = new ApprovalService({ engine: fake as any, logger: silentLogger(), clock: { now: () => new Date((t += 1000)) } });
-    automation = new AutomationEngine(silentLogger(), new InMemorySuspendedRunStore());
-    installBuiltinNodes(automation, { logger: silentLogger(), getService() { throw new Error('none'); } } as any);
-    registerApprovalNode(automation, service, silentLogger());
-    automation.registerNodeExecutor({
-      type: 'decided',
-      async execute(node: any, variables: Map<string, unknown>) {
-        variables.set('decision', node.config.decision);
-        return { success: true };
-      },
-    } as never);
-    automation.registerNodeExecutor({
-      type: 'peek',
-      async execute(_node: any, variables: Map<string, unknown>) {
-        seen = { results: variables.get('signoffResults'), count: variables.get('signoffs.count') };
-        return { success: true };
-      },
-    } as never);
-    automation.registerFlow('task_signoff', TASK_SIGNOFF as never);
-    automation.registerFlow('release_signoff', RELEASE_SIGNOFF as never);
-    service.attachAutomation(automation);
+    ({ automation, service } = wireReplica(fake, new InMemorySuspendedRunStore(), tickingClock(), (s) => { seen = s; }));
   });
 
   const launchBatch = async (ids: string[]) => {
@@ -326,5 +345,163 @@ describe('a revise-window recall on a batch item resumes the batch (#28183)', ()
     expect(entries).toBe(1);
     expect(await requestFor('f2', 'pending')).toBeUndefined();
     expect(parked()).toEqual([{ runId: fan.runId, nodeId: 'fan', correlation: `map:${req.flow_run_id}` }]);
+  });
+});
+
+/**
+ * #28230: the recall finds the batch above the item it cancels past the first
+ * page of parked runs.
+ *
+ * A DB-backed store lists one 1000-row page of `paused` rows in driver order,
+ * and a process lists what it parked itself beside that page. So the batch is
+ * missing from the listing exactly when it was parked by ANOTHER process (a
+ * replica, or this one before a restart) and more than 1000 runs are parked
+ * ahead of it. Both replicas below share one store and one table set; the
+ * batch is launched and sent back on `a` and recalled on `b`.
+ */
+describe('a revise-window recall finds its batch past the first page of parked runs (#28230)', () => {
+  let fake: ReturnType<typeof makeFakeEngine>;
+  let a: ReturnType<typeof wireReplica>;
+  let b: ReturnType<typeof wireReplica>;
+  let seen: { results: unknown; count: unknown } | undefined;
+
+  /** `count` parked runs of some other flow, stored ahead of everything this test parks. */
+  const parkOthers = (count: number) => {
+    const rows = fake.tables.get('sys_automation_run') ?? (fake.tables.set('sys_automation_run', []), fake.tables.get('sys_automation_run')!);
+    for (let i = 0; i < count; i++) {
+      rows.push({ id: `other-${String(i).padStart(4, '0')}`, flow_name: 'other_flow', node_id: 'wait', status: 'paused' });
+    }
+  };
+
+  beforeEach(() => {
+    seen = undefined;
+    fake = makeFakeEngine();
+    const store = new ObjectStoreSuspendedRunStore(fake as any, silentLogger());
+    const clock = tickingClock();
+    a = wireReplica(fake, store, clock, (s) => { seen = s; });
+    b = wireReplica(fake, store, clock, (s) => { seen = s; });
+  });
+
+  const requestFor = async (recordId: string, status: string) =>
+    (await fake.find('sys_approval_request', { where: { record_id: recordId, status } }))[0];
+  const storedRun = async (runId: string) =>
+    (await fake.find('sys_automation_run', { where: { id: runId } }))[0];
+
+  /** Launch the batch on `a` and send its first item back into the revise window. */
+  const batchInReviseWindow = async () => {
+    const paused = await a.automation.execute('release_signoff', {
+      userId: 'submitter', params: { items: [{ id: 't1', title: 'Task t1' }, { id: 't2', title: 'Task t2' }] },
+    } as never);
+    expect(paused.status, 'the batch parks on its first item').toBe('paused');
+    const first = await requestFor('t1', 'pending');
+    await a.service.sendBack(first.id, { actorId: 'u1', comment: 'rework' }, asUser('u1'));
+    return { batchRunId: paused.runId!, first };
+  };
+
+  it('the batch past the first page resumes, and the item keeps its slot as the cancelled marker', async () => {
+    parkOthers(1000);
+    const { batchRunId, first } = await batchInReviseWindow();
+    expect((await b.automation.listSuspendedRunsDurable()).some(r => r.runId === batchRunId),
+      'premise: the batch is not on the listing replica b reads').toBe(false);
+
+    const out = await b.service.recall(first.id, { actorId: 'submitter' }, asUser('submitter'));
+
+    expect(out.request.status).toBe('recalled');
+    expect(out.resumed).toBe(false);
+    expect(out.resumeError).toBeUndefined();
+    expect((await b.automation.getRun(first.flow_run_id))?.status).toBe('cancelled');
+    const second = await requestFor('t2', 'pending');
+    expect(second, 'the batch opened the next item').toBeDefined();
+    expect(await storedRun(batchRunId)).toMatchObject({ node_id: 'signoffs', correlation: `map:${second.flow_run_id}` });
+
+    await b.service.decide(second.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+
+    expect(seen).toEqual({ results: [{ $status: 'cancelled', $itemRunId: first.flow_run_id }, { decision: 'approved' }], count: 1 });
+    expect((await b.automation.getRun(batchRunId))?.status).toBe('completed');
+  });
+
+  it('control: a batch within the first page behaves as before', async () => {
+    parkOthers(10);
+    const { batchRunId, first } = await batchInReviseWindow();
+    expect((await b.automation.listSuspendedRunsDurable()).some(r => r.runId === batchRunId),
+      'premise: the batch is on the listing replica b reads').toBe(true);
+
+    const out = await b.service.recall(first.id, { actorId: 'submitter' }, asUser('submitter'));
+
+    expect(out).toMatchObject({ resumed: false });
+    expect(out.resumeError).toBeUndefined();
+    const second = await requestFor('t2', 'pending');
+    expect(second, 'the batch opened the next item').toBeDefined();
+    await b.service.decide(second.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+    expect(seen).toEqual({ results: [{ $status: 'cancelled', $itemRunId: first.flow_run_id }, { decision: 'approved' }], count: 1 });
+  });
+
+  it('control: a recall with no batch above it past the first page behaves as before, and the batch beside it is untouched', async () => {
+    parkOthers(1000);
+    const { batchRunId, first } = await batchInReviseWindow();
+    const lone = await a.automation.execute('task_signoff', {
+      object: 'rel_task', record: { id: 'solo' }, userId: 'submitter',
+    } as never);
+    const req = await requestFor('solo', 'pending');
+    await a.service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+
+    const out = await b.service.recall(req.id, { actorId: 'submitter' }, asUser('submitter'));
+
+    expect(out).toMatchObject({ runId: lone.runId, resumed: false });
+    expect(out.resumeError).toBeUndefined();
+    expect('resumeFailure' in out).toBe(false);
+    expect((await b.automation.getRun(lone.runId!))?.status).toBe('cancelled');
+    expect(await storedRun(batchRunId)).toMatchObject({ node_id: 'signoffs', correlation: `map:${first.flow_run_id}` });
+    expect(await storedRun(first.flow_run_id)).toMatchObject({ node_id: 'wait_revision', status: 'paused' });
+    expect(await requestFor('t2', 'pending')).toBeUndefined();
+  });
+
+  it('control: a parent linked to the item but parked at a node other than the built-in map is left alone', async () => {
+    // A home-grown fan-out that launches its child with the same linkage the
+    // `map` node writes, so the engine answers it as the item's parent; it is
+    // the recall's own `map` check that leaves it parked.
+    let entries = 0;
+    for (const replica of [a, b]) {
+      replica.automation.registerNodeExecutor({
+        type: 'fan_out',
+        descriptor: defineActionDescriptor({
+          type: 'fan_out', version: '1.0.0', name: 'Fan out', supportsPause: true, resumeAuthority: 'any',
+        }),
+        async execute(node: any, variables: Map<string, unknown>, context: any) {
+          entries++;
+          const child = await replica.automation.execute('task_signoff', {
+            ...context, object: 'rel_task', record: { id: `f${entries}` },
+            $parentRunId: String(variables.get('$runId')), $parentMapNode: node.id,
+          } as never);
+          return { success: true, suspend: true, correlation: `map:${child.runId}` };
+        },
+      } as never);
+      replica.automation.registerFlow('fan_signoff', {
+        name: 'fan_signoff', label: 'Fan Sign-off', type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'fan', type: 'fan_out', label: 'Fan out' },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+          { id: 'f1', source: 'start', target: 'fan' },
+          { id: 'f2', source: 'fan', target: 'end' },
+        ],
+      } as never);
+    }
+    parkOthers(1000);
+    const fan = await a.automation.execute('fan_signoff', { userId: 'submitter' } as never);
+    const req = await requestFor('f1', 'pending');
+    await a.service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));
+    expect(await b.automation.suspendedMapParentOf(req.flow_run_id),
+      'premise: the engine answers the fan-out as the item\'s parent').toMatchObject({ runId: fan.runId, nodeId: 'fan' });
+
+    const out = await b.service.recall(req.id, { actorId: 'submitter' }, asUser('submitter'));
+
+    expect(out).toMatchObject({ resumed: false });
+    expect(out.resumeError).toBeUndefined();
+    expect(entries).toBe(1);
+    expect(await requestFor('f2', 'pending')).toBeUndefined();
+    expect(await storedRun(fan.runId!)).toMatchObject({ node_id: 'fan', correlation: `map:${req.flow_run_id}`, status: 'paused' });
   });
 });

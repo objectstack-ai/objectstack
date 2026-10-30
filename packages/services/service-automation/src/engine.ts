@@ -6875,6 +6875,37 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#28230] The run parked at a `map` node on `itemRunId`, read through the
+     * item's own linkage: the `$parentRunId` / `$parentMapNode` the `map` node
+     * launched it with, then the parent's suspension by that id. Two keyed
+     * reads, never a listing — {@link listSuspendedRunsDurable} reads one
+     * capped page of a DB-backed store, so past 1000 parked runs a parent
+     * another process parked may not be on it.
+     *
+     * Answers the parent only while it is parked on `map:<itemRunId>` at the
+     * node the item names, and `undefined` otherwise: no suspension under
+     * `itemRunId`, an item no `map` launched, a parent that is gone or has
+     * moved on. Read it BEFORE {@link cancelRun}, which removes the item's
+     * suspension and with it the linkage.
+     *
+     * Read-only. THROWS when the store cannot be read, as
+     * {@link hasSuspendedRun} does: an outage means "unknown", never "no
+     * parent".
+     */
+    async suspendedMapParentOf(
+        itemRunId: string,
+    ): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined> {
+        const item = await this.loadSuspendedRunStrict(itemRunId);
+        const ctx = item?.context as Record<string, unknown> | undefined;
+        const parentRunId = ctx?.$parentRunId;
+        const mapNode = ctx?.$parentMapNode;
+        if (typeof parentRunId !== 'string' || !parentRunId) return undefined;
+        const parent = await this.loadSuspendedRunStrict(parentRunId);
+        if (!parent || parent.nodeId !== mapNode || parent.correlation !== `map:${itemRunId}`) return undefined;
+        return { runId: parent.runId, flowName: parent.flowName, nodeId: parent.nodeId, correlation: parent.correlation };
+    }
+
+    /**
      * Credit a completed child run's totals to the parent step waiting on it
      * (#4354).
      *
