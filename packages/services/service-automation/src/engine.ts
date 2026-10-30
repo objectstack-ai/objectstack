@@ -667,7 +667,26 @@ export interface RegisteredConnector {
     readonly state: ConnectorState;
     /** Why the connector is degraded — set only when `state` is `degraded`. */
     readonly degradedReason?: string;
+    /**
+     * [#28016] Set only on a degraded connector the platform does NOT retry:
+     * what re-attempts it instead. Absent on an instance on the #3017 backoff.
+     */
+    readonly degradedHold?: ConnectorHold;
 }
+
+/**
+ * [#28016] What re-attempts a **held** degraded instance — one neither the
+ * retry timer nor an unchanged reload re-attempts (a restart always does):
+ *
+ *  - `declaration`: an edit of its declaration — a configuration fault met on
+ *    a retry (#27992), or a credential written into the declaration that the
+ *    upstream refused (#27237);
+ *  - `credential`: setting the stored credential `ref` again — a value stored
+ *    through the credential door that the upstream refused (#27237).
+ */
+export type ConnectorHold =
+    | { readonly kind: 'declaration' }
+    | { readonly kind: 'credential'; readonly ref: string };
 
 // The connector **provider** contract (ADR-0097) — ConnectorProviderFactory,
 // ConnectorProviderContext, ConnectorMaterialization — lives in
@@ -3982,12 +4001,16 @@ export class AutomationEngine implements IAutomationService {
      * @param cause the thrown value behind the degrade, for the log record's
      *   structured `meta`. Optional — a caller with no thrown value in hand
      *   still gets `degradedReason` in the record.
+     * @param hold [#28016] set when the platform will NOT retry the instance:
+     *   what re-attempts it instead, stored as `degradedHold` and named by a
+     *   `connector_action` refusal. Omitted, the instance is on the backoff.
      */
     registerDegradedConnector(
         def: Connector,
         reason: string,
         origin: ConnectorOrigin = 'declarative',
         cause?: unknown,
+        hold?: ConnectorHold,
     ): void {
         // The body lives in ./plugin-extension-api.ts (#25222).
         const host: ThisParameterType<typeof registerDegradedConnector> = {
@@ -3995,7 +4018,7 @@ export class AutomationEngine implements IAutomationService {
             connectors: this.connectors,
             logger: this.logger,
         };
-        registerDegradedConnector.call(host, def, reason, origin, cause);
+        registerDegradedConnector.call(host, def, reason, origin, cause, hold);
     }
 
     /** Enforce the ADR-0097 §4 two-sources-of-truth rule; warn on same-origin replace. */
@@ -4140,6 +4163,17 @@ export class AutomationEngine implements IAutomationService {
     getConnectorDegradedReason(name: string): string | undefined {
         const reg = this.connectors.get(name);
         return reg?.state === 'degraded' ? (reg.degradedReason ?? 'upstream unavailable') : undefined;
+    }
+
+    /**
+     * [#28016] What re-attempts a held degraded connector, or `undefined` when
+     * it is not held — `ready`, unregistered, or degraded on the #3017 backoff.
+     * Lets the `connector_action` node say "retries automatically" only when
+     * that is true.
+     */
+    getConnectorDegradedHold(name: string): ConnectorHold | undefined {
+        const reg = this.connectors.get(name);
+        return reg?.state === 'degraded' ? reg.degradedHold : undefined;
     }
 
     /**
