@@ -1196,6 +1196,7 @@
     "ui/RecordLineItemsProps:sort",
     "ui/RecordLineItemsProps:title",
     "ui/RecordLineItemsProps:totalField",
+    "ui/RecordPathProps:allowStageChange",
     "ui/RecordPathProps:aria",
     "ui/RecordPathProps:stages",
     "ui/RecordPathProps:statusField",
