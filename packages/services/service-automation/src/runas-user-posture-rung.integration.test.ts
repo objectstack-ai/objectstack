@@ -249,6 +249,23 @@ describe("[#28099] a door-started run carries the rung its door forwarded, besid
     expect(ctx).toMatchObject({ userId: 'usr_member', permissions: ['member_default'] });
     expect(ctx).not.toHaveProperty('posture');
   });
+
+  it('a forwarded rung without forwarded grants is dropped when the resolution fails: the resolver rejects, answers nothing, or is not wired', async () => {
+    const alone = { userId: 'usr_member', tenantId: 'org_a', posture: 'PLATFORM_ADMIN' };
+    for (const resolver of [
+      async () => { throw new Error('grants store unavailable'); },
+      async () => undefined,
+      null,
+    ]) {
+      const h = envelopeHarness();
+      h.engine.registerFlow('rung', recordingFlow('rung') as never);
+      h.engine.setUserGrantsResolver(resolver as never);
+      await h.engine.execute('rung', { ...alone } as never);
+      const ctx = h.ctxOf('first');
+      expect(ctx).toMatchObject({ isSystem: false, userId: 'usr_member' });
+      expect(ctx).not.toHaveProperty('posture');
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

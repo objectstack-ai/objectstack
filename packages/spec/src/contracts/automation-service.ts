@@ -109,8 +109,10 @@ export interface AutomationContext {
      * Run setup keeps a forwarded rung beside the forwarded grants and does not
      * re-derive it. When it resolves the grants itself (a context with no
      * {@link permissions}: a record-change run, the segment after an approval
-     * decision), it takes the rung off that same resolution and drops any other
-     * one, so a rung stands only beside the grants it was derived from. Absent:
+     * decision), it drops any forwarded rung and takes the rung off that same
+     * resolution; grants that stay unresolved (the resolver rejects, answers
+     * nothing, or is not wired) leave the run with none. So a rung stands only
+     * beside the grants it was derived from. Absent:
      * every reader of it answers as for a principal below the rung, which
      * narrows and never widens. Absent on a `runAs:'system'` run's data
      * context, whose `isSystem` short-circuit precedes every reader of it.
