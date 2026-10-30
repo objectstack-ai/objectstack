@@ -138,7 +138,7 @@ async function boot(surface: 'envelope' | 'declarative') {
       },
     ] as never, { logger: noopLogger as never });
     expect(bound.errors).toEqual([]);
-    expect(bound.registered).toBe(2);
+    expect(bound.registered).toBe(4); // one registration per (hook, event)
   }
   protocol = new ObjectStackProtocolImplementation(engine as never);
   nestedSay = undefined;
