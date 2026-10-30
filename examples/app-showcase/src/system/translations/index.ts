@@ -656,10 +656,15 @@ export const ShowcaseTranslationBundle = {
         // `_views.create.title` — the sparse `formViews.create` form's own
         // heading (`title: 'New contact'`), which `translateView` overlays
         // onto the served form's `config.title`. 新建联系人 follows the
-        // 新建… shape a create heading takes.
+        // 新建… shape a create heading takes. Its `submitBehavior` is the
+        // thank-you panel the same form shows after a save, overlaid onto the
+        // served form's `config.submitBehavior`.
         _views: {
           default: { label: '联系人' },
-          create: { title: '新建联系人' },
+          create: {
+            title: '新建联系人',
+            submitBehavior: { title: '联系人已创建', message: '其余信息可在记录中补充。' },
+          },
         },
         // `_sections` — the four groups of the default edit form in
         // `ui/views/contact.view.ts`, plus the sparse `formViews.create`
@@ -843,6 +848,11 @@ export const ShowcaseTranslationBundle = {
         _views: {
           default: { label: '客户询问' },
           triage: { label: '询问分流' },
+          // The public web-to-lead form's thank-you panel — the confirmation
+          // an anonymous visitor reads after submitting `/forms/contact-us`.
+          contact: {
+            submitBehavior: { title: '感谢您！', message: '我们已收到您的留言，专员会尽快与您联系。' },
+          },
         },
         // The public web-to-lead form's single section
         // (`ui/views/inquiry.view.ts` `formViews.contact`). Declares a stable

@@ -49,66 +49,27 @@
  * before a driver throws it.
  */
 
+// The four handle types — `BorrowedConnectorAuth`, `BorrowedConnectorCredential`,
+// `ConnectorCredentialRequest` and `ConnectorCredentialHandle` — are declared in
+// `@objectstack/spec/integration` (ADR-0143 D7), because a connector provider
+// receives the same handle on `ConnectorProviderContext` and a connector package
+// depends on the spec only. They are re-exported here unchanged, so every
+// importer of this package keeps its spelling.
+import type {
+    BorrowedConnectorAuth,
+    ConnectorCredentialHandle,
+    ConnectorCredentialRequest,
+} from '@objectstack/spec/integration';
+
+export type {
+    BorrowedConnectorAuth,
+    BorrowedConnectorCredential,
+    ConnectorCredentialHandle,
+    ConnectorCredentialRequest,
+} from '@objectstack/spec/integration';
+
 /** The kernel service name the connector credential source is registered under. */
 export const CONNECTOR_CREDENTIAL_SOURCE_SERVICE = 'connector-credential-source';
-
-/**
- * The credential a driver presents on one request — the resolved form of a
- * connector instance's `auth`, never its reference.
- */
-export type BorrowedConnectorAuth =
-    | { type: 'bearer'; token: string }
-    | { type: 'api-key'; key: string; headerName: string; paramName?: string }
-    | { type: 'basic'; username: string; password: string };
-
-/** One answer of a {@link ConnectorCredentialHandle}. */
-export interface BorrowedConnectorCredential {
-    /** What to send. */
-    readonly auth: BorrowedConnectorAuth;
-    /**
-     * When the credential stops being valid, in epoch milliseconds. Absent for
-     * a credential with no known lifetime (the static kinds). A credential at
-     * or past `expiresAt` minus the skew margin is refreshed before it is sent.
-     */
-    readonly expiresAt?: number;
-}
-
-/** What a borrow is asked in the name of. */
-export interface ConnectorCredentialRequest {
-    /**
-     * The organization of the request the credential is for (ADR-0143 Q1 = A,
-     * an organization-shared connection). Absent for a read that carries none
-     * — a boot-time drift check, a schedule — which ADR-0143 D4 answers from
-     * the instance's connection only when exactly one exists. A static
-     * credential is environment-level and answers the same either way.
-     */
-    readonly organizationId?: string;
-}
-
-/**
- * A borrowed credential, bound to one connector instance. Returned by
- * {@link IConnectorCredentialSource.borrow}; the driver keeps it for the life
- * of its connection and asks it on every request.
- */
-export interface ConnectorCredentialHandle {
-    /** The connector instance this handle borrows from. */
-    readonly connector: string;
-    /**
-     * The credential to send now. Throws a refusal carrying `code` and
-     * `status` when none can be answered (the credential is not set, the
-     * store cannot be read, the instance was disabled): `503
-     * SERVICE_UNAVAILABLE`, since each clears without a change to the
-     * datasource.
-     */
-    get(request?: ConnectorCredentialRequest): Promise<BorrowedConnectorCredential>;
-    /**
-     * A credential obtained again, for the request that was refused with the
-     * one {@link get} answered (a `401`) or that would send an expired one.
-     * Concurrent calls on one handle share one refresh, so a rotating grant is
-     * never spent twice. Throws as {@link get} does.
-     */
-    refresh(request?: ConnectorCredentialRequest): Promise<BorrowedConnectorCredential>;
-}
 
 /** The provider side: answers a handle for a declared connector instance. */
 export interface IConnectorCredentialSource {

@@ -716,7 +716,7 @@ const ENGINE_FIND_OPTION_KEYS: ReadonlySet<string> = new Set([
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
-  'context', 'where', 'multi', 'returning', 'onFieldsDropped', 'onValidationAdvisory', 'strictReadonlyWrites',
+  'context', 'where', 'multi', 'returning', 'onFieldsDropped', 'onValidationAdvisory', 'onMentionsWithheld', 'strictReadonlyWrites',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([

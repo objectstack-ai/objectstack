@@ -19,6 +19,8 @@
  *      object/array shapes to bare STRINGS, which is why simply pointing the
  *      dashboard rule at reports would find nothing: its `Array.isArray(yAxis)`
  *      guard skips a string silently. `series[].name` keeps the array shape.
+ *      `seriesBy`, the optional split dimension, is a string dimension ref
+ *      like `xAxis` and is resolved the same way.
  *      A `joined` report draws no chart (#20161): its container `chart` is
  *      refused by `ReportSchema` and a block has no `chart` key, so neither is
  *      a binding this rule checks. Checking one would tell the author their
@@ -269,6 +271,8 @@ interface ChartBinding {
   values?: { names: string[]; path: string };
   /** Single dimension ref (report `xAxis`). */
   xAxis?: { name: string; path: string };
+  /** Single dimension ref (report `seriesBy`, the split dimension). */
+  seriesBy?: { name: string; path: string };
   /** Single measure ref (report `yAxis`). */
   yAxis?: { name: string; path: string };
   /**
@@ -501,6 +505,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       }
     }
     if (binding.xAxis) dimensionRef(binding.xAxis.name, binding.xAxis.path);
+    if (binding.seriesBy) dimensionRef(binding.seriesBy.name, binding.seriesBy.path);
     // No selection is passed at this position: the report `yAxis` IS the query
     // the chart issues, so it cannot name a measure that query does not ask
     // for (#15734). The `chart-measure-unknown` half still runs — an undeclared
@@ -576,15 +581,22 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       if (!isRec(chart)) return;
       const xAxisName = strName(chart.xAxis);
       const yAxisName = strName(chart.yAxis);
+      const seriesByName = strName(chart.seriesBy);
       checkAgainst(ds, dsName, {
         xAxis: xAxisName ? { name: xAxisName, path: `${path}.chart.xAxis` } : undefined,
         yAxis: yAxisName ? { name: yAxisName, path: `${path}.chart.yAxis` } : undefined,
+        // The split dimension is a dimension ref exactly like `xAxis`: the
+        // chart's query groups by it, so an undeclared name is no column.
+        seriesBy: seriesByName ? { name: seriesByName, path: `${path}.chart.seriesBy` } : undefined,
         // The chart's own selection: the ONE measure it queries and derives a
         // series from. Empty when no `yAxis` is authored — the chart plots
         // nothing at all then, which the shape rules own, so no override can
         // be reported as landing on nothing.
         ownSelection: yAxisName ? [yAxisName] : [],
-        series: recordsOf(chart.series)
+        // With `seriesBy` set the chart derives one series per VALUE of that
+        // dimension, so a `series[].name` override names a value — data no
+        // static check can see — and is not judged against any measure set.
+        series: seriesByName ? [] : recordsOf(chart.series)
           .map((s, si) => ({
             name: strName(s.name),
             path: `${path}.chart.series[${si}].name`,

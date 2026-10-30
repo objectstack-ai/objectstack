@@ -490,6 +490,14 @@ export interface CreateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
 }
 
 /**
@@ -544,6 +552,14 @@ export interface UpdateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
 }
 
 /**
@@ -5951,7 +5967,9 @@ export class ObjectStackClient {
        * intact keep their own codes and stay retryable — `INVALID_SIGNAL` /
        * `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409),
        * `RESUME_CHILD_PENDING` (409: the run waits on a `map` item run that is
-       * still suspended; the message names that run, resume it instead),
+       * still suspended; the message names that run, resume it instead — or
+       * whose suspension is gone without a `cancelled` history entry; the
+       * message names the remedy, cancelling the parent run),
        * `STORE_UNAVAILABLE` (503).
        */
       resume: async <T extends AutomationResult = AutomationResult>(

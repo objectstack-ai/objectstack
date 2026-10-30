@@ -191,7 +191,7 @@ export type HookUpdateDoc = HookDoc;
  *
  * `EngineUpdateOptions` minus the injected `context` and the `upsert`
  * tombstone, plus {@link WriteObservabilityOptions} (`onFieldsDropped`,
- * `onValidationAdvisory`, `strictReadonlyWrites` — contract-declared,
+ * `onValidationAdvisory`, `onMentionsWithheld`, `strictReadonlyWrites` — contract-declared,
  * deliberately outside the serializable schema) and the driver pass-through
  * keys.
  *
