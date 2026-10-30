@@ -20,8 +20,11 @@
  *  - on create, the bound managed object's table exists and the object reads;
  *  - on the restart's rehydration, a table that is missing (the state an
  *    install created before this fix is in) is created, and the object reads;
+ *  - [#27750] on an update that rebuilds the pool (a changed `config`), the
+ *    table exists on the NEW database, and the object reads;
  *  - ⛔ an `external` or `validate-only` datasource gets no schema sync at all:
- *    its pool opens, and nothing is synced for the objects bound to it.
+ *    its pool opens (or is rebuilt), and nothing is synced for the objects
+ *    bound to it.
  *
  * The composition is the real one: the real `DatasourceAdminServicePlugin`
  * through `init()` and `start()`, a real `ObjectQL` engine on the `'objectql'`
@@ -171,6 +174,41 @@ describe('a code object bound to a runtime managed datasource gets its table', (
 
     expect(synced.mock.calls.map(([name]) => name)).toEqual(['wh_note']);
   });
+});
+
+describe('[#27750] an update that rebuilds the pool gives the bound managed object its table', () => {
+  it('a changed config: the table exists on the NEW database, and the object reads', async () => {
+    const dir = scratch();
+    const { admin, knexOf, read } = await boot({ objects: [boundTo('wh_note', 'warehouse')] });
+    await admin.createDatasource({ name: 'warehouse', driver: 'sqlite', config: { filename: join(dir, 'a.db') } });
+
+    const updated = await admin.updateDatasource('warehouse', { config: { filename: join(dir, 'b.db') } });
+
+    expect(updated.status).toBe('ok');
+    expect(await knexOf('warehouse').schema.hasTable('wh_note')).toBe(true);
+    await expect(read('wh_note')).resolves.toEqual([]);
+  });
+
+  it.each(['external', 'validate-only'] as const)(
+    '⛔ schemaMode %s: the rebuilt pool opens, and no object bound to it is synced',
+    async (schemaMode) => {
+      const dir = scratch();
+      const { admin, synced, knexOf } = await boot({ objects: [boundTo('lake_note', 'lake')] });
+      await admin.createDatasource({
+        name: 'lake',
+        driver: 'sqlite',
+        schemaMode,
+        external: { validation: { onMismatch: 'warn' } },
+        config: { filename: join(dir, 'a.db') },
+      } as never);
+
+      const updated = await admin.updateDatasource('lake', { config: { filename: join(dir, 'b.db') } });
+
+      expect(updated.status).toBe('ok');
+      expect(synced).not.toHaveBeenCalled();
+      expect(await knexOf('lake').schema.hasTable('lake_note')).toBe(false);
+    },
+  );
 });
 
 describe('⛔ an external or federated datasource never gets DDL', () => {
