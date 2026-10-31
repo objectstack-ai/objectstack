@@ -191,8 +191,8 @@ describe('[#5791] every ledgered `responseSchema` names a real spec schema', () 
  * ledger only, names the spec export declaring the BODY a route reads. Same
  * resolver, same reason — a name is data, and a typo or a retired schema must
  * fail here rather than rot. That a filled row has conformance coverage is
- * pinned beside the coverage itself
- * (`packages/runtime/src/domains/packages-publish-drafts-request-conformance.test.ts`).
+ * pinned beside the coverage itself (`packages-publish-drafts-request-conformance.test.ts`
+ * in `packages/runtime`).
  */
 describe('every ledgered `requestSchema` names a real spec schema', () => {
   const requestRows = () =>

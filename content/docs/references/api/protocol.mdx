@@ -2568,7 +2568,7 @@ The authoring surface of a metadata write. Closed: `copilot` is an AI assistant'
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **message** | `string` | optional | The author's change note (ADR-0146 D1). The package commit records it, and so does every item history row this publish writes, as `change_note` (read back as each history event's `message`). Absent or empty, those rows record the sentence naming the package instead. |
-| **backfill** | `{ object: string; field: string }[]` | optional | Opt-in (#24253): fields this publish adds whose literal `defaultValue` is written into the object's existing rows once the drafts are live, as the signed-in caller. Absent or `[]`, no row is touched. Each entry names an object and a field and nothing else, and names it once. The whole request is refused `400 VALIDATION_ERROR` before anything is published when an entry is malformed, repeated, or names a field that is not new in this publish or declares no literal default; `backfillApplied` in the response reports the rows written per field. |
+| **backfill** | `{ object: string; field: string }[]` | optional | Opt-in: fields this publish adds whose literal `defaultValue` is written into the object's existing rows once the drafts are live, as the signed-in caller. Absent or `[]`, no row is touched. Each entry names an object and a field and nothing else, and names it once. The whole request is refused `400 VALIDATION_ERROR` before anything is published when an entry is malformed, repeated, or names a field that is not new in this publish or declares no literal default; `backfillApplied` in the response reports the rows written per field. |
 
 ### Nested Shape: `PublishPackageDraftsRequest.backfill[number]`
 

@@ -1496,7 +1496,7 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
     object: z.string().min(1).describe('Name of the object whose existing rows are written.'),
     field: z.string().min(1).describe('Name of the field this publish adds to that object.'),
   }).strict()).optional().describe(
-    'Opt-in (#24253): fields this publish adds whose literal `defaultValue` '
+    'Opt-in: fields this publish adds whose literal `defaultValue` '
     + 'is written into the object\'s existing rows once the drafts are live, as '
     + 'the signed-in caller. Absent or `[]`, no row is touched. Each entry '
     + 'names an object and a field and nothing else, and names it once. The '
