@@ -202,6 +202,9 @@ const CASES: Array<{ path: string; removes: string[] }> = [
     // the ruling it gated the four reads alone and the rest answered to
     // `api.enableMetadata`.
     //
+    // [#27627] Thirteen: the app metadata bundle registers through the per-item
+    // registrar too, since every member is the item read's own answer.
+    //
     // ⚠️ `GET {prefix}/object/:name/state/:field` is deliberately NOT here.
     // It is the object FSM read, addressed by object name rather than by
     // `:type/:name`, and no per-family switch gates it — see the
@@ -217,6 +220,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/:type/:name/layers`,
             `GET ${META}/:type/:name/published`,
             `GET ${META}/:type/:name/references`,
+            `GET ${META}/app/:appId/bundle`,
             `GET ${META}/book/:name/tree`,
             `POST ${META}/:type/:name/publish`,
             `POST ${META}/:type/:name/rollback`,
@@ -254,6 +258,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/:type/:name/published`,
             `GET ${META}/:type/:name/references`,
             `GET ${META}/_drafts`,
+            `GET ${META}/app/:appId/bundle`,
             `GET ${META}/book/:name/tree`,
             `GET ${META}/diagnostics`,
             `GET ${META}/object/:name/state/:field`,
