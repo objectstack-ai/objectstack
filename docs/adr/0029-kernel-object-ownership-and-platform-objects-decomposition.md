@@ -540,7 +540,8 @@ Binding consequences:
   were considered and **rejected**. Dropping scalars from the fold entirely
   (#8284's arm B) remains rejected and is not this clause.
 
-> **Note (2026-10-30, #27949; ruling of record 6524229156, letter C′): "validations
+> **Note (2026-10-30, #27949; ruling of record 6524229156, letter C′; where the
+> refusal sits: ruling of record 6545641964, letter B, 2026-10-31): "validations
 > stay additive" means rules of DIFFERENT names add. A same-named rule merges by
 > name, with the condition owned by the package.**
 >
@@ -560,13 +561,14 @@ Binding consequences:
 >   sentence and switch, so a later package fix to the rule reaches the tenant.
 >   This is the opposite of whole-rule replacement, which would freeze the
 >   enforced rule against package fixes.
-> - **A changed condition or type is refused, loudly, with the prescription "to
->   change the condition, add a rule under a new name, or change it in the
->   package"** — never two rules running beside each other, never a silent
->   replacement. A copy stored before the condition changed (a package upgrade)
->   is indistinguishable from one the tenant changed, so the fold never runs a
->   copy's condition and names each such copy once, at `error`, with that
->   prescription; it never drops the tenant's layer for it.
+> - **A changed condition or type is refused, loudly, at the save door, with the
+>   prescription "to change the condition, add a rule under a new name, or change
+>   it in the package"** — never two rules running beside each other, never a
+>   silent replacement. The overlay LOAD path never refuses: a copy stored before
+>   the condition changed (a package upgrade) is indistinguishable from one the
+>   tenant changed, so the fold never runs a copy's condition and names each such
+>   copy once, at `error`, with that prescription; it never drops the tenant's
+>   layer for it, so an upgrade never fails on stored data.
 > - **Different names stay additive**, as this clause has always protected: an
 >   extender's or a tenant's rule of a new name is added. A rule the overlay
 >   leaves out stays out, as D9.2's replace means. Between two code layers a
