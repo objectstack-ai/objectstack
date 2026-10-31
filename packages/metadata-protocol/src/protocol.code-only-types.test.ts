@@ -536,9 +536,11 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
 
                 expect(err?.status).toBe(403);
                 expect(metaRows(rows)).toEqual([]);
-                // Stronger than "no row landed": no write was even attempted,
-                // so there is nothing for a raw-engine path to have done.
-                expect(writes).toEqual([]);
+                // Stronger than "no row landed": no metadata write was even
+                // attempted, so there is nothing for a raw-engine path to have
+                // done. [#28355] The one engine call the refusal makes is its
+                // own `denied` row in the audit trail, and nothing else.
+                expect(writes).toEqual([{ op: 'insert', table: 'sys_metadata_audit' }]);
             });
         }
 

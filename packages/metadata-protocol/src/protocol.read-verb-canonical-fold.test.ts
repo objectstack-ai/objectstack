@@ -224,7 +224,9 @@ describe('#9157 — the population, re-derived from the code rather than from th
         // A class method at one indent level taking a `request` parameter. The
         // negative lookahead is load-bearing: without it `if (…)` / `for (…)`
         // blocks match the same shape and the population fills with keywords.
-        const METHOD = /^ {4}(?:async )?(?!if\b|for\b|while\b|switch\b|catch\b|do\b|return\b)([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*request\??\s*:/;
+        // [#28355] `protected` admits the four single-item doors' bodies: each public door
+        // (`saveMetaItem` …) wraps its `…Unaudited` body, which is where the fold is.
+        const METHOD = /^ {4}(?:protected )?(?:async )?(?!if\b|for\b|while\b|switch\b|catch\b|do\b|return\b)([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*request\??\s*:/;
         const starts: Array<{ name: string; line: number }> = [];
         for (let i = 0; i < lines.length; i++) {
             const m = METHOD.exec(lines[i]!);
@@ -269,7 +271,7 @@ describe('#9157 — the population, re-derived from the code rather than from th
         // assertion above forever.
         expect(folded.sort()).toEqual([
             'auditMetaItem',
-            'deleteMetaItem',
+            'deleteMetaItemUnaudited',
             'diffMetaItem',
             'findReferencesToMeta',
             'getMetaItem',
@@ -289,9 +291,9 @@ describe('#9157 — the population, re-derived from the code rather than from th
             // [#20679] The locked-base verdict a second write door asks — it
             // takes the type a caller names, so it folds at the producer too.
             'packagedBaseRefusal',
-            'publishMetaItem',
-            'rollbackMetaItem',
-            'saveMetaItem',
+            'publishMetaItemUnaudited',
+            'rollbackMetaItemUnaudited',
+            'saveMetaItemUnaudited',
             'tenantAuthoredWriteRefusal',
         ]);
     });

@@ -31,9 +31,9 @@
  *    argument in the object file).
  *  - It does not re-stamp `item_locked` or `metadata_conflict`: their gates
  *    already write their own row, and neither code is in the map.
- *  - It writes one row per refusal even when one door reaches another (a
- *    draft discard is a delete): the first seam to record a refusal marks it,
- *    and every outer seam it passes through after that leaves it alone.
+ *  - It writes one row per refusal even when one door hands it back through
+ *    another: the first seam to record a refusal marks it, and every outer
+ *    seam it passes through after that leaves it alone.
  *  - The batch publish keeps its own `batch_aborted` row with the causal code
  *    in `note`; it is not one of these doors.
  *
