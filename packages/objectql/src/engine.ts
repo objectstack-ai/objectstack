@@ -158,6 +158,8 @@ import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Ver
 import { announceOpenMigrationGates, isOrganizationOwnershipCertified, isValueShapesMigrationVerified, noteAdmittedValueShapeViolation, readFileReferencesFlagRow, readMigrationFlagVerified, supplyTenantKeyCertifiedResolver, wasDatastoreCreatedFromEmpty } from './engine-migration-flags.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+// [#27884] The stored-row read gate, registered on the family's tables below.
+import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // Imported from spec directly rather than through `@objectstack/core`'s
 // re-export block: that block is labelled backward-compatibility, and this
@@ -5124,6 +5126,14 @@ export class ObjectQL implements IObjectQLEngine {
     }
     if (process?.env?.OBJECTQL_WARN_LEGACY_HANDLER === '1') {
       (this as any)._warnLegacyHandler = true;
+    }
+    // [#27884] The stored-row read gate: a caller-context read of a
+    // stored-metadata table serves a capability-gated type's documents only to
+    // holders of that capability — the row the `/meta` type gate reads. In the
+    // constructor, so no engine serves those tables without it. See
+    // `stored-metadata-type-read-gate.ts`.
+    for (const object of STORED_METADATA_TYPE_READ_GATE_OBJECTS) {
+      this.registerMiddleware(storedMetadataTypeReadGate, { object });
     }
     this.logger.info('ObjectQL Engine Instance Created');
   }

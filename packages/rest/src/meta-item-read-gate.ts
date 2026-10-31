@@ -77,6 +77,9 @@ import {
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
     type ObjectSchemaMaskPosture,
+    // [#27884] The type-level read row, shared with the engine's stored-row
+    // read gate — see `META_TYPE_READ_CAPABILITIES` below.
+    STORED_METADATA_TYPE_READ_CAPABILITIES,
 } from '@objectstack/metadata-core';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 // [#22614] The registry's one spelling of a container's binding, through its
@@ -2070,11 +2073,15 @@ export function isPublicAudienceRead(
  * (every route `registerMetadataEndpoints` mounts) and the runtime
  * dispatcher's `handleMetadataRequest`. ⛔ A row added here reaches both; a
  * check added in one transport alone is the split this module exists to close.
+ *
+ * [#27884] The table itself is `STORED_METADATA_TYPE_READ_CAPABILITIES`
+ * (`@objectstack/metadata-core`), and this name is that same frozen object. The
+ * engine's stored-row read gate (`@objectstack/objectql`) narrows every
+ * caller-context read of `sys_metadata` / `sys_metadata_history` by the same
+ * row, so the generic data door cannot serve a document of a listed type to a
+ * caller this gate refuses. A row is added THERE, and reaches both exits.
  */
-export const META_TYPE_READ_CAPABILITIES: Readonly<Record<string, string>> = Object.freeze({
-    datasource: 'manage_platform_settings',
-    external_catalog: 'manage_platform_settings',
-});
+export const META_TYPE_READ_CAPABILITIES: Readonly<Record<string, string>> = STORED_METADATA_TYPE_READ_CAPABILITIES;
 
 /**
  * [#21087] Why a `/meta` read of a {@link META_TYPE_READ_CAPABILITIES} type is
