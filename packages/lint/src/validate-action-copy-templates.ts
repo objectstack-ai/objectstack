@@ -8,13 +8,16 @@
  *
  *  - a registered action (`stack.actions[]`, and an object's own `actions[]`):
  *    `confirmText` and `successMessage`, each a bare string, the parsed
- *    envelope, or an inline locale map whose every value is such a sentence;
+ *    envelope, or an inline locale map whose every value is such a sentence —
+ *    and, since #27948 (ruling A, step 2), `description`, each
+ *    `outcomeMessages` entry (both with the locale map) and each
+ *    `params[].helpText` (without it);
  *  - a page action row — `action:button` / `action:icon` `properties`, and
  *    each `properties.actions[]` member of an `action:group` / `action:menu` —
  *    all three keys;
  *  - a page component's inline `properties.action` (`InlineActionSchema`, the
- *    pick of `ActionSchema` an `element:button` carries): `confirmText` and
- *    `successMessage`.
+ *    pick of `ActionSchema` an `element:button` carries): `confirmText`,
+ *    `successMessage` and each `params[].helpText`.
  *
  * The same two steps the bulk `confirmText` pass takes, through the same
  * judge: `closedScopeTemplateRefusal` names a `${…}` or single-brace token
@@ -23,7 +26,9 @@
  * `template` it is (`validateExpression('template', …)`), which names a hole
  * holding logic or an unknown formatter. A blank sentence is named too. Each
  * key's roots are the spec's, measured at the console's runner:
- * `actionConfirmTemplateRoots(action)`, `ACTION_SUCCESS_TEMPLATE_ROOTS`,
+ * `actionConfirmTemplateRoots(action)` (also for `description` and
+ * `helpText`, the param dialog's copy), `ACTION_SUCCESS_TEMPLATE_ROOTS` (also
+ * for an `outcomeMessages` entry, the success toast of one outcome),
  * `ACTION_ERROR_TEMPLATE_ROOTS` (none — the runner shows an `errorMessage` as
  * written).
  *
@@ -49,13 +54,35 @@ import { walkPageComponents } from './page-walk.js';
 
 type AnyRec = Record<string, unknown>;
 
-type CopyKey = 'confirmText' | 'successMessage' | 'errorMessage';
+type CopyKey = 'confirmText' | 'successMessage' | 'errorMessage' | 'description' | 'helpText' | 'outcomeMessages';
 
 /** The keys a registered or inline action carries as `template` slots (`ActionSchema`'s `errorMessage` is not one). */
 const ACTION_KEYS: readonly CopyKey[] = ['confirmText', 'successMessage'];
 
+/**
+ * [#27948] The keys only a REGISTERED action carries as `template` slots, past
+ * {@link ACTION_KEYS}: the param dialog's `description`, each
+ * `outcomeMessages` entry, each `params[].helpText`. An inline action's pick
+ * has `params` but neither of the other two, so it is judged on `helpText`
+ * alone ({@link INLINE_KEYS}).
+ */
+const REGISTERED_KEYS: readonly CopyKey[] = [...ACTION_KEYS, 'description', 'outcomeMessages', 'helpText'];
+
+/** The keys an inline `properties.action` carries as `template` slots. */
+const INLINE_KEYS: readonly CopyKey[] = [...ACTION_KEYS, 'helpText'];
+
 /** The keys a page action row carries as `template` slots. */
 const ROW_KEYS: readonly CopyKey[] = ['confirmText', 'successMessage', 'errorMessage'];
+
+/** How a finding names the slot. */
+const SLOT_NAME: Record<CopyKey, string> = {
+  confirmText: "An action's `confirmText`",
+  successMessage: "An action's `successMessage`",
+  errorMessage: "An action's `errorMessage`",
+  description: "An action's `description`",
+  helpText: "An action param's `helpText`",
+  outcomeMessages: "An action's `outcomeMessages` entry",
+};
 
 /** The page components whose own `properties` are an action row. */
 const ROW_COMPONENTS: ReadonlySet<string> = new Set(['action:button', 'action:icon']);
@@ -73,12 +100,44 @@ const BLANK_COST: Record<CopyKey, string> = {
   successMessage: 'so the success toast shows the runner\'s default text: write the sentence, or remove the key.',
   errorMessage: 'so the failure toast shows the raw error (or an empty toast, for a whitespace sentence): write the '
     + 'sentence, or remove the key.',
+  description: 'so the param dialog shows no line under its title: write the sentence, or remove the key.',
+  helpText: 'so the input shows no hint: write the hint, or remove the key.',
+  outcomeMessages: 'so that outcome\'s toast falls back to `successMessage` (or the runner\'s default text): write the '
+    + 'sentence, or remove the entry.',
 };
 
 /** The roots one key's holes may name, for the action that carries it. */
 function rootsOf(key: CopyKey, action: AnyRec): readonly string[] {
-  if (key === 'confirmText') return actionConfirmTemplateRoots(action);
-  return key === 'successMessage' ? ACTION_SUCCESS_TEMPLATE_ROOTS : ACTION_ERROR_TEMPLATE_ROOTS;
+  switch (key) {
+    case 'confirmText':
+    case 'description':
+    case 'helpText':
+      return actionConfirmTemplateRoots(action);
+    case 'successMessage':
+    case 'outcomeMessages':
+      return ACTION_SUCCESS_TEMPLATE_ROOTS;
+    default:
+      return ACTION_ERROR_TEMPLATE_ROOTS;
+  }
+}
+
+/**
+ * The copy values one key carries on `action`, each with the path it is named
+ * at: the key itself, or — for the two keys that are maps of slots — each
+ * `outcomeMessages.<outcome>` entry and each `params[<i>].helpText`.
+ */
+function valuesOf(action: AnyRec, key: CopyKey): Array<{ path: string; value: unknown }> {
+  if (key === 'outcomeMessages') {
+    const messages = action.outcomeMessages;
+    if (!isRec(messages)) return [];
+    return Object.entries(messages).map(([outcome, value]) => ({ path: `outcomeMessages.${outcome}`, value }));
+  }
+  if (key === 'helpText') {
+    if (!Array.isArray(action.params)) return [];
+    return action.params.flatMap((param: unknown, i: number) =>
+      isRec(param) && param.helpText !== undefined ? [{ path: `params[${i}].helpText`, value: param.helpText }] : []);
+  }
+  return [{ path: key, value: action[key] }];
 }
 
 function isRec(v: unknown): v is AnyRec {
@@ -111,22 +170,27 @@ function judgeAction(
   localeMap: boolean,
 ): void {
   for (const key of keys) {
-    for (const { at, text } of sentencesOf(action[key], localeMap)) {
-      const located = `${where} ${key}${at}`;
-      const slot = `An action's \`${key}\``;
-      const refuse = (message: string, quoted: string): void => {
-        issues.push({ where: located, message, source: quoted, severity: 'error' });
-      };
-      if (BLANK_TEXT.test(text)) {
-        refuse(`${slot} is blank, ${BLANK_COST[key]}`, text);
-        continue;
+    // A param's `helpText` was a plain string, never a locale map (#27948).
+    const takesMap = localeMap && key !== 'helpText';
+    const slot = SLOT_NAME[key];
+    const roots = rootsOf(key, action);
+    for (const { path, value } of valuesOf(action, key)) {
+      for (const { at, text } of sentencesOf(value, takesMap)) {
+        const located = `${where} ${path}${at}`;
+        const refuse = (message: string, quoted: string): void => {
+          issues.push({ where: located, message, source: quoted, severity: 'error' });
+        };
+        if (BLANK_TEXT.test(text)) {
+          refuse(`${slot} is blank, ${BLANK_COST[key]}`, text);
+          continue;
+        }
+        const refusal = closedScopeTemplateRefusal(text, { slot, roots });
+        if (refusal !== undefined) {
+          refuse(refusal, text);
+          continue;
+        }
+        for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
       }
-      const refusal = closedScopeTemplateRefusal(text, { slot, roots: rootsOf(key, action) });
-      if (refusal !== undefined) {
-        refuse(refusal, text);
-        continue;
-      }
-      for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
     }
   }
 }
@@ -156,7 +220,7 @@ export function actionCopyTemplateIssues(stack: AnyRec, scope: ActionCopyTemplat
     const key = `${bound}:${name}`;
     if (seen.has(key)) return;
     seen.add(key);
-    judgeAction(issues, action, `${owner} · action '${name}'`, ACTION_KEYS, true);
+    judgeAction(issues, action, `${owner} · action '${name}'`, REGISTERED_KEYS, true);
   };
   if (scope.actions) {
     for (const action of recordsOf(stack.actions)) registered('stack', action);
@@ -182,7 +246,7 @@ export function actionCopyTemplateIssues(stack: AnyRec, scope: ActionCopyTemplat
             if (isRec(member)) judgeAction(issues, member, `${path} (${type}) · actions[${mi}]`, ROW_KEYS, false);
           });
         }
-        if (isRec(props.action)) judgeAction(issues, props.action, `${path} (${type}) · action`, ACTION_KEYS, true);
+        if (isRec(props.action)) judgeAction(issues, props.action, `${path} (${type}) · action`, INLINE_KEYS, true);
       }
     }
   }

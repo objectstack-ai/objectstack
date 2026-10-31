@@ -141,8 +141,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitación enviada a ${result.email}",
-          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          sent: "Invitación enviada a {{ result.email }}",
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
         },
         params: {
           role: {
@@ -581,8 +581,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitación enviada a ${result.email}",
-          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          sent: "Invitación enviada a {{ result.email }}",
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
         },
         params: {
           role: {
@@ -673,8 +673,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitación enviada a ${result.email}",
-          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          sent: "Invitación enviada a {{ result.email }}",
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
         },
         params: {
           role: {
@@ -700,10 +700,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       update_member_role: {
         label: "Cambiar rol",
-        description: "Elija el nuevo rol en la organización para ${record.user_id?.name ?? 'este miembro'}.",
+        description: "Elija el nuevo rol en la organización para {{ record.user_id.name | default:'este miembro' }}.",
         successMessage: "Rol del miembro actualizado",
         outcomeMessages: {
-          permission_set_granted: "Rol del miembro actualizado. El nuevo rol también concedió el conjunto de permisos ${result.grantedPermissionSet.label}."
+          permission_set_granted: "Rol del miembro actualizado. El nuevo rol también concedió el conjunto de permisos {{ result.grantedPermissionSet.label }}."
         },
         params: {
           role: {
@@ -721,7 +721,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "¿Hacer propietario de esta organización al miembro seleccionado? Obtendrá todos los privilegios de propietario, incluido eliminar la organización. Tú sigues siendo propietario; para dejar de serlo, usa «Cambiar rol» en tu propia membresía.",
         successMessage: "El miembro ahora es propietario",
         outcomeMessages: {
-          permission_set_granted: "El miembro ahora es propietario. El nuevo rol también concedió el conjunto de permisos ${result.grantedPermissionSet.label}."
+          permission_set_granted: "El miembro ahora es propietario. El nuevo rol también concedió el conjunto de permisos {{ result.grantedPermissionSet.label }}."
         }
       }
     }
@@ -825,8 +825,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
         successMessage: "Invitación enviada a {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitación enviada a ${result.email}",
-          link_only: "Invitación creada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          sent: "Invitación enviada a {{ result.email }}",
+          link_only: "Invitación creada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
         },
         params: {
           role: {
@@ -848,11 +848,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Reenviar invitación",
-        description: "¿Reenviar la invitación a ${record.email}? Su plazo de vencimiento vuelve a empezar.",
+        description: "¿Reenviar la invitación a {{ record.email }}? Su plazo de vencimiento vuelve a empezar.",
         successMessage: "Invitación reenviada",
         outcomeMessages: {
-          sent: "Invitación reenviada a ${result.email}",
-          link_only: "Invitación renovada para ${result.email}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
+          sent: "Invitación reenviada a {{ result.email }}",
+          link_only: "Invitación renovada para {{ result.email }}. El correo no está configurado en este servidor, así que no ha salido ningún mensaje. Usa Copiar enlace de invitación en la invitación para compartirla."
         }
       },
       copy_invitation_link: {

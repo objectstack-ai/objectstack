@@ -58,12 +58,19 @@ function located(result: { success: boolean; error?: { issues: Array<{ code: str
 }
 
 describe('ActionSchema.outcomeMessages — accepted on the two types with a success payload', () => {
-  it('accepts the map on a type:script action and carries it through parse untouched', () => {
+  it('accepts the map on a type:script action and carries every sentence through parse as written', () => {
     const r = ActionSchema.safeParse(DELETE_ENVIRONMENT);
     expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
-    // Byte-for-byte: the spec interpolates nothing — the `${result.*}` tokens
-    // are the renderer's, and an inline locale map stays a map.
-    expect((r.data as { outcomeMessages: unknown }).outcomeMessages).toEqual(DELETE_ENVIRONMENT.outcomeMessages);
+    // Each entry is a `template` slot (#27948): a bare string parses to the
+    // `{ dialect: 'template', source }` envelope with its text as written —
+    // the spec interpolates nothing, the tokens are the renderer's — and an
+    // inline locale map stays a map. (The `${…}` tokens still PARSE; the
+    // doors refuse them, `action-copy-template` pins that.)
+    const asWritten = Object.fromEntries(Object.entries(DELETE_ENVIRONMENT.outcomeMessages).map(([outcome, copy]) => [
+      outcome,
+      typeof copy === 'string' ? { dialect: 'template', source: copy } : copy,
+    ]));
+    expect((r.data as { outcomeMessages: unknown }).outcomeMessages).toEqual(asWritten);
   });
 
   it('accepts the map on a type:api action', () => {

@@ -1825,7 +1825,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       outcomeMessages: {
         label: "Outcome Messages",
-        helpText: "Success message per handler outcome, as JSON: each key is a snake_case `outcome` value the handler returns in its success payload, and each value is the label shown for that outcome, e.g. {\"archived\": \"Archived\", \"already_archived\": \"Already archived\"}. A label may interpolate ${result.*}. An outcome with no entry shows the success message; a key the handler never returns is never shown. Not allowed beside a result dialog or `operation: 'update'`."
+        helpText: "Success message per handler outcome, as JSON: each key is a snake_case `outcome` value the handler returns in its success payload, and each value is the label shown for that outcome, e.g. {\"archived\": \"Archived\", \"already_archived\": \"Already archived\"}. A label may hold {{ result.* }} holes. An outcome with no entry shows the success message; a key the handler never returns is never shown. Not allowed beside a result dialog or `operation: 'update'`."
       },
       onSuccess: {
         label: "On Success",

@@ -386,7 +386,8 @@ strict params gate admits either bag without a word.
   `'Invitation sent to {{ result.email }}'`; a `${…}` token in it is refused. A
   `type: 'api'` or `'script'` action whose handler can succeed in more than one
   way adds `outcomeMessages`, one entry per snake_case `outcome` the handler
-  returns, each of which may read `${result.*}`; the toast shows the entry the
+  returns, each a template like `successMessage` (`{{ result.* }}`,
+  `{{ record.* }}`; a `${…}` token is refused); the toast shows the entry the
   answer names, else `successMessage`, else a generic "Action completed
   successfully". A `message` in the server's answer is shown only when the copy
   asks for it (`{{ result.message }}`). Post-success navigation is
