@@ -11,7 +11,7 @@ import { strictObject } from '../shared/strict-object';
  * package that bears a base item's name and carries
  *
  * ```ts
- * overrides: { package: '<base package id>', basedOn: '<the base item's version>' }
+ * overrides: { package: '<base package id>', basedOn: '<the base package's manifest.version>' }
  * ```
  *
  * replaces the base's item WHOLE for every read that serves the base's name
@@ -93,7 +93,8 @@ export const OverrideDeclarationSchema = strictObject({
   basedOn: z.string()
     .min(1)
     .describe(
-      'Recorded, never judged: the version of the base item this override was taken from (e.g. "3.2.0"). '
+      'Recorded, never judged: the base package\'s `manifest.version` this override was taken from (e.g. "3.2.0"), '
+      + 'not a history version of the item. '
       + 'No door compares it with the installed base, no upgrade diff is produced from it, and nothing is '
       + 'refused on it; it tells a person re-basing the override where it started (ADR-0146 D2).',
     ),

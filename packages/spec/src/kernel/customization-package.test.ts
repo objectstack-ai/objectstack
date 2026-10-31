@@ -22,7 +22,7 @@ import {
 } from './customization-package';
 import { CUSTOMIZATION_PACKAGE_SUFFIX } from './override-declaration.zod';
 import { ManifestSchema, MANIFEST_ID_PATTERN } from './manifest.zod';
-import { DEFAULT_METADATA_TYPE_REGISTRY, type MetadataType } from './metadata-plugin.zod';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from './metadata-plugin.zod';
 import { deriveNamespaceFromPackageId } from './namespace-prefix';
 
 describe('the pair\'s package id', () => {
@@ -210,11 +210,15 @@ describe('the closed overridable-type list, pinned to the registry', () => {
     expect(conditioned).toEqual(['action', 'flow']);
   });
 
-  it('the types ADR-0146 does not decide are excluded (today\'s posture) and marked for the maintainer', () => {
-    const undecided = (Object.keys(OVERRIDE_TYPE_CLASSIFICATION) as MetadataType[])
-      .filter((t) => OVERRIDE_TYPE_CLASSIFICATION[t].basis === 'undecided').sort();
-    expect(undecided).toEqual(['datasource', 'seed', 'skill', 'tool']);
-    for (const type of undecided) expect(OVERRIDE_TYPE_CLASSIFICATION[type].disposition).toBe('excluded');
+  it('the four types ADR-0146 does not name are excluded on the basis the maintainer ruled (#28404)', () => {
+    expect(OVERRIDE_TYPE_CLASSIFICATION.seed).toEqual({ disposition: 'excluded', basis: 'adr_0126_one_shot' });
+    expect(OVERRIDE_TYPE_CLASSIFICATION.datasource).toEqual({ disposition: 'excluded', basis: 'setup_owned_connection' });
+    expect(OVERRIDE_TYPE_CLASSIFICATION.tool).toEqual({ disposition: 'excluded', basis: 'behavioural_switch_first' });
+    expect(OVERRIDE_TYPE_CLASSIFICATION.skill).toEqual({ disposition: 'excluded', basis: 'behavioural_switch_first' });
+    // No row is left undecided: a type added later is classified with a
+    // decided basis in the same change.
+    const bases = new Set(Object.values(OVERRIDE_TYPE_CLASSIFICATION).map((row) => row.basis as string));
+    expect(bases.has('undecided')).toBe(false);
   });
 
   it('isOverridableMetadataType answers false for a name that is no metadata type', () => {

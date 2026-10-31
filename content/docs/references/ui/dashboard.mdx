@@ -116,7 +116,7 @@ const result = DashboardSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
-| **basedOn** | `string` | ✅ | Recorded, never judged: the version of the base item this override was taken from (e.g. "3.2.0"). No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
 
 
 ---

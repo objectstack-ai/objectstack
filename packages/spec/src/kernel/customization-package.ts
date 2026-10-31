@@ -258,8 +258,22 @@ export type OverrideCondition =
  *   type as a standalone document;
  * - `not_runtime_creatable` — D2's first sentence fails: neither Studio nor the
  *   metadata API can author the type (`allowRuntimeCreate: false`);
- * - `undecided` — ADR-0146 does not decide the type; classified `excluded`
- *   (today's posture, a reversible default) until the maintainer rules.
+ * - `adr_0126_one_shot` — ADR-0126 §3 places the type outside as one-shot: it
+ *   is applied once at install or publish and holds nothing durable to
+ *   override; a customization adds its own item under a new name instead
+ *   (`seed`);
+ * - `setup_owned_connection` — ADR-0146 D1 gives the type to Setup, not to the
+ *   metadata a package carries, and ADR-0126 §3 makes it origin-gated: one
+ *   physical connection is environment configuration that must not travel in
+ *   an exported `.custom` package (`datasource`);
+ * - `behavioural_switch_first` — a behavioural type takes `action`'s path
+ *   (ADR-0146 D9): its ledger switch lands first and an override door opens
+ *   later, under D9-style conditions written for it then (`tool`, `skill`;
+ *   ADR-0126 §3 pre-charts both for disable + clone).
+ *
+ * The maintainer ruled the last three on #28404 (「同意」, 2026-10-31): no row
+ * is left undecided, and a type added later is classified with a decided basis
+ * in the same change.
  */
 export type OverrideClassificationBasis =
   | 'adr_0146_d2_listed'
@@ -268,7 +282,9 @@ export type OverrideClassificationBasis =
   | 'adr_0126_code_only'
   | 'not_package_shipped'
   | 'not_runtime_creatable'
-  | 'undecided';
+  | 'adr_0126_one_shot'
+  | 'setup_owned_connection'
+  | 'behavioural_switch_first';
 
 /** One type's override classification. */
 export interface OverrideTypeClassification {
@@ -282,7 +298,7 @@ const listed: OverrideTypeClassification = { disposition: 'overridable', basis: 
 const securityCatalog: OverrideTypeClassification = { disposition: 'excluded', basis: 'adr_0146_d6_security_catalog' };
 const codeOnly: OverrideTypeClassification = { disposition: 'excluded', basis: 'adr_0126_code_only' };
 const notRuntimeCreatable: OverrideTypeClassification = { disposition: 'excluded', basis: 'not_runtime_creatable' };
-const undecided: OverrideTypeClassification = { disposition: 'excluded', basis: 'undecided' };
+const behaviouralSwitchFirst: OverrideTypeClassification = { disposition: 'excluded', basis: 'behavioural_switch_first' };
 
 /**
  * The CLOSED override classification of every metadata type — the constant the
@@ -294,9 +310,9 @@ const undecided: OverrideTypeClassification = { disposition: 'excluded', basis: 
  * fails when a registry type is added without a row here, when a row names no
  * registry type, and when an `overridable` row is not runtime-creatable.
  *
- * Four runtime-creatable types ADR-0146 does not decide are `undecided`
- * (classified `excluded`, today's posture) and listed for the maintainer:
- * `seed`, `datasource`, `tool`, `skill`.
+ * Four runtime-creatable types ADR-0146 does not name (`seed`, `datasource`,
+ * `tool`, `skill`) are `excluded` with the basis the maintainer ruled on
+ * #28404 (「同意」, 2026-10-31).
  */
 export const OVERRIDE_TYPE_CLASSIFICATION = {
   // ── D2's list ──────────────────────────────────────────────────────
@@ -339,11 +355,11 @@ export const OVERRIDE_TYPE_CLASSIFICATION = {
   sharing_rule: notRuntimeCreatable,
   queue: notRuntimeCreatable,
   assignment_rule: notRuntimeCreatable,
-  // ── Not decided by ADR-0146 — listed for the maintainer ────────────
-  seed: undecided,
-  datasource: undecided,
-  tool: undecided,
-  skill: undecided,
+  // ── Not named by ADR-0146 — ruled by the maintainer on #28404 ──────
+  seed: { disposition: 'excluded', basis: 'adr_0126_one_shot' },
+  datasource: { disposition: 'excluded', basis: 'setup_owned_connection' },
+  tool: behaviouralSwitchFirst,
+  skill: behaviouralSwitchFirst,
 } as const satisfies Record<MetadataType, OverrideTypeClassification>;
 
 /** The metadata types a declared override applies to (`disposition: 'overridable'`). */
