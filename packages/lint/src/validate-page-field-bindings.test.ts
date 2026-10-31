@@ -631,7 +631,7 @@ describe('validatePageFieldBindings — binding precedence and traversal', () =>
           interfaceConfig: {
             source: 'crm_lead',
             filterBy: [
-              { any: [
+              { or: [
                 { field: 'status', operator: 'equals', value: 'open' },
                 { field: 'ghost_in_group', operator: 'equals', value: 'x' },
               ] },
@@ -641,7 +641,7 @@ describe('validatePageFieldBindings — binding precedence and traversal', () =>
         },
       ],
     });
-    expect(findings.map((f) => f.path)).toEqual(['pages[0].interfaceConfig.filterBy[0].any[1].field']);
+    expect(findings.map((f) => f.path)).toEqual(['pages[0].interfaceConfig.filterBy[0].or[1].field']);
   });
 });
 

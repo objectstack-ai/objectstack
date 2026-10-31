@@ -2,7 +2,7 @@
 
 /**
  * [#28020] Two readers of a stored view filter list, and the any-of group
- * element (`{ any: [rule, ...] }`) the list can now hold.
+ * element (`{ or: [rule, ...] }`) the list can now hold.
  *
  * - `computeViewReferenceDiagnostics` checks every field a list view's preset
  *   tabs filter by. A group names no field itself, so read as a rule it was
@@ -21,7 +21,7 @@ const objectDef = { fields: { status: { type: 'select' }, completed_at: { type: 
 
 describe('computeViewReferenceDiagnostics and an any-of group in a preset tab', () => {
   const view = (rules: unknown[]) => ({
-    userFilters: { tabs: [{ name: 'recent', filter: [{ any: rules }] }] },
+    userFilters: { tabs: [{ name: 'recent', filter: [{ or: rules }] }] },
   });
 
   it('a group of real fields is valid', () => {
@@ -38,7 +38,7 @@ describe('computeViewReferenceDiagnostics and an any-of group in a preset tab', 
     ]), objectDef);
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual([{
-      path: 'userFilters.tabs.0.filter.0.any.1.field',
+      path: 'userFilters.tabs.0.filter.0.or.1.field',
       message: 'Field "ghost" does not exist on the source object',
       code: 'reference_not_found',
     }]);
@@ -49,14 +49,14 @@ describe('graftNormalizedOperators reaches the rules inside a group', () => {
   it('folds an alias operator inside a group and changes nothing else', () => {
     const authored = {
       name: 'task.recent', object: 'task', viewKind: 'list', label: 'Recent', type: 'grid', columns: ['name'],
-      filter: [{ any: [{ field: 'amount', operator: 'gt', value: 1 }, { field: 'status', operator: 'equals', value: 'open' }] }],
+      filter: [{ or: [{ field: 'amount', operator: 'gt', value: 1 }, { field: 'status', operator: 'equals', value: 'open' }] }],
     };
     const parsed = ViewMetadataSchema.safeParse(authored);
     expect(parsed.success).toBe(true);
     const out = graftNormalizedOperators(authored, parsed.data) as typeof authored;
     expect(out.filter).toEqual([
-      { any: [{ field: 'amount', operator: 'greater_than', value: 1 }, { field: 'status', operator: 'equals', value: 'open' }] },
+      { or: [{ field: 'amount', operator: 'greater_than', value: 1 }, { field: 'status', operator: 'equals', value: 'open' }] },
     ]);
-    expect(authored.filter[0]!.any[0]!.operator).toBe('gt');
+    expect(authored.filter[0]!.or[0]!.operator).toBe('gt');
   });
 });

@@ -28,7 +28,7 @@ import type { z } from 'zod';
 import { getMetadataTypeSchema, stripReadDecorations } from '@objectstack/spec/kernel';
 import type { MetadataValidationResult } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
-import { isViewFilterAnyGroup } from '@objectstack/spec/ui';
+import { isViewFilterOrGroup } from '@objectstack/spec/ui';
 // [#5598] The READ path's share of the #5364 expansion. `zodIssuesToMetadataIssues`
 // is the ONE ranking this package speaks; the save path's 422 calls the same
 // function, so a document's verdict cannot depend on whether it was being saved
@@ -490,10 +490,10 @@ export function computeViewReferenceDiagnostics(
         t?.filter?.forEach((r, j) => {
             // [#28020] An any-of group element names no field itself; each of
             // its rules names one, and each is checked like a top-level rule.
-            if (isViewFilterAnyGroup(r)) {
-                const rules = Array.isArray(r.any) ? (r.any as Array<{ field?: string }>) : [];
+            if (isViewFilterOrGroup(r)) {
+                const rules = Array.isArray(r.or) ? (r.or as Array<{ field?: string }>) : [];
                 rules.forEach((rule, k) =>
-                    requireField(rule?.field, `userFilters.tabs.${i}.filter.${j}.any.${k}.field`));
+                    requireField(rule?.field, `userFilters.tabs.${i}.filter.${j}.or.${k}.field`));
                 return;
             }
             requireField(r?.field, `userFilters.tabs.${i}.filter.${j}.field`);

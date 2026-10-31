@@ -49,7 +49,7 @@
  */
 
 import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
-import { isViewFilterAnyGroup } from '@objectstack/spec/ui';
+import { isViewFilterOrGroup } from '@objectstack/spec/ui';
 import { recordsOf } from './object-graph.js';
 
 /** Any plain metadata record. */
@@ -282,11 +282,11 @@ export function walkFilterFieldKeys(
       if (typeof member === 'string') return; // the leading keyword
       // [#28020] An any-of group element of a view filter list. It names no
       // field itself, so it is stepped INTO: read as a condition object it
-      // would report its own key `any` as a field, and its rules would go
+      // would report its own key `or` as a field, and its rules would go
       // unchecked.
       const rules = filterGroupRules(member);
       if (rules) {
-        rules.forEach((rule, j) => walkFilterFieldKeys(rule, `${path}[${i}].any[${j}]`, visit, depth + 2));
+        rules.forEach((rule, j) => walkFilterFieldKeys(rule, `${path}[${i}].or[${j}]`, visit, depth + 2));
         return;
       }
       walkFilterFieldKeys(member, `${path}[${i}]`, visit, depth + 1);
@@ -307,18 +307,18 @@ export function walkFilterFieldKeys(
 
 /**
  * [#28020] The rules of an any-of group element of a view filter list
- * (`{ any: [rule, ...] }`, `ViewFilterAnyGroupSchema`), or `undefined` when
+ * (`{ or: [rule, ...] }`, `ViewFilterOrGroupSchema`), or `undefined` when
  * `member` is not one.
  *
  * Asked only of a MEMBER of a filter array — the position a group element
  * occupies — so a field-keyed condition object whose field happens to be named
- * `any` (`{ any: ['a'] }` as a whole filter) is still read as one. Which value
- * is a group is the spec's own predicate, `isViewFilterAnyGroup`, never a
+ * `or` (`{ or: ['a'] }` as a whole filter) is still read as one. Which value
+ * is a group is the spec's own predicate, `isViewFilterOrGroup`, never a
  * restated test. Exported for the other walks of a filter list in this package,
  * which must step into a group the same way.
  */
 export function filterGroupRules(member: unknown): unknown[] | undefined {
-  if (!isViewFilterAnyGroup(member)) return undefined;
-  const rules = member.any;
+  if (!isViewFilterOrGroup(member)) return undefined;
+  const rules = member.or;
   return Array.isArray(rules) ? rules : undefined;
 }

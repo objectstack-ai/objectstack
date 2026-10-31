@@ -64,7 +64,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { z } from 'zod';
 import { RecordRelatedListProps } from '@objectstack/spec/ui';
-import type { ViewFilterAnyGroup, ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterOrGroup, ViewFilterRule } from '@objectstack/spec/ui';
 import type { RecordRelatedListComponentProps } from '../record-components';
 
 /* ── Type-level legs (compiled by `tsc -p tsconfig.test.json`, erased by vitest) ── */
@@ -96,17 +96,17 @@ type SpecPickerFilter = NonNullable<z.input<typeof RecordRelatedListProps>['add'
  */
 /**
  * objectstack#28020: the contract's element is now a flat rule OR an any-of
- * group (`{ any: [rule, ...] }`), and the group is `[PLANNED — not yet
+ * group (`{ or: [rule, ...] }`), and the group is `[PLANNED — not yet
  * rendered]` there: the related list's own reader (`@object-ui/plugin-detail`)
  * types and lowers flat rules only. So this face carries the contract MINUS
  * the group until the console reads it (objectstack#28370), and the two legs
  * below hold exactly that gap — widen this face and the second leg's
  * companion together, never one alone.
  */
-type FlatRulesOf<F extends readonly unknown[] | undefined> = Exclude<NonNullable<F>[number], ViewFilterAnyGroup>[] | undefined;
+type FlatRulesOf<F extends readonly unknown[] | undefined> = Exclude<NonNullable<F>[number], ViewFilterOrGroup>[] | undefined;
 export type _MirrorAgreesWithTheContract = Expect<Equal<MirrorPickerFilter, FlatRulesOf<SpecPickerFilter>>>;
 /** …and the contract does carry the group the face withholds — so the gap is the group and nothing else. */
-export type _TheContractAlsoTakesTheGroup = Expect<Equal<NonNullable<SpecPickerFilter>[number], ViewFilterRule | ViewFilterAnyGroup>>;
+export type _TheContractAlsoTakesTheGroup = Expect<Equal<NonNullable<SpecPickerFilter>[number], ViewFilterRule | ViewFilterOrGroup>>;
 
 /**
  * …and the shape they agree on is the rule ARRAY. Stated separately from the

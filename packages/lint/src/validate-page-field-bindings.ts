@@ -175,7 +175,7 @@ export function fieldRefsFrom(value: unknown, basePath: string): FieldRef[] {
  * a list page's `filterBy` and a related list's `filter` carry.
  *
  * Plain rules are ordinary {@link fieldRefsFrom} work. An any-of group element
- * (`{ any: [rule, ...] }`) names no field of its own, so its rules are read in
+ * (`{ or: [rule, ...] }`) names no field of its own, so its rules are read in
  * its place: {@link fieldRefsFrom} alone finds neither `field` nor `name` on the
  * group and would skip every field the group's rules filter by.
  */
@@ -184,7 +184,7 @@ function filterFieldRefs(value: unknown, basePath: string): FieldRef[] {
   const out: FieldRef[] = [];
   for (let i = 0; i < value.length; i++) {
     const rules = filterGroupRules(value[i]);
-    out.push(...(rules ? fieldRefsFrom(rules, `${basePath}[${i}].any`) : fieldRefsFrom(value[i], `${basePath}[${i}]`)));
+    out.push(...(rules ? fieldRefsFrom(rules, `${basePath}[${i}].or`) : fieldRefsFrom(value[i], `${basePath}[${i}]`)));
   }
   return out;
 }

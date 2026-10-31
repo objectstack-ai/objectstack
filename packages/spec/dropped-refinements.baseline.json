@@ -1878,9 +1878,9 @@
         "list.timeline.groupByField"
       ]
     },
-    "ui/ViewFilterAnyGroup": {
+    "ui/ViewFilterOrGroup": {
       "sites": [
-        "any.element"
+        "or.element"
       ]
     },
     "ui/ViewFilterElement": {

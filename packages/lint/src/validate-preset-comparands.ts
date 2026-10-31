@@ -710,7 +710,7 @@ function judgeFilterValue(
       const rules = filterGroupRules(member);
       if (rules) {
         rules.forEach((rule, j) =>
-          judgeFilterValue(rule, `${path}[${i}].any[${j}]`, where, out, depth + 2, isTemporal));
+          judgeFilterValue(rule, `${path}[${i}].or[${j}]`, where, out, depth + 2, isTemporal));
         return;
       }
       judgeFilterValue(member, `${path}[${i}]`, where, out, depth + 1, isTemporal);
