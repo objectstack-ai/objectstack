@@ -29,7 +29,9 @@ deployment and to the sender. Scaffolded apps list the three executors in
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value slot.
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
   default `X-API-Key`, or `paramName` for a query-string key); `basic` (`username`
-  stays in metadata). A secret in a url path has no variant — use a
+  stays in metadata); `signed` on `openapi` / `rest` (`scheme`
+  `aliyun-acs3-hmac-sha256` or `tencentcloud-tc3-hmac-sha256`, `keyId`) signs each
+  request. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
 - `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
 
@@ -124,7 +126,7 @@ export const CarrierCallback = defineFlow({
 `x-objectstack-signature: t=<unix>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`
 under `CARRIER_HOOK_SECRET`. The door has no unsigned form and verifies no other
 scheme, so a vendor whose webhook signs its own header cannot post here today:
-name the gap and poll its status (recipe 1's shape) until vendor schemes verify.
+poll its status (recipe 1's shape) until vendor schemes verify.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
@@ -149,8 +151,8 @@ Each `operationId` is a named action in the flow palette and to agents;
 
 - **OAuth-protected vendor** (DocuSign, Salesforce, Google): `auth` declares
   `oauth2` (`authorization_code` / `client_credentials`) and `app-credential`
-  (`feishu` / `dingtalk` / `wecom`), the secret a `credentialRef`, but no server
-  runs the grant yet: the instance is held degraded, calling no upstream. Do not
-  park a short-lived token behind a `bearer` ref. Blocked on the outbound-OAuth card.
-- **Signature-authenticated vendor** (Alipay, WeChat Pay, Aliyun — RSA2 / HMAC
-  canonical-request signing): no auth kind signs requests today; blocked on the request-signing card.
+  (`feishu` / `dingtalk` / `wecom`), but no server runs the grant yet: the
+  instance is held degraded, calling no upstream. Do not park a short-lived
+  token behind a `bearer` ref. Blocked on the outbound-OAuth card.
+- **RSA-signing vendor** (Alipay, WeChat Pay): no `signed` scheme signs RSA yet;
+  blocked on the request-signing card.
