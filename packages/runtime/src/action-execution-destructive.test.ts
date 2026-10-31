@@ -38,8 +38,10 @@
  * actions, which is pinned below so the count of grounds is a measurement, not
  * a memory). Since #27681 gates 1 and 3 read ONE fact — the action's own
  * `ai.exposed` — so the exclusion is one ground asserted at both gates, not two
- * independent ones — this fix has zero observable effect on any request a
- * caller can make today.
+ * independent ones — this fix had zero observable effect on any request a
+ * caller could make when it landed. Since ADR-0011's 2026-10-30 addendum seven
+ * of the 13 declare `ai.exposed` and reach the classifier; the last `describe`
+ * below pins which.
  *
  * That is a fact about *today's platform objects*, not about the heuristic —
  * a future `ai.exposed`, non-`sys_*`, `script`/`flow` action carrying only
@@ -147,7 +149,7 @@ describe("actionLooksDestructive: mode:'delete' and variant:'danger' still class
 // composition that mounts it declares it), so it is pinned absent instead.
 // ---------------------------------------------------------------------------
 
-describe('the 5 identity actions #7309 flipped that the platform still declares read not-destructive, off their real declarations', () => {
+describe('the 5 identity actions #7309 flipped that the platform still declares, off their real declarations', () => {
     const flipped: Array<[string, any, any]> = [
         ['sys_user.generate_backup_codes', SysUser, 'generate_backup_codes'],
         ['sys_two_factor.regenerate_backup_codes', SysTwoFactor, 'regenerate_backup_codes'],
@@ -156,7 +158,22 @@ describe('the 5 identity actions #7309 flipped that the platform still declares 
         ['sys_oauth_application.rotate_client_secret', SysOauthApplication, 'rotate_client_secret'],
     ];
 
-    it.each(flipped)('%s: no confirmText, no mode:delete/variant:danger, no ai override → not destructive', (_label, obj, name) => {
+    // ADR-0011's 2026-10-30 addendum (ruling 6523087116 on #27900) exposes
+    // `disable_oauth_application` in bucket C, with `ai.requiresConfirmation:
+    // true`: the declared override now decides its classification — the
+    // precedence pinned above — so the heuristic's flip is read on the other
+    // four, which declare no override.
+    const heuristicOnly = flipped.filter(([, obj, name]) => actionByName(obj, name).ai?.requiresConfirmation === undefined);
+
+    it('one of the five now declares an override, and it wins: disable_oauth_application (bucket C) → destructive', () => {
+        expect(flipped.filter((row) => !heuristicOnly.includes(row)).map(([label]) => label))
+            .toEqual(['sys_oauth_application.disable_oauth_application']);
+        const action = actionByName(SysOauthApplication, 'disable_oauth_application');
+        expect(action.ai?.requiresConfirmation).toBe(true);
+        expect(actionLooksDestructive(deps, action)).toBe(true);
+    });
+
+    it.each(heuristicOnly)('%s: no confirmText, no mode:delete/variant:danger, no ai override → not destructive', (_label, obj, name) => {
         const action = actionByName(obj, name);
         // Guard the fixture's own premise: it must actually be the shape
         // #7828 describes, or this pin proves nothing.
@@ -197,6 +214,12 @@ describe('sibling identity actions with a declared destructive signal still read
         const action = actionByName(SysOrganization, 'leave_organization');
         expect(action.variant).toBe('danger');
         expect(action.mode).not.toBe('delete');
+        // ADR-0011's 2026-10-30 addendum exposes it in bucket C, and its declared
+        // `ai.requiresConfirmation: true` is read before the variant — so the
+        // variant leg is read with that override set aside, and the declared
+        // flag is asserted on its own.
+        expect(action.ai?.requiresConfirmation).toBe(true);
+        expect(actionLooksDestructive(deps, { ...action, ai: undefined })).toBe(true);
         expect(actionLooksDestructive(deps, action)).toBe(true);
     });
 });
@@ -287,9 +310,14 @@ describe('the classification IS live-reachable for a shape gate 1/2/3 all pass �
 // holds: #27506 made a same-origin api action server-dispatched, so gate 2
 // ADMITS all 13 and gates 1 and 3 carry the exclusion alone.
 // #7309 converted 14; `sys_organization.change_slug` left the platform object.
+//
+// Since ADR-0011's 2026-10-30 addendum (ruling 6523087116 on #27900) seven of
+// the 13 declare `ai.exposed` (buckets E and C), so gates 1 and 3 ADMIT them
+// and the classifier is reached on a real identity action; the six human-only
+// ones (bucket H) declare no `ai` block and stay excluded at both gates.
 // ---------------------------------------------------------------------------
 
-describe('today, all 13 #7309 identity actions the platform still declares are excluded before actionLooksDestructive ever runs on them', () => {
+describe('the 13 #7309 identity actions the platform still declares: the human-only six are excluded before actionLooksDestructive runs, the exposed seven reach it', () => {
     // The 13 of the 14 sites #7309 converted that the platform still
     // declares — same set pinned by
     // `platform-objects/src/identity/action-confirm-one-dialog.test.ts`'s
@@ -315,11 +343,47 @@ describe('today, all 13 #7309 identity actions the platform still declares are e
         expect(allThirteen).toHaveLength(13);
     });
 
-    it.each(allThirteen)('%s is excluded by systemObjectActionExposureError (gate 1: sys_* fail-closed unless ai.exposed)', (_label, objName, obj, name) => {
+    const exposed = new Set([
+        'sys_user.ban_user',
+        'sys_oauth_application.enable_oauth_application',
+        'sys_oauth_application.disable_oauth_application',
+        'sys_oauth_application.delete_oauth_application',
+        'sys_account.unlink_account',
+        'sys_sso_provider.delete_sso_provider',
+        'sys_team_member.remove_team_member',
+    ]);
+    const humanOnly = allThirteen.filter(([label]) => !exposed.has(label));
+    const exposedRows = allThirteen.filter(([label]) => exposed.has(label));
+
+    it('seven are exposed and six human-only', () => {
+        expect(exposedRows).toHaveLength(7);
+        expect(humanOnly.map(([label]) => label)).toEqual([
+            'sys_user.delete_my_account',
+            'sys_user.disable_two_factor',
+            'sys_user.generate_backup_codes',
+            'sys_oauth_application.rotate_client_secret',
+            'sys_two_factor.disable_two_factor',
+            'sys_two_factor.regenerate_backup_codes',
+        ]);
+    });
+
+    it.each(humanOnly)('%s is excluded by systemObjectActionExposureError (gate 1: sys_* fail-closed unless ai.exposed)', (_label, objName, obj, name) => {
         expect(isSystemObjectName(objName)).toBe(true);
         // Since #27681 the name alone no longer decides: the action's own
-        // `ai.exposed` does, and none of the 13 declares it.
+        // `ai.exposed` does, and a human-only action declares none.
         expect(systemObjectActionExposureError(deps, actionByName(obj, name), objName)).toMatch(/system object/);
+    });
+
+    it.each(exposedRows)('%s is admitted at gates 1 and 3 (its own ai.exposed), and its listing classification is the declared one', (_label, objName, obj, name) => {
+        const action = actionByName(obj, name);
+        expect(action.ai?.exposed).toBe(true);
+        expect(systemObjectActionExposureError(deps, action, objName)).toBeNull();
+        expect(actionAiExposureError(deps, action)).toBeNull();
+        // Bucket C declares `requiresConfirmation: true`; the one bucket E row
+        // (`enable_oauth_application`) declares none and carries no
+        // mode/variant signal, so it reads not destructive.
+        expect(summarizeAction(deps, action, { fields: {} }, objName).requiresConfirmation)
+            .toBe(action.ai?.requiresConfirmation === true);
     });
 
     it.each(allThirteen)('%s is ADMITTED by isHeadlessInvokableAction since #27506 (gate 2: a same-origin api action is server-dispatched)', (_label, _objName, obj, name) => {
@@ -329,7 +393,7 @@ describe('today, all 13 #7309 identity actions the platform still declares are e
         expect(isHeadlessInvokableAction(deps, action, true)).toBe(true);
     });
 
-    it.each(allThirteen)('%s is excluded by actionAiExposureError (gate 3: ai.exposed not set)', (_label, _objName, obj, name) => {
+    it.each(humanOnly)('%s is excluded by actionAiExposureError (gate 3: ai.exposed not set)', (_label, _objName, obj, name) => {
         const action = actionByName(obj, name);
         expect(action.ai?.exposed).not.toBe(true);
         // Matches the real call site (domains/mcp.ts listActions): 2-arg, no

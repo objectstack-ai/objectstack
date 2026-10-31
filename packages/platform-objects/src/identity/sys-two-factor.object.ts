@@ -93,6 +93,12 @@ export const SysTwoFactor = ObjectSchema.create({
           { path: 'backupCodes', label: 'Backup Codes', format: 'code-list' },
         ],
       },
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Turn on two-factor authentication for the caller\'s own account (param: the current password). Answers the authenticator URI and one-time backup codes; the user must save the codes, which are shown only once.',
+      },
     },
     {
       name: 'disable_two_factor',

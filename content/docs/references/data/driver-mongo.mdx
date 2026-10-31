@@ -47,7 +47,7 @@ MongoDB Connection Configuration
 | **host** | `string` | optional (default: `"localhost"`) | Host address |
 | **port** | `integer` | optional (default: `27017`) | Port number |
 | **username** | `string` | optional | Authentication user |
-| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` |
+| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config`. A datasource defined in code (`defineDatasource`) leaves the credential out of the declaration: it is read at connect time from the runtime environment variable derived from the datasource name (`OS_DATASOURCE_WAREHOUSE_PASSWORD` for a datasource named `warehouse`), which `os serve` / `os start` honour by default (`OS_DATASOURCE_ENV_CREDENTIALS=on`). |
 | **authSource** | `string` | optional | Authentication database |
 | **options** | `Record<string, any>` | optional | Extra MongoClient options (replicaSet, tls, timeouts, …). Credential-spelled keys (`password`, `authToken`, and their former aliases) are refused inline at any depth — bind the secret via the connection form / external.credentialsRef. `proxyPassword`, `tlsCertificateKeyFilePassword`, `key`, and `passphrase` are accepted and stored at rest in cleartext; they're redacted only when the datasource is read back, not refused at write. |
 

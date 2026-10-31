@@ -545,9 +545,23 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
  * missing key; what the pointer NAMES is the object's to judge (object.zod.ts).
  */
 function refuseRecordModeKeyMismatch(
-  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string },
+  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string; homeAmount?: unknown },
   ctx: z.RefinementCtx,
 ): void {
+  // [ADR-0144 D5] `homeAmount` converts a record's own currency into the home
+  // currency, so it has a reader only under `record`: a `fixed` amount has one
+  // currency for every row and a `dynamic` amount is already in the home
+  // currency, so the engine converts neither and the declaration would be inert.
+  if (config.currencyMode !== 'record' && config.homeAmount !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['homeAmount'],
+      message:
+        `\`homeAmount\` is read only under \`currencyMode: 'record'\`, and this config is \`${config.currencyMode}\`: `
+        + 'only an amount whose records each carry their own currency is converted into the home currency. '
+        + 'Set `currencyMode: \'record\'` with its `currencyField`, or delete `homeAmount`.',
+    });
+  }
   if (config.currencyMode === 'record' && config.defaultCurrency !== undefined) {
     ctx.addIssue({
       code: 'custom',
@@ -588,6 +602,58 @@ const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
   + 'give its ISO 4217 code (e.g. `defaultCurrency: \'USD\'`), or use `currencyMode: \'dynamic\'` '
   + 'to display amounts in the tenant default currency (the `localization.currency` setting). '
   + 'Since @objectstack/spec 18 nothing fills a code in; it used to be `\'CNY\'`.';
+
+/** The message an empty `homeAmount` pointer meets, naming the pointer and what it must name. */
+const homeAmountEmptyPointer = (key: string, names: string): string =>
+  `\`homeAmount.${key}\` names a field: an empty name points at nothing — name ${names} on this object.`;
+
+/**
+ * The message a missing (or non-string) `homeAmount` pointer meets. ADR-0144
+ * D5 requires all three whenever `homeAmount` is declared, and nothing fills
+ * one in, so the remedy is to name the field or to drop the declaration.
+ */
+const homeAmountPointerRequired = (key: string, names: string): (() => string) => () =>
+  `\`homeAmount\` needs \`${key}\`, the name of ${names} on this object: the engine has no default for it. `
+  + 'Name the field, or delete `homeAmount` if the amount needs no stored home-currency projection.';
+
+/**
+ * [ADR-0144 D5] `homeAmount` — a `record`-mode amount's stored home-currency
+ * projection, declared by three pointers into the same object. At write the
+ * engine converts the amount at the rate of the record's document date and
+ * stores the result in `field` and the rate it used in `rateField` (ruling
+ * 6465431966 D1: "STORED with the rate used"). Every pointer is required: D8
+ * rule 2 lets every currency-related field exist only as an author-declared
+ * field referenced by pointer, so the engine has no default to fall back on —
+ * no injected column, no fixed name, and no `created_at` as the document
+ * date. The names `rateDate` / `rateField` are this card's spelling (ADR-0144
+ * Open item 1); the ADR corrects the drafted optional `rateField?` to required.
+ *
+ * This shape sees only names. What each one names — a `dynamic`-mode stored
+ * `currency` field, a `date` / `datetime` field, a `number` field, the home
+ * and rate fields `readonly` — is the object's to judge
+ * (`refuseDishonestHomeAmount`, object.zod.ts), because only the object holds
+ * the field map. Nothing reads the declaration until the engine's write-time
+ * projection ships: the key ships in the same release as that engine (ADR-0144
+ * D9, release R2).
+ */
+const HomeAmountSchema = strictObject({
+  surface: "this amount's `homeAmount` declaration",
+  history:
+    'This shape was closed from the day it was declared — an unknown key here was never accepted, so a '
+    + 'misspelled pointer cannot parse and leave the home amount, its date or its rate unwritten.',
+  aliases: {
+    homeField: 'field', target: 'field', amountField: 'field',
+    date: 'rateDate', dateField: 'rateDate', documentDate: 'rateDate',
+    rate: 'rateField', exchangeRate: 'rateField', rateUsed: 'rateField',
+  },
+}, {
+  field: z.string({ error: homeAmountPointerRequired('field', 'the `dynamic`-mode `currency` field that stores the home amount') }).min(1, homeAmountEmptyPointer('field', 'the `dynamic`-mode `currency` field that stores the home amount'))
+    .describe('The field on the same object that stores the amount converted into the home currency: a stored `currency` field in `dynamic` mode (it displays in `localization.currency`, so metadata never names the home currency), declaring `readonly: true` — only the engine writes it. Conventionally `AMOUNT_home`.'),
+  rateDate: z.string({ error: homeAmountPointerRequired('rateDate', 'the `date` / `datetime` field whose value picks the rate') }).min(1, homeAmountEmptyPointer('rateDate', 'the `date` / `datetime` field whose value picks the rate'))
+    .describe('The field on the same object holding the record\'s document date, whose value picks the exchange rate: a `date` or `datetime` field. Required, with no default — the engine never guesses the date (not `created_at`).'),
+  rateField: z.string({ error: homeAmountPointerRequired('rateField', 'the `number` field that stores the rate used') }).min(1, homeAmountEmptyPointer('rateField', 'the `number` field that stores the rate used'))
+    .describe('The field on the same object that stores the exchange rate the conversion used: a `number` field declaring `readonly: true` — only the engine writes it. Required: the home amount is stored with the rate used. Conventionally `AMOUNT_rate`.'),
+});
 
 /** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
 function refuseFixedCurrencyWithoutCode(
@@ -673,12 +739,18 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   // object.zod.ts) checks what it names, because only the object holds the
   // sibling field map.
   currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty.'),
+  // ADR-0144 D5 — the stored home-currency projection, declared by pointer.
+  // Optional; `refuseRecordModeKeyMismatch` below refuses it outside `record`,
+  // and the object's `superRefine` (`refuseDishonestHomeAmount`,
+  // object.zod.ts) checks what its three pointers name.
+  homeAmount: HomeAmountSchema.optional().describe('`record` mode only, optional: where the engine stores this amount converted into the organization\'s home currency (the `localization.currency` setting) at write, at the rate of the record\'s document date, and the rate it used. `field` names a `dynamic`-mode `currency` field, `rateDate` a `date` / `datetime` field and `rateField` a `number` field, all on the same object; all three are required, and the home and rate fields declare `readonly: true` because only the engine writes them. Consolidated totals aggregate the home field. Refused under `dynamic` and `fixed`.'),
   // #19992 — no `.overwrite()` here any more: the #7918 ISO 4217 contradiction
   // check and the #11423 default-materializing `.overwrite()` both existed only
   // for the removed `precision` key (see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE
   // above). #27157 — `fixed` ⇒ a code; ADR-0144 D2 — `record` ⇔ a pointer and
-  // no code, both below. Parse output is `{ currencyMode }` plus the `defaultCurrency` and
-  // `currencyField` the author wrote.
+  // no code; ADR-0144 D5 — `homeAmount` under `record` only; all below. Parse
+  // output is `{ currencyMode }` plus the `defaultCurrency`, `currencyField`
+  // and `homeAmount` the author wrote.
 }).superRefine(refuseFixedCurrencyWithoutCode).superRefine(refuseRecordModeKeyMismatch));
 
 /**
