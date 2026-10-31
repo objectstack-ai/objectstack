@@ -139,14 +139,20 @@ describe('Setup → Position holders', () => {
   });
 
   it("shows a delegated administrator's out-of-scope refusal verbatim", async () => {
-    const said =
-      "[Security] Outside your delegated scope: assigning position 'auditor' — business unit 'bu_east' is outside the delegated subtree.";
-    adapter.create.mockRejectedValueOnce(new Error(said));
+    // The delegated-administration gate's refusal as the server throws it; the
+    // console shows its sentence without the `[Security] ` machine prefix, as
+    // every write refusal is read (`extractWriteErrorMessage`).
+    const sentence = "Outside your delegated scope: assigning position 'auditor' — business unit 'bu_east' is outside the delegated subtree.";
+    const refusal = Object.assign(new Error(`[Security] ${sentence}`), {
+      code: 'DELEGATION_SCOPE_VIOLATION',
+      httpStatus: 403,
+    });
+    adapter.create.mockRejectedValueOnce(refusal);
     renderPage('?position=auditor');
     await screen.findByText('Ada Auditor');
     pickRecords!([{ id: 'u_2' }]);
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe(said);
+    expect(alert.textContent).toBe(sentence);
     expect(screen.queryByText('Bob Builder')).toBeNull();
   });
 

@@ -154,15 +154,21 @@ describe('Setup → Permission set assignment', () => {
   });
 
   it("shows a delegated administrator's out-of-scope refusal verbatim", async () => {
-    const said =
-      "[Security] Outside your delegated scope: granting permission set 'sales_user' — the row belongs to organization 'org_b', not the one you administer.";
-    adapter.create.mockRejectedValueOnce(new Error(said));
+    // The delegated-administration gate's refusal as the server throws it; the
+    // console shows its sentence without the `[Security] ` machine prefix, as
+    // every write refusal is read (`extractWriteErrorMessage`).
+    const sentence = "Outside your delegated scope: granting permission set 'sales_user' — the row belongs to organization 'org_b', not the one you administer.";
+    const refusal = Object.assign(new Error(`[Security] ${sentence}`), {
+      code: 'DELEGATION_SCOPE_VIOLATION',
+      httpStatus: 403,
+    });
+    adapter.create.mockRejectedValueOnce(refusal);
     renderPage('?set=sales_user');
     await screen.findByText('Direct Dana');
     fireEvent.click(screen.getByRole('button', { name: 'Add user' }));
     fireEvent.click(await screen.findByRole('button', { name: 'pick' }));
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe(said);
+    expect(alert.textContent).toBe(sentence);
     expect(screen.queryByText('New Nora')).toBeNull();
   });
 });
