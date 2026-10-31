@@ -19,7 +19,8 @@
 - `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
 - `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate and never a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
 - `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
-- `confirmText` — set for any destructive or irreversible operation.
+- `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action, refused beside a non-empty `params` (put the question on `description`).
+- `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
 - `successMessage` / `errorMessage` — toast copy on success / failure. Set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
 - Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new role for {{ record.name }}.'`) and a param's `helpText` (`'Why {{ record.name }} is paused'`) read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
@@ -39,6 +40,7 @@ export const ReassignLeadAction = defineAction({
   disabled: P`record.status == "converted"`,
   disabledReason: 'A converted lead is reassigned from its opportunity.',
   params: [{ field: 'assigned_to', required: true }],
+  submitText: 'Reassign',
   undoable: true,
   successMessage: 'Lead {{ record.name }} reassigned.',
   errorMessage: "Couldn't reassign this lead — try again.",

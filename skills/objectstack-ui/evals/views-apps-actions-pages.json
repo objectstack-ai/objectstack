@@ -100,6 +100,16 @@
         "must_contain": ["type: 'report'"],
         "must_not_contain": ["reportName:"]
       }
+    },
+    {
+      "id": 11,
+      "prompt": "Add a 'Log Call' action on `contact` that asks for the call notes and the outcome in a dialog, and make the dialog's button read Log Call instead of Confirm.",
+      "expected_output": "One `defineAction` with field-backed `params` (`call_notes`, `call_outcome`) and `submitText: 'Log Call'` beside them — the verb on the param dialog's submit button, an I18nLabel translated at `objects.contact._actions.log_call.submitText`. Not `confirmText` (the message of a param-less action's confirm dialog, refused beside `params`), not `submitLabel` / `confirmLabel` (refused, naming `submitText`), and never blank.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["params", "submitText: 'Log Call'"],
+        "must_not_contain": ["submitLabel", "confirmLabel", "confirmText"]
+      }
     }
   ]
 }
