@@ -165,8 +165,9 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
     'manage_mailboxes',
     // [ADR-0143 D5] The connector connection capability: its holder connects,
     // reconnects and revokes its organization's OAuth2 connector connections.
-    // Platform administrators hold it by default; every other position, the
-    // organization administrator included, only by explicit grant.
+    // Platform administrators hold it by default, and so do organization
+    // administrators (ruling B, record 6545223261); every other position only
+    // by explicit grant.
     'manage_connector_connections',
   ],
 };

@@ -187,6 +187,7 @@ const pt = {
     dialogDescriptionFallback: "Preencha os campos do formulário e depois envie ou cancele.",
     deniedDescription: "Você não tem permissão para editar este campo.",
     serverDefaultHint: "Definido automaticamente ao salvar.",
+    requiredForAction: "Obrigatório para executar «{{action}}».",
     maxFileSize: "Tamanho máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Carregando colunas…",

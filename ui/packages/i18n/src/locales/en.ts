@@ -265,6 +265,9 @@ const en = {
     // evaluate, so it leaves the field empty and omits it (objectui#12108).
     // Shown only while the field is empty: a typed value is saved instead.
     serverDefaultHint: 'Set automatically when saved.',
+    // Under an empty field that a visible update action's static `patch` would
+    // make required (objectstack#28382). `{{action}}` is the action's label.
+    requiredForAction: 'Required to run “{{action}}”.',
     // The size-limit hint the flat `ObjectForm` appends to a `file` or `image`
     // field's description when the field declares `maxSize` (objectui#12156).
     // `{{size}}` is the formatted limit ("10.0 MB"); only the words translate.
