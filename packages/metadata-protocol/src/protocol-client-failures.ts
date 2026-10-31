@@ -1,19 +1,17 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/**
- * [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim:
- * the batch row results and row errors, the client-facing failure text and code, seed validation, and the metadata store and read failure errors.
- *
- * A MOVE, not a redesign: every declaration below is byte-identical to the text
- * that stood above `ObjectStackProtocolImplementation`; only the imports and the
- * export list at the foot are new. `protocol.ts` re-exports what it exported.
- */
+// [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim: the batch row
+// results and row errors, the client-facing failure text and code, seed validation, and the
+// metadata store and read failure errors.
+//
+// A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
+// above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
+// are new. `protocol.ts` re-exports what it exported.
 import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { zodIssuesToMetadataIssues } from './protocol-metadata-issues.js';
 import type { MetadataIssueEntry } from './protocol-metadata-issues.js';
-import type { MetadataWriteFace } from './protocol-destructive-change.js';
 
 /**
  * One row of a bulk-write result — exactly the `BatchOperationResult` the spec
@@ -658,92 +656,6 @@ function metadataIssueHeadline(issues: MetadataIssueEntry[]): string {
         .map((i) => `${i.path || '<root>'}${i.code ? ` [${i.code}]` : ''}`)
         .join('; ');
     return `${issues.length} issue${issues.length === 1 ? '' : 's'} — ${locators}`;
-}
-
-/**
- * [commit d806081dd] The `422 INVALID_METADATA` findings clause, rendered PER FACE.
- *
- * The refusal is raised in one place ({@link
- * ObjectStackProtocolImplementation.saveMetaItem}'s overlay spec check) and
- * quoted onto whatever response the caller's catch builds, so one clause is
- * read on every face at once — and the faces do not agree on whether the
- * structured `issues[]` array reaches the consumer beside it. Where it does,
- * restating the prose here is the #10524 duplication exactly: every console
- * rendering both channels shows each finding twice. Where it does NOT, this
- * clause is the SOLE carrier and trimming it deletes the author's
- * prescription from the wire outright.
- *
- * ## The polarity is the load-bearing decision, not the wording
- *
- * Silence renders the FULL prose — byte-identical to what every face carried
- * before this card. Only a face that positively declares it carries the
- * structured channel gets the headline. That direction is deliberate and is
- * the opposite of a convenience default:
- *
- *  - the destructive direction (deleting prose) requires an explicit,
- *    reviewable declaration at a call site, so it can never happen by
- *    omission;
- *  - a new write door added later, or one whose author never read this
- *    comment, keeps the complete sentence. The failure mode of forgetting is
- *    a redundant sentence on a console, not an author who is told a body is
- *    invalid and never told which key.
- *
- * ⛔ Do not invert this to "trim by default, message-only faces opt out".
- * Measured on `origin/main` for THIS gate (see
- * `protocol.invalid-metadata-422-face-inventory.test.ts`): four of the seven
- * callers are message-only, and two of them live in OTHER packages
- * (`@objectstack/runtime`'s ADR-0045 visibility flip, `plugin-security`'s
- * permission-set projection) where no face can be stated without making the
- * field caller-settable. Under the inverted polarity those two lose their
- * prescription silently — and `plugin-security`'s remedy sentence
- * ("make the record body spec-valid (the error names the offending key)")
- * is written on the assumption that this clause names it.
- *
- * ⚠️ Unlike the 409's {@link destructiveChangeRemedy}, whose faces differ on
- * WHAT REMEDY EXISTS, the faces here differ only on WHETHER A SECOND CHANNEL
- * CARRIES THE SAME FACTS. Nothing is withheld from anyone: `err.issues` is
- * attached identically on every face, and the headline still names how many
- * findings there are and where they are.
- */
-export function specValidationFindings(
-    face: MetadataWriteFace | undefined,
-    issues: MetadataIssueEntry[],
-): string {
-    switch (face) {
-        case 'meta-envelope':
-        case 'meta-dispatch':
-            // The door answers with an ADR-0112 error envelope that carries
-            // `issues[]` beside the message (`@objectstack/rest`'s
-            // `sendError` threads a top-level `issues`; `@objectstack/runtime`'s
-            // dispatcher threads `details.issues`). The prose lives there,
-            // once. Same headline grammar the seed refusal and the author-time
-            // gate compose — count plus `path [zod code]` locators.
-            //
-            // ⚠️ [#11095] TWO faces, one case, on purpose. The dispatcher split
-            // off `'meta-envelope'` because the 409 needed a different REMEDY
-            // there — nothing about the 422 moved, and this door's structured
-            // channel (`details.issues`) is the very one the comment above
-            // names. Letting `'meta-dispatch'` fall to the default instead would
-            // have re-introduced the duplication commit d806081dd removed on one door only, with
-            // every 409 test green: the polarity below is "declare to trim", so
-            // a face that stops declaring loses the trim SILENTLY. Pinned in
-            // `protocol.destructive-409-face-inventory.test.ts`'s [#11095]
-            // section, which asserts the 422 clause did not move under it.
-            return metadataIssueHeadline(issues);
-        default:
-            // Byte-identical to the clause before commit d806081dd: the first three findings
-            // as `<path>: <message>`, then a `(+N more)` tail. Read by
-            // `duplicatePackage`'s `failed[].error`, `migrateStoredMetadata`'s
-            // `rows[].reason`, `importUnmanagedPackage`'s rolled-back refusal
-            // (`'package-unmanaged-import'`, whose one door relays no
-            // `issues[]` — see `MetadataWriteFace`), and the two
-            // out-of-package log faces — none of which carry `issues[]` to
-            // their caller.
-            return issues.slice(0, 3)
-                .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
-                .join('; ')
-                + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '');
-    }
 }
 
 /**

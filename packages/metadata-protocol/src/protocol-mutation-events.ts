@@ -1,13 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/**
- * [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim:
- * the metadata mutation and publish event contracts, the cluster channel, and the mutation projector.
- *
- * A MOVE, not a redesign: every declaration below is byte-identical to the text
- * that stood above `ObjectStackProtocolImplementation`; only the imports and the
- * export list at the foot are new. `protocol.ts` re-exports what it exported.
- */
+// [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim: the metadata
+// mutation and publish event contracts, the cluster channel, and the mutation projector.
+//
+// A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
+// above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
+// are new. `protocol.ts` re-exports what it exported.
 
 /**
  * Post-persistence metadata-mutation notification (#2588). Emitted by

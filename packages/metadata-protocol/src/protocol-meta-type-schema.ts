@@ -1,13 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/**
- * [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim:
- * the canonical `/meta` type spelling, the served item and JSON Schema, and the overlay schema a save is judged against.
- *
- * A MOVE, not a redesign: every declaration below is byte-identical to the text
- * that stood above `ObjectStackProtocolImplementation`; only the imports and the
- * export list at the foot are new. `protocol.ts` re-exports what it exported.
- */
+// [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim: the canonical
+// `/meta` type spelling, the served item and JSON Schema, and the overlay schema a save is
+// judged against.
+//
+// A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
+// above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
+// are new. `protocol.ts` re-exports what it exported.
 // [#17502] The served JSON Schema publishes what an author MAY write, so a
 // property no instance can satisfy — a `retiredKey()` tombstone, rendered
 // `{ not: {} }` — is dropped from it. See the module header for the channels

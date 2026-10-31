@@ -1,13 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/**
- * [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim:
- * the metadata issue entry and the Zod-issue walk that turns a parse failure into located metadata issues.
- *
- * A MOVE, not a redesign: every declaration below is byte-identical to the text
- * that stood above `ObjectStackProtocolImplementation`; only the imports and the
- * export list at the foot are new. `protocol.ts` re-exports what it exported.
- */
+// [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim: the metadata
+// issue entry and the Zod-issue walk that turns a parse failure into located metadata issues.
+//
+// A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
+// above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
+// are new. `protocol.ts` re-exports what it exported.
 
 /**
  * One entry of the `422 INVALID_METADATA` envelope's `issues[]` — the shape

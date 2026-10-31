@@ -1,13 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-/**
- * [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim:
- * the reference-site walk behind `findReferencesToMeta`.
- *
- * A MOVE, not a redesign: every declaration below is byte-identical to the text
- * that stood above `ObjectStackProtocolImplementation`; only the imports and the
- * export list at the foot are new. `protocol.ts` re-exports what it exported.
- */
+// [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim: the
+// reference-site walk behind `findReferencesToMeta`.
+//
+// A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
+// above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
+// are new. `protocol.ts` re-exports what it exported.
 
 /**
  * Phase 3a-references: how a reference is FOUND in a stored document, given the
