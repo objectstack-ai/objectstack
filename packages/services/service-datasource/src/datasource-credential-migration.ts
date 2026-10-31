@@ -78,6 +78,7 @@ import {
   validateDriverConfig,
 } from '@objectstack/spec/data';
 import type { StoredDatasource } from './datasource-admin-service.js';
+import { DATASOURCE_ENV_CREDENTIALS_SWITCH, datasourceEnvCredentialVar } from './datasource-env-credential.js';
 
 /** Remedy sentence shared by every refusal that leaves the credential at rest. */
 const REENTER_REMEDY =
@@ -165,8 +166,11 @@ export function planCredentialMigration(record: StoredDatasource): CredentialMig
         `Datasource '${record.name}' is code-defined (origin: 'code'), so its definition is owned by `
         + 'the artifact that declares it and cannot be rewritten at runtime.',
       remedy:
-        'Move the credential in the source that defines this datasource: bind it through '
-        + '`external.credentialsRef`, or supply it from the runtime environment.',
+        'Move the credential out of the source that defines this datasource: leave it out of the '
+        + `declaration and set ${datasourceEnvCredentialVar(record.name)} in the runtime environment, `
+        + `which the datasource reads at connect when the host's ${DATASOURCE_ENV_CREDENTIALS_SWITCH} `
+        + 'switch is on (the default under `os serve` / `os start`), or bind it through '
+        + '`external.credentialsRef`.',
     };
   }
 
