@@ -16,6 +16,6 @@ Metadata-protocol: none
 - **One row.** The type-to-capability table moves to `@objectstack/metadata-core` as `STORED_METADATA_TYPE_READ_CAPABILITIES`, with `storedMetadataTypesWithheldFrom(caller)` and `isCapabilityGatedStoredMetadataType(type)`. `@objectstack/rest` keeps exporting `META_TYPE_READ_CAPABILITIES`, now that same frozen object, and the metadata read door answers exactly as before.
 - **Now.** A caller-context read of a stored metadata row of a listed type, by a caller without the type's capability, is served no row: a list or count leaves it out, and a read of its id answers as a read of a row that does not exist. Holders of the capability, platform administrators among them, are served everything as before. System reads are unchanged.
 - **Events.** A record-change event of such a row carries no metadata body to any subscriber; the row's other columns are unchanged.
-- **Who sees it.** A reader below datasource administration who listed or read stored datasource or federation-catalog rows as records no longer sees them.
+- **Who sees it.** A reader below datasource administration is no longer served stored datasource or federation-catalog rows.
 
 **The remedy.** Grant `manage_platform_settings` to a caller that needs a datasource definition, or read it through the datasource admin door (`GET /api/v1/datasources/:name`) as such a caller.
