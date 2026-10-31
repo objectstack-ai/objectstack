@@ -3647,6 +3647,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.validation.seedPlaceholderUnset': '请先设置 {fields} 再保存：新建项不会带着模板的占位值保存。',
   // objectstack#28179 — 见英文表同名条目。
   'engine.validation.fieldRequired': '此项为必填项。',
+  // The `engine.validation.spec.*` rows are zh-only on purpose: they render a
+  // schema issue from `@objectstack/spec` by its code, and the en text is the
+  // spec's own message (`translateSchemaIssue`, read through `tOptional`).
+  'engine.validation.spec.stringTooShort': '至少需要 {minimum} 个字符',
+  'engine.validation.spec.snakeCaseIdentifier':
+    '须为小写 snake_case：以字母开头，只能包含字母、数字和下划线（例如 “user_profile”）',
+  'engine.validation.spec.systemIdentifier':
+    '须为小写：以字母开头，可包含字母、数字、下划线或点（例如 “user_profile” 或 “order.created”）',
   'engine.embedded.saved': '已保存。',
   'engine.embedded.readOnlyParent': '父类型为只读；仍会尝试 PUT 保存，但服务器可能拒绝。',
   'engine.embedded.saveIntoParent': '保存到 {parentType}',

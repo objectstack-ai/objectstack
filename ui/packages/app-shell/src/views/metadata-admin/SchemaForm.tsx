@@ -68,7 +68,8 @@ import {
   type WidgetLabelling,
   type WidgetRenderer,
 } from './widgets.js';
-import { useMetadataLocale, t, tFormat, translateValidationMessage, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp } from './i18n.js';
+import { useMetadataLocale, t, tFormat, translateSchemaIssue, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp } from './i18n.js';
+import type { SchemaIssueDetail } from './i18n.js';
 import { prettifyFieldName as prettify, untranslatedFieldLabel } from './field-source-label.js';
 
 /**
@@ -1078,6 +1079,12 @@ function readVisibility(
 export interface SchemaFormIssue {
   path: string;
   message: string;
+  /**
+   * The Zod issue's code and parameters when the issue came from a client
+   * schema parse; what `translateSchemaIssue` picks the reader's-locale text
+   * by. Absent on server diagnostics and lint findings.
+   */
+  detail?: SchemaIssueDetail;
 }
 
 export interface SchemaFormProps {
@@ -1189,7 +1196,7 @@ function SchemaFormBody({
   const issuesByPath = React.useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const i of issues) {
-      (map[i.path] ??= []).push(translateValidationMessage(i.message, locale));
+      (map[i.path] ??= []).push(translateSchemaIssue(i, locale));
     }
     return map;
   }, [issues, locale]);
