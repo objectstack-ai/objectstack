@@ -518,12 +518,18 @@ monetary measure column takes the measure's own `currency`; then, only when the 
 field is `currencyMode: 'fixed'`, that field's `currencyConfig.defaultCurrency`; then the
 tenant default currency (the `localization.currency` setting), if one is set. A
 `dynamic` field (the default mode) never lends its `defaultCurrency` — only `fixed` does —
-so its column shows the tenant default. The cube query on this page carries no column
-`currency`.
+so its column shows the tenant default. A derived `sum` or `difference` whose monetary
+operands all resolve to one `fixed` code takes that code at the field's step; any other
+derived measure (a `ratio`, a `product`, operands in the tenant's currency) is monetary
+only by its own `currency`, else its column carries none. The cube query on this page
+carries no column `currency`.
 
 Over a `fixed` field the measure's `currency` may only restate the field's code. A
 different code is refused when the dataset compiles, with `DATASET_INVALID` / 400: delete
-the measure's `currency`, and the column takes the field's code. A derived measure whose
+the measure's `currency`, and the column takes the field's code. A derived `sum` or
+`difference` whose operands resolve to one `fixed` code is held to the same rule: a
+different `currency` is refused with `DATASET_INVALID` / 400 — delete the measure's
+`currency` (the column takes the operands' code), or restate it. A derived measure whose
 monetary operands resolve to two different `fixed` codes is refused the same way, whatever
 the operation: derive it from measures in one currency, or drop the operand in the other.
 Neither a `fixed` code against the tenant default nor a measure `currency` over a

@@ -178,8 +178,12 @@ that column. A `count` column never carries `currencyField`. See the
 - **A derived measure whose monetary operands resolve to two different `fixed` codes** is
   refused at compile with `DATASET_INVALID` / 400, whatever the operation. Derive it from
   measures in one currency, or drop the operand in the other. A derived `sum` or
-  `difference` over one `fixed` code carries that code, so a measure built on it is judged
-  the same way.
+  `difference` over one `fixed` code carries that code, on its result column too, so a
+  measure built on it is judged the same way.
+- **A derived `sum` or `difference` whose `currency` differs from its operands' one `fixed`
+  code** is refused at compile with `DATASET_INVALID` / 400: `currency: 'USD'` over two
+  measures fixed to `EUR` would print euros as dollars. Delete the measure's `currency`, and
+  the column takes the operands' code, or restate that code.
 - **Not judged:** a `fixed` code against the tenant currency, which compile does not know,
   and a measure `currency` over a `dynamic` field, which wins as the top of the currency
   chain.
