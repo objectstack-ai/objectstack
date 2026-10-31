@@ -4,7 +4,7 @@
 
 refactor(collaboration)!: retire the zero-consumer `useCommentSearch` and `createPresenceUpdater` exports
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (runtime-export-retired @object-ui/collaboration#useCommentSearch, @object-ui/collaboration#CommentSearchConfig, @object-ui/collaboration#CommentSearchReturn, @object-ui/collaboration#createPresenceUpdater) the retired operands are a React hook, its two option and result types, and a plain helper factory in a published ui package's entry that nothing in the workspace imported; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->

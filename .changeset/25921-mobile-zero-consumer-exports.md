@@ -4,7 +4,7 @@
 
 refactor(mobile)!: retire the zero-consumer `useOfflineSync`, `requestBackgroundSync` and `resolveResponsiveValue` exports
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (runtime-export-retired @object-ui/mobile#useOfflineSync, @object-ui/mobile#OfflineSyncState, @object-ui/mobile#requestBackgroundSync, @object-ui/mobile#resolveResponsiveValue) the retired operands are a React hook, its state type and two plain helpers in a published ui package's entry that nothing in the workspace imported; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
