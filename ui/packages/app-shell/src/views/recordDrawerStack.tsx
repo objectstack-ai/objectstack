@@ -617,7 +617,7 @@ function siblingRecordPath(pathname: string, from: string, to: string): string |
   return null;
 }
 
-/** What a page the list row's ↗ opened knows about that list. */
+/** What a page opened from a list knows about that list. */
 export interface RecordPageReturn {
   /**
    * The counter and ↓ ↑ over the list's rows (objectstack#27524, Target 7):
@@ -631,19 +631,58 @@ export interface RecordPageReturn {
 }
 
 /**
- * The record page's list context (objectstack#27524, Target 7): a page the
+ * The rows a list showed, handed in the page's `from` state by a list whose
+ * rows open as pages (objectstack#27524): its row click and its record links.
+ */
+function readFromSiblings(state: unknown): readonly string[] | undefined {
+  const from = (state as { from?: { siblings?: unknown } } | null | undefined)?.from;
+  const siblings = from?.siblings;
+  return Array.isArray(siblings) && siblings.every((id) => typeof id === 'string')
+    ? (siblings as string[])
+    : undefined;
+}
+
+/**
+ * The record page's list context (objectstack#27524, Target 7). A page the
  * list row's ↗ opened carries the way back to that list in its history state
  * (`recordDrawerReturnState`, objectstack#27545), and with it the rows the
- * list showed. Empty on a page opened any other way — a direct link, a
- * reload in a new tab, the drawer's 「Open as full page」 — which therefore
- * draws no counter, no ↓ ↑ and no ⤡.
+ * list showed: it gets the counter, ↓ ↑ and ⤡. A page a list opened as a page
+ * (a row click or a record link on an object whose rows open as pages) carries
+ * those rows in its `from` state: it gets the counter and ↓ ↑, and no ⤡, since
+ * that list opens no pane; so does the pane root's 「Open as full page」.
+ * Empty on a page opened any other way — a direct link, a link opened in a
+ * new tab, a level above the pane's root — which therefore draws no counter,
+ * no ↓ ↑ and no ⤡.
  */
 export function useRecordPageReturn(recordId: string | undefined): RecordPageReturn {
   const location = useLocation();
   const navigate = useNavigate();
   return useMemo<RecordPageReturn>(() => {
     const back = readReturn(location.state);
-    if (!back) return {};
+    if (!back) {
+      const siblings = readFromSiblings(location.state);
+      const index = recordId && siblings ? siblings.indexOf(recordId) : -1;
+      if (!recordId || !siblings || index < 0) return {};
+      // The `from` state goes along unchanged: the next page has the same list.
+      const go = (nextId: string) => () => {
+        const to = siblingRecordPath(location.pathname, recordId, nextId);
+        if (to === null) return;
+        const pageSearch = new URLSearchParams(location.search);
+        pageSearch.delete(RECORD_RELATED_ENLARGE_PARAM);
+        const qs = pageSearch.toString();
+        navigate(
+          { pathname: to, search: qs ? `?${qs}` : '' },
+          { replace: true, state: withoutKeys(location.state, [RECORD_RELATED_ENLARGE_PUSHED_STATE]) },
+        );
+      };
+      return {
+        stepper: {
+          onPrevious: index > 0 ? go(siblings[index - 1]) : undefined,
+          onNext: index < siblings.length - 1 ? go(siblings[index + 1]) : undefined,
+          position: { index, total: siblings.length },
+        },
+      };
+    }
     const top = back.path[back.path.length - 1];
     const collapse = () => {
       const restoreState = { ...withoutKeys(back.state, []), [RESTORE_STATE_KEY]: back.path };

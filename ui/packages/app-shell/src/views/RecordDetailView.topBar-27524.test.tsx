@@ -200,6 +200,34 @@ describe('the page\'s top bar (objectstack#27524, Target 7)', () => {
     expect(screen.getByTestId('where-state').textContent).toContain('"recordDrawerRestore":[{"objectName":"crm_lead","recordId":"r-2"');
   });
 
+  it('opened by a list whose rows open as pages: the counter and ↓ ↑ over its rows, and no ⤡', async () => {
+    const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS };
+    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from } });
+    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    const position = () => pageBar()!.querySelector('[data-record-top-bar-position]');
+    expect(position()?.textContent).toBe('1 / 3');
+    expect(position()?.getAttribute('title')).toBe('1 of 3 in All leads');
+    // That list opens no pane: there is nothing to collapse to.
+    expect(screen.queryByTestId('record-drawer-return')).toBeNull();
+    // The object crumb is the list it came from.
+    expect(pageBar()!.querySelector('[data-record-crumb-object]')?.getAttribute('href')).toBe(`/apps/${APP}/${LEAD}`);
+
+    fireEvent.keyDown(document.body, { key: 'j' });
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-2`));
+    await waitFor(() => expect(position()?.textContent).toBe('2 / 3'));
+    // The next page keeps the same list.
+    expect(JSON.parse(screen.getByTestId('where-state').textContent!)).toEqual({ from });
+    fireEvent.click(screen.getByRole('button', { name: 'Previous record' }));
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`));
+  });
+
+  it('control: a list\'s origin without its rows draws no counter', async () => {
+    mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from: { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads' } } });
+    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    expect(pageBar()!.querySelector('[data-record-top-bar-position]')).toBeNull();
+    expect(pageBar()!.querySelector('[data-record-top-bar-step]')).toBeNull();
+  });
+
   it('the object crumb of a ↗ page returns to the list with no record open', async () => {
     const back = recordDrawerReturnState(
       { pathname: `/apps/${APP}/${LEAD}`, search: '?view=all&recordId=r-1', state: null },

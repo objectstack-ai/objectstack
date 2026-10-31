@@ -768,11 +768,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       label: parent.t || `#${shortId}`,
     };
   }, [originFromState, location.search, appName]);
-  // objectstack#27524, Target 7 — a page the list row's ↗ opened knows that
-  // list: its top bar steps the list's rows with the counter, ↓ ↑ and `j` /
-  // `k` (the arrow keys scroll the page), offers ⤡ 「Collapse to drawer」, and
-  // its object crumb returns to the list. The counter names the list's view
-  // (the origin's label). A record drawn in a pane has the pane's bar.
+  // objectstack#27524, Target 7 — a page a list opened knows that list: its
+  // top bar steps the list's rows with the counter, ↓ ↑ and `j` / `k` (the
+  // arrow keys scroll the page). A page the row's ↗ opened also offers ⤡
+  // 「Collapse to drawer」, and its object crumb returns to the list. The
+  // counter names the list's view (the origin's label). A record drawn in a
+  // pane has the pane's bar.
   const pageReturn = useRecordPageReturn(embedded ? undefined : recordId);
   const pageStepper = useMemo<RecordTopBarStepper | undefined>(
     () => (pageReturn.stepper && originFromState?.label

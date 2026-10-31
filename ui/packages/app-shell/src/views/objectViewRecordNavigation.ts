@@ -127,6 +127,10 @@ export function useObjectViewRecordNavigation({
     // (objectstack#27545) — and the location changes with it.
     const locationRef = useRef(location);
     locationRef.current = location;
+    // The rows the list shows (`handleListRowsChange` below), read when a
+    // handler runs: a page this list opens steps through them
+    // (objectstack#27524, Target 7).
+    const listRowIdsRef = useRef<readonly string[]>([]);
     // The list's name — its view's tab label: what the page's way back says,
     // and the set the pane's counter names (objectstack#27524, Target 7).
     const listLabel = useMemo(
@@ -158,11 +162,16 @@ export function useObjectViewRecordNavigation({
             // already treated the name and the token identically, which is
             // exactly what made the substitution inaudible on this surface.
             const { pathname, search } = locationRef.current;
+            // The rows the list shows go along when the record is one of
+            // them: the page's top bar counts and steps through them
+            // (objectstack#27524, Target 7).
+            const siblings = listRowIdsRef.current;
             const originState = {
               ...extraState,
               from: {
                 pathname: pathname + (search || ''),
                 label: listLabel,
+                ...(siblings.includes(String(recordId)) ? { siblings } : {}),
               },
             };
             if (viewId) {
@@ -284,7 +293,6 @@ export function useObjectViewRecordNavigation({
      * top bar steps through with its counter and ↓ ↑ (objectstack#27524,
      * Target 7). Read at click time: the handler never changes with the rows.
      */
-    const listRowIdsRef = useRef<readonly string[]>([]);
     const handleOpenRowAsPage = useCallback((recordId: string | number) => {
         const { pathname, search, state } = locationRef.current;
         const back = new URLSearchParams(search);
