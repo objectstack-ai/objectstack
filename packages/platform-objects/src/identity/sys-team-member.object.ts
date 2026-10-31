@@ -66,6 +66,12 @@ export const SysTeamMember = ObjectSchema.create({
         { name: 'teamId', field: 'team_id', required: true },
         { name: 'userId', field: 'user_id', required: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Add a user to a team (params: teamId, userId). The user must already be a member of the team\'s organization.',
+      },
     },
     {
       // Better-auth: `organization/remove-team-member { teamId, userId }`.
@@ -92,6 +98,14 @@ export const SysTeamMember = ObjectSchema.create({
         { name: 'teamId', field: 'team_id', required: true, defaultFromRow: true },
         { name: 'userId', field: 'user_id', required: true, defaultFromRow: true },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Remove a user from a team (params: teamId, userId): they lose the team-scoped access. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 

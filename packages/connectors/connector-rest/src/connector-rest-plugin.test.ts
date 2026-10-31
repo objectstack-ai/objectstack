@@ -270,4 +270,55 @@ describe('ConnectorRestPlugin — a declarative `signed` instance (ADR-0143 D2.3
 
         await kernel.shutdown();
     });
+
+    it('signs a tencentcloud-tc3-hmac-sha256 instance the same way, with the service named by its host', async () => {
+        const KEY = 'dummy-tencent-secret-key-26710';
+        const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+        const impl = (async (url: string, init: RequestInit) => {
+            calls.push({ url, headers: init.headers as Record<string, string> });
+            return new Response('{"Response":{"RequestId":"r-1"}}', { status: 200, headers: { 'content-type': 'application/json' } });
+        }) as unknown as typeof fetch;
+        const declared = [{
+            name: 'tencent_cvm',
+            label: 'Tencent CVM',
+            type: 'api',
+            provider: 'rest',
+            providerConfig: { baseUrl: 'https://cvm.tencentcloudapi.com', defaultHeaders: { 'X-TC-Version': '2017-03-12', 'X-TC-Region': 'ap-guangzhou' } },
+            auth: { type: 'signed', scheme: 'tencentcloud-tc3-hmac-sha256', keyId: 'test-secret-id', credentialRef: 'TENCENT_SECRET_26710' },
+        }];
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin({ credentialResolver: (r) => (r === 'TENCENT_SECRET_26710' ? KEY : undefined) }));
+        kernel.use(new ConnectorRestPlugin({ fetchImpl: impl }));
+        kernel.use({
+            name: 'test.metadata',
+            type: 'standard',
+            version: '1.0.0',
+            dependencies: [],
+            async init(ctx: any) {
+                ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        const engine = kernel.getService<AutomationEngine>('automation');
+        expect(engine.getConnectorDegradedReason('tencent_cvm')).toBeUndefined();
+
+        const request = engine.resolveConnectorAction('tencent_cvm', 'request')!;
+        const answered = await request({ method: 'POST', path: '/', body: { Limit: 1 }, headers: { 'X-TC-Action': 'DescribeInstances' } }, {} as never);
+        expect(answered).toEqual({ status: 200, ok: true, body: { Response: { RequestId: 'r-1' } } });
+
+        expect(calls).toHaveLength(1);
+        const headers = calls[0]!.headers;
+        expect(headers.authorization).toMatch(
+            /^TC3-HMAC-SHA256 Credential=test-secret-id\/\d{4}-\d{2}-\d{2}\/cvm\/tc3_request, SignedHeaders=content-type;host, Signature=[0-9a-f]{64}$/,
+        );
+        expect(headers['x-tc-timestamp']).toMatch(/^\d{10}$/);
+        expect(headers['content-type']).toBe('application/json');
+        expect(headers['x-tc-action']).toBe('DescribeInstances');
+
+        expect(JSON.stringify(calls)).not.toContain(KEY);
+        expect(JSON.stringify(engine.getConnectorDescriptors())).not.toContain(KEY);
+
+        await kernel.shutdown();
+    });
 });

@@ -305,6 +305,86 @@ ships next.
 
 ---
 
+## Addendum (2026-10-30): the platform identity actions an agent may reach
+
+> Status of this addendum: **ruled** (ruling of record `6523087116` on #27900, letter A+), executing
+> parameter 2 of ruling `6513869839` on #27681. The maintainer, verbatim:
+> 「所以我说评估标准对象的意思，就是允许放开的动作，是不是就应该把申明加上」.
+> It changes no rule of this ADR: it records how the platform's own `sys_*` identity actions apply the
+> opt-in, and the declarations that follow from it.
+
+The opt-in binds the platform's `sys_*` actions exactly as it binds an app's: an action reaches an
+agent only when it declares `ai: { exposed: true, description }`. The named actions on the twelve
+identity objects in `packages/platform-objects/src/identity/` were assessed once, as one set, into
+three buckets, and the declarations were written in the same change as this addendum.
+
+| Bucket | Test | What the action declares |
+|:--|:--|:--|
+| **H** human-only | it mints a credential or a session, changes who owns or who can sign in, or destroys an account or an organization | no `ai` block. ⛔ No `ai.exposed` on one of these without a maintainer ruling that names the action. |
+| **C** exposed, confirmed | a destructive or privilege-changing lifecycle act that is reversible or bounded | `ai: { exposed: true, description, requiresConfirmation: true }`. ⛔ The confirmation is never relaxed. |
+| **E** exposed | an additive or self-scoped act with no credential and no privilege escalation | `ai: { exposed: true, description }`; confirmation is the author's choice (none is declared today). |
+
+**H — human-only (20):** `sys_user.impersonate_user` · `sys_user.set_user_password` ·
+`sys_user.create_user` · `sys_user.delete_my_account` · `sys_user.change_my_password` ·
+`sys_user.change_my_email` · `sys_user.disable_two_factor` · `sys_user.generate_backup_codes` ·
+`sys_two_factor.disable_two_factor` · `sys_two_factor.regenerate_backup_codes` ·
+`sys_api_key.create_api_key` · `sys_api_key.restore_api_key` ·
+`sys_oauth_application.create_oauth_application` · `sys_oauth_application.rotate_client_secret` ·
+`sys_sso_provider.register_sso_provider` · `sys_sso_provider.register_saml_provider` ·
+`sys_sso_provider.verify_domain` · `sys_member.transfer_ownership` · `sys_member.update_member_role` ·
+`sys_organization.delete_organization`.
+
+**C — exposed, confirmed (17):** `sys_user.ban_user` · `sys_user.unban_user` · `sys_user.unlock_user` ·
+`sys_user.set_user_manager` · `sys_api_key.revoke_api_key` · `sys_session.revoke_session` ·
+`sys_session.revoke_my_other_sessions` · `sys_invitation.cancel_invitation` ·
+`sys_invitation.reject_invitation` · `sys_member.remove_member` · `sys_team_member.remove_team_member` ·
+`sys_team.remove_team` · `sys_oauth_application.disable_oauth_application` ·
+`sys_oauth_application.delete_oauth_application` · `sys_sso_provider.delete_sso_provider` ·
+`sys_organization.leave_organization` · `sys_account.unlink_account`.
+
+**E — exposed (21):** `sys_user.invite_user` · `sys_invitation.invite_user` ·
+`sys_organization.invite_user` · `sys_member.invite_user` · `sys_invitation.resend_invitation` ·
+`sys_invitation.accept_invitation` · `sys_member.add_member` · `sys_team_member.add_team_member` ·
+`sys_team.add_team_member` · `sys_team.create_team` · `sys_team.update_team` ·
+`sys_organization.create_organization` · `sys_organization.update_organization` ·
+`sys_organization.rename_organization` · `sys_organization.set_active_organization` ·
+`sys_oauth_application.enable_oauth_application` · `sys_user.enable_two_factor` ·
+`sys_two_factor.enable_two_factor` · `sys_user.update_my_profile` ·
+`sys_user.resend_verification_email` · `sys_sso_provider.request_domain_verification`.
+
+That is 58 actions and 38 `ai` blocks. The card's bucket headers read H 19 and E 22; its name lists,
+which the ruling adopted, hold 20 and 21, and the names are the record.
+
+**Not assessed.** `sys_invitation.copy_invitation_link` was added after the assessment (the link-only
+invitation delivery). It declares no `ai` block, which is this ADR's default, and it is not assessed
+until a maintainer ruling names it.
+
+**No automatic check.** The maintainer struck the pin test the assessment proposed:
+「自动检查 有必要吗？每一个元数据应用都有类似的问题，后续都要检查吗」. This table lives only here; a reviewer
+of `packages/platform-objects/src/identity/**` reads it. A customer app governs its own actions with
+the same key and the platform's defaults: the opt-in, the confirmation default, and the ADR-0126
+activation switch.
+
+**How the declarations reach an agent.** Over MCP, a `sys_*` action is listed and run only when the
+action itself declares `ai.exposed: true` — ADR-0066 D4's 2026-10-30 note records that mechanism
+(`packages/runtime/src/action-execution.ts#systemObjectActionExposureError`). As of this addendum the
+38 E and C actions above are the platform `sys_*` actions that declare it. Every gate after admission
+still runs: ADR-0066 D4's capability gate, the ADR-0126 §8 activation switch, the
+`ai.requiresConfirmation` gate (a C action is refused `428 ACTION_CONFIRMATION_REQUIRED`, nothing run,
+until the call carries `confirm: true`; `packages/runtime/src/action-execution.ts#actionConfirmationRefusal`),
+and the target's own authorization.
+
+**Declared is not yet runnable for an OAuth-connected agent.** All 38 are `type: 'api'` actions that
+forward to an identity route: 37 to the better-auth routes under `/api/v1/auth/`, and
+`sys_api_key.revoke_api_key` to the REST data route. Those targets accept a signed-in session, and the
+forward of an OAuth-connected agent's call is answered `401` there. Which credentials a forward
+target accepts is not decided here; it is the open decision on #28178. Until that lands, an
+OAuth-connected agent lists these actions, a C action is still refused `428` until the call is
+confirmed, and a call that reaches the identity route is answered `401` there, with nothing changed.
+A signed-in session's same call is served.
+
+---
+
 ## References
 
 * ADR-0003 — Package as first-class citizen (where actions live)

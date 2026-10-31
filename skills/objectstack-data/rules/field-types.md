@@ -6,8 +6,6 @@
 - [Common Field Configurations](#common-field-configurations)
 - [Incorrect vs Correct](#incorrect-vs-correct)
 
-Quick reference for choosing the right field type from the available options.
-
 ## Two spellings: `Field.*` factory or object literal
 
 The tables below give the **object-literal** spelling. Real apps overwhelmingly
@@ -144,16 +142,6 @@ Stored as JSON on the parent row — no separate table / FK:
 
 ## Common Field Configurations
 
-### Text with Max Length
-
-```typescript
-{
-  type: 'text',
-  maxLength: 255,
-  required: true,
-}
-```
-
 ### Email with Uniqueness
 
 ```typescript
@@ -174,7 +162,8 @@ Stored as JSON on the parent row — no separate table / FK:
   type: 'currency',
   currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' },  // ISO 4217
 }
-// per record: { currencyMode: 'record', currencyField: 'currency_code' }
+// per record: { currencyMode: 'record', currencyField: 'currency_code',
+//   homeAmount: { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' } }
 ```
 
 **Currency resolution.** The value is a bare number in every mode, never
@@ -183,9 +172,14 @@ Stored as JSON on the parent row — no separate table / FK:
 `$`); `'record'`, each record's code in the `text` field `currencyField`
 names (by convention `currency_code`), with `valueDomain: 'iso_4217_currency'`. A
 dataset measure's own `currency` wins over a `'dynamic'` field; over a `'fixed'` one
-it may only restate the code, else `DATASET_INVALID` (delete it), as is a derived
-measure over two different `'fixed'` codes (derive from one currency or drop an
-operand). A `'fixed'` code is not judged against the tenant's.
+it may only restate the code, else `DATASET_INVALID` (objectstack-ui →
+Dashboards). A `'fixed'` code is not judged against the tenant's. Switched a
+stored field to `'record'`? Backfill: `os migrate record-currency-codes`.
+
+`homeAmount` (`'record'` only, all three required): the engine stores the
+home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
+(`date`) rate, and that rate in `rateField` (`number`), both `readonly: true`.
+Cross-currency totals sum `field`.
 
 ### Select with Default
 
@@ -208,8 +202,6 @@ operand). A `'fixed'` code is not judged against the tenant's.
   type: 'lookup',
   reference: 'account',
   required: true,
-  // Structured, picker-honoured filter — the former string[] `referenceFilters`
-  // was removed (ADR-0049): it filtered nothing.
   lookupFilters: [
     { field: 'status', operator: 'eq', value: 'active' },
   ],
@@ -224,17 +216,6 @@ operand). A `'fixed'` code is not judged against the tenant's.
   reference: 'tag',
   multiple: true,
   max: 10,
-}
-```
-
-### Master-Detail with Cascade
-
-```typescript
-{
-  type: 'master_detail',
-  reference: 'invoice',
-  deleteBehavior: 'cascade',
-  required: true,
 }
 ```
 

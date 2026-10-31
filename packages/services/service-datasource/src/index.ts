@@ -61,6 +61,16 @@ export type {
   ConnectStatus,
 } from './datasource-connection-service.js';
 
+// The runtime-environment credential slot of a code-defined datasource
+// (#27687) — exported so a host that opts in stamps the switch by its name,
+// and an operator tool names the variable the way the connect path derives it.
+export {
+  DATASOURCE_ENV_CREDENTIALS_SWITCH,
+  datasourceEnvCredentialVar,
+  resolveDatasourceEnvCredentialsSwitch,
+} from './datasource-env-credential.js';
+export type { DatasourceEnvCredentialSource } from './datasource-env-credential.js';
+
 // The #8155 credential re-homing planner — exported so a host that drives the
 // migration through its own surface asks the same question the Setup action
 // asks, rather than re-deriving which stored keys are safe to re-home.
