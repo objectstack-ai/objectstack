@@ -535,7 +535,10 @@ a rotating refresh token is never spent twice.
   organization-scoped `manage_connector_connections` capability. Platform
   administrators and organization administrators hold it by default, so an
   organization's owners and admins can connect its vendors from the start;
-  grant it to anyone else through a permission set:
+  grant it to anyone else through a permission set. Connecting and revoking
+  is a human administrator's act, taken from a signed-in session: an agent
+  acting for them (an OAuth client) or an API key is refused by name, whatever
+  it holds.
 
   ```http
   POST /api/v1/automation/connectors/:name/connection     → { authorizationUrl, expiresAt }
