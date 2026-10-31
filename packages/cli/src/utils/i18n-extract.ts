@@ -87,13 +87,14 @@
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
  *   objects.<name>._actions.<action>.disabledReason
+ *   objects.<name>._actions.<action>.submitText      (only beside a non-empty `params`)
  *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
- *                          / .disabledReason
+ *                          / .disabledReason / .submitText (beside a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
@@ -746,6 +747,25 @@ function pushOptional(
   const evidence = authoredEvidence(value);
   if (evidence.inline !== undefined) pushEntry(out, path, evidence.inline, source, extra);
   else out.push({ path, ...evidence, source, ...extra });
+}
+
+/**
+ * Emit `submitText`, the param dialog's submit button label, under an action's
+ * translation root — OPTIONAL-not-derived like `description` (an action that
+ * names no verb shows the console's own "Confirm"), and only for an action with
+ * a non-empty `params`: that is the only action `translateAction` overlays the
+ * key onto, because no other action opens the dialog the button sits in. A
+ * paramless action gets no slot, so a translation filed there stays dangling.
+ */
+function pushActionSubmitText(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  source: ExpectedEntry['source'],
+  objectName: string | undefined,
+): void {
+  if (!Array.isArray(action?.params) || action.params.length === 0) return;
+  pushOptional(out, [...actionRoot, 'submitText'], action.submitText, source, { objectName });
 }
 
 /**
@@ -1506,6 +1526,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'confirmText'], actionCopy(action.confirmText), 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
         pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
+        pushActionSubmitText(out, aroot, action, 'action', objectName);
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1603,6 +1624,7 @@ export function collectExpectedEntries(
     // reason shows the console's own default sentence, so there is no gap to
     // seed for it.
     pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
+    pushActionSubmitText(out, root, action, kind, objectName);
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);

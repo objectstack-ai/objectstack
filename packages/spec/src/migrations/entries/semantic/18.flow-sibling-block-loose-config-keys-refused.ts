@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // conversion repairs — a connector node whose pair the lift cannot complete.
 export const entry: SemanticMigration = {
   id: 'flow-sibling-block-loose-config-keys-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'wait and connector_action flow-node settings written under config (eventType, timerDuration, duration, '
     + 'signalName, signal, timeoutMs on wait; connectorId, actionId, input on connector_action)',

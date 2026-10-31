@@ -11,7 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // and one whose dependency is a native addon is refused by the build.
 export const entry: SemanticMigration = {
   id: 'manifest-packaging-manifest-deps-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     "manifest.packaging: 'manifest-deps' (and packages[].manifest.packaging, and objectstack.plugin.json) — "
     + "the second packaging strategy left; PluginPackagingSchema is now 'bundled' alone",

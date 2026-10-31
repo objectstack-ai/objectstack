@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // retirement card: a single-posture deployment observes it too).
 export const entry: SemanticMigration = {
   id: 'meta-doors-organization-scope-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the organization the /meta doors of @objectstack/rest and of the runtime dispatcher thread '
     + 'into a metadata write (PUT, DELETE, publish, rollback) or read (item, list, layered, '

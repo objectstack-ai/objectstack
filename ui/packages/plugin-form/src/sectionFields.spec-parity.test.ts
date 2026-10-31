@@ -106,7 +106,14 @@ const TABLE: Record<string, (f: (def: Record<string, unknown>) => any) => void> 
   placeholder: (f) => expect(f({ placeholder: 'Type…' }).placeholder).toBe('Type…'),
   helpText: (f) => expect(f({ helpText: 'Hint' }).description).toBe('Hint'),
   readonly: (f) => expect(f({ readonly: true }).disabled).toBe(true),
-  immutable: (f) => expect(f({ immutable: true }).immutable).toBe(true),
+  immutable: (f) => {
+    // Locked once the record exists: an edit form draws it disabled, a create
+    // form leaves it editable, and no `immutable` key is carried (objectstack#25923).
+    const edit = normalizeSectionField({ field: 'ghost', immutable: true }, { ...ctx, mode: 'edit', recordId: 'r1' }) as any;
+    expect(edit.disabled).toBe(true);
+    expect(edit.immutable).toBeUndefined();
+    expect(f({ immutable: true }).disabled).toBeFalsy();
+  },
   required: (f) => expect(f({ required: true }).required).toBe(true),
   hidden: (f) => expect(f({ hidden: true }).hidden).toBe(true),
   colSpan: (f) => expect(f({ colSpan: 2 }).colSpan).toBe(2),

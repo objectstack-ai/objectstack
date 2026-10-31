@@ -20,6 +20,7 @@ const ko = {
       manage_org_users: "조직 사용자 관리",
       manage_metadata: "메타데이터 관리",
       manage_mailboxes: "메일함 관리",
+      manage_connector_connections: "커넥터 연결 관리",
       manage_platform_settings: "플랫폼 설정 관리",
       setup_access: "설정 접근",
       setup_write: "설정 쓰기",
@@ -483,6 +484,7 @@ const ko = {
       undonePrefix: "되돌림 — ",
       succeeded: "성공 {{count}} / {{total}}",
       resultFailed: " · 실패 {{count}}",
+      succeededRecords: "성공한 레코드",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
       cancel: "취소",
@@ -1342,9 +1344,12 @@ const ko = {
     concurrentUpdateRecordLabel: "이 레코드",
     openInNewTab: "새 탭에서 열기",
     activity: "활동",
-    timeline: "타임라인",
-    timelineFolded: "활동",
-    relatedColumn: "관련 열",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "활동",
+    relatedColumn: "오른쪽 열",
+    timelineComposer: "메모 작성… @로 멘션",
     // objectstack#27055 — the record page v3.
     emptySections: "빈 섹션 {{count}}개",
     emptySections_one: "빈 섹션 {{count}}개",
@@ -2151,6 +2156,8 @@ const ko = {
       popupBlockedDescription: "브라우저가 새 탭 열기를 차단했습니다.",
       popupBlockedAction: "새 탭에서 열기",
       noRecordId: "이 작업은 단일 레코드에서 실행되지만 사용할 수 있는 레코드 ID가 없습니다.",
+      fillRequiredThenRetry: "{{fields}}을(를) 입력한 다음 \"{{action}}\"을(를) 다시 실행하세요.",
+      fillRequiredFirst: "먼저 {{fields}}을(를) 입력하세요.",
     },
     shortcuts: {
       title: "키보드 단축키",
@@ -2167,8 +2174,7 @@ const ko = {
       newChat: "새 채팅",
       toggleChatsList: "채팅 목록 전환",
       goHome: "홈으로 돌아가기",
-      toggleTimeline: "타임라인 표시 / 숨기기",
-      toggleRelated: "관련 표시 / 숨기기",
+      toggleRelated: "오른쪽 열 표시 / 숨기기",
     },
     reportIndex: {
       title: "보고서",
@@ -2686,9 +2692,11 @@ const ko = {
       signInText: "로그인",
       socialButton: "{provider} 계정으로 가입",
       orText: "또는 이메일로 계속",
+      captchaRetry: "다시 시도",
       errors: {
         userExists: "해당 이메일로 이미 계정이 존재합니다. 로그인해 보세요.",
         selfRegistrationClosed: "이 시스템에서는 직접 가입을 받지 않습니다. 관리자에게 초대를 요청하세요.",
+        captchaFailed: "보안 확인이 완료되지 않았습니다. 다시 시도하세요.",
         emailDomainNotAllowed: "이 이메일의 도메인으로는 여기에서 가입할 수 없습니다. 조직 이메일을 사용하거나 관리자에게 초대를 요청하세요.",
         invitationSentTo: "이 초대는 {{email}}(으)로 전송되었습니다. 초대를 수락하려면 해당 주소로 가입하세요.",
         invitationAddressOnly: "이 초대는 초대를 받은 주소로만 수락할 수 있습니다. 해당 주소로 가입하세요.",
@@ -3301,6 +3309,7 @@ const ko = {
   report: {
     total: "합계",
     totals: "합계",
+    subtotal: "소계",
     loading: "로딩 중…",
     forbiddenMessage: "이 보고서의 데이터를 볼 수 있는 권한이 없습니다.",
     dateRange: {
@@ -4236,6 +4245,7 @@ const ko = {
     approveOneTitle: '"{{title}}"을(를) 승인할까요?',
     approveOneBody: '내 이름으로 이 요청을 승인합니다. 의견이나 첨부 파일을 추가하려면 요청을 열어 처리하세요.',
     flowOrigin: '플로우 시작',
+    submittedByYou: '내가 제출함',
     sortBy: '정렬',
     sortRecent: '최신순',
     sortOldest: '오래된순',
@@ -4435,6 +4445,8 @@ const ko = {
       confirmNoteSeparate_one: '게시하면 대기 중인 초안 {{count}}개가 하나씩 따로 게시됩니다. 게시에 실패한 초안은 대기 상태로 남고, 나머지는 그대로 게시됩니다.',
       confirmNoteSeparate_other: '게시하면 대기 중인 초안 {{count}}개가 하나씩 따로 게시됩니다. 게시에 실패한 초안은 대기 상태로 남고, 나머지는 그대로 게시됩니다.',
       publishConfirm: '모두 게시',
+      noteLabel: '변경 메모(선택)',
+      notePlaceholder: '무엇을 왜 바꿨는지 적어 주세요. 각 항목의 기록에 표시됩니다.',
       summaryItems: '{{count}}개 항목',
       summaryItems_one: '{{count}}개 항목',
       summaryItems_other: '{{count}}개 항목',

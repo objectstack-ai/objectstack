@@ -26,6 +26,8 @@
  *   combining a record-mode amount with another currency or two different
  *   `fixed` codes. The `fixed` arms reach boot registration, `queryDataset`
  *   and the draft preview alike (ruling 6486427200 on #8345).
+ * - A `count` reads no amount, over an amount field or not: guard 2 does not
+ *   compare it and its column carries no currency, in any arm of the chain.
  *
  * The SQLite cell runs everywhere; the strategies are the axis here, not the
  * dialect (the door stands ahead of both and reads nothing).
@@ -347,6 +349,53 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
     });
   });
 
+  // A `count` over an amount reads no amount, so its column is no money in any
+  // arm of the chain: neither the field's `fixed` code nor the tenant's.
+  describe('a count over an amount field carries no currency', () => {
+    const COUNTS = DatasetSchema.parse({
+      name: 'os28194_count_currency',
+      label: 'Count currency',
+      object: OBJECT,
+      dimensions: [],
+      measures: [
+        { name: 'priced_eur', aggregate: 'count', field: 'amt_eur' },
+        { name: 'priced_tenant', aggregate: 'count', field: 'amt_tenant' },
+        // Controls: an amount aggregate over the same fields keeps its currency.
+        { name: 'eur', aggregate: 'sum', field: 'amt_eur' },
+        { name: 'tenant', aggregate: 'sum', field: 'amt_tenant' },
+      ],
+    });
+    const expectColumns = (result: AnalyticsResult) => {
+      expect(column(result, 'priced_eur')?.currency).toBeUndefined();
+      expect(column(result, 'priced_tenant')?.currency).toBeUndefined();
+      expect(column(result, 'eur')?.currency).toBe('EUR');
+      expect(column(result, 'tenant')?.currency).toBe('CNY');
+    };
+
+    for (const face of FACES) {
+      it(`${face} strategy: a count over a fixed or a tenant-currency amount is a plain number; a sum keeps the code`, async () => {
+        const result = await services[face]!.queryDataset(
+          COUNTS,
+          { measures: ['priced_eur', 'priced_tenant', 'eur', 'tenant'] },
+          CTX,
+        );
+        expectColumns(result);
+        const row = (result.rows as Array<Record<string, unknown>>)[0];
+        expect(Number(row?.priced_eur)).toBe(3);
+      });
+    }
+
+    it('the draft-preview path labels the same columns', async () => {
+      const result = await services.objectql!.queryDataset(
+        COUNTS,
+        { measures: ['priced_eur', 'priced_tenant', 'eur', 'tenant'] },
+        CTX,
+        { previewDrafts: true },
+      );
+      expectColumns(result);
+    });
+  });
+
   describe('compile-time guards on measure currencies', () => {
     const datasetWith = (measures: unknown[]) =>
       DatasetSchema.parse({
@@ -504,6 +553,38 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
           { name: 'total_share', derived: { op: 'ratio', of: ['total', 'total'] } },
         ]),
       ).toBeUndefined();
+    });
+
+    // A `count` counts rows, not money (ruling 6486427200 on #8345): only an
+    // amount aggregate resolves a currency, so a count is no operand guard 2
+    // compares, whatever field it names or currency it declares.
+    const counts = [
+      { name: 'priced_invoices', aggregate: 'count', field: 'amount' },
+      { name: 'priced_eur', aggregate: 'count', field: 'amt_eur' },
+      { name: 'invoices_usd', aggregate: 'count', currency: 'USD' },
+    ];
+    for (const op of ['ratio', 'sum', 'difference'] as const) {
+      it(`accepted: a derived ${op} of an amount and a count over an amount field, or a count declaring a currency`, () => {
+        expect(
+          compileRefusal([
+            ...base,
+            ...counts,
+            { name: 'usd_by_priced', derived: { op, of: ['usd', 'priced_invoices'] } },
+            { name: 'usd_by_priced_eur', derived: { op, of: ['usd', 'priced_eur'] } },
+            { name: 'total_by_priced_eur', derived: { op, of: ['total', 'priced_eur'] } },
+            { name: 'total_by_invoices_usd', derived: { op, of: ['total', 'invoices_usd'] } },
+          ])?.message,
+        ).toBeUndefined();
+      });
+    }
+
+    it('CONTROL: beside those counts, two fixed codes and a record amount against a fixed one stay refused', () => {
+      expectRefused([...base, ...counts, { name: 'mixed', derived: { op: 'sum', of: ['usd', 'eur'] } }], 'mixed');
+      expectRefused([...base, ...counts, { name: 'mixed', derived: { op: 'ratio', of: ['total', 'usd'] } }], 'mixed');
+    });
+
+    it("CONTROL: a count's measure currency contradicting its fixed field is still refused (guard 1 reads the field)", () => {
+      expectRefused([{ name: 'priced_eur_as_usd', aggregate: 'count', field: 'amt_eur', currency: 'USD' }], 'priced_eur_as_usd');
     });
 
     // The request door and the draft preview compile through the same

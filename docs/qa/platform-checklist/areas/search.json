@@ -150,7 +150,7 @@
       "title": "$searchFields narrows and can never widen; a name outside the searchable set is 400 INVALID_FIELD at the ingress, never silently dropped",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -164,7 +164,8 @@
         "POST { search: 'retail', searchFields: ['no_such_field'] } and capture the refusal",
         "POST { search: 'retail', searchFields: ['annual_revenue'] } (a REAL field outside the searchable set — numbers are not searchable-textual) and capture the refusal",
         "POST { search: 'zhangwei', searchFields: ['__search'] } against showcase_contact — the hidden companion column must be refusable/invisible to overrides, not a client-nameable widening lever",
-        "GET the OData spelling too: /api/v1/data/showcase_account?$search=retail&$searchFields=name — the protocol layer normalizes both spellings to the same executor"
+        "GET the OData spelling too: /api/v1/data/showcase_account?$search=retail&$searchFields=name — the protocol layer normalizes both spellings to the same executor",
+        "empty override: POST { search: 'retail', searchFields: [] }, then { search: 'retail', searchFields: [''] }, then GET /api/v1/data/showcase_account?$search=retail&$searchFields= (blank) and ?$search=retail&$searchFields=, (comma only). Capture each status and body, and whether any rows came back"
       ],
       "acceptance": [
         {
@@ -190,6 +191,12 @@
           "oracle": "api",
           "verify": "the GET spelling reproduces the POST results and refusals. No pin drives the GET $search / $searchFields spelling: score it from the live pair",
           "evidence": "paired responses"
+        },
+        {
+          "clause": "an override that names NO field is refused, never read as absent: a blank or comma-only $searchFields, or an empty searchFields list, answers 400 and the search never runs over the default set; a list holding a blank member (['']) names a field nobody declares, 400 INVALID_FIELD. Only an ABSENT override scans the default set",
+          "oracle": "api",
+          "verify": "GET $searchFields= and $searchFields=, each answer 400 VALIDATION_ERROR naming the parameter (\"Query parameter '$searchFields' names no field\": packages/metadata-protocol/src/protocol-query-validation.ts#assertSearchFieldsAreSearchable, #27484). POST query with searchFields: [] answers 400 VALIDATION_FAILED at the body schema, naming query.searchFields (FindDataRequestSchema, #27683). POST searchFields: [''] answers 400 INVALID_FIELD. No answer is 200 with the unnarrowed rows. The spec helper resolveSearchFields (packages/spec/src/data/search-fields.ts) still reads an empty list as no narrowing, for in-process callers that pass no ingress. It is not this door's answer: every Data API door refuses the empty override before the engine reads it",
+          "evidence": "the four refusal bodies"
         }
       ],
       "negative": [
@@ -197,7 +204,7 @@
         "silent dropping of the override (200, results identical to the unrestricted search) is equally a FAIL — refusal must be loud"
       ],
       "traps": ["dispatcher-vs-hono-route"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts, for acceptance[0] only ('$searchFields narrows: \"retail\" restricted to name matches nothing'; the ['industry'] half rides in its multi-field case). It drives only POST /data/showcase_account/query with bare search / searchFields and carries no $searchFields refusal case, so acceptance[1], [2] and [3] and both negatives have no end-to-end pin and are the run's. packages/rest/src/list-view-grouping-query-door.test.ts refuses a grouped query's unscannable searchFields with 400 INVALID_FIELD at the route-handler level; it stops above the live showcase boot and corroborates acceptance[1] without scoring it" },
+      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts, for acceptance[0] only ('$searchFields narrows: \"retail\" restricted to name matches nothing'; the ['industry'] half rides in its multi-field case). It drives only POST /data/showcase_account/query with bare search / searchFields and carries no $searchFields refusal case, so acceptance[1], [2], [3] and [4] and both negatives have no end-to-end pin and are the run's. packages/rest/src/list-view-grouping-query-door.test.ts refuses a grouped query's unscannable searchFields with 400 INVALID_FIELD at the route-handler level; it stops above the live showcase boot and corroborates acceptance[1] without scoring it. packages/rest/src/data-empty-search-fields-door.test.ts holds acceptance[4]'s refusals at the same level, over a real SqlDriver: GET list, POST query and export, each refusal ahead of any read. It corroborates acceptance[4] without scoring it" },
       "source": [
         "packages/qa/dogfood/test/search-conformance.ledger.ts (row search-fields-override: intersection + ingress gate, #4254)",
         "packages/metadata-protocol/src/protocol.ts#assertSearchFieldsAreSearchable (assertSearchFieldsAreSearchable — 400 INVALID_FIELD; $-spelling normalization)",
@@ -205,7 +212,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item from the conformance ledger's override row and the #4254 ingress-gate source, including the companion-invisibility clause from search-filter.ts", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-26", "change": "automated.ref scoped to acceptance[0] and acceptance[3].verify marks the GET spelling unpinned (checklist-accuracy findings a1/n0/n1 and a3 of QA run #25815, release-18.2.0-tier1 at 6679644a; wave anchor #25807). The bare ref claimed the whole item, but showcase-search.dogfood.test.ts has no $searchFields refusal case and drives only the POST spelling; the route-handler INVALID_FIELD evidence sits in packages/rest tests outside the ref. No clause is loosened", "ref": "#25847" }
+        { "revision": 2, "date": "2026-10-26", "change": "automated.ref scoped to acceptance[0] and acceptance[3].verify marks the GET spelling unpinned (checklist-accuracy findings a1/n0/n1 and a3 of QA run #25815, release-18.2.0-tier1 at 6679644a; wave anchor #25807). The bare ref claimed the whole item, but showcase-search.dogfood.test.ts has no $searchFields refusal case and drives only the POST spelling; the route-handler INVALID_FIELD evidence sits in packages/rest tests outside the ref. No clause is loosened", "ref": "#25847" },
+        { "revision": 3, "date": "2026-10-31", "change": "No clause decided an EMPTY $searchFields override, as QA run #27438 recorded twice (census rows 162 and 170). The finding read that [] is treated as absent (unnarrowed 200) while [''] is 400, per spec resolveSearchFields. At this base the doors no longer read [] as absent. #27484 refuses an override naming no field at the protocol door: 400 VALIDATION_ERROR \"names no field\" (assertSearchFieldsAreSearchable). #27683 refuses it at the POST body schema: 400 VALIDATION_FAILED, query.searchFields. [''] reaches the name lookup and answers 400 INVALID_FIELD. resolveSearchFields' tolerance now serves only in-process callers that pass no ingress. So the new clause, acceptance[4] with its step, states today's refusal, not the finding's absent-reading. automated.ref names data-empty-search-fields-door.test.ts as corroboration. This adds a clause. Nothing was loosened. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); findings parked in anchor comment 6494110310", "ref": "#27438" }
       ]
     },
     {
@@ -482,7 +490,7 @@
       "title": "The console global search — ⌘K palette, header Search button, and /search page — drives ONE path (GET /api/v1/search): hits group under object headings, RLS hides invisible rows, Enter opens the record, empty input shows recents",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -507,7 +515,7 @@
         "with the input EMPTY (after visiting a couple of records first to populate recents), confirm the palette shows the 'Recently viewed' group and fires NO search request",
         "type a seeded CJK/pinyin query (e.g. 'zhangwei', '张伟', or 'huaning' — ⛔ not the single character '张': the palette sends no request below its minLength of 2, so a one-character query never reaches the wire and the palette reads 'No results found.' — objectui react useRecordSearch minLength = 2, which CommandPalette.tsx leaves at its default) and capture the network request — confirm it is GET /api/v1/search?q=<term> (searchAll), and capture the returned hits",
         "screenshot the settled palette and confirm record hits are grouped under per-object headings (issue #3371); read the DOM only after the screenshot",
-        "press Enter on the top hit (ref-targeted select, not a coordinate click) and confirm navigation to /apps/<app>/<object>/record/<id> and the record page renders",
+        "press Enter on the top hit (ref-targeted select, not a coordinate click) and confirm navigation to /apps/<app>/<object>/record/<id> — <app> is the app's ADR-0048 address, its package id (com.example.showcase on the showcase), never its name: a route reached through the name alias is rewritten to the package id (ui/packages/app-shell/src/utils/appRoute.ts canonicalAppPathname), and the name stays the address only for a second app in a package that ships several; and the record page renders",
         "reach the SearchResultsPage at /apps/<app>/search?q=<term> by URL and repeat the query there; confirm record hits grouped by object plus nav matches; also run a no-hit query and confirm the designed empty state. The palette's 'Open full search' item is no shortcut for this: the palette offers it only for an EMPTY query or one matching the words of its value 'search all results full page' (e.g. type 'full'), never beside a record query, and it navigates to <baseUrl>/search without carrying the typed term (objectui CommandPalette.tsx FULL_SEARCH_VALUE, objectui#11812)",
         "RLS parity: as the restricted member, run GET /api/v1/search?q=INV-1003 (the row their RLS hides) and the same in the palette; then as admin run the identical query — capture both persona responses",
         "capture the browser console for the whole session"
@@ -532,7 +540,7 @@
           "evidence": "the search response + the grouped-palette screenshot"
         },
         {
-          "clause": "Enter navigates to the record: selecting the top hit routes to /apps/<app>/<object>/record/<id> and the record page renders — the palette is a navigator, not a dead list",
+          "clause": "Enter navigates to the record: selecting the top hit routes to /apps/<app>/<object>/record/<id> — <app> is the app's ADR-0048 address, its package id (com.example.showcase on the showcase), never its name: a route reached through the name alias is rewritten to the package id (ui/packages/app-shell/src/utils/appRoute.ts canonicalAppPathname), and the name stays the address only for a second app in a package that ships several; and the record page renders — the palette is a navigator, not a dead list",
           "oracle": "screenshot",
           "verify": "post-Enter the record page for the selected hit is on screen at the expected route (ref-targeted select rules out the automation-input trap)",
           "evidence": "the record-page screenshot + the resolved URL"
@@ -587,7 +595,8 @@
         { "revision": 2, "date": "2026-08-11", "change": "two text corrections from run #7629, no clause substance changed. (1) The RLS-parity fixture carried the same stale invoice count as search.rls-both-personas — the seed ships 12 rows INV-1001..INV-1012, not 8; INV-1003's owner (linus) is now named so the invisible-row premise is checkable in place. (2) knownGaps records that this path inherits the declared-case-insensitive contract and the #7641 executor gap, since searchAll also emits `$contains` — without it a run scores a case-driven miss as a palette defect. Direction is per the #4706 Q2 = A ruling: case-insensitive is the declared truth, so the checklist reconciles toward the declaration and #7641 owns the product side", "ref": "#7647" },
         { "revision": 3, "date": "2026-08-12", "change": "the executor gap this item's third knownGap recorded is CLOSED, so the gap flips to past tense. #7641 found searchAll to be a SECOND producer of search clauses with the same declared≠enforced defect — metadata-protocol/src/protocol.ts built its AND-of-OR from `$contains` under a comment asserting `$contains` was the case-insensitive operator — and moved it onto `$icontains` in the same PR as search-filter.ts. No clause substance changed; a case-varying miss on a current build is now a real palette/UI defect rather than an expected executor FAIL, which is the scoring instruction this revision corrects", "ref": "#7641" },
         { "revision": 4, "date": "2026-10-13", "change": "fixtures.requires[2] names the recipe's owner rule (persona recipe gap, #23166 A5), and steps[5] reaches /search by URL (stale step, #23166 A6); both parked on #23121, carried by #23169. A member-created showcase_invoice is invisible to its creator unless `owner` is set to the member's email, so the area recipe qa-contributor-bound-member's step 5 now carries it, with a recipe knownGap for the same rule on showcase_task (assignee). The palette's Open Full Search Page is offered only for an empty query or one matching 'search all results full page' (CommandPalette.tsx at objectui 1fb1ced36243, still this repo's .objectui-sha), and it drops the query, so the step reaches the page by URL. QA run #23166 passed both clauses that way", "ref": "#23169" },
-        { "revision": 5, "date": "2026-10-19", "change": "steps[2], fixtures.requires[0], acceptance[0].clause and acceptance[2].clause corrected from QA run #24574 (18.0 sweep, 5b14b7f3; carried by #24593 at ba4afcc2), checklist-accuracy findings re-read at the console pin .objectui-sha 4016370af3c9 and unchanged at objectui main 282b138c07. (1) The palette's minLength is 2 (objectui react useRecordSearch, left at its default by CommandPalette.tsx), so the suggested query '张' never reaches the wire and reads 'No results found.' — the CJK example is now '张伟'. (2) The accelerator toggles by source design (CommandPaletteProvider.tsx: only the button, links, deep-links and programmatic callers share the idempotent openCommandPalette()), so 'open when already open is a no-op' now covers the non-keyboard affordances and a repeated ⌘K closing the palette is not a FAIL. Wave anchor #24579 §3", "ref": "#24671" }
+        { "revision": 5, "date": "2026-10-19", "change": "steps[2], fixtures.requires[0], acceptance[0].clause and acceptance[2].clause corrected from QA run #24574 (18.0 sweep, 5b14b7f3; carried by #24593 at ba4afcc2), checklist-accuracy findings re-read at the console pin .objectui-sha 4016370af3c9 and unchanged at objectui main 282b138c07. (1) The palette's minLength is 2 (objectui react useRecordSearch, left at its default by CommandPalette.tsx), so the suggested query '张' never reaches the wire and reads 'No results found.' — the CJK example is now '张伟'. (2) The accelerator toggles by source design (CommandPaletteProvider.tsx: only the button, links, deep-links and programmatic callers share the idempotent openCommandPalette()), so 'open when already open is a no-op' now covers the non-keyboard affordances and a repeated ⌘K closing the palette is not a FAIL. Wave anchor #24579 §3", "ref": "#24671" },
+        { "revision": 6, "date": "2026-10-31", "change": "acceptance[3] and steps[4] named the route /apps/<app>/<object>/record/<id> without saying what <app> is. QA run #27441 found the app segment canonicalized to the package id. Source agrees: ADR-0048 keys /apps/<segment> on the package id, and canonicalAppPathname (ui/packages/app-shell/src/utils/appRoute.ts) rewrites a name alias to it unless a package ships several apps. Both now say <app> is the package id (com.example.showcase), which is more precise than before. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726", "ref": "#27441" }
       ]
     },
     {
@@ -695,7 +704,7 @@
       "title": "Global search (GET /api/v1/search) skips what the caller cannot read instead of failing: an unreadable object is never queried, named or counted; a readable object is searched only on fields the caller may query; row scope still narrows every searched object",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -707,7 +716,7 @@
         "requires": [
           "an object W the member is refused at its own door (GET /api/v1/data/W answers 403 for the member) that holds a row matching the run's term T. Pick W and T on the live boot as admin; ⛔ never assume them. A platform sys_* object is the likely W: an unscoped search sweeps every registered object, the platform's own included",
           "seeded invoices INV-1001..INV-1012 with INV-1003 invisible to the member, plus one invoice the member creates (as in search.rls-both-personas)",
-          "a searchable field the member may NOT query that holds a value found in no field the member may query. On stock this is one of sys_user's admin-only search columns (role, ban_reason, last_login_ip, measured by #21879 on a fresh boot). On a fresh boot the usable stock V is the `role` value `user`: it is held by sign-up and seed-admin users only and no member-readable column contains it, while `last_login_ip` is null on every row (a direct sign-in sends no forwarded header, and the column is stamped from the trusted proxy's forwarded header — sys-user.object.ts) and `ban_reason` is null too (QA run #24593). Confirm the premise as admin before relying on it"
+          "a searchable field the member may NOT query that holds a value found in no field the member may query. On stock this is one of sys_user's admin-only search columns (role, ban_reason, last_login_ip, measured by #21879 on a fresh boot). On a fresh boot the usable stock V is the `role` value `user`: it is held by sign-up and seed-admin users only and no member-readable column contains it, while `ban_reason` is null on every row (QA run #24593). `last_login_ip` is no longer null: a direct sign-in stamps it with the transport's peer address, because the client-address rule believes a forwarded header only under server.trustProxy and otherwise reads the peer (packages/plugins/plugin-auth/src/client-address.ts). So on a local boot the admin and a signed-up member both read '127.0.0.1' there (QA run #27438). `role` = `user` stays the V this item uses. Confirm the premise as admin before relying on it"
         ],
         "provisioning": {
           "use": "qa-contributor-bound-member",
@@ -808,6 +817,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says what the dogfood pin runs on (checklist-accuracy finding a0-a2 of QA run #25815, release-18.2.0-tier1 at 6679644a; wave anchor #25807): it plants skipsearch_open / skipsearch_walled rather than reading the showcase objects the steps name, and its unscoped case does not assert totalObjects. The clauses are unchanged",
           "ref": "#25847"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[2] said last_login_ip is null on every row, because a direct sign-in sends no forwarded header. QA run #27438 read '127.0.0.1' on the admin and on a signed-up member of a fresh boot. Source agrees: the client-address rule (plugin-auth client-address.ts) falls back to the transport's peer address when server.trustProxy is not declared, and the D7 login audit stamps that address. The fixture now says so and keeps role = user as the item's V, which the run confirmed. No clause changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6494110310",
+          "ref": "#27438"
         }
       ]
     }

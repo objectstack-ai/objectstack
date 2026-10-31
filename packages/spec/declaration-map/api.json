@@ -57,6 +57,8 @@
     "ApiTestRequestSchema": "api/ApiTestRequest",
     "AppDefinitionResponse": "api/AppDefinitionResponse",
     "AppDefinitionResponseSchema": "api/AppDefinitionResponse",
+    "AppMetadataBundleResponse": "api/AppMetadataBundleResponse",
+    "AppMetadataBundleResponseSchema": "api/AppMetadataBundleResponse",
     "ApproveAiPendingActionResponse": "api/ApproveAiPendingActionResponse",
     "ApproveAiPendingActionResponseSchema": "api/ApproveAiPendingActionResponse",
     "AssembledInstalledPackage": "api/AssembledInstalledPackage",

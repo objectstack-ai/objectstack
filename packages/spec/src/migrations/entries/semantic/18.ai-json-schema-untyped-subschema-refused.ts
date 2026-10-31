@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // nothing that worked stops working; supplying a `type` is a judgment about the
 // author's intent (adding one also narrows what the schema accepts), not a
 // lossless rewrite; and the authored census found nothing to respell.
-// No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-// span already, and a nested backtick would close it.
 export const entry: SemanticMigration = {
   id: 'ai-json-schema-untyped-subschema-refused',
   surface: 'action.ai.outputSchema (stack actions and object-nested actions) and '

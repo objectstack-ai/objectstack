@@ -60,6 +60,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
     actionParamText: (_o: any, _a: any, _p: any, _attr: any, fallback: any) => fallback,
     actionParamOptionLabel: (_o: any, _a: any, _p: any, _v: any, fallback: any) => fallback,
     actionDescription: (_o: any, _a: any, fallback: any) => bundleDescription ?? fallback,
+    actionSubmitText: (_o: any, _a: any, fallback: any) => fallback,
   }),
   useObjectTranslation: () => ({
     t: (key: string, options?: any) =>

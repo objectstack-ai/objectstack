@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // move the values onto the named action.
 export const entry: SemanticMigration = {
   id: 'ui-page-action-row-patch-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'page.component.action:button.patch / page.component.action:icon.patch / '
     + 'page.component.action:group.actions[].patch / page.component.action:menu.actions[].patch — '
     + 'the static field values a page action row declared for its operation: update',

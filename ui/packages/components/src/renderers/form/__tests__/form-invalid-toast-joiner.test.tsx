@@ -34,7 +34,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider } from '@object-ui/i18n';
 import { toast } from '../../../ui/sonner';
@@ -87,11 +87,16 @@ function renderFormIn(language: string) {
   );
 }
 
+/**
+ * The refusal as the form says it: its banner, the one message a refused
+ * submit raises (objectstack-ai/objectstack#27520 retired the toast copy).
+ */
 async function toastTextAfterSubmit(language: string): Promise<string> {
   renderFormIn(language);
   fireEvent.click(screen.getByRole('button', { name: /create/i }));
-  await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
-  return String(toastErrorSpy.mock.calls[0][0]);
+  const banner = await screen.findByRole('alert');
+  expect(toastErrorSpy).not.toHaveBeenCalled();
+  return banner.textContent ?? '';
 }
 
 describe('form renderer — refused-submit field list joiner (objectstack#5407)', () => {

@@ -124,6 +124,10 @@ export const ACTION_DEF_KEYS = [
   // of an action), forwarded by all four action renderers and read by the
   // param-collection dialog, but never declared on `ActionDef`.
   'description',
+  // The param dialog's submit-button label (`ActionSchema.submitText`), derived
+  // from the spec and drawn by the console's param dialog. Display only: the
+  // runner never reads it.
+  'submitText',
   'confirmText',
   'confirm',
   'condition',
@@ -325,8 +329,8 @@ export const SPEC_ACTION_KEYS = [
   'requiresMembershipReach',
   'resultDialog',
   // Added to `ActionSchema` by objectstack#27944: the param dialog's submit
-  // button label. Listed for this array's contract alone, like `description`
-  // above; the dialog reading it is the console's own follow-up.
+  // button label. `ActionDef` declares it (derived), and the console's param
+  // dialog draws it.
   'submitText',
   'successMessage',
   'target',

@@ -202,6 +202,10 @@ interface CensusEntry {
  * [#27627] 5 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0 + 0 + 0 + 1:
  * the record page (`record-page-routes.ts`) builds one `query:` slot, the
  * related list read, so the new module's floor is 1.
+ *
+ * [#27627] 5, unchanged: the app metadata bundle (`meta-app-bundle-routes.ts`)
+ * reads metadata only and builds no `query:` slot, so the new module's floor
+ * is 0.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -223,6 +227,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'meta-item-history-routes.ts': 0,
     'meta-object-state-routes.ts': 0,
     'record-page-routes.ts': 1,
+    'meta-app-bundle-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -432,6 +437,7 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // state-machine read nor the published read carries a slot).
         // [#26433] The list's length is no longer pinned: the list is the authority.
         // [#27627] The sum 4 → 5: the record page's related list read.
+        // [#27627] The sum unchanged by the app metadata bundle (no slot).
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

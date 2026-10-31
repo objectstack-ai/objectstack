@@ -290,6 +290,8 @@ const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSch
             // / 1 mobile — changed the dialog's title (objectui#4192).
             label: action.label,
             description: (action as any).description,
+            // The param dialog's submit-button verb, read by the same dialog.
+            submitText: action.submitText,
             target: action.target,
             openIn: (action as any).openIn,
             endpoint: action.endpoint,

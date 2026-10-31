@@ -198,6 +198,35 @@ describe('[#27908] the action_invocation row tells an agent\'s call from a click
     });
   });
 
+  it('[#28281] an api forward\'s two rows name each other: the outer row its target, the inner row the forward', async () => {
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation({
+      context: { userId: 'usr_1', tenantId: 'org_1', surface: 'rest' },
+      actionName: 'nudge_case', objectName: 'crm_case', recordId: 'case_1', branch: 'script', outcome: 'succeeded',
+      forwardedFrom: 'crm_case/forward_case',
+    });
+    await writer.recordActionInvocation({
+      ...AGENT, actionName: 'forward_case', branch: 'api', target: '/api/v1/actions/crm_case/nudge_case',
+    });
+
+    const [inner, outer] = (await ledgerRows(engine)).map((r) => JSON.parse(r.metadata));
+    expect(inner).toEqual({
+      surface: 'rest', action_name: 'nudge_case', branch: 'script', outcome: 'succeeded',
+      forwarded_from: 'crm_case/forward_case',
+    });
+    expect(outer).toEqual({
+      surface: 'mcp', action_name: 'forward_case', branch: 'api', outcome: 'succeeded',
+      target: '/api/v1/actions/crm_case/nudge_case', performed_by: 'cli_agent', on_behalf_of: 'usr_1',
+    });
+  });
+
+  it('[#28281] a target is recorded only on the api branch', () => {
+    const row = buildActionInvocationAuditRow({ ...CLICK, branch: 'flow', target: 'escalate_flow' });
+    expect('target' in JSON.parse(String(row.metadata))).toBe(false);
+  });
+
   it('an object-less action names no object and no record', () => {
     const row = buildActionInvocationAuditRow({ ...CLICK, objectName: undefined, recordId: 'r1' });
     expect(row.object_name).toBeNull();

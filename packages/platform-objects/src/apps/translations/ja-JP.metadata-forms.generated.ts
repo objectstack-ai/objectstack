@@ -1807,6 +1807,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "説明",
         helpText: "このアクションのパラメーターダイアログのタイトル下に表示される説明文。パラメーターを収集するアクションでは、確認の問いを confirmText ではなくここに書きます（ダイアログは 2 つではなく 1 つ）。AI エージェントが読む ai.description とは別物です。"
       },
+      submitText: {
+        label: "送信ボタンのラベル",
+        helpText: "このアクションのパラメーターダイアログにある送信ボタンのラベル。ボタンが行う操作を表す動詞です（例：「送信」「通話を記録」）。パラメーターを収集するアクションでのみ使用します。空のままにすると「確認」と表示されます。"
+      },
       confirmText: {
         label: "確認文",
         helpText: "確認メッセージ（例: \"Are you sure?\"）"

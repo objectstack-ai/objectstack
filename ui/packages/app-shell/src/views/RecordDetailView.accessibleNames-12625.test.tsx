@@ -9,9 +9,11 @@
 /**
  * objectui#12625 — the console record page's controls have accessible names,
  * read on the REAL `RecordDetailView` mount (the synthesized default page:
- * `page:header`, `page:tabs`, `record:details`), by role and name.
+ * `page:header`, `record:details`, the right column), by role and name.
  *
- * - The tabs are named by their labels (Details, Related).
+ * - The page's regions are named by their labels: the right column, the 动态
+ *   panel (Activity) and a related panel (Task). They were the Details and
+ *   Related tabs until objectstack#27524 laid every width out as columns.
  * - A declared `record_header` action is named by its label (Log a Call).
  * - A collapsible field group's header is a button named by its label
  *   (Lead Information) that toggles `aria-expanded` — the half the card found
@@ -24,7 +26,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, screen, cleanup } from '@testing-library/react';
+import { render, waitFor, screen, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router-dom';
@@ -98,7 +100,7 @@ const LEAD = {
   ],
 };
 
-/** A child with a lookup to the lead, so the page carries a Related tab. */
+/** A child with a lookup to the lead, so the page carries a related panel. */
 const TASK = {
   name: 'task',
   label: 'Task',
@@ -167,11 +169,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('objectui#12625 — the record page names its tabs, header actions and section headers', () => {
-  it('the tabs are named by their labels', async () => {
+describe('objectui#12625 — the record page names its regions, header actions and section headers', () => {
+  it('the right column and its panels are named by their labels', async () => {
     await mountLeadPage();
-    expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Related' })).toBeInTheDocument();
+    const right = screen.getByRole('complementary', { name: 'Right column' });
+    expect(right).toBeInTheDocument();
+    expect(within(right).getByRole('region', { name: 'Activity' })).toBeInTheDocument();
+    expect(await within(right).findByRole('region', { name: 'Task' })).toBeInTheDocument();
   });
 
   it('the header actions are named by their labels', async () => {

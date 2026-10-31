@@ -26,7 +26,9 @@
  * publish action itself still belongs to the caller. With a package as well,
  * an added object field the batch door could backfill carries an unchecked
  * "backfill default" choice (objectui#12929); the checked ones ride on the
- * footer's call as the door's `backfill` option.
+ * footer's call as the door's `backfill` option. The footer also takes an
+ * optional change note there (ADR-0146 D1), sent as the door's `message`, which
+ * every item history row the publish writes records.
  */
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -41,6 +43,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
+  Textarea,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useAdapter } from '@object-ui/react';
@@ -748,8 +751,8 @@ export function computeChangeDetail(
 /**
  * What the footer's Publish hands its host (objectui#12929): the batch door's
  * own options, by reference to `MetadataClient.publishPackageDrafts`, so the
- * sheet can only ask for what that door sends. Today that is the protocol's
- * opt-in `backfill`.
+ * sheet can only ask for what that door sends: the protocol's opt-in
+ * `backfill`, and the change note `message` (ADR-0146 D1).
  */
 export type DraftPublishOptions = NonNullable<Parameters<MetadataClient['publishPackageDrafts']>[1]>;
 
@@ -1301,7 +1304,8 @@ export interface DraftChangesPanelProps {
    * each added field the batch door would honour (objectui#12929). The button
    * passes the checked ones as `{ backfill }` — the door's own options — and
    * passes NOTHING when none is checked, so the caller's request is the one it
-   * sent before.
+   * sent before. The footer's change note (ADR-0146 D1), offered on the same
+   * condition, rides as `{ message }` when the author wrote one.
    */
   onPublish?: (options?: DraftPublishOptions) => void | Promise<void>;
   /** Disables the confirm button and shows a spinner while the caller publishes. */
@@ -1375,6 +1379,13 @@ export function DraftChangesPanel({
    * choice is made on the drafts this open reviews, never carried over.
    */
   const [backfill, setBackfill] = useState<ReadonlyMap<string, DraftBackfillEntry>>(new Map());
+  /**
+   * ADR-0146 D1 — the author's change note for this publish, as typed. Sent
+   * trimmed, and only when something is left, as the batch door's `message`:
+   * every item history row the publish writes records it. Cleared at every
+   * open, like the backfill choices: a note describes the drafts it reviewed.
+   */
+  const [note, setNote] = useState('');
   const toggleBackfill = useCallback((entry: DraftBackfillEntry, checked: boolean) => {
     setBackfill((prev) => {
       const key = backfillKey(entry);
@@ -1407,6 +1418,7 @@ export function DraftChangesPanel({
    */
   const listRef = useRef<HTMLDivElement>(null);
   const publishRef = useRef<HTMLButtonElement>(null);
+  const noteId = useId();
   const settledRef = useRef(false);
   // The list as it stood when the sheet opened: the previous open's, until
   // this open's load replaces it. Only a list newer than that one settles.
@@ -1445,6 +1457,7 @@ export function DraftChangesPanel({
     setProblems([]);
     setUnchanged(new Set());
     setBackfill(new Map());
+    setNote('');
     try {
       const listed = await listPendingDrafts(packageId);
       const drafts = include ? listed.filter(include) : listed;
@@ -1810,14 +1823,42 @@ export function DraftChangesPanel({
                       'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
                   })}
             </p>
+            {packageId && (
+              // ADR-0146 D1 — the change note. Offered only where the footer
+              // publishes one package as a batch: only that door carries a
+              // `message` to every history row it writes.
+              <div className="flex flex-col gap-1">
+                <label htmlFor={noteId} className="text-xs font-medium">
+                  {t('preview.changes.noteLabel', { defaultValue: 'Change note (optional)' })}
+                </label>
+                <Textarea
+                  id={noteId}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  disabled={publishing}
+                  rows={2}
+                  className="min-h-0 resize-none text-xs"
+                  placeholder={t('preview.changes.notePlaceholder', {
+                    defaultValue: 'What changed and why. It is shown in each item’s history.',
+                  })}
+                  data-testid="draft-changes-note"
+                />
+              </div>
+            )}
             <Button
               ref={publishRef}
               size="sm"
-              // objectui#12929 — the checked backfill choices, or no options at
-              // all: an unchecked sheet sends the request it always sent.
-              onClick={() =>
-                void (backfill.size > 0 ? onPublish({ backfill: [...backfill.values()] }) : onPublish())
-              }
+              // objectui#12929 — the checked backfill choices, and ADR-0146 D1
+              // the change note, or no options at all: a sheet with neither
+              // sends the request it always sent.
+              onClick={() => {
+                const message = packageId ? note.trim() : '';
+                const options: DraftPublishOptions = {
+                  ...(backfill.size > 0 ? { backfill: [...backfill.values()] } : {}),
+                  ...(message ? { message } : {}),
+                };
+                void (Object.keys(options).length > 0 ? onPublish(options) : onPublish());
+              }}
               disabled={publishing}
               data-testid="draft-changes-publish"
             >

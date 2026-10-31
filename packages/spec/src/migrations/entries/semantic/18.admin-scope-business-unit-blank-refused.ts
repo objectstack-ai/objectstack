@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // named by the boot reconciliation's existing durability error instead.
 export const entry: SemanticMigration = {
   id: 'admin-scope-business-unit-blank-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'security.permission.adminScope.businessUnit (AdminScopeSchema, ADR-0090 D12) authored or stored '
     + 'BLANK: the empty string, or a value that is nothing but whitespace (spaces, a tab, a newline). '

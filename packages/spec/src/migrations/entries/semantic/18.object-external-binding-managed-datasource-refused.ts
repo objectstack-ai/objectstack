@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // knowledge, which no artifact records.
 export const entry: SemanticMigration = {
   id: 'object-external-binding-managed-datasource-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'object.external together with object.datasource — an external (federated) binding on the platform\'s '
     + 'primary datasource (datasource \'default\', also the value when none is written) or on a datasource '

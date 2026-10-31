@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // second half. Nothing at rest moves and the runtime accept set is unchanged.
 export const entry: SemanticMigration = {
   id: 'view-filter-rule-operator-input-canonical',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'ui.ViewFilterRule operator — the TypeScript INPUT type of a view filter rule, on every '
     + 'carrier of ViewFilterRuleSchema (ListView.filter, a view tab filter, Page.filterBy, the '

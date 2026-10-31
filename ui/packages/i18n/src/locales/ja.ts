@@ -20,6 +20,7 @@ const ja = {
       manage_org_users: "組織ユーザーの管理",
       manage_metadata: "メタデータ管理",
       manage_mailboxes: "メールボックスの管理",
+      manage_connector_connections: "コネクタ接続の管理",
       manage_platform_settings: "プラットフォーム設定の管理",
       setup_access: "設定へのアクセス",
       setup_write: "設定の書き込み",
@@ -483,6 +484,7 @@ const ja = {
       undonePrefix: "取り消し済み — ",
       succeeded: "成功 {{count}} / {{total}}",
       resultFailed: " · 失敗 {{count}}",
+      succeededRecords: "成功したレコード",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
       cancel: "キャンセル",
@@ -1176,9 +1178,12 @@ const ja = {
     new: "新規",
     add: "追加",
     activity: "アクティビティ",
-    timeline: "タイムライン",
-    timelineFolded: "アクティビティ",
-    relatedColumn: "関連列",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "アクティビティ",
+    relatedColumn: "右側の列",
+    timelineComposer: "メモを書く… @ でメンション",
     // objectstack#27055 — the record page v3.
     emptySections: "空のセクション {{count}} 件",
     emptySections_one: "空のセクション {{count}} 件",
@@ -2153,6 +2158,8 @@ const ja = {
       popupBlockedDescription: "ブラウザが新しいタブを開くのをブロックしました。",
       popupBlockedAction: "新しいタブで開く",
       noRecordId: "この操作は 1 件のレコードに対して実行されますが、利用できるレコード ID がありません。",
+      fillRequiredThenRetry: "{{fields}} を入力してから、もう一度「{{action}}」を実行してください。",
+      fillRequiredFirst: "先に {{fields}} を入力してください。",
     },
     shortcuts: {
       title: "キーボードショートカット",
@@ -2169,8 +2176,7 @@ const ja = {
       newChat: "新しいチャット",
       toggleChatsList: "チャット一覧を切り替え",
       goHome: "ホームに戻る",
-      toggleTimeline: "タイムラインの表示 / 非表示",
-      toggleRelated: "関連の表示 / 非表示",
+      toggleRelated: "右側の列の表示 / 非表示",
     },
     reportIndex: {
       title: "レポート",
@@ -2688,9 +2694,11 @@ const ja = {
       signInText: "サインイン",
       socialButton: "{provider} で新規登録",
       orText: "またはメールアドレスで続行",
+      captchaRetry: "再試行",
       errors: {
         userExists: "このメールアドレスのアカウントはすでに存在します。代わりにサインインしてください。",
         selfRegistrationClosed: "このシステムではセルフ登録を受け付けていません。管理者に招待を依頼してください。",
+        captchaFailed: "セキュリティチェックが完了しませんでした。もう一度お試しください。",
         emailDomainNotAllowed: "このメールアドレスのドメインはここでの登録が許可されていません。組織のメールアドレスを使用するか、管理者に招待を依頼してください。",
         invitationSentTo: "この招待は {{email}} 宛てに送信されました。招待を承諾するには、そのアドレスで登録してください。",
         invitationAddressOnly: "この招待は送信先のアドレスでのみ承諾できます。そのアドレスで登録してください。",
@@ -3304,6 +3312,7 @@ const ja = {
   report: {
     total: "合計",
     totals: "合計",
+    subtotal: "小計",
     loading: "読み込み中…",
     forbiddenMessage: "このレポートのデータを表示する権限がありません。",
     dateRange: {
@@ -4239,6 +4248,7 @@ const ja = {
     approveOneTitle: '「{{title}}」を承認しますか？',
     approveOneBody: 'あなたの名義でこのリクエストを承認します。コメントや添付を付ける場合は、リクエストを開いて操作してください。',
     flowOrigin: 'フロー起動',
+    submittedByYou: 'あなたが提出',
     sortBy: '並び替え',
     sortRecent: '新しい順',
     sortOldest: '古い順',
@@ -4438,6 +4448,8 @@ const ja = {
       confirmNoteSeparate_one: '公開すると、保留中のドラフト {{count}} 件がそれぞれ個別に公開されます。公開に失敗したドラフトは保留中のまま残り、ほかのドラフトは公開されます。',
       confirmNoteSeparate_other: '公開すると、保留中のドラフト {{count}} 件がそれぞれ個別に公開されます。公開に失敗したドラフトは保留中のまま残り、ほかのドラフトは公開されます。',
       publishConfirm: 'すべて公開',
+      noteLabel: '変更メモ（任意）',
+      notePlaceholder: '何をなぜ変更したか。各項目の履歴に表示されます。',
       summaryItems: '{{count}} 件',
       summaryItems_one: '{{count}} 件',
       summaryItems_other: '{{count}} 件',

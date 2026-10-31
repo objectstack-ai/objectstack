@@ -213,6 +213,7 @@ const KNOWN_LABEL_DICT: Record<string, Record<string, string>> = {
     Details: '詳情',
     Related: '相關',
     Timeline: '時間線',
+    'Activity stream': '動態',
     Activity: '活動',
     History: '歷史',
     Notes: '備註',
@@ -260,8 +261,14 @@ const KNOWN_LABEL_KEYS: Record<string, string> = {
   Related: 'detail.related',
   Activity: 'detail.activity',
   History: 'detail.history',
-  // The synthesized record page's one timeline stream tab (objectstack#27055).
-  Timeline: 'detail.timeline',
+  // The synthesized record page's one stream tab (objectstack#27055), 「动态」
+  // since objectstack#27524. Its own token, not `Timeline`: that word is an
+  // author's too (the served approval page's history tab), and mapping it to
+  // `detail.timeline` would now rename an authored Timeline tab 动态.
+  'Activity stream': 'detail.timeline',
+  // An authored `Timeline` stays a timeline: the pack's own word for one (the
+  // timeline view type's label, in all ten packs).
+  Timeline: 'console.objectView.viewTypeTimeline',
   Attachments: 'detail.attachments',
   Approvals: 'detail.approvalsPanelTitle',
   Discussion: 'detail.discussion',

@@ -45,7 +45,7 @@ import {
   filterSystemFields,
   sectionedGridLayout,
 } from './autoLayout';
-import { deriveFieldGroupSections, projectSectionDivider, resolveSectionCollapse } from './fieldGroups';
+import { deriveFieldGroupSections, projectSectionDivider, resolveSectionCollapse, type FormFieldWithGroup } from './fieldGroups';
 import { mergeCustomFields } from './customFieldsMerge';
 import { hasSectionGroupReference, resolveSectionGroupReferences } from './sectionGroups';
 import {
@@ -958,7 +958,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
       const field = objectSchema.fields?.[name];
       if (field) {
         // Auto-generate field from schema
-        const formField: FormField = {
+        const formField: FormFieldWithGroup = {
           name: name,
           label: fieldLabel(schema.objectName, name, field.label || fieldName),
           // (type, multiple) decides the widget, not the type alone: a `select`

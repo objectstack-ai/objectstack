@@ -13,8 +13,9 @@
  * `MessagingService.enqueueHttp()` and `redeliverHttp()` — waking it.
  *
  * Every leg runs on vitest's fake timers, so "when did a tick start" is an
- * exact reading rather than a sleep-and-hope. With one partition the dispatcher
- * issues exactly one `claim()` per tick, so a tick is timestamped there.
+ * exact reading rather than a sleep-and-hope. Every tick opens with exactly one
+ * `reap()` — an idle one claims nothing at all since #28383 — so a tick is
+ * timestamped there, as the notification side's file does.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -23,7 +24,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { DEFAULT_MAX_IDLE_INTERVAL_MS } from './dispatcher.js';
 import { MessagingService } from './messaging-service.js';
 import type { FetchImpl } from './http-sender.js';
-import type { EnqueueHttpInput, HttpAckResult, HttpClaimCredential, HttpClaimOptions, HttpDelivery } from './http-outbox.js';
+import type { EnqueueHttpInput, HttpAckResult, HttpClaimCredential, HttpReapOptions } from './http-outbox.js';
 
 const BASE = 500;
 const CAP = 30_000;
@@ -35,9 +36,9 @@ const silentLogger = { info() {}, warn() {}, error() {} };
 class TickRecordingOutbox extends MemoryHttpOutbox {
     readonly tickStarts: number[] = [];
     readonly retriesDueAt: number[] = [];
-    override async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {
+    override async reap(opts: HttpReapOptions): Promise<void> {
         this.tickStarts.push(Date.now());
-        return super.claim(opts);
+        return super.reap(opts);
     }
     override async ack(id: string, result: HttpAckResult, claimed?: HttpClaimCredential): Promise<void> {
         if (!result.success && result.nextRetryAt !== undefined) this.retriesDueAt.push(result.nextRetryAt);

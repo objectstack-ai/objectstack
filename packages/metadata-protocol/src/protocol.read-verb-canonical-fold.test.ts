@@ -235,10 +235,41 @@ describe('#9157 — the population, re-derived from the code rather than from th
         // the failure mode this whole describe block exists to prevent.
         expect(starts.length).toBeGreaterThan(20);
 
+        // [#28355] The four single-item doors are public wrappers (the refusal
+        // audit) over a private `…Unaudited` body, and both read their request
+        // shape from a module-level alias (`type SaveMetaItemRequest = {…}`): a
+        // private member's type is not published. So a signature naming such an
+        // alias is read from the alias, and a wrapper is judged by the body it
+        // delegates to — that is where the fold is.
+        const memberSlice = (line: number) => {
+            const k = starts.findIndex((s) => s.line === line);
+            const end = k >= 0 ? starts[k + 1]?.line : lines.findIndex((l, i) => i > line && METHOD_OR_PRIVATE.test(l));
+            return lines.slice(line, end === undefined || end < 0 ? lines.length : end).join('\n');
+        };
+        const METHOD_OR_PRIVATE = /^ {4}(?:private |protected )?(?:static )?(?:async )?[A-Za-z_][A-Za-z0-9_]*\s*\(/;
+        const aliasLiteral = (name: string): string | undefined => {
+            const at = src.indexOf(`\ntype ${name} = {`);
+            if (at < 0) return undefined;
+            const open = src.indexOf('{', at);
+            let depth = 0;
+            for (let i = open; i < src.length; i++) {
+                if (src[i] === '{') depth++;
+                else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
+            }
+            return undefined;
+        };
+        const delegateBody = (body: string): string => {
+            const to = /this\.([A-Za-z_][A-Za-z0-9_]*Unaudited)\(request\)/.exec(body)?.[1];
+            if (to === undefined) return body;
+            const line = lines.findIndex((l) => l.startsWith(`    private async ${to}(`));
+            expect(line, `the wrapper delegates to '${to}', which the scan cannot find`).toBeGreaterThanOrEqual(0);
+            return memberSlice(line);
+        };
+
         const unfolded: string[] = [];
         const folded: string[] = [];
         for (let k = 0; k < starts.length; k++) {
-            const body = lines.slice(starts[k]!.line, starts[k + 1]?.line ?? lines.length).join('\n');
+            const body = delegateBody(lines.slice(starts[k]!.line, starts[k + 1]?.line ?? lines.length).join('\n'));
             // The PARAMETER LIST exactly — walked by paren balance rather than
             // guessed at with a character budget, so a long request type cannot
             // push `type: string` outside the window and drop a verb silently.
@@ -249,7 +280,9 @@ describe('#9157 — the population, re-derived from the code rather than from th
                 if (body[i] === '(') depth++;
                 else if (body[i] === ')' && --depth === 0) { close = i; break; }
             }
-            const sig = body.slice(open, close + 1);
+            const declared = body.slice(open, close + 1);
+            const alias = /^\(\s*request\??\s*:\s*([A-Z][A-Za-z0-9_]*)\s*\)$/.exec(declared)?.[1];
+            const sig = alias === undefined ? declared : (aliasLiteral(alias) ?? declared);
             // A REQUIRED `type: string` in the request object — the shape a
             // `/meta/:type` path segment arrives as. `type?:` is a query-string
             // FILTER (`/meta/diagnostics?type=`, `/meta/_drafts?type=`), a

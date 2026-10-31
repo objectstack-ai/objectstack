@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // string, not a filter object they wrote by hand.
 export const entry: SemanticMigration = {
   id: 'rls-predicate-array-comparand-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'security.PermissionSet rowLevelSecurity[].check — a CEL predicate comparing a field with != '
     + 'or == against a list, '

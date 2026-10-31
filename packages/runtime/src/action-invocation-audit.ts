@@ -34,6 +34,25 @@
  * replaces. The row therefore names the true door on the `api` branch exactly
  * as on the other three.
  *
+ * ## Joining a forward's two rows
+ *
+ * A `type: 'api'` action whose `target` is another action route on this
+ * server answers through two doors, so it writes two rows: the outer door's
+ * (`branch: 'api'`) and the inner REST door's for the action it reached. The
+ * two are joined by what each row names, never by their timestamps:
+ *
+ *  - the outer row carries the action's declared `target`
+ *    ({@link actionInvocationTarget}) — the DECLARATION, not the interpolated
+ *    path: a path built from the caller's params can carry a param value, and
+ *    this row records no params;
+ *  - the inner row carries the forward mark's value as `forwardedFrom` —
+ *    `<object>/<action>` of the outer action, the same header the inner door
+ *    already reads for its loop refusal. A HINT, not a surface: any caller
+ *    can send the mark, so a forged one mislabels this hint and nothing else,
+ *    and the inner row's `surface: 'rest'` stays the door's own. Because it is
+ *    caller text written into the ledger, only a mark in the forwarding
+ *    door's own shape is recorded ({@link actionInvocationForwardedFrom}).
+ *
  * ## The writer
  *
  * `@objectstack/plugin-audit` owns the row shape and registers the writer on
@@ -48,6 +67,7 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 import { resolveThrownHttpError } from '@objectstack/types';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
@@ -69,6 +89,10 @@ export interface ActionInvocationAuditEvent {
     status?: number;
     errorCode?: string;
     runId?: string;
+    /** `api` branch only: the action's declared `target` — see {@link actionInvocationTarget}. */
+    target?: string;
+    /** The forward mark this request arrived carrying (`<object>/<action>`), a hint only. */
+    forwardedFrom?: string;
 }
 
 /** The `audit` slot member this file calls — declared locally, structurally. */
@@ -98,6 +122,46 @@ export function actionInvocationBranch(action: any, isDeclarativeUpdate: boolean
     if (action?.type === 'api') return 'api';
     if (action?.type === 'flow') return 'flow';
     return 'script';
+}
+
+/**
+ * The declared `target` an `api`-branch invocation forwards to, for the
+ * outer row — absent on every other branch. The declaration, never the
+ * interpolated path (see the header: the path can carry a param value).
+ */
+export function actionInvocationTarget(action: any, isDeclarativeUpdate: boolean): string | undefined {
+    if (actionInvocationBranch(action, isDeclarativeUpdate) !== 'api') return undefined;
+    const target = action?.target;
+    return typeof target === 'string' && target.trim() !== '' ? target : undefined;
+}
+
+/**
+ * The longest forward mark the inner row records. Two machine names and a
+ * slash; a declared object or action name is a storage identifier, far below
+ * this. A longer header is not a mark any forwarding door wrote.
+ */
+export const ACTION_FORWARD_MARK_MAX_LENGTH = 255;
+
+/**
+ * The forward mark a request arrived carrying, for the inner row's
+ * `forwardedFrom` — read from the header the forwarding door sets
+ * (`API_FORWARD_MARK_HEADER`, passed in so this file does not import the
+ * dispatch module that imports it). A hint, not a surface: see the header.
+ *
+ * The header is caller-controlled text bound for the compliance ledger, so it
+ * is recorded only in the shape the forwarding door writes — `OBJECT/ACTION`,
+ * each segment a machine name by `SnakeCaseIdentifierSchema` (the grammar the
+ * object and action declarations are held to, `global` for an object-less
+ * action included), at most {@link ACTION_FORWARD_MARK_MAX_LENGTH} characters.
+ * Anything else is left out of the row. Never a refusal: the mark gates
+ * nothing here, and the door's answer is the same either way.
+ */
+export function actionInvocationForwardedFrom(requestContext: HttpProtocolContext | undefined, markHeader: string): string | undefined {
+    const mark = requestContext?.request?.headers?.[markHeader];
+    if (typeof mark !== 'string' || mark.length > ACTION_FORWARD_MARK_MAX_LENGTH) return undefined;
+    const segments = mark.split('/');
+    if (segments.length !== 2) return undefined;
+    return segments.every((segment) => SnakeCaseIdentifierSchema.safeParse(segment).success) ? mark : undefined;
 }
 
 /**

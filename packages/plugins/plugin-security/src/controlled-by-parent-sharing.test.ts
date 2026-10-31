@@ -280,7 +280,7 @@ function makeStore(rows: Record<string, Row[]>, detail: DetailVariant = 'valid',
 function datasourceOutage(object: string): Error {
   const e = new Error(
     `[ObjectQL] Datasource 'primary' configured for object '${object}' is declared but not connected: ` +
-      `it failed to connect at startup and the server was started with OS_ALLOW_DRIVER_CONNECT_FAILURE.`,
+      `its last connect attempt failed, so no driver serves it. See Setup → Datasources or the server log for the cause.`,
   ) as Error & { code: string; datasource: string };
   e.name = 'DatasourceUnavailableError';
   e.code = 'ERR_DATASOURCE_UNAVAILABLE';

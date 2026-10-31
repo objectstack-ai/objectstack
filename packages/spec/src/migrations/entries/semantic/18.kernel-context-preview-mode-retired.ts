@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'kernel-context-preview-mode-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     "context.mode — the value 'preview' left the RuntimeMode enum — and "
     + 'context.previewMode, the whole PreviewModeConfig block it keyed '

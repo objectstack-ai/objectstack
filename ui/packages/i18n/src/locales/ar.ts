@@ -20,6 +20,7 @@ const ar = {
       manage_org_users: "إدارة مستخدمي المؤسسة",
       manage_metadata: "إدارة البيانات الوصفية",
       manage_mailboxes: "إدارة صناديق البريد",
+      manage_connector_connections: "إدارة اتصالات الموصلات",
       manage_platform_settings: "إدارة إعدادات المنصة",
       setup_access: "الوصول إلى الإعداد",
       setup_write: "كتابة الإعدادات",
@@ -529,6 +530,7 @@ const ar = {
       undonePrefix: "تم التراجع — ",
       succeeded: "نجح {{count}} / {{total}}",
       resultFailed: " · فشل {{count}}",
+      succeededRecords: "السجلات الناجحة",
       retry: "إعادة المحاولة",
       downloadErrorCsv: "تنزيل ملف CSV للأخطاء",
       cancel: "إلغاء",
@@ -1500,9 +1502,12 @@ const ar = {
     concurrentUpdateRecordLabel: "هذا السجل",
     openInNewTab: "فتح في علامة تبويب جديدة",
     activity: "النشاط",
-    timeline: "الخط الزمني",
-    timelineFolded: "النشاط",
-    relatedColumn: "عمود العناصر ذات الصلة",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "النشاط",
+    relatedColumn: "العمود الجانبي",
+    timelineComposer: "اكتب ملاحظة… @ للإشارة",
     // objectstack#27055 — the record page v3.
     emptySections: "أقسام فارغة: {{count}}",
     emptySections_zero: "أقسام فارغة: {{count}}",
@@ -2374,6 +2379,8 @@ const ar = {
       popupBlockedDescription: "حظر المتصفح فتح علامة التبويب الجديدة.",
       popupBlockedAction: "فتح في علامة تبويب جديدة",
       noRecordId: "يُنفَّذ هذا الإجراء على سجل واحد — لا يتوفر معرّف سجل.",
+      fillRequiredThenRetry: "املأ {{fields}}، ثم شغّل \"{{action}}\" مرة أخرى.",
+      fillRequiredFirst: "املأ {{fields}} أولاً.",
     },
     shortcuts: {
       title: "اختصارات لوحة المفاتيح",
@@ -2390,8 +2397,7 @@ const ar = {
       newChat: "محادثة جديدة",
       toggleChatsList: "تبديل قائمة المحادثات",
       goHome: "العودة إلى الرئيسية",
-      toggleTimeline: "إظهار / إخفاء الخط الزمني",
-      toggleRelated: "إظهار / إخفاء العناصر ذات الصلة",
+      toggleRelated: "إظهار / إخفاء العمود الجانبي",
     },
     reportIndex: {
       title: "التقارير",
@@ -2924,9 +2930,11 @@ const ar = {
       signInText: "تسجيل الدخول",
       socialButton: "التسجيل باستخدام {provider}",
       orText: "أو تابع باستخدام البريد الإلكتروني",
+      captchaRetry: "إعادة المحاولة",
       errors: {
         userExists: "يوجد حساب بهذا البريد الإلكتروني بالفعل. حاول تسجيل الدخول.",
         selfRegistrationClosed: "التسجيل الذاتي غير متاح في هذا النظام. اطلب دعوة من المسؤول.",
+        captchaFailed: "لم يكتمل التحقق الأمني. يرجى المحاولة مرة أخرى.",
         emailDomainNotAllowed: "نطاق هذا البريد الإلكتروني غير مسموح له بالتسجيل هنا. استخدم البريد الإلكتروني لمؤسستك أو اطلب دعوة من المسؤول.",
         invitationSentTo: "أُرسلت هذه الدعوة إلى {{email}}. سجّل بهذا العنوان لقبولها.",
         invitationAddressOnly: "لا يمكن قبول هذه الدعوة إلا بالعنوان الذي أُرسلت إليه. سجّل بهذا العنوان.",
@@ -3567,6 +3575,7 @@ const ar = {
   report: {
     total: "الإجمالي",
     totals: "الإجماليات",
+    subtotal: "المجموع الفرعي",
     loading: "جارٍ التحميل…",
     forbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بهذا التقرير.",
     dateRange: {
@@ -4586,6 +4595,7 @@ const ar = {
     approveOneTitle: 'الموافقة على "{{title}}"؟',
     approveOneBody: 'ستتم الموافقة على الطلب بهويتك. لإضافة تعليق أو مرفق، افتح الطلب.',
     flowOrigin: 'بدأها التدفق',
+    submittedByYou: 'مقدَّم منك',
     sortBy: 'ترتيب',
     sortRecent: 'الأحدث أولاً',
     sortOldest: 'الأقدم أولاً',
@@ -4833,6 +4843,8 @@ const ar = {
       confirmNoteSeparate_many: 'النشر يُصدر المسودات المعلقة ({{count}}) كلًّا على حدة: المسودة التي يتعذّر نشرها تبقى معلقة، وتُنشر البقية.',
       confirmNoteSeparate_other: 'النشر يُصدر المسودات المعلقة ({{count}}) كلًّا على حدة: المسودة التي يتعذّر نشرها تبقى معلقة، وتُنشر البقية.',
       publishConfirm: 'نشر الكل',
+      noteLabel: 'ملاحظة التغيير (اختيارية)',
+      notePlaceholder: 'ما الذي تغيّر ولماذا. تظهر في سجل كل عنصر.',
       summaryItems: '{{count}} عنصر',
       summaryItems_zero: '{{count}} عنصر',
       summaryItems_one: 'عنصر واحد ({{count}})',

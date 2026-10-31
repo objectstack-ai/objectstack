@@ -1807,6 +1807,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Descripción",
         helpText: "Línea explicativa bajo el título del diálogo de parámetros de esta acción. En una acción que recoge parámetros, la pregunta de confirmación va aquí y no en confirmText: un diálogo, no dos. No es ai.description, que es el texto que lee un agente de IA."
       },
+      submitText: {
+        label: "Etiqueta del botón de envío",
+        helpText: "Etiqueta del botón de envío en el diálogo de parámetros de esta acción, el verbo que ejecuta el botón (p. ej., \"Enviar\", \"Registrar llamada\"). Solo para una acción que recoge parámetros. Déjalo vacío para mostrar \"Confirmar\"."
+      },
       confirmText: {
         label: "Texto de confirmación",
         helpText: "Mensaje de confirmación (p. ej., \"Are you sure?\")"

@@ -30,7 +30,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ConsolePageHeader } from '@object-ui/app-shell';
 import {
   Button,
@@ -63,6 +63,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
   Input,
+  Textarea,
   Checkbox,
   Select,
   SelectContent,
@@ -424,6 +425,42 @@ function RequestCell({ r, tr }: { r: ApprovalRequestRow; tr: Translate }) {
 }
 
 /**
+ * The `comment` member of a decision body: the trimmed reason, or nothing when
+ * the approver left it empty, so an unexplained decision sends what it always did.
+ */
+function decisionComment(comment: string | undefined): { comment?: string } {
+  const text = (comment ?? '').trim();
+  return text ? { comment: text } : {};
+}
+
+/** The optional reason box a Reject confirmation carries. */
+function RejectCommentField({ id, label, value, onChange }: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-sm font-medium">{label}</label>
+      <Textarea id={id} rows={3} value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+/**
+ * Beside the requester of a request the viewer submitted, read from the
+ * server's `viewer.is_submitter`. It informs the decision; it gates nothing.
+ */
+function SelfSubmittedBadge({ label }: { label: string }) {
+  return (
+    <Badge variant="outline" className="shrink-0 whitespace-nowrap px-1.5 py-0 text-[10px] font-normal">
+      {label}
+    </Badge>
+  );
+}
+
+/**
  * `href` is `null` for a record this viewer cannot open (objectui#5211) — the
  * readable/unreadable decision and the URL are ONE prop so the two cannot be
  * handed in disagreeing with each other.
@@ -432,9 +469,15 @@ function RequestCell({ r, tr }: { r: ApprovalRequestRow; tr: Translate }) {
  * many objects, so it is a per-row prop and not something this cell could
  * resolve for itself — see the page body, which drives it off one lookup.
  */
-function RecordCell({ r, href, hiddenKeys, deadLabel, unresolvableLabel }: {
+function RecordCell({ r, href, linkState, hiddenKeys, deadLabel, unresolvableLabel }: {
   r: ApprovalRequestRow;
   href: string | null;
+  /**
+   * The history-state origin the record page's crumb row draws its way back
+   * from (`state.from`, the shape a list row hands it), so a record opened in
+   * an app whose navigation does not list its object still leads back here.
+   */
+  linkState: { from: { pathname: string; label: string } };
   hiddenKeys: ReadonlySet<string>;
   deadLabel: string | null;
   unresolvableLabel: string | null;
@@ -469,6 +512,7 @@ function RecordCell({ r, href, hiddenKeys, deadLabel, unresolvableLabel }: {
       ) : (
       <Link
         to={href}
+        state={linkState}
         onClick={(e) => e.stopPropagation()}
         className="inline-flex items-center gap-1 text-sm hover:underline truncate max-w-full"
         title={title}
@@ -684,6 +728,19 @@ function ApprovalsQueue() {
   }, [appName]);
 
   /**
+   * The way back a record link carries: this inbox, named as its header names
+   * it. The target app stays the inbox's own (`recordHref`); an app whose
+   * navigation does not list the record's object (the Account app lists the
+   * inbox) otherwise leaves the record page with no way back here.
+   */
+  const location = useLocation();
+  const inboxTitle = tr('title', 'Approvals Inbox');
+  const recordLinkState = useMemo(
+    () => ({ from: { pathname: `${location.pathname}${location.search}`, label: inboxTitle } }),
+    [location.pathname, location.search, inboxTitle],
+  );
+
+  /**
    * [objectui#7108] The tombstone copy, resolved once for the whole page from
    * the platform's own `cancel_reason` option label.
    *
@@ -828,6 +885,11 @@ function ApprovalsQueue() {
   const [approveTarget, setApproveTarget] = useState<ApprovalRequestRow | null>(null);
   const [rejectTarget, setRejectTarget] = useState<ApprovalRequestRow | null>(null);
   const [inlineActing, setInlineActing] = useState<string | null>(null);
+  // The optional reason a Reject confirmation collects, sent as the reject
+  // call's `comment` (the approvals door records it on the timeline). Each
+  // dialog starts empty: closing one clears what it held.
+  const [rejectComment, setRejectComment] = useState('');
+  const [bulkRejectComment, setBulkRejectComment] = useState('');
 
   // Keyboard row focus
   const [focusIndex, setFocusIndex] = useState<number>(-1);
@@ -1083,7 +1145,7 @@ function ApprovalsQueue() {
    * Bulk approve / reject the actionable selection. Runs sequentially for
    * clear progress; failures are reported per record, not just as a count.
    */
-  const runBulk = useCallback(async (kind: 'approve' | 'reject') => {
+  const runBulk = useCallback(async (kind: 'approve' | 'reject', comment?: string) => {
     const targets = actionableSelectedRows;
     if (targets.length === 0) return;
     setBulkRunning(true);
@@ -1094,7 +1156,7 @@ function ApprovalsQueue() {
       const actor = identities.find(i => pending.has(i)) || user?.id || '';
       try {
         const fn = kind === 'approve' ? approvalsApi.approve : approvalsApi.reject;
-        await fn(r.id, { actor_id: actor });
+        await fn(r.id, { actor_id: actor, ...decisionComment(comment) });
         ok++;
       } catch {
         failures.push(r.record_title || formatIdentity(r.record_id));
@@ -1144,10 +1206,12 @@ function ApprovalsQueue() {
     if (!r) return;
     const pending = new Set(r.pending_approvers || []);
     const actor = identities.find(i => pending.has(i)) || user?.id || '';
+    const comment = rejectComment;
     setInlineActing(r.id);
     setRejectTarget(null);
+    setRejectComment('');
     try {
-      await approvalsApi.reject(r.id, { actor_id: actor });
+      await approvalsApi.reject(r.id, { actor_id: actor, ...decisionComment(comment) });
       toast.success(tr('inlineRejected', 'Rejected "{{title}}"', { title: r.record_title || formatIdentity(r.record_id) }));
       void load();
       refreshBadge();
@@ -1156,7 +1220,7 @@ function ApprovalsQueue() {
     } finally {
       setInlineActing(null);
     }
-  }, [rejectTarget, identities, user?.id, load, refreshBadge, humanizeError, tr]);
+  }, [rejectTarget, rejectComment, identities, user?.id, load, refreshBadge, humanizeError, tr]);
 
   // ── Keyboard flow: j/k move · Enter open · x select · a approve · r reject ──
   const filteredRef = useRef(filteredRows);
@@ -1368,7 +1432,7 @@ function ApprovalsQueue() {
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
-                <AlertDialog>
+                <AlertDialog onOpenChange={(open) => { if (!open) setBulkRejectComment(''); }}>
                   <AlertDialogTrigger asChild>
                     <Button
                       size="sm"
@@ -1389,10 +1453,16 @@ function ApprovalsQueue() {
                         {tr('bulkRejectBody', 'This rejects the selected requests and notifies their submitters.')}
                       </AlertDialogDescription>
                     </AlertDialogHeader>
+                    <RejectCommentField
+                      id="approvals-bulk-reject-comment"
+                      label={tr('comment', 'Comment (optional)')}
+                      value={bulkRejectComment}
+                      onChange={setBulkRejectComment}
+                    />
                     <AlertDialogFooter>
                       <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
                       <AlertDialogAction
-                        onClick={() => runBulk('reject')}
+                        onClick={() => runBulk('reject', bulkRejectComment)}
                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       >
                         {tr('rejectN', 'Reject {{count}}', { count: actionableSelectedRows.length })}
@@ -1526,6 +1596,7 @@ function ApprovalsQueue() {
                               // fails open, so leaving it to answer would render
                               // a live-looking link for the first paint.
                               href={deadLabelFor(r) !== null || readability.isUnreadable(r) ? null : recordHref(r)}
+                              linkState={recordLinkState}
                               hiddenKeys={hiddenFields.forObject(r.object_name)}
                               deadLabel={deadLabelFor(r)}
                               unresolvableLabel={unresolvableLabelFor(r)}
@@ -1543,6 +1614,9 @@ function ApprovalsQueue() {
                               <div className="flex items-center gap-1.5 text-sm">
                                 <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                 <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
+                                {tab !== 'submitted' && r.viewer?.is_submitter === true && (
+                                  <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
+                                )}
                               </div>
                             )}
                           </TableCell>
@@ -1647,6 +1721,9 @@ function ApprovalsQueue() {
                         ) : (
                           <span className="inline-flex items-center gap-1 truncate">
                             <UserIcon className="h-3 w-3" />{submitterDisplay(r)}
+                            {tab !== 'submitted' && r.viewer?.is_submitter === true && (
+                              <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
+                            )}
                           </span>
                         )}
                         <span className={cn('inline-flex items-center gap-1 whitespace-nowrap', agingClass(r, now))}>
@@ -1723,7 +1800,10 @@ function ApprovalsQueue() {
       </AlertDialog>
 
       {/* Shared inline-reject confirmation */}
-      <AlertDialog open={!!rejectTarget} onOpenChange={(open) => !open && setRejectTarget(null)}>
+      <AlertDialog
+        open={!!rejectTarget}
+        onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectComment(''); } }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -1735,6 +1815,12 @@ function ApprovalsQueue() {
               {tr('rejectOneBody', 'This rejects the request and notifies the submitter.')}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <RejectCommentField
+            id="approvals-reject-comment"
+            label={tr('comment', 'Comment (optional)')}
+            value={rejectComment}
+            onChange={setRejectComment}
+          />
           <AlertDialogFooter>
             <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction

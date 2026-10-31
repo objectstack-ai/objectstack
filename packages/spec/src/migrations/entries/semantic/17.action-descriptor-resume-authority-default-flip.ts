@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'action-descriptor-resume-authority-default-flip',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
   surface:
     'automation.ActionDescriptor.resumeAuthority — an OMITTED value on a pausing '
     + 'node descriptor (supportsPause: true, or any executor whose execute() returns '
