@@ -142,8 +142,9 @@ describe('form renderer — fields an update action would require (objectstack#2
     renderInvoiceForm({});
     await waitFor(() => expect(noteOnIssuedOn()).not.toBeNull());
 
-    // Typing the status the rule names makes the field required for Save
-    // itself, and hides the action (its `visible` no longer holds).
+    // Typing a status the rule names makes the field required for Save itself.
+    // The action is still visible (`paid` is not `sent`) and would still
+    // require it, but the asterisk already says so: no second note.
     fireEvent.change(screen.getByLabelText(/Status/), { target: { value: 'paid' } });
 
     await waitFor(() => expect(issuedOnInput().getAttribute('aria-required')).toBe('true'));
