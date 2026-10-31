@@ -340,7 +340,7 @@ export const SysAuditLog = ObjectSchema.create({
     // `ER_BLOB_KEY_WITHOUT_LENGTH`, and the object landed registered-but-broken
     // with the lookup its own `record_views` list view depends on absent.
     record_id: Field.text({
-      label: 'Record ID',
+      label: 'Record',
       required: false,
       readonly: true,
       searchable: true,

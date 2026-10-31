@@ -53,7 +53,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "目标对象（例如 sys_user、project_task）"
       },
       record_id: {
-        label: "记录 ID",
+        label: "记录",
         help: "受影响记录的 ID"
       },
       old_value: {
@@ -158,7 +158,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "目标对象短名称（例如 account、sys_user）"
       },
       record_id: {
-        label: "记录 ID"
+        label: "记录"
       },
       record_label: {
         label: "记录标签",
