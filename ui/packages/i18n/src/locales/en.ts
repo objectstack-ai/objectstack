@@ -3896,6 +3896,8 @@ const en = {
       confirmNoteSeparate_one: 'Publishing releases the {{count}} pending draft on its own: if it fails, it stays pending.',
       confirmNoteSeparate_other: 'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
       publishConfirm: 'Publish all',
+      noteLabel: 'Change note (optional)',
+      notePlaceholder: 'What changed and why. It is shown in each item’s history.',
       // objectui#12517 — the confirm posture's summary line above the list:
       // the item count, then one `{{n}} {{type}}` per type group.
       summaryItems: '{{count}} items',

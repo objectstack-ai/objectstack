@@ -344,6 +344,25 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
 }
 
 /**
+ * The actor a package write door records (ADR-0146 D1): the user id of the
+ * execution context this request was authorized as — the same context
+ * {@link requireManageMetadata} judged a few lines earlier — or `undefined`
+ * when the caller carries none, so the protocol's no-actor default (a `NULL`
+ * `recorded_by`) applies and a machine write is never stamped with a person.
+ *
+ * Never the request body: a body `actor` let any caller holding
+ * `manage_metadata` record any name as the one who changed a package. This is
+ * the rule `RestServer.resolveMetaWriteActor` holds for the `/meta` write
+ * doors, so attribution cannot drift from authorization. Only
+ * `publish-drafts` reads it today; the sibling package doors that still read
+ * `body.actor` are carried by their own card.
+ */
+function resolvePackageWriteActor(context: HttpProtocolContext | undefined): string | undefined {
+    const userId: unknown = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
+    return typeof userId === 'string' && userId ? userId : undefined;
+}
+
+/**
  * ADR-0106 D4 READ gate for the `/packages` domain (#7033 / #7023).
  *
  * Package reads disclose authored metadata — the `GET /packages` id
@@ -1886,9 +1905,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
                 }
                 try {
+                    // [ADR-0146 D1] Who published: the identity this request
+                    // was authorized as, never a name the body supplies — see
+                    // `resolvePackageWriteActor`. A body `actor` is ignored.
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.publishPackageDrafts({
                         packageId: id,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...(actor !== undefined ? { actor } : {}),
+                        // [ADR-0146 D1] The author's change note: the package
+                        // commit and every item history row this publish writes
+                        // carry it. A string, as the single-item publish door
+                        // reads `message`; anything else sends no note.
+                        ...(typeof body?.message === 'string' ? { message: body.message } : {}),
                         // [#24253] Passed through as sent: the protocol judges
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.

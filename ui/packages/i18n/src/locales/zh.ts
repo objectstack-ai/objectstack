@@ -3373,6 +3373,8 @@ const zh = {
       confirmNoteSeparate_one: '发布会逐个单独发布这 {{count}} 个待发布草稿：发布失败的草稿仍保持待发布，其余草稿照常发布。',
       confirmNoteSeparate_other: '发布会逐个单独发布这 {{count}} 个待发布草稿：发布失败的草稿仍保持待发布，其余草稿照常发布。',
       publishConfirm: '全部发布',
+      noteLabel: '变更说明（可选）',
+      notePlaceholder: '改了什么、为什么改。会显示在每一项的历史记录里。',
       summaryItems: '{{count}} 项',
       summaryItems_one: '{{count}} 项',
       summaryItems_other: '{{count}} 项',

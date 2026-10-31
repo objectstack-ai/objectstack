@@ -4445,6 +4445,8 @@ const de = {
       confirmNoteSeparate_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf für sich allein freigegeben: Scheitert er, bleibt er ausstehend.',
       confirmNoteSeparate_other: 'Beim Veröffentlichen werden die {{count}} ausstehenden Entwürfe einzeln freigegeben: Ein Entwurf, der dabei scheitert, bleibt ausstehend, die übrigen werden trotzdem freigegeben.',
       publishConfirm: 'Alle veröffentlichen',
+      noteLabel: 'Änderungsnotiz (optional)',
+      notePlaceholder: 'Was sich geändert hat und warum. Sie erscheint im Verlauf jedes Elements.',
       summaryItems: '{{count}} Elemente',
       summaryItems_one: '{{count}} Element',
       summaryItems_other: '{{count}} Elemente',

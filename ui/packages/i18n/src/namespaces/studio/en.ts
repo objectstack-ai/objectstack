@@ -1582,6 +1582,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.historyEmptyTitle': 'No history yet',
   'engine.edit.historyEmptyDesc':
     'This item has never been edited via an overlay. The first save will create the initial history record.',
+  // Who wrote an event (ADR-0146 D1): the user's name, or the recorded id
+  // marked unresolved when no user row answers for it.
+  'engine.edit.historyBy': 'by',
+  'engine.edit.historyActorUnresolved': 'unresolved user',
+  'engine.edit.historyActorUnresolvedHint':
+    'No user record was found for this id: the user may have been deleted, or you cannot read the user directory.',
   // Reorder buttons (used in InspectorShell header)
   'engine.inspector.reorder.up': 'Move up',
   'engine.inspector.reorder.down': 'Move down',

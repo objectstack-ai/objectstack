@@ -3018,10 +3018,23 @@ export class ObjectStackClient {
      * signed-in caller; `backfillApplied` reports the rows written per field.
      * A field that is not new, or declares no literal default, refuses the
      * whole request with a 400 before anything is published.
+     *
+     * `opts.message` (ADR-0146 D1) is the author's change note: the package
+     * commit records it, and so does every item history row this publish
+     * writes (`change_note`, read back as each event's `message` by `meta.getHistory`).
+     * Without one those rows carry the sentence naming the package.
+     *
+     * The publish is recorded as the signed-in caller. `opts.actor` is
+     * ignored by this door and kept only so existing callers still compile.
      */
     publishDrafts: async (
         id: string,
-        opts?: { actor?: string; backfill?: Array<{ object: string; field: string }> },
+        opts?: {
+            /** @deprecated Ignored: the door records the signed-in caller (ADR-0146 D1). */
+            actor?: string;
+            backfill?: Array<{ object: string; field: string }>;
+            message?: string;
+        },
     ): Promise<PublishPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish-drafts`, {

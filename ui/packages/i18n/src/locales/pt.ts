@@ -4540,6 +4540,8 @@ const pt = {
       confirmNoteSeparate_many: 'Publicar libera os {{count}} de rascunhos pendentes um a um: o que falhar continua pendente e os demais são publicados mesmo assim.',
       confirmNoteSeparate_other: 'Publicar libera os {{count}} rascunhos pendentes um a um: o que falhar continua pendente e os demais são publicados mesmo assim.',
       publishConfirm: 'Publicar tudo',
+      noteLabel: 'Nota da alteração (opcional)',
+      notePlaceholder: 'O que mudou e por quê. Aparece no histórico de cada item.',
       summaryItems: '{{count}} itens',
       summaryItems_one: '{{count}} item',
       summaryItems_many: '{{count}} de itens',

@@ -4444,6 +4444,8 @@ const ko = {
       confirmNoteSeparate_one: '게시하면 대기 중인 초안 {{count}}개가 하나씩 따로 게시됩니다. 게시에 실패한 초안은 대기 상태로 남고, 나머지는 그대로 게시됩니다.',
       confirmNoteSeparate_other: '게시하면 대기 중인 초안 {{count}}개가 하나씩 따로 게시됩니다. 게시에 실패한 초안은 대기 상태로 남고, 나머지는 그대로 게시됩니다.',
       publishConfirm: '모두 게시',
+      noteLabel: '변경 메모(선택)',
+      notePlaceholder: '무엇을 왜 바꿨는지 적어 주세요. 각 항목의 기록에 표시됩니다.',
       summaryItems: '{{count}}개 항목',
       summaryItems_one: '{{count}}개 항목',
       summaryItems_other: '{{count}}개 항목',
