@@ -777,6 +777,8 @@
     "PublishMetaItemRequestSchema": "src/api/protocol.zod.ts#PublishMetaItemRequestSchema (const)",
     "PublishMetaItemResponse": "src/api/protocol.zod.ts#PublishMetaItemResponse (type)",
     "PublishMetaItemResponseSchema": "src/api/protocol.zod.ts#PublishMetaItemResponseSchema (const)",
+    "PublishPackageDraftsRequest": "src/api/protocol.zod.ts#PublishPackageDraftsRequest (type)",
+    "PublishPackageDraftsRequestSchema": "src/api/protocol.zod.ts#PublishPackageDraftsRequestSchema (const)",
     "PublishPackageDraftsResponse": "src/api/protocol.zod.ts#PublishPackageDraftsResponse (type)",
     "PublishPackageDraftsResponseSchema": "src/api/protocol.zod.ts#PublishPackageDraftsResponseSchema (const)",
     "QueryAdapterConfig": "src/api/query-adapter.zod.ts#QueryAdapterConfig (type)",
