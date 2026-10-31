@@ -133,10 +133,6 @@ dataset, so Level B only surfaces in Studio previews and hand-coded react-page
   `logarithmic`, `title`); a second `yAxis` entry plus `series[].yAxis: 'right'`
   gives a dual axis; `series[].stack` groups a stacked bar; `annotations` draw
   reference lines/bands.
-- Studio's Dashboard Widget Inspector can author per-widget `dataset`,
-  `dimensions`, and `values`; curated metadata-admin forms merge
-  server-only fields back into the payload, so saving through Studio should
-  not drop newer schema fields.
 - The analytics runtime applies SecurityPlugin read scope via
   `security.getReadFilter`, so dashboard/report datasets remain RLS-aware.
 
@@ -321,9 +317,6 @@ const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
 | `'quarter'` | `YYYY-Qn` |
 | `'year'` | `YYYY` |
 
-* **Engine support** — drivers emit the bucket as a label (`2026-01`), not
-  an instant: Postgres `to_char`, MySQL `date_format`, SQLite `strftime`,
-  MongoDB `$dateToString`, in-memory `bucketDateKey`.
 * **Human labels are automatic** — the analytics layer formats the bucket value
   to the label above, and resolves `select`/`lookup` dimension values to their
   option label / related-record name. Measures carry their `label` + `format`
@@ -404,7 +397,8 @@ export const PipelineCoverageReport = defineReport({
   dateRange: { dimension: 'close_date', defaultRange: 'this_year' },
   exportOptions: { formats: ['csv', 'xlsx'] }, // the download; optional `includeHeaders`, `fileNamePrefix`
   order: [{ by: 'amount_sum', direction: 'desc' }], // by measure; dates default to chronological
-  chart: { type: 'bar', xAxis: 'forecast_category', yAxis: 'amount_sum' },
+  // `seriesBy`: one bar per quarter inside each category.
+  chart: { type: 'bar', xAxis: 'forecast_category', yAxis: 'amount_sum', seriesBy: 'close_date' },
 });
 ```
 
@@ -423,6 +417,11 @@ export const PipelineCoverageReport = defineReport({
 > **`exportOptions`** declares the download, never who may download — that is the
 > base object's permission-set `allowExport`; a `joined` report takes neither
 > `dateRange` nor `exportOptions`.
+> **`seriesBy`** splits the one `yAxis` measure into a series per value of a second
+> dataset dimension — not a `matrix` workaround. It must name a declared dimension
+> (publish refuses an unknown name) other than `xAxis`, and is refused on the
+> single-series types `pie` / `donut` / `funnel` / `treemap` / `sankey`; with it,
+> `series[].name` names one of its values.
 
 ---
 
