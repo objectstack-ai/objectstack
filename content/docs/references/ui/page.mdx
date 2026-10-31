@@ -68,7 +68,7 @@ View filter rule
 
 ### Nested Shape: `ElementDataSource.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ any: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ any: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one does not filter by it.
+[PLANNED — not yet rendered] An any-of group: `{ any: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ any: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -150,7 +150,7 @@ View filter rule
 
 ### Nested Shape: `InterfacePageConfig.filterBy[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ any: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ any: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one does not filter by it.
+[PLANNED — not yet rendered] An any-of group: `{ any: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ any: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -479,7 +479,7 @@ View filter rule
 
 ### Nested Shape: `PageRecordBinding.filter[number][option 2]`
 
-[PLANNED — not yet rendered] An any-of group: `{ any: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ any: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one does not filter by it.
+[PLANNED — not yet rendered] An any-of group: `{ any: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ any: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

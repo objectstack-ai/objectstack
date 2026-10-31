@@ -1160,9 +1160,12 @@ export function isViewFilterAnyGroup(value: unknown): value is { [VIEW_FILTER_AN
  * ## [PLANNED — not yet rendered]
  *
  * No reader applies the group yet. The query a list view runs is built by the
- * console (`ui/packages/plugin-list`'s filter-to-AST conversion), which reads
- * flat rules only; until it reads this element, a view that stores one does not
- * filter by it. The describe below says so, so no author is told it works.
+ * console (`ui/packages/core/src/utils/filter-converter.ts#toFilterNode`), which
+ * lowers flat rules only and passes a group through untouched, so the server
+ * refuses the query as a malformed filter (400 `INVALID_FILTER`) and the list
+ * shows that error and no rows. It fails closed: a stored group never widens
+ * what a view, a related list or a picker shows. The describe below says so,
+ * so no author is told it works.
  * The console half is #28370; the marker leaves when it lands.
  *
  * @example
@@ -1210,7 +1213,8 @@ export const ViewFilterAnyGroupSchema = lazySchema(() => strictObject({
   + 'so `[{ any: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", '
   + 'operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the '
   + 'last 7 days. One level only: its members are flat rules. No console reads it yet: until the list '
-  + 'query build reads the group, a view that stores one does not filter by it.',
+  + 'query build reads the group, a view that stores one is refused when it loads (the list reports a '
+  + 'malformed filter and shows no rows).',
 ));
 
 export type ViewFilterAnyGroup = z.input<typeof ViewFilterAnyGroupSchema>;

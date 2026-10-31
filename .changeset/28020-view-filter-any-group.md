@@ -28,6 +28,6 @@ filter: [
 - The wire door strips the console's row `id` inside a group as on a plain rule.
 - `ViewFilterRule` (the type) is unchanged and still means one flat rule. A reader typed against a carrier's element now sees `ViewFilterElement`, and must step into a group (`isViewFilterAnyGroup`) rather than read `field` off every element.
 - `solution-blueprint` view `filters` deliberately stay flat rules: the model writes them through a strict mirror that cannot carry a union.
-- `[PLANNED — not yet rendered]`: no console applies the group yet. The list query build reads flat rules only, so until it reads this element a view that stores a group does not filter by it; the group's describe says so.
+- `[PLANNED — not yet rendered]`: no console applies the group yet. The list query build reads flat rules only, so until it reads this element a view that stores a group is refused when it loads (the server answers the passed-through group with a malformed-filter error and the list shows no rows); it fails closed, and the group's describe says so.
 
 Readers updated: `@objectstack/lint`'s filter field-key walk (`filter-walk.ts`, used by the list-view, dataset and widget field-reference rules), the preset-comparand rule, and the page field-binding rule (`filterBy` and a related list's `filter`) step into a group, so a field inside one is checked and `any` is never reported as a field. `@objectstack/metadata-protocol`'s `computeViewReferenceDiagnostics` checks the fields inside a group in a preset tab's filter.
