@@ -1362,6 +1362,7 @@
     "ui/View:name",
     "ui/View:object",
     "ui/View:protection",
+    "ui/ViewFilterAnyGroup:any",
     "ui/ViewFilterRule:field",
     "ui/ViewFilterRule:operator",
     "ui/ViewFilterRule:value",
