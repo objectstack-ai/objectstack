@@ -3452,6 +3452,7 @@ const ru = {
   report: {
     total: "Итого",
     totals: "Итоги",
+    subtotal: "Промежуточный итог",
     loading: "Загрузка…",
     forbiddenMessage: "У вас нет прав на просмотр данных этого отчёта.",
     dateRange: {

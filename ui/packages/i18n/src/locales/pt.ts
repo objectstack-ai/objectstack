@@ -3371,6 +3371,7 @@ const pt = {
   report: {
     total: "Total",
     totals: "Totais",
+    subtotal: "Subtotal",
     loading: "Carregando…",
     forbiddenMessage: "Você não tem permissão para ver os dados deste relatório.",
     dateRange: {

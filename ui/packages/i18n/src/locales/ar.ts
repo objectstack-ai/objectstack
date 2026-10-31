@@ -3574,6 +3574,7 @@ const ar = {
   report: {
     total: "الإجمالي",
     totals: "الإجماليات",
+    subtotal: "المجموع الفرعي",
     loading: "جارٍ التحميل…",
     forbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بهذا التقرير.",
     dateRange: {

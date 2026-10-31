@@ -3309,6 +3309,7 @@ const de = {
   report: {
     total: "Gesamt",
     totals: "Summen",
+    subtotal: "Zwischensumme",
     loading: "Wird geladen…",
     forbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Berichts anzuzeigen.",
     dateRange: {

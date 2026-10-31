@@ -1480,6 +1480,7 @@ const zh = {
   report: {
     total: '总计',
     totals: '汇总',
+    subtotal: '小计',
     loading: '加载中…',
     forbiddenMessage: '你没有查看该报表数据的权限。',
     dateRange: {

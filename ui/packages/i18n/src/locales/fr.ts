@@ -3372,6 +3372,7 @@ const fr = {
   report: {
     total: "Total",
     totals: "Totaux",
+    subtotal: "Sous-total",
     loading: "Chargement…",
     forbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce rapport.",
     dateRange: {
