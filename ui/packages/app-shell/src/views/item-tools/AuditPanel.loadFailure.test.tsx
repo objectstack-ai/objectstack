@@ -49,7 +49,7 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MetadataAuditEntry, MetadataClient } from '@object-ui/data-objectstack';
 import { AuditPanel } from './AuditPanel';
-import { t } from './i18n';
+import { t } from '../metadata-admin/i18n';
 // The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.

@@ -1645,6 +1645,28 @@ export class SecurityPlugin implements Plugin {
             { id: 'nav_permission_sets', type: 'url', label: 'Permission Sets', url: '/apps/setup/metadata/permission?scope=environment', icon: 'lock' },
           ],
         },
+        {
+          // [ADR-0146 D7] The two ASSIGNMENT pages — who holds a position, and
+          // which users carry a permission set. They sit with the people they
+          // assign (People & Organization), not with the catalog above. The
+          // console binds each `componentRef` to its page (app-shell
+          // `builtinComponents`), and the pages read and write this plugin's
+          // assignment rows, so the entries live and die with this plugin like
+          // the catalog entries. Gate: none of their own, exactly like
+          // Positions / Permission Sets — the Setup app's `setup.access` and the
+          // ungated group anchor decide who sees them (ADR-0146 D7: the scope of
+          // `setup.access` and the delegated-administrator gate), and the writes
+          // the pages make keep their own server-side gates (the ADR-0090 D12
+          // delegated-admin gate among them). Priority 200 keeps them after
+          // platform-objects' base People & Organization entries (100).
+          app: 'setup',
+          group: 'group_people_org',
+          priority: 200,
+          items: [
+            { id: 'nav_position_holders', type: 'component', label: 'Position Holders', componentRef: 'security:position-holders', icon: 'user-check' },
+            { id: 'nav_permission_set_assignment', type: 'component', label: 'Permission Set Assignment', componentRef: 'security:permission-set-assignment', icon: 'key-round' },
+          ],
+        },
       ],
     });
 

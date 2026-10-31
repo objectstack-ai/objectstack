@@ -13,8 +13,10 @@
  *     never read it — and a caller-set `origin: 'code'` is not provenance;
  *   - a declared `credentialsRef` / `external.connector` wins, and a failing
  *     one stays fail-closed rather than falling back;
- *   - an unset variable keeps the verdict, and its reason names the variable;
- *   - two names deriving one variable are refused;
+ *   - an unset variable keeps the verdict, and its reason names the variable —
+ *     as a trailing note after the driver's own error (#28283);
+ *   - two names deriving one variable are refused, and a failed connect holds
+ *     no claim on its variable (#28283);
  *   - the value reaches no log line and no answer.
  * The kernel-level wiring (the admin plugin's switch, the provenance set the
  * runtime fills) is pinned in `@objectstack/runtime`'s
@@ -54,9 +56,10 @@ function engine(): ConnectionEngineLike {
 /**
  * A factory that records the `secret` each build received. `connectFails`
  * makes the connect throw the way a database refusing an unauthenticated
- * login does.
+ * login does; `connectError` makes the connect of the named datasources
+ * throw that error instead.
  */
-function recordingFactory(opts: { connectFails?: boolean } = {}) {
+function recordingFactory(opts: { connectFails?: boolean; connectError?: { names: string[]; error: () => Error } } = {}) {
   const seen: Array<{ name?: string; secret?: string }> = [];
   const factory: IDatasourceDriverFactory = {
     supports: () => true,
@@ -66,6 +69,7 @@ function recordingFactory(opts: { connectFails?: boolean } = {}) {
       return {
         driver,
         connect: async () => {
+          if (opts.connectError?.names.includes(spec.name)) throw opts.connectError.error();
           if (opts.connectFails) throw new Error('password authentication failed for user "svc"');
         },
       };
@@ -88,12 +92,13 @@ function service(opts: {
   env?: Record<string, string | undefined>;
   slot?: boolean;
   connectFails?: boolean;
+  connectError?: { names: string[]; error: () => Error };
   secrets?: { resolve?: (ref: string) => Promise<string | undefined> };
 } = {}) {
   const codeNames = new Set(opts.codeNames ?? ['warehouse']);
   const env = opts.env ?? { [datasourceEnvCredentialVar('warehouse')]: VALUE };
   const read = vi.fn((variable: string) => env[variable]);
-  const { factory, seen } = recordingFactory({ connectFails: opts.connectFails });
+  const { factory, seen } = recordingFactory({ connectFails: opts.connectFails, connectError: opts.connectError });
   const { logger, lines } = capturingLogger();
   const svc = new DatasourceConnectionService({
     factory: () => factory,
@@ -239,6 +244,22 @@ describe('an unset variable keeps the verdict, and the reason names the variable
     expect(result.reason).toContain('OS_DATASOURCE_WAREHOUSE_PASSWORD');
   });
 
+  it("a failure that is not a login refusal leads with the driver's error; the variable is only a trailing note", async () => {
+    // [#28283] An unreachable host, a missing driver module or a TLS failure
+    // is not cured by a password: the variable rides along as a note, never as
+    // the explanation of the failure.
+    const unreachable = 'connect ECONNREFUSED 127.0.0.1:1';
+    const { svc } = service({
+      env: {},
+      connectError: { names: ['warehouse'], error: () => Object.assign(new Error(unreachable), { code: 'ECONNREFUSED' }) },
+    });
+    const result = await svc.connect(warehouse, BOOT).catch((err: Error) => ({ status: 'threw', reason: err.message }));
+    expect(result.status).toBe('failed-degraded');
+    expect(result.reason!.startsWith(unreachable)).toBe(true);
+    expect(result.reason!.slice(unreachable.length)).toMatch(/^ \(note: [^)]*OS_DATASOURCE_WAREHOUSE_PASSWORD[^)]*\)$/);
+    expect(svc.getConnectionState('warehouse')?.reason).toBe(result.reason);
+  });
+
   it('a failure on a connect the slot did not apply to keeps its reason unchanged', async () => {
     const { svc } = service({ env: {}, connectFails: true });
     const result = await svc.connect(warehouse, { context: { origin: 'runtime', trigger: 'runtime-admin' } });
@@ -262,6 +283,23 @@ describe('two datasources that derive one variable are refused', () => {
     expect(second.reason).toContain('OS_DATASOURCE_EU_SALES_PASSWORD');
     expect(read).toHaveBeenCalledTimes(1);
     expect(seen.map((s) => s.name)).toEqual(['eu-sales']);
+  });
+
+  it('a connect that failed holds no claim: a later name deriving the same variable connects', async () => {
+    // [#28283] The owner is the datasource the variable was read for and
+    // connected; a failed connect leaves no live pool to collide with.
+    const { svc, seen } = service({
+      codeNames: ['eu-sales', 'eu_sales'],
+      env: { OS_DATASOURCE_EU_SALES_PASSWORD: VALUE },
+      connectError: { names: ['eu-sales'], error: () => new Error('getaddrinfo ENOTFOUND db.internal') },
+    });
+    const first = await svc.connect({ ...warehouse, name: 'eu-sales' }, BOOT);
+    expect(first.status).toBe('failed-degraded');
+    const second = await svc
+      .connect({ ...warehouse, name: 'eu_sales' }, BOOT)
+      .catch((err: Error) => ({ status: 'threw', reason: err.message }));
+    expect(second.status).toBe('connected');
+    expect(seen.map((s) => s.name)).toEqual(['eu-sales', 'eu_sales']);
   });
 
   it('a reconnect of the same name is not a collision, and a disconnect releases the variable', async () => {

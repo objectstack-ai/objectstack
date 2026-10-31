@@ -1,8 +1,0 @@
-{
-  "worktree": {
-    "setup": [
-      "pnpm i",
-      "pnpm build"
-    ]
-  }
-}

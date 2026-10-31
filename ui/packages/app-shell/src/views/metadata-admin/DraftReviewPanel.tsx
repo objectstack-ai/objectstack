@@ -19,7 +19,7 @@
  * draft drops, "modified" = value changed.
  */
 import React from 'react';
-import { computeDiffRows, type DiffStatus } from './LayeredDiff.js';
+import { computeDiffRows, type DiffStatus } from '../item-tools/LayeredDiff.js';
 import { t, type SupportedLocale } from './i18n.js';
 
 const STATUS_BADGE: Record<Exclude<DiffStatus, 'unchanged'>, string> = {

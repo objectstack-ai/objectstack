@@ -29,6 +29,7 @@ export * from './native-error-name.js';
 export * from './keyset-walk.js';
 export * from './module-not-found.js';
 export * from './response-envelope.js';
+export * from './representation-validator.js';
 // [#8016] The one rule for "what HTTP answer does a THROWN error declare?",
 // plus the validation-failure recogniser it reads. Both doors of
 // `/api/v1/packages` call it: the runtime dispatcher's `errorFromThrown` and the
