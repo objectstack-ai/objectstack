@@ -181,6 +181,105 @@ describe('normalize-openapi: OpenAPI 3.0 YAML across two files (Stripe-shaped)',
   });
 });
 
+describe('normalize-openapi: --trim keeps only the matched operations', () => {
+  const PATTERNS = ['^GET /v1/customers', 'balance'];
+
+  it('writes exactly the matched operations, with the include list an untrimmed run computes', async () => {
+    const untrimmed = await normalizeOpenApi({ input: OPENAPI3_YAML, includePatterns: PATTERNS });
+    const trimmed = await normalizeOpenApi({ input: OPENAPI3_YAML, includePatterns: PATTERNS, trim: true });
+    expect(trimmed.operationKeys).toEqual(['GetCustomers', 'GetCustomersCustomer', 'get_v1_balance']);
+    expect(trimmed.include).toEqual(untrimmed.include);
+    expect(trimmed.sourceOperations).toBe(4);
+    const paths = trimmed.document.paths as Record<string, Record<string, unknown>>;
+    expect(Object.keys(paths)).toEqual(['/v1/customers', '/v1/customers/{customer}', '/v1/balance']);
+    // The unmatched POST is gone from a path item whose GET is kept.
+    expect(Object.keys(paths['/v1/customers'] ?? {})).toEqual(['get']);
+    expect(trimmed.text.length).toBeLessThan(untrimmed.text.length);
+
+    const { def } = await load(trimmed);
+    expect(def.actions?.map((a) => a.key)).toEqual(trimmed.include);
+    expect(refPaths(def)).toEqual([]);
+    expect(refPaths(trimmed.document)).toEqual([]);
+    expect(trimmed.refsLeft).toBe(0);
+  });
+
+  it('carries nothing reachable only from a dropped operation, and drops path items left empty', async () => {
+    const trimmed = await normalizeOpenApi({ input: OPENAPI3_YAML, includePatterns: ['balance'], trim: true });
+    expect(Object.keys(trimmed.document.paths as object)).toEqual(['/v1/balance']);
+    // customer, customer_create, the shared error response and the shared parameter were reachable
+    // only from the customer operations.
+    for (const gone of ['A customer.', 'Error response.', 'someone@example.com', '"limit"', 'subscription']) {
+      expect(trimmed.text).not.toContain(gone);
+    }
+    // Only the kept operation is walked: none of the customer schemas' cuts are counted.
+    expect(trimmed.cuts).toEqual({ recursive: 0, maxDepth: 0, extension: 0 });
+    expect(trimmed.document.components).toEqual({ securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } });
+    const { def } = await load(trimmed);
+    expect(def.actions?.map((a) => a.key)).toEqual(['get_v1_balance']);
+  });
+
+  it('trims a Swagger 2.0 document after conversion, keyed by operationId', async () => {
+    const trimmed = await normalizeOpenApi({
+      input: SWAGGER2,
+      emptyConsumes: 'application/json',
+      includePatterns: ['^Envelopes_GetEnvelope$'],
+      trim: true,
+    });
+    expect(trimmed.operationKeys).toEqual(['Envelopes_GetEnvelope']);
+    expect(trimmed.sourceOperations).toBe(3);
+    const { def } = await load(trimmed);
+    expect(def.actions?.map((a) => a.key)).toEqual(['Envelopes_GetEnvelope']);
+    expect(refPaths(def)).toEqual([]);
+  });
+
+  it('resolves a $ref path item before selecting its operations', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'normalize-openapi-'));
+    try {
+      const file = join(dir, 'ref-path-item.json');
+      await writeFile(
+        file,
+        JSON.stringify({
+          openapi: '3.1.0',
+          info: { title: 't', version: '1' },
+          servers: [{ url: 'https://api.example.com' }],
+          paths: {
+            '/a': { $ref: '#/paths/~1b', summary: 'A, shaped like B' },
+            '/b': {
+              get: { operationId: 'getB', responses: { '200': { description: 'OK' } } },
+              delete: { operationId: 'deleteB', responses: { '200': { description: 'OK' } } },
+            },
+          },
+          webhooks: { ping: { post: { operationId: 'ping', responses: { '200': { description: 'OK' } } } } },
+        }),
+      );
+      const trimmed = await normalizeOpenApi({ input: file, includePatterns: ['^GET /a$'], trim: true });
+      expect(trimmed.document.paths).toEqual({
+        '/a': { summary: 'A, shaped like B', get: { operationId: 'getB', responses: { '200': { description: 'OK' } } } },
+      });
+      expect(trimmed.document).not.toHaveProperty('webhooks');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses --trim without a pattern, and a pattern that matches nothing', async () => {
+    expect((await refusal(normalizeOpenApi({ input: OPENAPI3_YAML, trim: true }))).message).toContain(
+      'give at least one --include-pattern',
+    );
+    expect(
+      (await refusal(normalizeOpenApi({ input: OPENAPI3_YAML, includePatterns: ['^nope$'], trim: true }))).message,
+    ).toContain('matched none of the 4 operation(s)');
+  });
+
+  it('without --trim the whole document is written, as before (control)', async () => {
+    const result = await normalizeOpenApi({ input: OPENAPI3_YAML, includePatterns: ['balance'] });
+    expect(result.operationKeys).toEqual(['GetCustomers', 'PostCustomers', 'GetCustomersCustomer', 'get_v1_balance']);
+    expect(result.sourceOperations).toBe(4);
+    expect(result.include).toEqual(['get_v1_balance']);
+    expect(result.text).toContain('A customer.');
+  });
+});
+
 describe('normalize-openapi: servers, sources and refusals', () => {
   const doc = (servers: unknown) =>
     JSON.stringify({ openapi: '3.1.0', info: { title: 't', version: '1' }, servers, paths: { '/x': { get: { responses: {} } } } });
@@ -255,6 +354,36 @@ describe('normalize-openapi: the CLI', () => {
     expect(summary.bytes).toBe(written.length);
     expect(summary.sha256).toBe(createHash('sha256').update(written).digest('hex'));
     expect(summary.include).toEqual(['GetCustomers', 'GetCustomersCustomer']);
+  });
+
+  it('with --trim, writes the trimmed bytes and prints their sha256', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'normalize-openapi-'));
+    dirs.push(dir);
+    const out = join(dir, 'billing.trimmed.json');
+    const { chunks, io } = capture();
+    const code = await main(['--in', OPENAPI3_YAML, '--out', out, '--trim', '--include-pattern', '^Get'], io);
+    expect(code).toBe(0);
+    const summary = JSON.parse(chunks.out) as {
+      sha256: string;
+      bytes: number;
+      include: string[];
+      operations: number;
+      trimmedFrom: number;
+    };
+    const written = await readFile(out);
+    expect(summary.bytes).toBe(written.length);
+    expect(summary.sha256).toBe(createHash('sha256').update(written).digest('hex'));
+    expect(summary.include).toEqual(['GetCustomers', 'GetCustomersCustomer']);
+    expect(summary.operations).toBe(2);
+    expect(summary.trimmedFrom).toBe(4);
+    const paths = (JSON.parse(written.toString('utf8')) as { paths: Record<string, object> }).paths;
+    expect(Object.keys(paths)).toEqual(['/v1/customers', '/v1/customers/{customer}']);
+    expect(Object.keys(paths['/v1/customers'] ?? {})).toEqual(['get']);
+
+    const refused = capture();
+    expect(await main(['--in', OPENAPI3_YAML, '--out', join(dir, 'y.json'), '--trim'], refused.io)).toBe(1);
+    expect(refused.chunks.err).toContain('--include-pattern');
+    await expect(readFile(join(dir, 'y.json'))).rejects.toThrow();
   });
 
   it('exits 1 on a refusal and 2 on a usage error, writing nothing', async () => {
