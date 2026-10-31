@@ -81,6 +81,8 @@ describe('the exact decimal arithmetic', () => {
     expect(div('0.125', 1, 2)).toBe('0.13');
     expect(div('-0.125', 1, 2)).toBe('-0.13');
     expect(div('0.124999', 1, 2)).toBe('0.12');
+    // 1.005 has no exact binary double (1.00499999…), so a float `toFixed(2)` answers 1.00; the decimal is 1.01.
+    expect(div(1.005, 1, 2)).toBe('1.01');
     // A float division would answer 0.30000000000000004 for 0.1 + 0.2 style inputs; exact here.
     expect(div('0.3', '0.1', 2)).toBe('3.00');
     // Three minor-unit classes: JPY 0, USD 2, KWD 3.

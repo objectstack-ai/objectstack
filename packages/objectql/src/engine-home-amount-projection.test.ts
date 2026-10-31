@@ -160,6 +160,9 @@ describe('insert: the home amount is the amount divided by the rate in force on 
     const before = t.finds.sys_exchange_rate ?? 0;
     const row = await t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'CNY', amount: 12.345 });
     expect(t.storeFor('fx_invoice').get(row.id)).toMatchObject({ amount_home: 12.35, amount_rate: 1 });
+    // 1.005 is 1.00499999… as a double: a float rounding stores 1.00, the decimal one 1.01.
+    const half = await t.engine.insert('fx_invoice', { title: 'i2', currency_code: 'CNY', amount: 1.005 });
+    expect(t.storeFor('fx_invoice').get(half.id)).toMatchObject({ amount_home: 1.01, amount_rate: 1 });
     expect(t.finds.sys_exchange_rate ?? 0).toBe(before);
   });
 

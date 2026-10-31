@@ -178,6 +178,8 @@ for (const cell of CELLS) {
       it('the same currency as home is rate 1, rounded to the home minor units', async () => {
         home = 'CNY';
         expect(await written({ currency_code: 'CNY', amount: 12.345 })).toMatchObject({ home: 12.35, rate: 1 });
+        // 1.005 is 1.00499999… as a double: a float rounding stores 1.00, the decimal one 1.01.
+        expect(await written({ currency_code: 'CNY', amount: 1.005 })).toMatchObject({ home: 1.01, rate: 1 });
       });
 
       it('the rate row is the latest on or before the document date; none ⇒ refused, nothing stored', async () => {
