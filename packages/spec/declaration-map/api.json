@@ -585,6 +585,8 @@
     "PresignedUrlResponseSchema": "api/PresignedUrlResponse",
     "ProvenanceWaiver": "api/ProvenanceWaiver",
     "ProvenanceWaiverSchema": "api/ProvenanceWaiver",
+    "PublicFormSubmitResponse": "api/PublicFormSubmitResponse",
+    "PublicFormSubmitResponseSchema": "api/PublicFormSubmitResponse",
     "PublishMetaItemRequest": "api/PublishMetaItemRequest",
     "PublishMetaItemRequestSchema": "api/PublishMetaItemRequest",
     "PublishMetaItemResponse": "api/PublishMetaItemResponse",

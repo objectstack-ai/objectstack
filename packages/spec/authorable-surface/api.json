@@ -1356,6 +1356,8 @@
     "api/ProvenanceWaiver:package",
     "api/ProvenanceWaiver:reason",
     "api/ProvenanceWaiver:registeredUnder",
+    "api/PublicFormSubmitResponse:fields",
+    "api/PublicFormSubmitResponse:id",
     "api/PublishMetaItemRequest:actor",
     "api/PublishMetaItemRequest:member",
     "api/PublishMetaItemRequest:message",
