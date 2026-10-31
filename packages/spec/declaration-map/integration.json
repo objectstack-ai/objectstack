@@ -27,6 +27,8 @@
     "ConnectorInstanceOAuth2AuthorizationCodeAuthSchema": "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth",
     "ConnectorInstanceOAuth2ClientCredentialsAuth": "integration/ConnectorInstanceOAuth2ClientCredentialsAuth",
     "ConnectorInstanceOAuth2ClientCredentialsAuthSchema": "integration/ConnectorInstanceOAuth2ClientCredentialsAuth",
+    "ConnectorInstanceSignedAlipayV3Auth": "integration/ConnectorInstanceSignedAlipayV3Auth",
+    "ConnectorInstanceSignedAlipayV3AuthSchema": "integration/ConnectorInstanceSignedAlipayV3Auth",
     "ConnectorInstanceSignedAliyunAcs3Auth": "integration/ConnectorInstanceSignedAliyunAcs3Auth",
     "ConnectorInstanceSignedAliyunAcs3AuthSchema": "integration/ConnectorInstanceSignedAliyunAcs3Auth",
     "ConnectorInstanceSignedAuth": "integration/ConnectorInstanceSignedAuth",

@@ -122,6 +122,7 @@ bugs — it is the protection or the side effect that silently does not happen.
 | 18 | REST anonymous-deny seam satisfied | rest | Get: `enforceAuth` passes with no `userId`. Not reachable from the wire — `isSystem` is never set on an inbound request | `enforceAuth` |
 | 18b | Settings namespace read scope not applied | service-settings | Get: a read of `sys_setting`, `sys_setting_audit` or `sys_platform_setting` across every namespace, whatever each namespace's `readPermission` names — the settings service's own reads of its stores take this path. Lose: the per-namespace read gate the generic data API applies to every other caller, the same rule the settings routes enforce | `settingsReadDoorMiddleware` |
 | 18c | **Credential-column filter / sort refusal not applied** — a `where`, `orderBy`, per-aggregation `filter` or `expand` entry naming a `password` / `secret` column is evaluated | objectql | Get: the server's own match on a stored credential value, a lookup that never returns it. Every other caller, administrators included, is refused `400 INVALID_FIELD` for anything but a has-a-value check (ADR-0100). Lose: nothing a wire caller reaches — `isSystem` is never set on an inbound request | `rejectCredentialEvaluation` |
+| 18d | **Stored-metadata type read gate not applied** — a read of `sys_metadata` / `sys_metadata_history` is not narrowed by the capability its row's type requires | objectql | Get: every row of the family on `find` / `findOne` / `count` / `aggregate` — the metadata loader, the `/meta` doors' own store reads, boot (a read with no execution context is not narrowed either). Lose: the narrowing that serves a stored row of a capability-gated type (`datasource`, `external_catalog`) only to holders of the capability the `/meta` type gate names for it | `storedMetadataTypeReadFilter` |
 
 ### 2. Write pipeline and data integrity
 
@@ -543,6 +544,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/objectql/src/engine.ts#insert` | 3 | 21, 22 |
 | `packages/objectql/src/engine.ts#isSystem` | 1 | 64 |
 | `packages/objectql/src/engine.ts#update` | 4 | 19, 20 |
+| `packages/objectql/src/stored-metadata-type-read-gate.ts#storedMetadataTypeReadFilter` | 1 | 18d |
 | `packages/observability/src/perf-timing.ts#isPerfDisclosurePrincipal` | 1 | 13 |
 | `packages/plugins/organizations/src/organizations-plugin.ts#start` | 1 | 62 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts#comment` | 1 | 43 |

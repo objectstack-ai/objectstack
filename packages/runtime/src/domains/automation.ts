@@ -59,6 +59,9 @@ import {
 // Who may START a flow by name — the one rule the trigger door, the action door
 // and the declared endpoint share (the maintainer's ruling, letters B and A).
 import { flowStartRefusal } from '../flow-start-admission.js';
+// ADR-0143 D5 · ruling A (record 6548764795) — which credential admitted the
+// caller, read the way the api-action forward table reads it.
+import { apiForwardCredentialKind } from '../action-execution.js';
 // [#12156] ADR-0126 §7.1 clone — the whole-definition copy, the keys it must
 // not carry forward, the same-name refusal and the references notice.
 import {
@@ -944,17 +947,68 @@ const CONNECTOR_CONNECTION_DENY_MESSAGE =
     `Connecting, reconnecting or revoking a connector instance, or reading its connection, requires the \`${CONNECTOR_CONNECTION_CAPABILITY}\` capability.`;
 
 /**
+ * ADR-0143 D5 — a caller that acts for a person instead of being that person
+ * signed in, by kind: `agent` (an envelope that names a delegator,
+ * `principalKind: 'agent'` or `onBehalfOf`), `oauth` (admitted by an OAuth
+ * access token) or `api_key` (admitted by an API key). The credential half is
+ * the forward table's own reading ({@link apiForwardCredentialKind}), so the
+ * two doors cannot disagree about which credential admitted a caller.
+ */
+export type ConnectorConnectionDelegatedCaller = 'agent' | 'oauth' | 'api_key';
+
+/** The delegated kind of this request's caller, or `undefined` for a person signed in (or no recorded credential). */
+export function connectorConnectionDelegatedCaller(context: HttpProtocolContext | undefined): ConnectorConnectionDelegatedCaller | undefined {
+    const ec: any = context?.executionContext;
+    if (ec?.principalKind === 'agent' || ec?.onBehalfOf) return 'agent';
+    const credential = apiForwardCredentialKind(context);
+    return credential === 'oauth' || credential === 'api_key' ? credential : undefined;
+}
+
+const CONNECTOR_CONNECTION_DELEGATED_CALLER_NAMES: Readonly<Record<ConnectorConnectionDelegatedCaller, string>> = {
+    agent: 'an agent acting on a person\'s behalf',
+    oauth: 'an OAuth access token, which a client holds to act for a person',
+    api_key: 'an API key, which acts for its owner without them present',
+};
+
+/**
+ * The refusal sentence for a delegated caller on the begin or revoke leg,
+ * naming its kind and the rule.
+ */
+export function connectorConnectionDelegatedCallerRefusal(kind: ConnectorConnectionDelegatedCaller): string {
+    return (
+        'Connecting, reconnecting or revoking a connector instance is a human administrator\'s act, taken from a '
+        + `signed-in session, and this request comes from ${CONNECTOR_CONNECTION_DELEGATED_CALLER_NAMES[kind]}. `
+        + 'Nothing was connected or revoked. Sign in and take this step yourself.'
+    );
+}
+
+/**
  * ADR-0143 D5 — the connection door's capability gate:
  * {@link CONNECTOR_CONNECTION_CAPABILITY}, fail-closed, only `isSystem`
  * bypassing. The callback is gated too: the browser that lands on it is the
  * administrator's, carrying the session that began the connect.
+ *
+ * Ruling A (record 6548764795): the begin leg (`POST`: connect, reconnect) and
+ * the revoke leg (`DELETE`) refuse a delegated caller by name
+ * ({@link connectorConnectionDelegatedCaller}), whatever it holds. D5 binds a
+ * connection to the session that began it, so connecting and revoking an
+ * organization's vendor account is a person's act, never an agent's acting for
+ * them. The read leg and the callback are unchanged.
  */
 function refuseUngrantedConnectorConnectionAccess(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
+    method: string,
 ): HttpDispatcherResult | undefined {
     const ec: any = context?.executionContext;
     if (ec?.isSystem) return undefined;
+    const delegated = method === 'POST' || method === 'DELETE' ? connectorConnectionDelegatedCaller(context) : undefined;
+    if (delegated) {
+        return {
+            handled: true,
+            response: deps.error(connectorConnectionDelegatedCallerRefusal(delegated), FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
+        };
+    }
     if (new Set<string>(ec?.systemPermissions ?? []).has(CONNECTOR_CONNECTION_CAPABILITY)) return undefined;
     return {
         handled: true,
@@ -3096,9 +3150,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // the organization-scoped capability, ahead of the service probe and of
     // any query check, as above. No walled refusal: a
     // connection belongs to its organization (Q1 = A), so it is served under
-    // every tenancy posture.
+    // every tenancy posture. Begin and revoke refuse a delegated caller by
+    // name (ruling A, record 6548764795).
     if (isConnectorConnectionDoor(parts, m)) {
-        const refusal = refuseUngrantedConnectorConnectionAccess(deps, context);
+        const refusal = refuseUngrantedConnectorConnectionAccess(deps, context, m);
         if (refusal) return refusal;
     }
 

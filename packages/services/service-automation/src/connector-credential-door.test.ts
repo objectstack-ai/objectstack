@@ -27,6 +27,7 @@
  *
  * The values below are obvious dummies.
  */
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
@@ -286,6 +287,57 @@ describe('[#27237] a missing credential degrades its instance; setting it materi
         await expect(engine.clearConnectorCredential({ ref: REF, context: ADMIN }))
             .rejects.toMatchObject({ status: 404, code: 'RESOURCE_NOT_FOUND' });
         expect(await ql.find(CONNECTOR_CREDENTIAL_OBJECT, { context: SYSTEM } as never)).toHaveLength(0);
+    });
+});
+
+// ADR-0143 D2.3 — an `alipay-v3` instance names two references: the private
+// key it signs with and the Alipay public key it verifies responses with. The
+// door lists both against the instance, and setting or replacing either one
+// re-materializes it.
+describe('[#26710] a signed instance names its vendor public key as a second reference', () => {
+    const vectors = new URL('../test-vectors/alipay-v3/', import.meta.url);
+    const PRIVATE_KEY = readFileSync(new URL('PLACEHOLDER-test-only-rsa2048-private-key.pkcs8.b64', vectors), 'ascii').trim();
+    const PUBLIC_KEY = readFileSync(new URL('PLACEHOLDER-test-only-rsa2048-public-key.spki.b64', vectors), 'ascii').trim();
+    const alipay = {
+        name: 'alipay_pay',
+        label: 'Alipay',
+        type: 'api',
+        provider: 'fake',
+        providerConfig: {},
+        auth: { type: 'signed', scheme: 'alipay-v3', keyId: '2021000000000000', credentialRef: 'ALIPAY_APP_PRIVATE_KEY', vendorPublicKeyRef: 'ALIPAY_PUBLIC_KEY' },
+        _packageId: 'com.example.alipay',
+    };
+
+    it('lists both references; the public key missing degrades the instance, and setting or replacing it materializes it', async () => {
+        const materialized: ConnectorProviderContext[] = [];
+        const signing: ConnectorProviderFactory = (ctx) => {
+            materialized.push(ctx);
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [] } as unknown as Connector,
+                handlers: {},
+                requestSignerApplied: true,
+            };
+        };
+        const provider = { ...fakeProvider(), factory: signing };
+        const { engine } = await boot([alipay], {
+            provider,
+            credentialResolver: (ref) => (ref === 'ALIPAY_APP_PRIVATE_KEY' ? PRIVATE_KEY : undefined),
+        });
+        expect(materialized).toHaveLength(0);
+        expect(engine.getConnectorDegradedReason('alipay_pay')).toContain("credential 'ALIPAY_PUBLIC_KEY'");
+        const listed = Object.fromEntries((await engine.listConnectorCredentialRefs()).map((e) => [e.ref, e]));
+        expect(listed.ALIPAY_PUBLIC_KEY).toMatchObject({ status: 'missing', declared: true });
+        expect(listed.ALIPAY_PUBLIC_KEY!.connectors).toEqual([expect.objectContaining({ name: 'alipay_pay', packageId: 'com.example.alipay' })]);
+        expect(listed.ALIPAY_APP_PRIVATE_KEY!.connectors).toEqual([expect.objectContaining({ name: 'alipay_pay' })]);
+
+        await engine.setConnectorCredential({ ref: 'ALIPAY_PUBLIC_KEY', value: PUBLIC_KEY, context: ADMIN });
+        expect(engine.getConnectorDegradedReason('alipay_pay')).toBeUndefined();
+        expect(materialized).toHaveLength(1);
+        expect(materialized[0]!.requestSigner?.scheme).toBe('alipay-v3');
+
+        // A replaced public key is a new revision: the instance re-materializes.
+        await engine.setConnectorCredential({ ref: 'ALIPAY_PUBLIC_KEY', value: `\n${PUBLIC_KEY}\n`, context: ADMIN });
+        expect(materialized).toHaveLength(2);
     });
 });
 

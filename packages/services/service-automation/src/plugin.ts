@@ -437,6 +437,19 @@ function credentialRefOf(auth: ConnectorInstanceAuth | undefined): string | unde
     return auth.credentialRef;
 }
 
+/**
+ * ADR-0143 D2.3 — the vendor public-key reference a `signed` instance names
+ * beside its key, for a scheme whose vendor signs its responses (`alipay-v3`).
+ */
+function vendorPublicKeyRefOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
+    return auth?.type === 'signed' && auth.scheme === 'alipay-v3' ? auth.vendorPublicKeyRef : undefined;
+}
+
+/** [#27237] Every reference an instance's `auth` names: its `credentialRef`, and a vendor public key's. */
+function credentialRefsOf(auth: ConnectorInstanceAuth | undefined): string[] {
+    return [credentialRefOf(auth), vendorPublicKeyRefOf(auth)].filter((ref): ref is string => ref !== undefined);
+}
+
 /** The `basic` username an instance sends beside its secret — what its `Authorization` header encodes with it. */
 function basicUsernameOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
     return auth?.type === 'basic' ? auth.username : undefined;
@@ -2410,7 +2423,7 @@ export class AutomationServicePlugin implements Plugin {
         // read is not one that is absent, so the rows count as unreadable then.
         let chain: ConnectorCredentialChain = { vault: this.options.credentialResolver };
         let credentialRows: Map<string, ConnectorCredentialRecord> | undefined = new Map();
-        if ([...desired.values()].some((d) => credentialRefOf(d.entry.auth) !== undefined)) {
+        if ([...desired.values()].some((d) => credentialRefsOf(d.entry.auth).length > 0)) {
             try {
                 chain = await this.connectorCredentialChain(ctx);
                 if (chain.store) credentialRows = await chain.store.list();
@@ -2426,11 +2439,11 @@ export class AutomationServicePlugin implements Plugin {
         }
         const credentialSources = new Map<string, string>();
         for (const d of desired.values()) {
-            const ref = credentialRefOf(d.entry.auth);
-            if (ref === undefined) continue;
-            const fingerprint = connectorCredentialFingerprint(chain, ref, credentialRows);
-            credentialSources.set(ref, fingerprint);
-            d.signature += `|credential:${fingerprint}`;
+            for (const ref of credentialRefsOf(d.entry.auth)) {
+                const fingerprint = connectorCredentialFingerprint(chain, ref, credentialRows);
+                credentialSources.set(ref, fingerprint);
+                d.signature += `|credential:${fingerprint}`;
+            }
         }
         // ADR-0143 D4 — whether an `authorization_code` instance has a working
         // connection joins its signature, so the first connect materializes it
@@ -2603,11 +2616,36 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 credential = resolution;
             }
+            // ADR-0143 D2.3 — a scheme that verifies responses names the
+            // vendor's public key beside the signing key; it resolves through
+            // the same chain and degrades the instance the same way, so a
+            // response is never accepted unverified for want of it.
+            const vendorRef = vendorPublicKeyRefOf(entry.auth);
+            let vendorPublicKey: string | undefined;
+            if (vendorRef !== undefined) {
+                let resolution: ConnectorCredentialResolution;
+                try {
+                    resolution = await resolveConnectorCredential(chain, vendorRef, credentialRows);
+                } catch (err) {
+                    fail(
+                        `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
+                        err,
+                    );
+                    continue;
+                }
+                if (resolution.kind !== 'resolved') {
+                    await this.degradeConnectorForCredential(engine, ctx, {
+                        name, entry, provider, signature, existing, ref: vendorRef, resolution,
+                    });
+                    continue;
+                }
+                vendorPublicKey = resolution.value;
+            }
             // ADR-0143 D2.3, D4 — a `signed` instance's key is bound to the
             // signer its scheme names, here, and the provider receives only
             // the signer: the key never crosses into a provider package. A key
-            // that cannot sign at all is a configuration fault, like an
-            // unparseable retry policy below.
+            // that cannot sign (or a vendor key that cannot verify) is a
+            // configuration fault, like an unparseable retry policy below.
             let auth: ResolvedConnectorAuth | undefined;
             let requestSigner: ConnectorRequestSigner | undefined;
             let credentialHandle: OAuth2GrantHandle | undefined;
@@ -2616,11 +2654,14 @@ export class AutomationServicePlugin implements Plugin {
             let materializingHandle: ReturnType<typeof askingDuringMaterializationAs> | undefined;
             if (entry.auth?.type === 'signed') {
                 try {
-                    requestSigner = createConnectorRequestSigner(name, entry.auth, credential?.value ?? '');
+                    requestSigner = createConnectorRequestSigner(name, entry.auth, {
+                        key: credential?.value ?? '',
+                        ...(vendorPublicKey === undefined ? {} : { vendorPublicKey }),
+                    });
                 } catch (err) {
                     fail(
-                        `[Automation] connector instance '${name}' (provider '${provider}'): its signing key cannot sign ` +
-                            `(ADR-0143 D2.3).`,
+                        `[Automation] connector instance '${name}' (provider '${provider}'): a key it names cannot sign or ` +
+                            `verify (ADR-0143 D2.3).`,
                         err,
                     );
                     continue;
@@ -3636,12 +3677,12 @@ export class AutomationServicePlugin implements Plugin {
             const entry = raw as DeclaredConnectorItem & { _packageId?: unknown };
             if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
-            const ref = credentialRefOf(entry.auth);
-            if (ref === undefined) continue;
             const packageId = typeof entry._packageId === 'string' && entry._packageId.length > 0 ? entry._packageId : undefined;
-            const list = out.get(ref) ?? [];
-            if (!list.some((c) => c.name === entry.name)) list.push({ name: entry.name, ...(packageId ? { packageId } : {}) });
-            out.set(ref, list);
+            for (const ref of credentialRefsOf(entry.auth)) {
+                const list = out.get(ref) ?? [];
+                if (!list.some((c) => c.name === entry.name)) list.push({ name: entry.name, ...(packageId ? { packageId } : {}) });
+                out.set(ref, list);
+            }
         }
         return out;
     }
