@@ -53,7 +53,7 @@ import { AUTH_ROUTE_LEDGER } from '../../plugins/plugin-auth/src/auth-route-ledg
 /** The five independent ledgers, labelled so a failure names the file to open. */
 const LEDGERS: ReadonlyArray<{
   readonly label: string;
-  readonly rows: ReadonlyArray<{ route: string; responseSchema?: string }>;
+  readonly rows: ReadonlyArray<{ route: string; responseSchema?: string; requestSchema?: string }>;
 }> = [
   { label: 'packages/runtime/src/route-ledger.ts', rows: ROUTE_LEDGER },
   { label: 'packages/rest/src/rest-route-ledger.ts', rows: REST_ROUTE_LEDGER },
@@ -183,5 +183,36 @@ describe('[#5791] every ledgered `responseSchema` names a real spec schema', () 
       byLedger.get('packages/rest/src/rest-route-ledger.ts') ?? [],
       'the REST discovery row must keep declaring its response schema (#5791)',
     ).toContain('GET /api/v1/discovery');
+  });
+});
+
+/**
+ * The request-side twin (ADR-0146 D1): `requestSchema`, so far on the dispatcher
+ * ledger only, names the spec export declaring the BODY a route reads. Same
+ * resolver, same reason — a name is data, and a typo or a retired schema must
+ * fail here rather than rot. That a filled row has conformance coverage is
+ * pinned beside the coverage itself
+ * (`packages/runtime/src/domains/packages-publish-drafts-request-conformance.test.ts`).
+ */
+describe('every ledgered `requestSchema` names a real spec schema', () => {
+  const requestRows = () =>
+    LEDGERS.flatMap(({ label, rows }) =>
+      rows
+        .filter((r): r is typeof r & { requestSchema: string } => r.requestSchema !== undefined)
+        .map((r) => ({ ledger: label, route: r.route, requestSchema: r.requestSchema })),
+    );
+
+  it('resolves each declared name against the live `@objectstack/spec/api` / `/api-assembled` exports', () => {
+    const broken = requestRows()
+      .map(({ ledger, route, requestSchema }) => {
+        const why = resolutionFailure(requestSchema);
+        return why ? `${ledger} — \`${route}\`: requestSchema '${requestSchema}' ${why}` : undefined;
+      })
+      .filter((m): m is string => m !== undefined);
+    expect(broken, 'Ledger rows whose `requestSchema` does not resolve to an exported zod schema.').toEqual([]);
+  });
+
+  it('anti-vacuity: the publish-drafts row declares its request body', () => {
+    expect(requestRows().map((r) => r.route)).toContain('POST /packages/:id/publish-drafts');
   });
 });
