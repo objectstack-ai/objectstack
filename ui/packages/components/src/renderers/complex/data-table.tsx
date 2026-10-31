@@ -18,7 +18,7 @@ import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagno
 import { ComponentRegistry, compareSortValues, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
-import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope } from '@object-ui/react';
+import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation, useDisplayLocale } from '@object-ui/i18n';
 import { 
   Table, 
@@ -372,6 +372,39 @@ function extractSaveErrorMessage(error: unknown): string {
     if (typeof e.message === 'string' && e.message.trim()) return e.message.trim();
   }
   return typeof error === 'string' && error.trim() ? error.trim() : 'Unknown error';
+}
+
+/**
+ * The lines a refused save shows in the save bar: one per reason the refusals
+ * list (a `VALIDATION_FAILED` answer keeps one `fields[]` entry per failed
+ * rule), else each refusal's one message — distinct, in the order the rows
+ * were sent. Said whole, never cut to one line (objectstack-ai/objectstack#27520).
+ */
+function saveRefusalLines(errors: readonly unknown[]): string[] {
+  const lines: string[] = [];
+  for (const error of errors) {
+    const listed = unmarkedRefusalLines(error, () => false);
+    for (const line of listed && listed.length > 0 ? listed : [extractSaveErrorMessage(error)]) {
+      if (!lines.includes(line)) lines.push(line);
+    }
+  }
+  return lines;
+}
+
+/**
+ * The cells a refused row save names, field → reason, read from the refusal's
+ * own field entries (`extractFieldErrors`); `null` when it names none. A field
+ * the table draws no column for simply marks nothing: its reason is still in
+ * the save bar.
+ */
+function refusedCellsOf(error: unknown): Record<string, string> | null {
+  const entries = extractFieldErrors(error);
+  if (!entries) return null;
+  const cells: Record<string, string> = {};
+  for (const { field, message } of entries) {
+    if (!(field in cells)) cells[field] = message || extractSaveErrorMessage(error);
+  }
+  return cells;
 }
 
 /**
@@ -1670,9 +1703,35 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     };
   }, [pendingChanges]);
   const [isSaving, setIsSaving] = useState(false);
-  // Last save failure message (server validation text, etc.) shown in the
-  // toolbar; null when the last save attempt succeeded or nothing's been saved.
-  const [saveError, setSaveError] = useState<string | null>(null);
+  // Last save failure, one line per reason (server validation text, etc.),
+  // shown in the toolbar; null when the last save attempt succeeded or
+  // nothing's been saved.
+  const [saveError, setSaveError] = useState<string[] | null>(null);
+  // The cells the last refusal named, per record key, field → reason
+  // (objectstack-ai/objectstack#27520): each is marked where it is drawn, and
+  // its mark goes the moment the cell is edited again or its row saves.
+  const [cellErrors, setCellErrors] = useState<Map<PendingRowKey, Record<string, string>>>(new Map());
+  const clearCellError = (rowKey: PendingRowKey, columnKey: string) => {
+    setCellErrors((prev) => {
+      const cells = prev.get(rowKey);
+      if (!cells || !(columnKey in cells)) return prev;
+      const next = new Map(prev);
+      const rest = { ...cells };
+      delete rest[columnKey];
+      if (Object.keys(rest).length > 0) next.set(rowKey, rest);
+      else next.delete(rowKey);
+      return next;
+    });
+  };
+  const setRowCellErrors = (rowKey: PendingRowKey, cells: Record<string, string> | null) => {
+    setCellErrors((prev) => {
+      if (!cells && !prev.has(rowKey)) return prev;
+      const next = new Map(prev);
+      if (cells) next.set(rowKey, cells);
+      else next.delete(rowKey);
+      return next;
+    });
+  };
   // Records whose last save attempt failed, by the key their pending edit is
   // kept under (objectui#12310) — tinted destructive so the author sees exactly
   // which rows didn't persist (no silent "phantom save").
@@ -2335,6 +2394,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // save that settled since this render is not undone (objectui#12322).
     const inFlight = inFlightRef.current.get(rowKey);
     setPendingChanges((prev) => stageCellChange(prev, rowKey, row, columnKey, valueToStage, inFlight));
+    clearCellError(rowKey, columnKey);
 
     // Call the legacy onCellChange callback if provided
     if (schema.onCellChange) {
@@ -2428,6 +2488,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const inFlight = inFlightRef.current.get(rowKey);
     setEditValue(value);
     setPendingChanges((prev) => stageCellChange(prev, rowKey, row, columnKey, value, inFlight));
+    clearCellError(rowKey, columnKey);
   };
 
   // Commit the in-flight edit when the input loses focus (e.g. the user clicks
@@ -2502,12 +2563,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         if (next.size === 0) setSaveError(null);
         return next;
       });
+      setRowCellErrors(rowKey, null);
     } catch (error) {
       // Keep the pending change so the author can fix and retry; surface the
-      // reason instead of failing silently, and flag the row.
+      // reason instead of failing silently, flag the row, and mark the cells
+      // the refusal names.
       console.error('Failed to save row:', error);
-      setSaveError(extractSaveErrorMessage(error));
+      setSaveError(saveRefusalLines([error]));
       setErroredRows((prev) => new Set(prev).add(rowKey));
+      setRowCellErrors(rowKey, refusedCellsOf(error));
     } finally {
       setIsSaving(false);
     }
@@ -2524,6 +2588,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       if (next.size === 0) setSaveError(null);
       return next;
     });
+    setRowCellErrors(rowKey, null);
   };
 
   // Save All. Like `saveRow`, it settles against the pending edits as they
@@ -2589,13 +2654,23 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         const landed = new Map(Array.from(sent).filter(([key]) => !failedKeys.has(key)));
         setPendingChanges((prev) => removeSentEdits(prev, landed));
         setErroredRows(failedKeys);
-        setSaveError(extractSaveErrorMessage(failed[0].error));
+        // Every refused row's reasons, and the cells each refusal names
+        // (objectstack-ai/objectstack#27520).
+        setSaveError(saveRefusalLines(failed.map((entry) => entry.error)));
+        const refusedCells = new Map<PendingRowKey, Record<string, string>>();
+        for (const entry of failed) {
+          const cells = refusedCellsOf(entry.error);
+          const key = keyOfRowIndex.get(entry.rowIndex);
+          if (cells && key !== undefined) refusedCells.set(key, cells);
+        }
+        setCellErrors(refusedCells);
         return;
       }
       // Clear every edit the batch saved, and only those.
       setPendingChanges((prev) => removeSentEdits(prev, sent));
       // Saved — clear any prior errors.
       setErroredRows(new Set());
+      setCellErrors(new Map());
       setSaveError(null);
     } catch (error) {
       // A rejection says nothing about which rows landed, so it is read as
@@ -2603,8 +2678,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // one staged during the save), and surface the reason instead of
       // failing silently.
       console.error('Failed to save batch:', error);
-      setSaveError(extractSaveErrorMessage(error));
+      setSaveError(saveRefusalLines([error]));
       setErroredRows(new Set(sent.keys()));
+      // Which row a whole-batch refusal's fields belong to is unknown, so no
+      // cell is marked; the save bar says every reason.
+      setCellErrors(new Map());
     } finally {
       setIsSaving(false);
     }
@@ -2613,6 +2691,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const cancelAllChanges = () => {
     setPendingChanges(new Map());
     setErroredRows(new Set());
+    setCellErrors(new Map());
     setSaveError(null);
   };
 
@@ -3022,7 +3101,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     <div className={`flex flex-col h-full gap-2 sm:gap-4 ${className || ''}`}>
       {/* Toolbar */}
       {showToolbar && (
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-4 flex-none">
+        <div data-slot="table-toolbar" className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2 sm:gap-4 flex-none">
           <div className="flex items-center gap-2 flex-1">
             {searchEnabled && (
               <div className="relative w-full sm:max-w-sm flex-1">
@@ -3040,17 +3119,6 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           <div className="flex flex-wrap items-center gap-2">
             {hasPendingChanges && (
               <>
-                {saveError && (
-                  <div
-                    role="alert"
-                    className="flex items-center gap-1.5 text-sm text-destructive max-w-[16rem] sm:max-w-sm"
-                  >
-                    <AlertCircle className="h-4 w-4 flex-none" />
-                    <span className="truncate" title={`${t('table.saveFailed')}: ${saveError}`}>
-                      {t('table.saveFailed')}: {saveError}
-                    </span>
-                  </div>
-                )}
                 <div className="text-sm text-muted-foreground">
                   {t('table.modified', { count: pendingChanges.size })}
                 </div>
@@ -3093,6 +3161,31 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               </div>
             )}
           </div>
+
+          {/* The last save's refusal, on a line of its own and said whole —
+              one line per reason (objectstack-ai/objectstack#27520). The
+              cells it names are marked in the table below. */}
+          {hasPendingChanges && saveError && (
+            <div
+              role="alert"
+              data-testid="table-save-refusal"
+              className="flex items-start gap-1.5 text-sm text-destructive sm:basis-full"
+            >
+              <AlertCircle className="h-4 w-4 flex-none mt-0.5" />
+              {saveError.length === 1 ? (
+                <span className="min-w-0 break-words">
+                  {t('table.saveFailed')}: {saveError[0]}
+                </span>
+              ) : (
+                <div className="min-w-0 break-words">
+                  <span>{t('table.saveFailed')}:</span>
+                  <ul className="list-disc pl-5">
+                    {saveError.map((line) => <li key={line}>{line}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -3453,6 +3546,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                   const rowHasChanges = rowPending !== undefined;
                   const rowChanges = rowPending?.changes || {};
                   const rowErrored = erroredRows.has(rowKey);
+                  const rowCellErrors = cellErrors.get(rowKey);
                   
                   return (
                     // objectstack#27545 — the row of the record a pane beside
@@ -3669,6 +3763,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         const hasPendingChange = rowChanges[col.accessorKey] !== undefined;
                         const cellValue = hasPendingChange ? rowChanges[col.accessorKey] : originalValue;
                         const isEditing = editingCell !== null && editingCell.rowKey === rowKey && editingCell.columnKey === col.accessorKey;
+                        // The reason the last refusal gave for THIS cell, if it
+                        // named it (objectstack-ai/objectstack#27520).
+                        const cellError = rowCellErrors?.[col.accessorKey];
                         // A masked column reads as NOT editable here too
                         // (objectui#10583), so its cell neither shows the
                         // edit cursor nor swallows the row's click —
@@ -3700,6 +3797,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               isFit ? 'whitespace-nowrap' : 'overflow-hidden',
                               isEditable && !isEditing && "cursor-text hover:bg-muted/50",
                               hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
+                              cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
                               isFrozen && colIndex === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
                             )}
@@ -3742,6 +3840,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex ? 0 : -1) : 0}
                             data-grid-cell={keyboardNavigation ? `${rowIndex}:${colIndex}` : undefined}
                             onFocus={keyboardNavigation ? () => rove(rowIndex, colIndex) : undefined}
+                            aria-invalid={cellError !== undefined || undefined}
+                            data-cell-error={cellError}
+                            title={cellError}
                           >
                             {isEditing ? (
                               (() => {
