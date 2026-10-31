@@ -417,7 +417,8 @@ import type { READABLE_IDS_MAX_CHAIN_DEPTH } from './engine-readable-ids-permiss
 // names below hand each body the members it reads (`DeleteCascadeHost`).
 // Imported after every module those bodies import, so the engine's module
 // evaluation order is what it was.
-import { collectCascadeDeleteSet, deleteRestrictedError, recordReferenceCheckElevation, referenceProbeFilter, refuseRestrictsInsideOwnCascade } from './engine-delete-cascade.js';
+// [#28001] …and the object-level closure of that walk the metadata read serves.
+import { collectCascadeDeleteObjects, collectCascadeDeleteSet, deleteRestrictedError, recordReferenceCheckElevation, referenceProbeFilter, refuseRestrictsInsideOwnCascade } from './engine-delete-cascade.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 import {
   resolveEngineDeleteDispatch,
@@ -10717,6 +10718,44 @@ export class ObjectQL implements IObjectQLEngine {
       }
     }
     return members;
+  }
+
+  /**
+   * [#28001] `IObjectQLEngine.getCascadeDeleteObjects`: the objects a delete
+   * of a record of `object` can cascade into, which the metadata read serves
+   * beside the object as `cascadeDeleteObjects` so a delete confirmation can
+   * name them (ruling B on #28001: the client gets the list from the server,
+   * never from a second copy of the engine rule).
+   *
+   * Read from the rule the delete runs: breadth-first through the relations
+   * whose resolved behaviour is `cascade` ({@link cascadeRelationBehavior},
+   * through the same scan {@link collectCascadeDeleteSet} makes at each
+   * depth), so a `master_detail` child is named by default and a lookup only
+   * when it declares `deleteBehavior: 'cascade'`. A child's own cascading
+   * children are named too, since the delete reaches them through it. Each
+   * object once, in the order the walk first reaches it; `object` itself only
+   * when a cascading relation leads back to it.
+   *
+   * It is object-level, and that is the whole of its disclosure: it reads the
+   * registry and no row, so it says what a delete MAY remove, never which
+   * records or how many. {@link inspectCascadeDelete} is the record-level
+   * reading, as SYSTEM, for the operator's command, and is not served.
+   *
+   * What it leaves out is what removes nothing: a `restrict` relation (it
+   * refuses the delete) and a `set_null` one (it clears the reference),
+   * as {@link inspectCascadeDelete} leaves them out.
+   *
+   * `undefined` when the registry does not hold `object`: the read then
+   * serves no key, rather than `[]`, which says nothing cascades.
+   */
+  getCascadeDeleteObjects(object: string): string[] | undefined {
+    if (!this._registry.getObject(object)) return undefined;
+    const host: ThisParameterType<typeof collectCascadeDeleteObjects> = {
+      cascadeRelationBehavior: (...a) => this.cascadeRelationBehavior(...a),
+    };
+    return collectCascadeDeleteObjects.call(
+      host, this.resolveObjectName(object), this._registry.getAllObjects(),
+    );
   }
 
   /**
