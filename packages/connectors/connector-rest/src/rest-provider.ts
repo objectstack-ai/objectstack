@@ -52,11 +52,13 @@ export function createRestProviderFactory(deps: RestProviderDeps = {}): Connecto
     // `ResolvedConnectorAuth` is exactly the static-auth subset RestAuth expects
     // (the credentialRef has already been resolved to a secret upstream).
     const auth = ctx.auth as ResolvedConnectorAuth | undefined as RestAuth | undefined;
-    return createRestConnector({
+    const bundle = createRestConnector({
       name: ctx.name,
       label: ctx.label,
       baseUrl: cfg.baseUrl,
       auth,
+      // ADR-0143 D2.3 — a `signed` instance's signer, applied to every attempt.
+      requestSigner: ctx.requestSigner,
       defaultHeaders: isStringRecord(cfg.defaultHeaders) ? cfg.defaultHeaders : undefined,
       // ADR-0049 · #18975 — the authored resilience policy, already resolved by
       // the materializer, reaches the transport this bundle closes over.
@@ -64,5 +66,8 @@ export function createRestProviderFactory(deps: RestProviderDeps = {}): Connecto
       requestTimeoutMs: ctx.requestTimeoutMs,
       fetchImpl: deps.fetchImpl,
     });
+    // Says so, so the host serves the `signed` instance (it refuses one whose
+    // provider does not apply the signer).
+    return ctx.requestSigner ? { ...bundle, requestSignerApplied: true } : bundle;
   };
 }

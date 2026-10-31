@@ -24,8 +24,12 @@ import {
  * or the full page where the object declares `navigation.mode: 'page'` — and
  * the side-by-side pane is each reader's own choice. So `split` left
  * `NavigationModeSchema` (an author can no longer fix it for every reader) and
- * lives here instead: `drawer` draws the record in the drawer over the list,
- * `split` draws the same record page beside the list.
+ * lives here instead: `split` draws the record page beside the list, `drawer`
+ * draws it in the drawer over the list, `page` opens the full page.
+ *
+ * Since objectstack#27545 (maintainer rulings of 2026-10-29) the pane beside
+ * the list is the default, and `page` is the third choice, for a reader who
+ * wants a row click to open the record page itself.
  *
  * Both sides live here: {@link readRecordOpenPreference} and
  * {@link writeRecordOpenPreference}, and {@link useRecordOpenPreference}, the
@@ -44,17 +48,17 @@ import {
  * A thin alias over the console's one preference store,
  * `workspacePreference.ts` (objectstack#27052): the preference is
  * {@link RECORD_OPEN_PREFERENCE} there, in the `user` scope, and it keeps the
- * spelling it was first stored with — a bare `drawer` / `split` under
+ * spelling it was first stored with — a bare `split` / `drawer` / `page` under
  * {@link RECORD_OPEN_PREFERENCE_KEY} — so a reader's earlier choice reads
  * back unchanged.
  */
-export type RecordOpenPreference = 'drawer' | 'split';
+export type RecordOpenPreference = 'split' | 'drawer' | 'page';
 
 /** The `localStorage` key the preference is kept under. */
 export const RECORD_OPEN_PREFERENCE_KEY = 'os:record-open-mode';
 
-/** What a reader who never chose gets: the drawer. */
-export const DEFAULT_RECORD_OPEN_PREFERENCE: RecordOpenPreference = 'drawer';
+/** What a reader who never chose gets: the pane beside the list. */
+export const DEFAULT_RECORD_OPEN_PREFERENCE: RecordOpenPreference = 'split';
 
 /** The storage surface this module reads — `localStorage`, or a test double. */
 export type RecordOpenPreferenceStorage = Pick<Storage, 'getItem'>;
@@ -71,14 +75,14 @@ export const RECORD_OPEN_PREFERENCE = defineWorkspacePreference<RecordOpenPrefer
   name: 'record.open-mode',
   storageKey: () => RECORD_OPEN_PREFERENCE_KEY,
   codec: {
-    decode: (stored) => (stored === 'split' || stored === 'drawer' ? stored : undefined),
+    decode: (stored) => (stored === 'split' || stored === 'drawer' || stored === 'page' ? stored : undefined),
     encode: (value) => value,
   },
 });
 
 /**
  * The reader's record-open preference, or {@link DEFAULT_RECORD_OPEN_PREFERENCE}
- * when none is stored, the stored value is not one of the two, or there is no
+ * when none is stored, the stored value is not one of the three, or there is no
  * readable storage. `storage` defaults to the browser's `localStorage`; `null`
  * says there is none.
  */

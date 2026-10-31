@@ -48,7 +48,7 @@ import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { redactAuditLogRows } from './audit-log-field-redaction.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 const LEDGER = 'sys_audit_log';
 const ITEM = 'alr_item';
@@ -186,7 +186,10 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
 
     // Rows other writers put on the ledger, in their writers' shapes: a
     // settings digest and an administrator roster (not a parent's field map),
-    // and three record-write rows the mirror's own shape cannot judge.
+    // and three record-write rows the mirror's own shape cannot judge. Each
+    // carries the Default Organization: a row with no `tenant_id` is a
+    // deployment-level row, served to the platform administrator alone
+    // (#26750), and every reader here is an organization reader.
     const stamp = new Date().toISOString();
     const extra: Array<[keyof typeof rowIds, Row]> = [
       ['config', { action: 'config_change', object_name: ITEM, new_value: JSON.stringify({ namespace: 'n', key: 'k', scope: 's', digest: 'd' }) }],
@@ -196,7 +199,11 @@ describe('[#21155] sys_audit_log before/after snapshots are served through the s
       ['foreign', { action: 'create', object_name: 'alr_not_registered', record_id: 'x1', new_value: JSON.stringify({ any: V.foreign }) }],
     ];
     for (const [key, row] of extra) {
-      rowIds[key] = String((await engine.insert(LEDGER, { ...row, created_at: stamp }, { context: SYS })).id);
+      rowIds[key] = String((await engine.insert(
+        LEDGER,
+        { ...row, tenant_id: DEFAULT_ORGANIZATION_ID, created_at: stamp },
+        { context: SYS },
+      )).id);
     }
   }, 120_000);
 

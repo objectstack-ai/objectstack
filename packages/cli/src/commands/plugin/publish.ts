@@ -137,11 +137,9 @@ export default class PluginPublish extends Command {
     // What is uploaded is the manifest the artifact carries, as it carries
     // it: the parse above stamps the schema's defaults (`scope`,
     // `defaultDatasource`), which would make the declared manifest differ
-    // from the signed bytes' own. The entry is there and is a JSON object:
-    // the read above answered `ok`.
-    const declaredManifest = JSON.parse(
-      Buffer.from(archiveFiles.find((f) => f.path === MANIFEST_FILENAME)!.data).toString('utf8'),
-    ) as Record<string, unknown>;
+    // from the signed bytes' own. The read hands back the document it
+    // decoded, so the entry is decoded once and looked up by one spelling.
+    const declaredManifest = read.document;
     const id = String(flags['manifest-id'] ?? manifest.id).trim();
     const version = manifest.version;
     const displayName = String(flags['display-name'] ?? manifest.name ?? id).trim();

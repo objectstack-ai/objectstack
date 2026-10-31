@@ -22,6 +22,11 @@
  * the WAVE it went out in. A wave is one round of the held transport: every
  * request the page has issued is answered together, then the page is allowed
  * to settle, and whatever it asks for next is the next wave.
+ *
+ * Since objectstack#27627 the page asks all of it in ONE record page payload
+ * (`POST /data/OBJ/ID/page`): the record, each related list's count and first
+ * rows, and the access verdicts. The pins below read that request's body for
+ * the questions the separate reads used to ask.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -205,11 +210,35 @@ const topOf = (h: Held): number | undefined => {
   return top === null ? undefined : Number(top);
 };
 const objectOf = (h: Held): string | undefined => /\/api\/v1\/data\/([^/?]+)/.exec(h.path)?.[1];
-const isRecordRead = (h: Held) => h.method === 'GET' && objectOf(h) === OBJECT;
+const PAGE = `/api/v1/data/${OBJECT}/${REC}/page`;
+const isPageRead = (h: Held) => h.method === 'POST' && h.path === PAGE;
+/** The record read: the page payload carries it (objectstack#27627). */
+const isRecordRead = (h: Held) => isPageRead(h) || (h.method === 'GET' && objectOf(h) === OBJECT);
+interface PageList { object: string; field: string; filter?: unknown; top: number }
+const pageBody = (h: Held) => JSON.parse(h.body || '{}') as { related?: PageList[]; explain?: string[] };
+/** The related lists the open's page payload asked for. */
+const pageLists = (held: Held[]): PageList[] => held.filter(isPageRead).flatMap((h) => pageBody(h).related ?? []);
 const isChildRead = (h: Held) => h.method === 'GET' && [QUOTE, LINE, TASK].includes(objectOf(h) ?? '');
 const isExplain = (h: Held) => h.path.endsWith('/security/explain');
 
 function answerFor(h: Held): unknown {
+  if (isPageRead(h)) {
+    const body = pageBody(h);
+    return {
+      success: true,
+      data: {
+        object: OBJECT,
+        id: REC,
+        record: RECORD,
+        related: (body.related ?? []).map((list) => {
+          const total = TOTALS[list.object] ?? 0;
+          return { object: list.object, field: list.field, total, records: childRows(list.object, Math.min(list.top, total)) };
+        }),
+        explain: Object.fromEntries((body.explain ?? []).map((op) => [op, { allowed: true, record: { recordId: REC, visible: true } }])),
+        approvals: { requests: [], lock: null },
+      },
+    };
+  }
   if (isExplain(h)) return { allowed: true, record: { recordId: REC, visible: true } };
   if (h.path.startsWith(`/api/v1/data/${OBJECT}/${REC}`)) return { success: true, data: { object: OBJECT, id: REC, record: RECORD } };
   const object = objectOf(h);
@@ -373,19 +402,19 @@ describe('the record page open waves (objectui#13010)', () => {
   // explain questions (one `update`, one `delete` — two different bodies, not
   // one question sent twice) and the rail's three `top=3` card reads in wave
   // 1; the tab strip's three `top=1` badge probes in wave 2, because the probe
-  // keyed on the record BODY's id. After it: all thirteen in wave 1.
+  // keyed on the record BODY's id. After it: all thirteen in wave 1. Since
+  // objectstack#27627 all of them are ONE page payload request.
   it('the related cards and the tab badge probes go out in the first wave, beside the record read', async () => {
     const { held } = await openRecordPage();
     const table = waveTable(held);
     expect(held.filter(isRecordRead).map((h) => h.wave), table).toEqual([1]);
 
-    const cards = held.filter((h) => isChildRead(h) && topOf(h) === 3);
-    expect(cards.map((h) => objectOf(h)).sort(), table).toEqual([LINE, QUOTE, TASK].sort());
-    expect(cards.every((h) => h.wave === 1), table).toBe(true);
-
-    const probes = held.filter((h) => isChildRead(h) && topOf(h) === 1);
-    expect(probes.length, table).toBeGreaterThan(0);
-    expect(probes.every((h) => h.wave === 1), table).toBe(true);
+    // Neither a card read nor a badge probe goes out on its own.
+    expect(held.filter(isChildRead), table).toEqual([]);
+    // The payload asks every card's rows: three each.
+    const cards = pageLists(held).filter((l) => l.filter === undefined);
+    expect(cards.map((l) => l.object).sort(), table).toEqual([LINE, QUOTE, TASK].sort());
+    expect(cards.every((l) => l.top === 3), table).toBe(true);
 
     // One wave in all: nothing waits on the record body any more.
     expect(Math.max(...held.map((h) => h.wave)), table).toBe(1);
@@ -403,8 +432,9 @@ describe('the record page open waves (objectui#13010)', () => {
     const { held } = await openRecordPage();
     const table = waveTable(held);
     for (const object of [QUOTE, LINE]) {
-      const reads = held.filter((h) => objectOf(h) === object);
-      expect(reads.map((h) => topOf(h)), `${object}\n${table}`).toEqual([3]);
+      expect(held.filter((h) => objectOf(h) === object), `${object}\n${table}`).toEqual([]);
+      const asked = pageLists(held).filter((l) => l.object === object);
+      expect(asked.map((l) => l.top), `${object}\n${table}`).toEqual([3]);
     }
     // The badge total is drawn from that read: quote 6 + line 7 + the
     // filtered task probe's own 4.
@@ -423,19 +453,23 @@ describe('the record page open waves (objectui#13010)', () => {
   it('CONTROL: a badge whose declared filter differs from its card still probes, with its own filter', async () => {
     const { held } = await openRecordPage();
     const table = waveTable(held);
-    const taskProbes = held.filter((h) => objectOf(h) === TASK && topOf(h) === 1);
-    expect(taskProbes, table).toHaveLength(1);
-    expect(taskProbes[0].path, table).toContain('not_equals');
-    // The card's read carries no declared scope, so its total answers a
+    const tasks = pageLists(held).filter((l) => l.object === TASK);
+    expect(tasks, table).toHaveLength(2);
+    const taskProbe = tasks.filter((l) => l.filter !== undefined);
+    expect(taskProbe, table).toHaveLength(1);
+    expect(JSON.stringify(taskProbe[0].filter), table).toContain('not_equals');
+    // The card's list carries no declared scope, so its total answers a
     // different question and never stands in for the badge's.
-    const taskCard = held.filter((h) => objectOf(h) === TASK && topOf(h) === 3);
-    expect(taskCard, table).toHaveLength(1);
-    expect(taskCard[0].path, table).not.toContain('not_equals');
+    expect(tasks.filter((l) => l.filter === undefined), table).toHaveLength(1);
   });
 
   it('two explain questions on a record open, two different bodies', async () => {
     const { held } = await openRecordPage();
-    expect(held.filter(isExplain).map((h) => JSON.parse(h.body).operation).sort(), waveTable(held)).toEqual(['delete', 'update']);
+    const asked = [
+      ...held.filter(isExplain).map((h) => JSON.parse(h.body).operation as string),
+      ...held.filter(isPageRead).flatMap((h) => pageBody(h).explain ?? []),
+    ];
+    expect(asked.sort(), waveTable(held)).toEqual(['delete', 'update']);
   });
 });
 

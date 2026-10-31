@@ -327,11 +327,15 @@ interface EngineUpdateOptions {
 
 ### WriteObservabilityOptions
 
-The write methods (`insert` / `update`) additionally accept three **in-process**
+The write methods (`insert` / `update`) additionally accept five **in-process**
 options. Two govern what happens when caller-supplied write fields are legally
 stripped from the payload before the driver write: observe the strip
 (`onFieldsDropped`) or refuse the write outright (`strictReadonlyWrites`). The
 third, `onValidationAdvisory`, reports the write's advisory validation-rule hits.
+The fourth, `onMentionsWithheld`, reports the users a comment write @mentioned who
+will not be notified.
+The fifth, `onNotice`, is how a hook tells the person who made the write what
+the save set in motion.
 
 The strips these two options cover are the engine's legal ones:
 
@@ -357,6 +361,8 @@ on `insert` too since the 2026-09-03 ruling — see **On `insert`** below.
 interface WriteObservabilityOptions {
   onFieldsDropped?: (event: DroppedFieldsEvent) => void;
   onValidationAdvisory?: (event: ValidationAdvisoryEvent) => void;
+  onMentionsWithheld?: (userIds: readonly string[]) => void;
+  onNotice?: (message: string) => void;
   strictReadonlyWrites?: boolean;  // refuse instead of stripping. Default: false
 }
 
@@ -454,6 +460,58 @@ The DataProtocol's `createData`, `updateData` and `cloneData` pass this listener
 and answer the hits as `warnings` (`ValidateDataIssue` entries carrying `rule`
 and `severity`), present only when there is at least one hit.
 
+#### `onMentionsWithheld` — who a comment's @mentions will not reach
+
+A `sys_comment` write notifies each user it @mentions, but only a user who can
+read the comment and its record: the mention recipient gate withholds the rest.
+This listener is told the ids of the users the gate withheld on the write the
+options were passed to, whatever its reason: ids only, never the reason. The engine never calls it.
+It reaches the mention writer the way every member of this bag reaches an
+`after*` hook, on `ctx.input.options`, and the writer calls it once per written
+comment that withheld anyone. On an `update`, only a mention the update added is
+judged; a mention the comment already carried was judged when it was written. A
+nested write that a hook or a flow makes inside this one carries its own options,
+so its verdicts never reach this listener.
+
+The DataProtocol's `createData` and `updateData` pass this listener and answer the
+ids as `withheldMentions`, on the requester's own answer to that request only and present only when at
+least one user was withheld. Nothing is stored on the comment: a stored member
+would tell every reader of the comment who cannot read its thread.
+
+#### `onNotice` — what the save set in motion
+
+A hook that starts something the person saving should hear about ("Sent to your
+manager for approval") calls this listener with one author-written message. It is
+info severity: it reports an outcome, never a problem, so it is not a validation
+finding and never rides `onValidationAdvisory`. The engine never calls it. A hook
+reaches it the way every member of this bag reaches a hook, on
+`ctx.input.options`: a `before*` handler reads the caller's bag as passed, an
+`after*` handler after `buildDriverOptions` widened it.
+
+{/* os:check */}
+```typescript
+import type { HookContext } from '@objectstack/spec/data';
+import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
+
+export async function announceApproval(ctx: HookContext): Promise<void> {
+  const opts = ctx.input.options as WriteObservabilityOptions | undefined;
+  opts?.onNotice?.('Sent to your manager for approval');
+}
+```
+
+The listener is often absent (a seed, a flow node, a batch or an import passes
+none), so call it optionally. One message per write: a later call replaces an
+earlier one, and a message that is not a non-empty string sets nothing. A write
+that is refused answers its error, never a notice. A nested write that a hook or a
+flow makes inside this one carries its own options, so its notice never reaches
+this listener. The sandboxed `body` face (including a `handler` the build lowers
+into a body) does not carry it: its `ctx.input.options` is the frozen
+`{ multi, where }` projection.
+
+The DataProtocol's `createData` and `updateData` pass this listener and answer
+the message as `notice`, on the requester's own answer to that request only and
+present only when a hook set one. Nothing is stored on the record.
+
 <Callout type="warn">
 **Layering — this is the engine seam, and since the 2026-09-03 ruling the only
 one.** The DataProtocol create faces (`createData`, `cloneData`, `createManyData`,
@@ -465,7 +523,7 @@ declares one; none carries a `readonly` policy of its own any more — see
 
 <Callout type="warn">
 `WriteObservabilityOptions` is a **TS-contract-level, in-process-only** bag —
-all three members. It is deliberately not part of the serializable Zod options schemas:
+all five members. It is deliberately not part of the serializable Zod options schemas:
 a function is unrepresentable in JSON Schema and cannot be serialized, so remote
 callers (REST, the client SDK) never receive these events; and putting
 `strictReadonlyWrites` in the serializable bag would let any client toggle

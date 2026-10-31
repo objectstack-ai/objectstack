@@ -18,7 +18,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhook",
-    description: "外发 HTTP Webhook 订阅，由组织在 Studio 编辑器中或通过 API 编写。在代码中通过 defineStack({ webhooks }) / defineWebhook() 声明的 Webhook 从元数据注册表读取，不会在此写入数据行。两者均由 Webhook 自动入队器分发到共享的 HTTP 发件箱。",
+    description: "由您的组织在此处或通过 API 创建的外发 HTTP Webhook。应用内置的 Webhook 不在此列出。两者都通过同一个投递队列发送。",
     fields: {
       id: {
         label: "Webhook ID"

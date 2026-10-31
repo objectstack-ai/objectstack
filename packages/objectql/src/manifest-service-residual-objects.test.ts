@@ -37,9 +37,10 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
-import type { IMetadataService } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE, type IMetadataService } from '@objectstack/spec/contracts';
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
+import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
 
@@ -330,5 +331,353 @@ describe('ADR-0015 D7 — the manifest service registers the residual\'s connect
       residualStack(noteObj(), { connectors: [sap()] }, { connectors: [sap()] }),
     ]));
     expect(connectorOwners(engineOf(kernel))).toEqual([['acme_sap', SERVICE_ID, '2.4.0']]);
+  });
+});
+
+/**
+ * [ADR-0130 D4] The residual's FLOWS reach the registry too: the automation
+ * plugin's boot pull reads `registry.listItems('flow')` alone, so a residual
+ * flow registered by the metadata door only was listed by `/meta` and never
+ * registered with the engine. The boot-and-run reading is pinned on a kernel
+ * in `service-automation` (`residual-top-level-flow-boot.test.ts`).
+ */
+describe('ADR-0130 D4 — the manifest service registers the residual\'s flows', () => {
+  const flow = (name = 'acme_escalate') => ({
+    name,
+    label: 'Escalate',
+    type: 'autolaunched',
+    nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  });
+  const flowOwners = (ql: ObjectQL) =>
+    (ql.registry.listItems('flow') as Array<{ name?: string; _packageId?: string; _packageVersion?: string }>)
+      .map((f) => [f.name, f._packageId, f._packageVersion])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+  it('registers a residual flow under the stack\'s manifest id and version, beside a body\'s own', async () => {
+    const residualEntry = flow();
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { flows: [residualEntry] }, { flows: [flow('acme_route')] }),
+    ]));
+    expect(flowOwners(engineOf(kernel))).toEqual([
+      ['acme_escalate', RELEASE_ID, '1.0.0'],
+      ['acme_route', SERVICE_ID, '2.4.0'],
+    ]);
+    // The artifact's own entry is left as it arrived.
+    expect((residualEntry as { _packageId?: string })._packageId).toBeUndefined();
+  });
+
+  it('registers a residual flow when the stack has no other residual item', async () => {
+    const { kernel } = await boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      objects: [caseObj(), accountObj()],
+      flows: [flow()],
+      packages: [
+        { manifest: { ...svc, objects: [caseObj()] } },
+        { manifest: { ...app, objects: [accountObj()] } },
+      ],
+    })]));
+    expect(flowOwners(engineOf(kernel))).toEqual([['acme_escalate', RELEASE_ID, '1.0.0']]);
+  });
+
+  it('CONTROL: a top-level flow a body repeats is the body\'s, registered once', async () => {
+    const { kernel } = await boot(registering('app', [
+      residualStack(noteObj(), { flows: [flow()] }, { flows: [flow()] }),
+    ]));
+    expect(flowOwners(engineOf(kernel))).toEqual([['acme_escalate', SERVICE_ID, '2.4.0']]);
+  });
+});
+
+/**
+ * [ADR-0130 D4] EVERY other residual type a package body's collections take
+ * into the registry reaches it too, under the stack's manifest id and version:
+ * the engine registered a residual's objects, connectors and flows only, so a
+ * residual item of any other type was registered by the metadata door alone
+ * and every reader that asks the registry — the save door's managed-content
+ * seal among them — answered as if it were not declared. Two residual types
+ * keep a path of their own and are not in this population: objects (above) and
+ * picklists, which stay metadata-only for the reason the objects rule names.
+ */
+describe('ADR-0130 D4 — the manifest service registers every other residual type', () => {
+  /** The stack collection of each type, with a minimal named item. */
+  const GENERIC: Record<string, string> = {
+    apps: 'app', pages: 'page', dashboards: 'dashboard', reports: 'report', actions: 'action',
+    workflows: 'workflow', positions: 'position', permissions: 'permission', capabilities: 'capability',
+    sharingRules: 'sharing_rule', apis: 'api', webhooks: 'webhook', agents: 'agent', tools: 'tool',
+    skills: 'skill', ragPipelines: 'rag_pipeline', hooks: 'hook', mappings: 'mapping',
+    analyticsCubes: 'analytics_cube', emailTemplates: 'email_template', docs: 'doc', books: 'book',
+  };
+  const itemOf = (type: string) => ({ name: `acme_top_${type}`, label: `Top ${type}` });
+  /** The registry parses an action on registration, so the residual's action is a valid one too. */
+  const ITEM_EXTRA: Record<string, Record<string, unknown>> = { actions: { type: 'url', target: 'https://example.com' } };
+  const collectionsOf = (pick: (type: string) => boolean = () => true) => Object.fromEntries(
+    Object.entries(GENERIC).filter(([, type]) => pick(type))
+      .map(([field, type]) => [field, [{ ...itemOf(type), ...ITEM_EXTRA[field] }]]),
+  );
+  /**
+   * A package BODY is strictly parsed on registration, so the pins that put an
+   * item on a body take a schema-valid one: every security-domain type, and
+   * one of each other kind the body schema admits with a short item.
+   */
+  const BODY_VALID: Record<string, Record<string, unknown>> = {
+    permissions: { objects: {} },
+    positions: {},
+    capabilities: {},
+    sharingRules: {
+      type: 'criteria', object: 'acme_case', condition: "record.subject == 'x'", accessLevel: 'read',
+      sharedWith: { type: 'position', value: 'acme_top_position' },
+    },
+    apps: {},
+    pages: {},
+    actions: { type: 'url', target: 'https://example.com' },
+    hooks: { object: 'acme_case', events: ['beforeInsert'] },
+    agents: { role: 'Triage', instructions: 'Triage cases.' },
+    webhooks: { object: 'acme_case', url: 'https://example.com/hook', triggers: ['create'] },
+    emailTemplates: { subject: 'Subject', bodyHtml: '<p>Body</p>' },
+  };
+  const bodyCollections = () => Object.fromEntries(
+    Object.entries(BODY_VALID).map(([field, extra]) => [field, [{ ...itemOf(GENERIC[field]), ...extra }]]),
+  );
+  const ownerOf = (ql: ObjectQL, type: string, name: string) => {
+    const item = ql.registry.getItem(type, name) as { _packageId?: string; _packageVersion?: string } | undefined;
+    return item ? [item._packageId, item._packageVersion] : undefined;
+  };
+  const namesOf = (ql: ObjectQL, type: string) =>
+    (ql.registry.listItems(type) as Array<{ name?: string }>).map((i) => i.name).filter((n) => n?.startsWith('acme_')).sort();
+
+  it.each(Object.values(GENERIC))('registers a residual %s under the stack\'s manifest id and version', async (type) => {
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), collectionsOf((t) => t === type))]));
+    expect(ownerOf(engineOf(kernel), type, `acme_top_${type}`)).toEqual([RELEASE_ID, '1.0.0']);
+  });
+
+  it('registers every one of them from one stack, and leaves the artifact\'s own entries as they arrived', async () => {
+    const collections = collectionsOf();
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), collections)]));
+    const ql = engineOf(kernel);
+    for (const type of Object.values(GENERIC)) {
+      expect(ownerOf(ql, type, `acme_top_${type}`), type).toEqual([RELEASE_ID, '1.0.0']);
+    }
+    for (const [field] of Object.entries(GENERIC)) {
+      expect((collections[field] as Array<{ _packageId?: string }>)[0]._packageId, field).toBeUndefined();
+    }
+  });
+
+  it('a residual view container registers under its object, expanded into its views, like a body\'s', async () => {
+    const container = { object: 'acme_note', list: { type: 'grid', columns: ['title'] } };
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), { views: [container] })]));
+    const ql = engineOf(kernel);
+    const views = ql.registry.listItems('view') as Array<{ name?: string; _packageId?: string }>;
+    const noteViews = views.filter((v) => v.name === 'acme_note' || v.name?.startsWith('acme_note.'));
+    expect(noteViews.map((v) => v.name)).toContain('acme_note');
+    expect(noteViews.length).toBeGreaterThan(1);
+    expect(new Set(noteViews.map((v) => v._packageId))).toEqual(new Set([RELEASE_ID]));
+    expect((container as { _packageId?: string })._packageId).toBeUndefined();
+  });
+
+  it('a residual view container whose own `name` disagrees with its object is refused, in the body seam\'s words', async () => {
+    const container = { name: 'notes_grid', object: 'acme_note', list: { type: 'grid', columns: ['title'] } };
+    const expected = viewContainerNameRefusal(container, 'manifest', RELEASE_ID);
+    expect(expected).toBeDefined();
+    await expect(boot(registering('app', [residualStack(noteObj(), { views: [container] })])))
+      .rejects.toThrow(expected!.message);
+  });
+
+  it('a residual view entry with no `name` is filed under its slot, as the body seam files it', async () => {
+    const entry = { object: 'acme_note', label: 'Notes' };
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), { views: [entry] })]));
+    expect(ownerOf(engineOf(kernel), 'view', 'acme_note')).toEqual([RELEASE_ID, '1.0.0']);
+    expect((entry as { name?: string }).name).toBeUndefined();
+  });
+
+  it.each([
+    ['a flattened overlay with no `name`', { object: 'acme_note', type: 'grid', columns: ['title'] }, 'acme_note'],
+    ['a ViewItem', { name: 'acme_note_item', object: 'acme_note', viewKind: 'list', config: { type: 'grid' } }, 'acme_note_item'],
+  ])('a residual `views:` entry that is not a container (%s) is refused 422, in the body seam\'s words', async (_label, entry, name) => {
+    const refusal = await boot(registering('app', [residualStack(noteObj(), { views: [entry] })])).then(() => undefined, (e: unknown) => e);
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
+    expect((refusal as Error).message).toContain(
+      `Invalid \`views:\` entry '${name}' from manifest '${RELEASE_ID}': the stack \`views:\` collection carries view CONTAINERS only.`,
+    );
+  });
+
+  it('a residual queue and assignment rule register when the ownership-queue service is composed', async () => {
+    const queues = { queues: [itemOf('queue')], assignmentRules: [itemOf('assignment_rule')] };
+    const queueService: Plugin = {
+      name: 'test.ownership-queue',
+      init: async (ctx: PluginContext) => { ctx.registerService(OWNERSHIP_QUEUE_SERVICE, {}); },
+    } as Plugin;
+    const { kernel } = await boot(queueService, registering('app', [residualStack(noteObj(), queues)]));
+    const ql = engineOf(kernel);
+    expect(ownerOf(ql, 'queue', 'acme_top_queue')).toEqual([RELEASE_ID, '1.0.0']);
+    expect(ownerOf(ql, 'assignment_rule', 'acme_top_assignment_rule')).toEqual([RELEASE_ID, '1.0.0']);
+  });
+
+  it('…and, like a body\'s, refuse the boot loudly when it is not', async () => {
+    const queues = { queues: [itemOf('queue')], assignmentRules: [itemOf('assignment_rule')] };
+    await expect(boot(registering('app', [residualStack(noteObj(), queues)])))
+      .rejects.toThrow(/declares queues \(1\) and assignmentRules \(1\), but no 'ownership-queue' service is registered/);
+  });
+
+  it('a residual permission set whose body `packageId` names another package is refused, as a body\'s is', async () => {
+    const set = { ...itemOf('permission'), objects: {}, packageId: OTHER_ID };
+    await expect(boot(registering('app', [residualStack(noteObj(), { permissions: [set] })])))
+      .rejects.toThrow(/Drop `packageId` from permission set 'acme_top_permission'/);
+  });
+
+  it('a top-level item a body repeats is the body\'s, registered once', async () => {
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), bodyCollections(), bodyCollections())]));
+    const ql = engineOf(kernel);
+    for (const type of Object.keys(BODY_VALID).map((field) => GENERIC[field])) {
+      expect(ownerOf(ql, type, `acme_top_${type}`), type).toEqual([SERVICE_ID, '2.4.0']);
+      expect(namesOf(ql, type), type).toEqual([`acme_top_${type}`]);
+    }
+  });
+
+  it('CONTROL: a stack with no residual item of these types registers exactly the bodies\' items', async () => {
+    const { kernel } = await boot(registering('app', [residualStack(noteObj(), {}, bodyCollections())]));
+    const ql = engineOf(kernel);
+    for (const type of Object.keys(BODY_VALID).map((field) => GENERIC[field])) {
+      expect(namesOf(ql, type), type).toEqual([`acme_top_${type}`]);
+      expect(ownerOf(ql, type, `acme_top_${type}`), type).toEqual([SERVICE_ID, '2.4.0']);
+    }
+  });
+});
+
+/**
+ * [ADR-0130 D4] A residual PICKLIST that no object field of the stack names is
+ * refused at boot. The residual's picklists stay metadata only (the objects
+ * rule above is judged on that premise), so one that no field names was
+ * neither registered nor refused: the boot booted, and the list was missing
+ * from the engine with nothing said. One that a field names is loud already,
+ * and stays as it is: a residual object's field makes that object listed and
+ * not served (above), and a body's field fails the boot's picklist audit.
+ */
+describe('ADR-0130 D4 — a residual picklist that no object field names', () => {
+  const unusedList = (name = 'acme_unused') => ({ name, label: 'Unused', options: [{ label: 'A', value: 'a' }] });
+  const refusalOf = (booting: Promise<unknown>): Promise<unknown> => booting.then(() => undefined, (e: unknown) => e);
+
+  it('refuses the boot, naming the picklist and the stack, with the prescription', async () => {
+    const refusal = await refusalOf(boot(registering('app', [residualStack(noteObj(), { picklists: [unusedList()] })])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
+    const message = (refusal as Error).message;
+    expect(message).toContain(`Picklist 'acme_unused' is declared on the top level of stack '${RELEASE_ID}'`);
+    expect(message).toContain('no package body declares it and no object field the engine registers names it');
+    expect(message).toContain('Declare it inside the `packages[]` entry of the package whose objects use it');
+    expect(message).toContain('name it from a field of the object meant to use it');
+    expect(message).toContain('remove it from the top level');
+  });
+
+  it('names every such picklist in one refusal, and not one a field names', async () => {
+    const refusal = await refusalOf(boot(registering('app', [
+      residualStack(noteObj(statusField), { picklists: [statusList(), unusedList(), unusedList('acme_spare')] }),
+    ])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    const message = (refusal as Error).message;
+    expect(message).toContain(`Picklists 'acme_unused', 'acme_spare' are declared on the top level of stack '${RELEASE_ID}'`);
+    expect(message).not.toContain("'acme_status'");
+  });
+
+  it('refuses a stack whose `packages: []` leaves only such a picklist', async () => {
+    const refusal = await refusalOf(boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      picklists: [unusedList()],
+      packages: [],
+    })])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    expect((refusal as Error).message).toContain(`Picklist 'acme_unused' is declared on the top level of stack '${RELEASE_ID}'`);
+  });
+
+  it('after start(), refuses the artifact before anything of it registers', async () => {
+    const { kernel } = await boot();
+    const manifest = kernel.getService<ManifestService>('manifest');
+    const refusal = await refusalOf(Promise.resolve().then(() =>
+      manifest.register(residualStack(noteObj(), { picklists: [unusedList()] }))));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    expect(owners(engineOf(kernel))).toEqual({ acme_account: undefined, acme_case: undefined, acme_note: undefined });
+    expect(acmePackageIds(engineOf(kernel))).toEqual([]);
+  });
+
+  /** A residual `acme_status` that only an item the engine never registers in a composed stack names. */
+  const isTopLevelOnlyRefusal = (refusal: unknown): void => {
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    expect((refusal as Error).message).toContain(`Picklist 'acme_status' is declared on the top level of stack '${RELEASE_ID}'`);
+  };
+
+  it('refuses one that only a top-level `objectExtensions` entry names — no door registers that entry in a composed stack', async () => {
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [residualStack(noteObj(), {
+      picklists: [statusList()],
+      objectExtensions: [{ extend: 'acme_case', fields: statusField }],
+    })]))));
+  });
+
+  it('refuses one that only a top-level copy of a body-declared object names, its fields diverging from the body\'s', async () => {
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [payload({
+      manifest: { ...app, id: RELEASE_ID },
+      objects: [{ ...caseObj(), fields: { ...caseObj().fields, ...statusField } }, accountObj()],
+      picklists: [statusList()],
+      packages: [
+        { manifest: { ...svc, objects: [caseObj()] } },
+        { manifest: { ...app, objects: [accountObj()] } },
+      ],
+    })]))));
+  });
+
+  it('refuses one that only a body\'s `picklistExtensions` entry extends — at boot, and after start() before anything registers', async () => {
+    const extending = () => residualStack(noteObj(), { picklists: [statusList()] }, {
+      picklistExtensions: [{ extend: 'acme_status', options: [{ label: 'Closed', value: 'closed' }] }],
+    });
+    isTopLevelOnlyRefusal(await refusalOf(boot(registering('app', [extending()]))));
+
+    const { kernel } = await boot();
+    isTopLevelOnlyRefusal(await refusalOf(Promise.resolve().then(() =>
+      kernel.getService<ManifestService>('manifest').register(extending()))));
+    expect(owners(engineOf(kernel))).toEqual({ acme_account: undefined, acme_case: undefined, acme_note: undefined });
+    expect(acmePackageIds(engineOf(kernel))).toEqual([]);
+  });
+
+  it('CONTROL: one a residual object\'s field names keeps the objects rule\'s line — boots, listed and not served, list unregistered', async () => {
+    const { kernel, recorder } = await boot(registering('app', [
+      residualStack(noteObj(statusField), { picklists: [statusList()] }),
+    ]));
+    const ql = engineOf(kernel);
+    expect(kernel.getState()).toBe('running');
+    expect(owners(ql).acme_note).toBeUndefined();
+    expect(ql.registry.resolvePicklistOptions('acme_status')).toBeUndefined();
+    expect(unservedLines(recorder)).toHaveLength(1);
+  });
+
+  it('CONTROL: one a BODY object\'s field names still fails the boot\'s picklist audit, not this refusal', async () => {
+    const refusal = await refusalOf(boot(registering('app', [
+      residualStack(noteObj(), { picklists: [statusList()] }, { objects: [{ ...caseObj(), fields: { ...caseObj().fields, ...statusField } }] }),
+    ])));
+    expect(refusal).toMatchObject({ code: 'INVALID_METADATA' });
+    const message = (refusal as Error).message;
+    expect(message).toContain("field 'acme_case.status'");
+    expect(message).toContain('that no loaded package declares');
+    expect(message).not.toContain('is declared on the top level of stack');
+  });
+
+  it('CONTROL: a picklist a body declares registers as today, whether or not the top level repeats it', async () => {
+    for (const extra of [{ picklists: [statusList()] }, {}]) {
+      const { kernel, recorder } = await boot(registering('app', [residualStack(noteObj(), extra, { picklists: [statusList()] })]));
+      const ql = engineOf(kernel);
+      expect(kernel.getState()).toBe('running');
+      expect(ql.registry.resolvePicklistOptions('acme_status')?.map((o) => o.value)).toEqual(['open']);
+      expect(unservedLines(recorder)).toEqual([]);
+      await kernel.shutdown();
+    }
+  });
+
+  it('CONTROL: a stack with no residual picklist boots unchanged', async () => {
+    const { kernel, recorder } = await boot(registering('app', [residualStack()]));
+    expect(kernel.getState()).toBe('running');
+    expect(owners(engineOf(kernel))).toEqual({ acme_account: APP_ID, acme_case: SERVICE_ID, acme_note: RELEASE_ID });
+    expect(unservedLines(recorder)).toEqual([]);
+  });
+
+  it('CONTROL: a stack without `packages[]` has no residual — its unnamed picklist registers as today', async () => {
+    const { kernel } = await boot(registering('app', [payload({ manifest: app, objects: [noteObj()], picklists: [unusedList()] })]));
+    expect(kernel.getState()).toBe('running');
+    expect(engineOf(kernel).registry.resolvePicklistOptions('acme_unused')?.map((o) => o.value)).toEqual(['a']);
   });
 });

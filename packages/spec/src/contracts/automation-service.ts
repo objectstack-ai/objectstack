@@ -94,6 +94,31 @@ export interface AutomationContext {
      */
     permissions?: string[];
     /**
+     * The posture rung of the triggering identity (ADR-0095 D2/D3), the kernel
+     * `ExecutionContext.posture` under its own name: what the readers keyed on
+     * the rung read, the compliance ledger's deployment-level rows among them
+     * (`PLATFORM_ADMIN` alone is served those). Forwarded alongside
+     * {@link positions} and {@link permissions} by the two doors that start a
+     * run on a person's behalf (`buildAutomationContext` and
+     * `dispatchFlowAction` in `@objectstack/runtime`), copied off the
+     * request's already-resolved execution context, so the run reads what the
+     * same caller's request reads. #28099.
+     *
+     * ⛔ It is the caller's own rung, as-is: never derived from the flow's
+     * author, never raised, and never filled in when the request carries none.
+     * Run setup keeps a forwarded rung beside the forwarded grants and does not
+     * re-derive it. When it resolves the grants itself (a context with no
+     * {@link permissions}: a record-change run, the segment after an approval
+     * decision), it drops any forwarded rung and takes the rung off that same
+     * resolution; grants that stay unresolved (the resolver rejects, answers
+     * nothing, or is not wired) leave the run with none. So a rung stands only
+     * beside the grants it was derived from. Absent:
+     * every reader of it answers as for a principal below the rung, which
+     * narrows and never widens. Absent on a `runAs:'system'` run's data
+     * context, whose `isSystem` short-circuit precedes every reader of it.
+     */
+    posture?: ExecutionContext['posture'];
+    /**
      * Tenant/org id of the triggering identity, carried so a `runAs:'user'` run
      * stays tenant-scoped. ADR-0049 / #1888.
      */
@@ -531,6 +556,13 @@ export interface AutomationResult {
      *    to **409**. Distinct from `'RESUME_IN_PROGRESS'` on purpose: that one is
      *    benign and needs nothing from the caller, this one is answered only by
      *    resuming a different run id.
+     *    The same code answers the map's second refusal (#27971): the item's
+     *    suspension is gone and its run history does not record it as
+     *    `cancelled` (no entry, an unreadable store, or another status), so the
+     *    map has nothing true to record for that item. Nothing moves; `error`
+     *    names the item run and the remedy, which is cancelling the parent run
+     *    to end the batch, or retrying once the store is readable. A cancelled
+     *    item is not refused: the map records it and goes on.
      *  - `'INVALID_SCREEN_INPUT'` — the run is parked on a `screen` node and
      *    the submitted bag violates that screen's declared field contract: a
      *    `required` field the caller WAS asked for is missing, or a key the

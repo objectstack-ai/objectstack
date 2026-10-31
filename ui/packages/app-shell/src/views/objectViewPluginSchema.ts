@@ -6,7 +6,7 @@
  * slice 9). Every input is passed in; the component reads the returned values.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import type { NavigateFunction, Location } from 'react-router-dom';
 import { normalizeListViewSchema } from '@object-ui/core';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
@@ -73,6 +73,12 @@ export function useObjectViewPluginSchema({
     const activeViewFilter = activeViewUserActions?.filter !== false;
     const activeViewSort = activeViewUserActions?.sort !== false;
 
+    // The location as of the latest render, read when `onNavigate` runs: the
+    // schema reaches the list, which must not re-render when `?recordId=`
+    // changes (objectstack#27545) — and the location changes with it.
+    const locationRef = useRef(location);
+    locationRef.current = location;
+
     // Build the ObjectViewSchema for the plugin — reads from activeView (which merges draft)
     const objectViewSchema = useMemo(() => ({
         type: 'object-view' as const,
@@ -92,9 +98,10 @@ export function useObjectViewPluginSchema({
             if (mode === 'edit') {
                 onEdit?.({ id: recordId });
             } else if (mode === 'view') {
+                const { pathname, search } = locationRef.current;
                 const originState = {
                   from: {
-                    pathname: location.pathname + (location.search || ''),
+                    pathname: pathname + (search || ''),
                     label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
                   },
                 };
@@ -105,7 +112,7 @@ export function useObjectViewPluginSchema({
                 }
             }
         },
-    }), [objectDef, onEdit, activeViewSearch, activeViewFilter, activeViewSort, activeView?.id, activeView?.name, activeView?.label, navigate, viewId, isAdmin, location.pathname, location.search, viewLabel, unlabelledViewText, servedViews, language]);
+    }), [objectDef, onEdit, activeViewSearch, activeViewFilter, activeViewSort, activeView?.id, activeView?.name, activeView?.label, navigate, viewId, isAdmin, viewLabel, unlabelledViewText, servedViews, language]);
 
     return { mergedViews, objectViewSchema };
 }

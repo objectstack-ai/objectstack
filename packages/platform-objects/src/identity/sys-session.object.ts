@@ -83,6 +83,14 @@ export const SysSession = ObjectSchema.create({
       confirmText: 'Sign out of every other device where you\'re currently logged in? Your current session will remain active.',
       successMessage: 'All other sessions revoked',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Sign the caller out on every other device; the current session stays signed in. Use when the user suspects their account is in use elsewhere. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'revoke_session',
@@ -104,6 +112,14 @@ export const SysSession = ObjectSchema.create({
       confirmText: 'Revoke this session? The user will be signed out from that device.',
       successMessage: 'Session revoked',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Revoke a sign-in session (the record), signing its user out on that device. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 

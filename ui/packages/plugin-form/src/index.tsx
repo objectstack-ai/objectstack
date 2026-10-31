@@ -170,6 +170,13 @@ export type { ResolveSectionGroupsOptions } from './sectionGroups';
 export { sectionEntryName } from './sectionFields';
 
 /**
+ * The first-editable-field focus of a dialog whose body loads after it opens,
+ * published for the console's action param dialog, which has the same lazy
+ * body. One rule for "which control a dialog opens on", not a copy per dialog.
+ */
+export { useInitialFieldFocus } from './initialFieldFocus';
+
+/**
  * The parameter types those published signatures require, so a consumer can
  * NAME what it must pass (objectui#7324).
  *

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Connector, RetryConfig } from '@objectstack/spec/integration';
-import { connectorFetchOptions } from '@objectstack/spec/integration';
+import type { Connector, ConnectorRequestSigner, RetryConfig } from '@objectstack/spec/integration';
+import { connectorFetchOptions, readConnectorResponse } from '@objectstack/spec/integration';
 import { resilientFetch } from '@objectstack/spec/shared';
 
 /**
@@ -15,6 +15,12 @@ import { resilientFetch } from '@objectstack/spec/shared';
  * and refresh, credential vaulting, and multi-tenant connection lifecycle are
  * the enterprise tier (see `../cloud/docs/design/connector-tiering.md`) and are
  * deliberately out of scope here.
+ *
+ * A request-signing instance (ADR-0143 D2.3) passes a `requestSigner` instead
+ * of a credential: every attempt is signed by it — retries included — and its
+ * response verification, when the scheme has one, runs before a body is
+ * returned (`connectorFetchOptions` / `readConnectorResponse`, the one site
+ * for both built-in HTTP connectors).
  */
 
 /** Auth config understood by the REST connector (the static subset). */
@@ -32,6 +38,12 @@ export interface RestConnectorOptions {
     baseUrl: string;
     /** Static authentication. Defaults to `{ type: 'none' }`. */
     auth?: RestAuth;
+    /**
+     * Per-request signer of a `signed` instance (ADR-0143 D2.3): signs every
+     * attempt and verifies every response its scheme signs. Exclusive with a
+     * static `auth` other than `none` — a request is authenticated one way.
+     */
+    requestSigner?: ConnectorRequestSigner;
     /** Headers merged into every request (request-level headers win). */
     defaultHeaders?: Record<string, string>;
     /**
@@ -112,12 +124,19 @@ function applyAuth(
 export function createRestConnector(opts: RestConnectorOptions): RestConnectorBundle {
     const name = opts.name ?? 'rest';
     const auth: RestAuth = opts.auth ?? { type: 'none' };
+    if (opts.requestSigner && auth.type !== 'none') {
+        throw new Error(
+            `createRestConnector: connector '${name}' is given both a static '${auth.type}' credential and a request signer; ` +
+                'a request is authenticated one way — pass one of them.',
+        );
+    }
     // Resolved once per connector, not per request: the policy is fixed for the
     // bundle's lifetime, and a declarative instance re-materializes (with a new
     // bundle) whenever the author edits it.
     const fetchOptions = connectorFetchOptions(
         { retryConfig: opts.retryConfig, requestTimeoutMs: opts.requestTimeoutMs },
         { fetchImpl: opts.fetchImpl },
+        opts.requestSigner,
     );
 
     const def: Connector = {
@@ -183,13 +202,9 @@ export function createRestConnector(opts: RestConnectorOptions): RestConnectorBu
         }, fetchOptions);
 
         // Parse JSON when advertised; fall back to text so non-JSON endpoints
-        // don't throw.
-        const contentType = response.headers.get('content-type') ?? '';
-        const parsed = contentType.includes('application/json')
-            ? await response.json()
-            : await response.text();
-
-        return { status: response.status, ok: response.ok, body: parsed };
+        // don't throw. A signed instance's response is verified first, when
+        // its scheme signs responses.
+        return readConnectorResponse(response, opts.requestSigner);
     }
 
     return { def, handlers: { request } };

@@ -127,12 +127,15 @@ export type {
 } from './ConcurrentUpdateDialog';
 // `__clearRecordEditableCache` is test-only and stays off the barrel
 // (objectui#13453); tests import it from `useRecordEditable` directly.
-export { useRecordEditable } from './useRecordEditable';
+export { useRecordEditable, seedRecordVerdict } from './useRecordEditable';
+// objectstack#27627 — the record page payload's field projection, for the
+// in-place edit blocks' first ask.
+export { seedRecordFieldAccess } from './recordFieldAccess';
 export type { RecordOperation } from './useRecordEditable';
 // The Claim affordance on a record sitting in an ownership queue (objectstack
 // ADR-0142 D4): the server's `queue_claim` answer decides the button, the
 // claim is `{ owner_id: <self> }` through the normal update.
-export { recordSitsInQueue, queueClaimAdmitted, useQueueClaimOffered, claimQueuedRecord } from './queueClaim';
+export { recordSitsInQueue, queueClaimAdmitted, useQueueClaimOffered, claimQueuedRecord, seedQueueClaimDecision } from './queueClaim';
 export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
@@ -159,6 +162,10 @@ export type { DetailViewProps } from './DetailView';
 export type { DetailSectionProps, VirtualScrollOptions } from './DetailSection';
 export type { DetailTabsProps } from './DetailTabs';
 export type { RelatedListProps } from './RelatedList';
+// objectstack#27627 — the order a related list's row read asks, for the record
+// page's payload to ask a compact card's first rows in.
+export { normalizeSortSpec as normalizeRelatedListSort } from './RelatedList';
+export { COMPACT_RELATED_ROWS } from './relatedListCompact';
 export type { SectionGroupProps } from './SectionGroup';
 export type { HeaderHighlightProps } from './HeaderHighlight';
 export type { RecordCommentsProps } from './RecordComments';

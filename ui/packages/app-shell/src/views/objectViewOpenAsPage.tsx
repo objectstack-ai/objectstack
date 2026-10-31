@@ -21,9 +21,11 @@
  * **The URL is not built here.** The list page publishes its record builder on
  * `RelatedRecordActionsContext` (`listRecordActionsValue`): `recordHref` is the
  * anchor's href and `openRecord` the SPA navigation a plain left click takes —
- * the record route, with the list as the record's origin, the destination the
- * drawer's own "open as full page" reaches. A host that cannot route to the
- * record answers `null`, and nothing is drawn.
+ * the record route, with the list as the record's origin. A host that cannot
+ * route to the record answers `null`, and nothing is drawn. A host that
+ * passes `onOpen` takes the plain click itself: the console's object list
+ * hands the page the way back to this list with the record open, which the
+ * page offers as 「Collapse to drawer」 (objectstack#27545).
  *
  * Hidden by OPACITY until the row is hovered or holds focus, as the row's ⋮
  * menu is (`RowActionMenu`), so it keeps its Tab stop and its name; a coarse
@@ -42,16 +44,20 @@ export function OpenAsPageLink({
     objectName,
     recordId,
     label,
+    onOpen,
 }: {
     objectName: string;
     recordId: string | number;
     /** The tooltip and accessible name: 「整页打开」. */
     label: string;
+    /** The plain left click, in place of the host's `openRecord`. */
+    onOpen?: (recordId: string | number) => void;
 }) {
     const host = useRelatedRecordActions();
     const href = host?.recordHref?.(objectName, recordId) ?? null;
     if (href === null || !host?.openRecord) return null;
-    const openRecord = host.openRecord;
+    const hostOpenRecord = host.openRecord;
+    const openRecord = onOpen ? () => onOpen(recordId) : () => hostOpenRecord(objectName, recordId);
     return (
         <a
             href={href}
@@ -67,7 +73,7 @@ export function OpenAsPageLink({
                 // tab of the same record page), as on the name's own link.
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                 e.preventDefault();
-                openRecord(objectName, recordId);
+                openRecord();
             }}
             onKeyDown={(e) => {
                 // Enter is the anchor's own activation (the browser turns it into

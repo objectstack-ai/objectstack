@@ -93,7 +93,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "语言",
-        help: "该用户接收通知时使用的首选语言，填写语言标签，如 zh-CN 或 ja-JP。未设置时采用部署的默认语言。"
+        help: "该用户界面显示和接收通知所用的语言，填写语言标签，如 zh-CN 或 ja-JP。未设置时采用部署的默认语言。"
       },
       manager_id: {
         label: "经理",
@@ -146,6 +146,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：完全控制组织，包括删除组织。\n管理员：管理成员、邀请、团队和组织设置。\n受托管理员：可以邀请人员，并且只能将其安排到管理员已委托的范围内。\n成员：使用组织的应用，访问权限由其权限集决定。\n外部成员：来自组织外部的人员（如供应商或客户），只能看到与其共享的内容。",
             options: {
               owner: "所有者",
               admin: "管理员",
@@ -195,13 +196,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "用户已创建",
-          description: "如果生成了临时密码，请立即复制——它只显示一次，不会被保存。",
           acknowledge: "完成",
           fields: {
             "user.email": "邮箱",
             "user.phoneNumber": "手机号",
             permissionSet: "权限集",
-            temporaryPassword: "临时密码"
+            temporaryPassword: "临时密码：请立即复制，它只显示一次，不会被保存"
           }
         }
       },
@@ -222,10 +222,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "密码已更新",
-          description: "如果生成了临时密码，请立即复制——它只显示一次，不会被保存。",
           acknowledge: "完成",
           fields: {
-            temporaryPassword: "临时密码"
+            temporaryPassword: "临时密码：请立即复制，它只显示一次，不会被保存"
           }
         }
       },
@@ -587,6 +586,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：完全控制组织，包括删除组织。\n管理员：管理成员、邀请、团队和组织设置。\n受托管理员：可以邀请人员，并且只能将其安排到管理员已委托的范围内。\n成员：使用组织的应用，访问权限由其权限集决定。\n外部成员：来自组织外部的人员（如供应商或客户），只能看到与其共享的内容。",
             options: {
               owner: "所有者",
               admin: "管理员",
@@ -678,6 +678,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：完全控制组织，包括删除组织。\n管理员：管理成员、邀请、团队和组织设置。\n受托管理员：可以邀请人员，并且只能将其安排到管理员已委托的范围内。\n成员：使用组织的应用，访问权限由其权限集决定。\n外部成员：来自组织外部的人员（如供应商或客户），只能看到与其共享的内容。",
             options: {
               owner: "所有者",
               admin: "管理员",
@@ -690,11 +691,25 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       add_member: {
         label: "添加成员",
-        successMessage: "成员已添加"
+        successMessage: "成员已添加",
+        params: {
+          role: {
+            helpText: "所有者：完全控制组织，包括删除组织。\n管理员：管理成员、邀请、团队和组织设置。\n受托管理员：可以邀请人员，并且只能将其安排到管理员已委托的范围内。\n成员：使用组织的应用，访问权限由其权限集决定。\n外部成员：来自组织外部的人员（如供应商或客户），只能看到与其共享的内容。"
+          }
+        }
       },
       update_member_role: {
         label: "更改角色",
-        successMessage: "成员角色已更新"
+        description: "为 ${record.user_id?.name ?? '该成员'} 选择新的组织角色。",
+        successMessage: "成员角色已更新",
+        outcomeMessages: {
+          permission_set_granted: "成员角色已更新。新角色还授予了权限集 ${result.grantedPermissionSet.label}。"
+        },
+        params: {
+          role: {
+            helpText: "所有者：完全控制组织，包括删除组织。\n管理员：管理成员、邀请、团队和组织设置。\n受托管理员：可以邀请人员，并且只能将其安排到管理员已委托的范围内。\n成员：使用组织的应用，访问权限由其权限集决定。\n外部成员：来自组织外部的人员（如供应商或客户），只能看到与其共享的内容。"
+          }
+        }
       },
       remove_member: {
         label: "移除成员",
@@ -704,7 +719,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       transfer_ownership: {
         label: "设为所有者",
         confirmText: "确定要将所选成员设为该组织的所有者吗？对方将获得所有者的全部权限，包括删除该组织。您仍是所有者；如需卸任，请在您自己的成员记录上使用“更改角色”。",
-        successMessage: "该成员现已成为所有者"
+        successMessage: "该成员现已成为所有者",
+        outcomeMessages: {
+          permission_set_granted: "该成员现已成为所有者。新角色还授予了权限集 ${result.grantedPermissionSet.label}。"
+        }
       }
     }
   },
@@ -812,6 +830,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：完全控制组织，包括删除组织。\n管理员：管理成员、邀请、团队和组织设置。\n受托管理员：可以邀请人员，并且只能将其安排到管理员已委托的范围内。\n成员：使用组织的应用，访问权限由其权限集决定。\n外部成员：来自组织外部的人员（如供应商或客户），只能看到与其共享的内容。",
             options: {
               owner: "所有者",
               admin: "管理员",
@@ -829,6 +848,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "重新发送邀请",
+        description: "要重新发送邀请给 ${record.email} 吗？邀请的有效期将重新计算。",
         successMessage: "邀请已重新发送",
         outcomeMessages: {
           sent: "已向 ${result.email} 重新发送邀请",

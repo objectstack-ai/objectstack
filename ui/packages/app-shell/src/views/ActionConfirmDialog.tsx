@@ -26,6 +26,7 @@ import {
   buttonVariants,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { useActionDialogReturnFocus } from './actionDialogReturnFocus.js';
 
 export interface ConfirmDialogState {
   open: boolean;
@@ -42,6 +43,8 @@ interface ActionConfirmDialogProps {
 
 export function ActionConfirmDialog({ state, onOpenChange }: ActionConfirmDialogProps) {
   const { t } = useObjectTranslation();
+  // Focus returns to the control that opened the dialog (see the helper).
+  const returnFocus = useActionDialogReturnFocus(state.open);
   const handleConfirm = () => {
     state.resolve?.(true);
     onOpenChange(false);
@@ -56,7 +59,7 @@ export function ActionConfirmDialog({ state, onOpenChange }: ActionConfirmDialog
     <AlertDialog open={state.open} onOpenChange={(open) => {
       if (!open) handleCancel();
     }}>
-      <AlertDialogContent>
+      <AlertDialogContent ref={returnFocus.contentRef} onCloseAutoFocus={returnFocus.onCloseAutoFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{state.options?.title || t('actionConfirm.title')}</AlertDialogTitle>
           <AlertDialogDescription>{state.message}</AlertDialogDescription>

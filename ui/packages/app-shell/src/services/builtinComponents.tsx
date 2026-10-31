@@ -22,6 +22,8 @@ import { PermissionMatrixEditPage } from '../views/metadata-admin/PermissionMatr
 import { PackagesPage } from '../views/metadata-admin/PackagesPage.js';
 import { PositionGrantedSetsCell, PositionHolderCountCell } from '../views/metadata-admin/PositionGrantCells.js';
 import { PackagedAutomationPage } from '../views/setup/PackagedAutomationPage.js';
+import { ConnectorCredentialsPage } from '../views/setup/ConnectorCredentialsPage.js';
+import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.js';
 import {
   isAggregatedViewContainer,
   viewDisplayType,
@@ -146,6 +148,20 @@ registerAppComponent({
   label: 'Packaged Automation',
   source: '@object-ui/app-shell',
   component: PackagedAutomationPage,
+});
+
+/**
+ * Setup → Integrations → Connector Credentials (ruling A on objectstack#27230).
+ * The entry naming this ref is contributed by the automation service's UI
+ * bundle (`CONNECTOR_CREDENTIALS_UI_BUNDLE`, `@objectstack/service-automation`),
+ * so it lives and dies with the credential door; the shell declares no entry
+ * and no route for it.
+ */
+registerAppComponent({
+  ref: CONNECTOR_CREDENTIALS_REF,
+  label: 'Connector Credentials',
+  source: '@object-ui/app-shell',
+  component: ConnectorCredentialsPage,
 });
 
 /* -------------------------------------------------------------------------- */

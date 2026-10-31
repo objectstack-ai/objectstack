@@ -23,12 +23,13 @@
  * Presentation only. Nothing here touches the transport: no cadence is changed,
  * no request is added, and no push channel (WebSocket / SSE) is opened — those
  * are framework-side platform work with their own project. The consequence is
- * accepted rather than worked around: a backgrounded tab polls at 60 s, so a
- * desktop notification can be up to about a minute late. Shaving that by
- * speeding the poll up would trade a server-wide cost for one surface's
- * latency, which is the trade the card refused.
+ * accepted rather than worked around: a backgrounded tab polls every 3 minutes
+ * (`HIDDEN_POLL_MS`, objectstack#28084), so a desktop notification can be up
+ * to about three minutes late. Shaving that by speeding the poll up would
+ * trade a server-wide cost for one surface's latency, which is the trade the
+ * card refused.
  *
- * And the 60 s holds only for the first 10 minutes of a continuous hide
+ * And that cadence holds only for the first 10 minutes of a continuous hide
  * (`HIDDEN_POLL_STOP_MS`, `hiddenTabPollStop.ts`, objectui#12439). After that
  * the shared feed stops polling, so a message that arrives later raises NO
  * desktop notification while the tab stays hidden: nothing reads it until the

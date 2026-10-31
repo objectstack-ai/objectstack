@@ -259,7 +259,12 @@
  * read the dialect two ways.
  */
 
-import { isExpressionEnvelopeShaped, resolveFlowNodeValueSlots } from './flow-node-expression-paths';
+import {
+  isExpressionEnvelopeShaped,
+  resolveFlowNodeValueSlots,
+  type FlowNodeExpressionBlock,
+  type FlowNodeSiblingBlocks,
+} from './flow-node-expression-paths';
 // [#19939] The query placeholders a flow filter operand hands on untouched —
 // the vocabulary the query engine's own resolver reads (`resolveFilterTokens`
 // in `@objectstack/core`), never re-spelled here.
@@ -744,7 +749,15 @@ export function valueSlotTemplateRefusals(
 
 /** One refused string in a node's config, located for a door's report. */
 export interface FlowNodeValueTemplateRefusal {
-  /** Path into `node.config` — `fields.total`, `assignments.digest`, `assignments[0].value`, `total`, `fields.meta.note`. */
+  /**
+   * [#27968] The node block {@link FlowNodeValueTemplateRefusal.path} is inside:
+   * `config`, or — for a `connector_action` node's `input` map — `connectorConfig`.
+   */
+  readonly block: FlowNodeExpressionBlock;
+  /**
+   * Path into the node's {@link FlowNodeValueTemplateRefusal.block} — `fields.total`, `assignments.digest`,
+   * `assignments[0].value`, `total`, `fields.meta.note`, `input.ticket`.
+   */
   readonly path: string;
   /** The slot, as a door names it — `create_record field value`, `assignment value`. */
   readonly label: string;
@@ -960,8 +973,17 @@ function joinPath(prefix: string, inner: readonly (string | number)[]): string {
  * operand of a CRUD node's `filter` a whole query placeholder passes, and a
  * token is refused with the filter operand's remedy
  * ({@link ValueSlotTemplateOptions.filterOperand}).
+ *
+ * [#27968] A value slot rooted in a sibling block — a `connector_action`
+ * node's `connectorConfig.input` — is reached through `siblings` (pass the
+ * node itself), and each refusal names its block; a caller that hands none is
+ * answered for `config` only.
  */
-export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown): FlowNodeValueTemplateRefusal[] {
+export function flowNodeValueTemplateRefusals(
+  nodeType: string,
+  config: unknown,
+  siblings?: FlowNodeSiblingBlocks,
+): FlowNodeValueTemplateRefusal[] {
   const out: FlowNodeValueTemplateRefusal[] = [];
   const judge = (
     path: string,
@@ -969,15 +991,24 @@ export function flowNodeValueTemplateRefusals(nodeType: string, config: unknown)
     value: unknown,
     options: ValueSlotTemplateOptions = {},
     callee?: (refusal: ValueSlotTemplateRefusal) => string | undefined,
+    block: FlowNodeExpressionBlock = 'config',
   ): void => {
     for (const refusal of valueSlotTemplateRefusals(value, options)) {
       const sentence = callee?.(refusal);
       const message = sentence === undefined ? refusal.message : `${refusal.message} ${sentence}`;
-      out.push({ path: joinPath(path, refusal.path), label, message, source: refusal.source });
+      out.push({ block, path: joinPath(path, refusal.path), label, message, source: refusal.source });
     }
   };
-  for (const found of resolveFlowNodeValueSlots(nodeType, config)) {
+  for (const found of resolveFlowNodeValueSlots(nodeType, config, siblings)) {
     const entryKey = `${found.entry.nodeType} ${found.entry.path}`;
+    if (found.block !== 'config') {
+      // [#27968] A sibling block's value slot — today a `connector_action`
+      // node's `connectorConfig.input` — takes the generic remedy: the action
+      // was handed the token's text as written, so no sentence about what a
+      // callee received instead of nothing applies.
+      judge(found.path, found.entry.label, found.value, {}, undefined, found.block);
+      continue;
+    }
     if (COLLECTION_SLOTS.has(entryKey)) {
       judge(found.path, found.entry.label, found.value, { collection: true });
       continue;

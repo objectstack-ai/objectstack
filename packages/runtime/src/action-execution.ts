@@ -1396,7 +1396,7 @@ export function buildApiActionRequest(
             body[recordIdParam] = value;
         }
     }
-    if (/\/api\/v1\/auth\//.test(path) && body.organizationId === undefined && organizationId) {
+    if (isIdentityRouteTarget(path) && body.organizationId === undefined && organizationId) {
         body.organizationId = organizationId;
     }
     if (action?.bodyExtra && typeof action.bodyExtra === 'object' && !Array.isArray(action.bodyExtra)) {
@@ -1406,6 +1406,40 @@ export function buildApiActionRequest(
     // ── 3. the method ──
     const method = String(action?.method || 'POST').toUpperCase();
     return method === 'GET' || method === 'DELETE' ? { method, path } : { method, path, body };
+}
+
+/**
+ * Is this forward `path` an identity route — one under the auth mount
+ * (`/api/v1/auth/…`)? That mount reads its caller from its OWN signed-in
+ * session (a session bearer or cookie) and admits no API key, so a principal
+ * the door admitted by key reaches it as nobody. Read once, here, for the two
+ * rules that depend on it: the `organizationId` stamp in
+ * {@link buildApiActionRequest} and the key refusal in {@link forwardApiAction}.
+ */
+function isIdentityRouteTarget(path: string): boolean {
+    return /\/api\/v1\/auth\//.test(path);
+}
+
+/**
+ * The refusal a door answers, before any forward, when an API-key caller runs
+ * an action whose `target` is an identity route ({@link isIdentityRouteTarget}).
+ *
+ * The forward carries the caller's own credentials so the target authorizes
+ * the SAME principal the door admitted. An identity route cannot read a key,
+ * so it would authorize no one: the request would leave the door and come
+ * back as the target's anonymous 401 ("Sign in first"), telling a caller who
+ * did authenticate to sign in. This says what actually happened. Which
+ * credentials the identity route accepts is unchanged: a signed-in session
+ * still reaches it through the door exactly as before, and a key still
+ * reaches every other target.
+ */
+export function apiActionIdentityRouteKeyRefusal(action: any, target: string): string {
+    return (
+        `Action '${action?.name ?? 'unknown'}' forwards to an identity endpoint ('${target}') that accepts a ` +
+        `signed-in session only, and this request was authenticated with an API key, which that endpoint ` +
+        `cannot read. The action was not run. Run it from a signed-in session (a session token or the ` +
+        `Console's sign-in cookie) instead of an API key.`
+    );
 }
 
 /** What the in-process forward answered — status, parsed JSON body, relayed headers. */
@@ -1516,6 +1550,8 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * ({@link API_FORWARD_HEADER_ALLOWLIST}); `Content-Length` / `Host` are the
  * injector's to set. The forward is marked ({@link API_FORWARD_MARK_HEADER})
  * so a door reached by it refuses instead of looping.
+ * One caller is never forwarded: an API-key caller of an identity route,
+ * which cannot read a key ({@link apiActionIdentityRouteKeyRefusal}).
  *
  * Relayed back: the status, the JSON body, and the credential-rotation
  * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
@@ -1532,6 +1568,24 @@ export async function forwardApiAction(
     req: ApiActionRequest,
     mark: { objectName: string; actionName: string },
 ): Promise<ApiActionForwardAnswer> {
+    // An API-key caller cannot be carried to an identity route (see
+    // {@link apiActionIdentityRouteKeyRefusal}): refused here, before the
+    // target is called, with the status the target would have answered and
+    // the sentence that says why. Both doors relay it as they relay a target's
+    // refusal.
+    if (requestContext?.admission?.credential === 'api_key' && isIdentityRouteTarget(req.path)) {
+        return {
+            status: 401,
+            body: {
+                success: false,
+                error: {
+                    code: standardErrorCodeForHttpStatus(401),
+                    message: apiActionIdentityRouteKeyRefusal({ name: mark.actionName }, req.path.split('?')[0]!),
+                },
+            },
+            headers: {},
+        };
+    }
     const incoming: Record<string, unknown> =
         requestContext?.request?.headers && typeof requestContext.request.headers === 'object'
             ? requestContext.request.headers
@@ -2077,6 +2131,10 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
+        // [#28099] The caller's already-resolved posture rung, the trigger
+        // door's twin (`buildAutomationContext`): never re-derived or raised,
+        // absent when the request carries none. See `AutomationContext.posture`.
+        ...(typeof ec?.posture === 'string' && ec.posture.length > 0 ? { posture: ec.posture } : {}),
         // [#22450] The caller's already-resolved language, the trigger door's
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.

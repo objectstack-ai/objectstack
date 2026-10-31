@@ -93,7 +93,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Locale",
-        help: "Preferred language for this user's notifications, as a language tag such as zh-CN or ja-JP. When unset, the deployment's default language applies."
+        help: "The language this user sees the interface in and receives notifications in, as a language tag such as zh-CN or ja-JP. When unset, the deployment's default language applies."
       },
       manager_id: {
         label: "Manager",
@@ -146,6 +146,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -195,13 +196,12 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "User Created",
-          description: "If a temporary password was generated, copy it now — it is shown only once and never stored.",
           acknowledge: "Done",
           fields: {
             "user.email": "Email",
             "user.phoneNumber": "Phone Number",
             permissionSet: "Permission Set",
-            temporaryPassword: "Temporary Password"
+            temporaryPassword: "Temporary password: copy it now, it is shown only once and never stored"
           }
         }
       },
@@ -222,10 +222,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Password Updated",
-          description: "If a temporary password was generated, copy it now — it is shown only once and never stored.",
           acknowledge: "Done",
           fields: {
-            temporaryPassword: "Temporary Password"
+            temporaryPassword: "Temporary password: copy it now, it is shown only once and never stored"
           }
         }
       },
@@ -587,6 +586,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -678,6 +678,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -690,11 +691,25 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       add_member: {
         label: "Add Member",
-        successMessage: "Member added"
+        successMessage: "Member added",
+        params: {
+          role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them."
+          }
+        }
       },
       update_member_role: {
         label: "Change Role",
-        successMessage: "Member role updated"
+        description: "Choose the new organization role for ${record.user_id?.name ?? 'this member'}.",
+        successMessage: "Member role updated",
+        outcomeMessages: {
+          permission_set_granted: "Member role updated. The new role also granted the permission set ${result.grantedPermissionSet.label}."
+        },
+        params: {
+          role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them."
+          }
+        }
       },
       remove_member: {
         label: "Remove Member",
@@ -704,7 +719,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       transfer_ownership: {
         label: "Make Owner",
         confirmText: "Make the selected member an owner of this organization? They get every owner privilege, including deleting the organization. You stay an owner too; to step down, use Change Role on your own membership.",
-        successMessage: "Member is now an owner"
+        successMessage: "Member is now an owner",
+        outcomeMessages: {
+          permission_set_granted: "Member is now an owner. The new role also granted the permission set ${result.grantedPermissionSet.label}."
+        }
       }
     }
   },
@@ -744,11 +762,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       status: {
         label: "Status",
         options: {
-          pending: "pending",
-          accepted: "accepted",
-          rejected: "rejected",
-          expired: "expired",
-          canceled: "canceled"
+          pending: "Pending",
+          accepted: "Accepted",
+          rejected: "Declined",
+          expired: "Expired",
+          canceled: "Canceled"
         }
       },
       inviter_id: {
@@ -812,6 +830,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Owner: full control of the organization, including deleting it.\nAdmin: manages members, invitations, teams and organization settings.\nDelegated Admin: invites people and places them only where an administrator has delegated that.\nMember: works in the organization's apps with the access their permission sets give.\nExternal: someone from outside the organization, such as a supplier or customer, who sees only what is shared with them.",
             options: {
               owner: "Owner",
               admin: "Admin",
@@ -829,6 +848,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Resend Invitation",
+        description: "Resend the invitation to ${record.email}? Its expiry date starts over.",
         successMessage: "Invitation resent",
         outcomeMessages: {
           sent: "Invitation resent to ${result.email}",
@@ -2531,9 +2551,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Severity",
         help: "Severity hint for rendering / filtering",
         options: {
-          info: "info",
-          warning: "warning",
-          critical: "critical"
+          info: "Info",
+          warning: "Warning",
+          critical: "Critical"
         }
       },
       suppressed_channels: {

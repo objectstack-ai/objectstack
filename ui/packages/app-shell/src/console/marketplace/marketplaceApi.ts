@@ -753,6 +753,13 @@ export interface LocalManagedInstallResult {
   hotLoaded: boolean;
   upgradedFrom: string | null;
   note?: string;
+  /**
+   * The door's sentence for the package's connector credentials that still
+   * need an administrator (objectstack#27237), present only when one does. The
+   * credential step shows it where the credential listing cannot be read here,
+   * as under a walled tenancy posture, which this sentence names the remedy for.
+   */
+  credentialNote?: string;
 }
 
 /**

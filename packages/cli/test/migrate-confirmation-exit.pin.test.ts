@@ -275,6 +275,11 @@ const ROSTER: Record<string, Member> = {
     },
     writes: () => [seams.resumeMigrationJournal],
   },
+  'record-currency-codes': {
+    argv: ['--apply', '--object', 'opportunity', '--field', 'amount', '--code', 'USD'],
+    confirm: '--yes',
+    writes: BOOT,
+  },
   'security-catalog-overlays': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'summary-nulls': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'value-shapes': { argv: ['--apply'], confirm: '--yes', writes: BOOT },

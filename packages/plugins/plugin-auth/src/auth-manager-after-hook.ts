@@ -47,6 +47,7 @@ import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotati
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { readRequestClientAddress } from './request-client-address.js';
+import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
@@ -64,6 +65,7 @@ export interface AfterHookHost {
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
   recordSignInOutcome: AuthManager['recordSignInOutcome'];
+  roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   stampLastLogin: AuthManager['stampLastLogin'];
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
@@ -231,6 +233,14 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // invitation row, by the one deliverability rule sign-up uses (see
   // `invitation-delivery-outcome.ts`). A refusal passes untouched.
   await stampInvitationDeliveryOutcome(ctx, () => this.isEmailDeliveryLive());
+
+  // ── #27862: a role change names the permission set it granted ──
+  // The before hook read the member's org-admin grants; a success that
+  // left a new one held answers `outcome: 'permission_set_granted'` and
+  // `grantedPermissionSet: { name, label }` beside the member row (see
+  // `role-change-granted-set.ts`). A refusal passes untouched.
+  const roleChangeDeps = this.roleChangeGrantDeps();
+  if (roleChangeDeps) await stampRoleChangeGrantedSet(ctx, roleChangeDeps);
 
   // ── #24750: invite-member's unknown-role refusal carries its code ──
   // better-auth throws it with only a message; the spec promises

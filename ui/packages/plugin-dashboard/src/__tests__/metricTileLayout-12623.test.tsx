@@ -82,7 +82,9 @@ function expectTileContainer(inner: Element) {
 describe('dataset-bound metric tile — the layout rule (objectui#12623)', () => {
   const source = () => ({
     queryDataset: vi.fn(async () => ({
-      rows: [{ total_amount: 1964500 }],
+      // A short value: a longer one takes the dataset tile's ladder, pinned in
+      // `metricTileDatasetValueScale-27520.test.tsx`.
+      rows: [{ total_amount: 196450 }],
       fields: [{ name: 'total_amount', label: 'Total Amount', type: 'number' }],
     })),
   });
@@ -105,7 +107,7 @@ describe('dataset-bound metric tile — the layout rule (objectui#12623)', () =>
 
   it('gives the title the first line alone, up to two lines', async () => {
     renderTile();
-    await screen.findByText('1964500');
+    await screen.findByText('196450');
     const title = screen.getByTestId('dataset-metric-title');
     expectTitleRule(title);
     // Alone on its line: the heading row holds the title and nothing else.
@@ -114,12 +116,12 @@ describe('dataset-bound metric tile — the layout rule (objectui#12623)', () =>
 
   it('draws the value unwrapped, one step smaller below a 160 px tile', async () => {
     renderTile();
-    expectValueRule(await screen.findByText('1964500'));
+    expectValueRule(await screen.findByText('196450'));
   });
 
   it('draws the measure label under the value, 11 px, hidden below a 160 px tile, and keeps it in the tooltip', async () => {
     renderTile();
-    const value = await screen.findByText('1964500');
+    const value = await screen.findByText('196450');
     const label = screen.getByTestId('dataset-metric-label');
 
     expect(value.nextElementSibling).toBe(label);
@@ -134,7 +136,7 @@ describe('dataset-bound metric tile — the layout rule (objectui#12623)', () =>
 
   it('measures every width rule against the tile, which holds the title, the value and the label', async () => {
     renderTile();
-    const value = await screen.findByText('1964500');
+    const value = await screen.findByText('196450');
     const box = expectTileContainer(value);
     expect(box).toContainElement(screen.getByTestId('dataset-metric-title'));
     expect(box).toContainElement(screen.getByTestId('dataset-metric-label'));

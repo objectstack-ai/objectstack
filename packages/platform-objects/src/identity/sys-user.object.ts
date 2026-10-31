@@ -3,6 +3,7 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
+import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
 /**
  * The BCP-47 shape `sys_user.locale` accepts — a 2–3 letter language subtag
@@ -38,6 +39,15 @@ import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
  * spellings are byte-identical and names what breaks if they are not.
  */
 export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$';
+
+/**
+ * The label of the `temporaryPassword` field on the `create_user` and
+ * `set_user_password` result dialogs. It carries the copy-it-now instruction
+ * because the dialog skips a field absent from the response, and the server
+ * returns `temporaryPassword` only when it generated one: the instruction
+ * shows exactly when there is a password to copy.
+ */
+const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
  * sys_user — System User Object
@@ -129,8 +139,14 @@ export const SysUser = ObjectSchema.create({
         // (`INVITATION_ROLE_GRANTORS`), so a delegated_admin is offered
         // `member` alone. Declared on the param, not inherited from the
         // field, so the gate narrows this dialog and no other picker.
-        { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+        { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Invite a person by email address to join the current organization with a role (params: email, role). They join when they accept the invitation. Use when the user asks to invite someone who is not a member yet; the role options are only the roles the caller may grant.',
+      },
     },
 
     // ── Platform admin operations (require better-auth `admin` plugin) ─
@@ -196,6 +212,14 @@ export const SysUser = ObjectSchema.create({
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Ban a user (the record; optionally banReason): they are signed out and cannot sign in until unbanned. Platform administrators only. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'unban_user',
@@ -212,6 +236,14 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'User unbanned',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Lift the ban on a banned user (the record), so they can sign in again. Platform administrators only. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       // ADR-0069 D2 — clear a brute-force lockout early (locked_until auto-
@@ -239,6 +271,14 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'Account unlocked',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Release a user (the record) from a sign-in lockout before it expires, at the password and the second-factor stage, and reset the failed-attempt count. Platform administrators only. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       // #2766 V1 — a platform admin can add a login-capable teammate without
@@ -318,11 +358,12 @@ export const SysUser = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'User Created',
-        // Hedged for both outcomes: a typed password returns no
-        // `temporaryPassword`, so the dialog must not claim one to copy.
-        // Same sentence and button as `set_user_password` below.
-        description:
-          'If a temporary password was generated, copy it now — it is shown only once and never stored.',
+        // No dialog-level description: it shows on both outcomes, and a typed
+        // password returns no `temporaryPassword`, so any copy-it-now sentence
+        // there talks about a password that is not on screen. The instruction
+        // rides the `temporaryPassword` field's own label instead, which the
+        // dialog draws only when the server minted one. Same shape and button
+        // as `set_user_password` below.
         acknowledge: 'Done',
         fields: [
           // The dialog skips fields whose path is absent from the response, so
@@ -331,7 +372,7 @@ export const SysUser = ObjectSchema.create({
           { path: 'user.email', label: 'Email', format: 'text' },
           { path: 'user.phoneNumber', label: 'Phone Number', format: 'text' },
           { path: 'permissionSet', label: 'Permission Set', format: 'text' },
-          { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
+          { path: 'temporaryPassword', label: TEMPORARY_PASSWORD_LABEL, format: 'secret' },
         ],
       },
     },
@@ -388,11 +429,10 @@ export const SysUser = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'Password Updated',
-        description:
-          'If a temporary password was generated, copy it now — it is shown only once and never stored.',
+        // No description, for the reason given on `create_user` above.
         acknowledge: 'Done',
         fields: [
-          { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
+          { path: 'temporaryPassword', label: TEMPORARY_PASSWORD_LABEL, format: 'secret' },
         ],
       },
     },
@@ -514,6 +554,14 @@ export const SysUser = ObjectSchema.create({
           helpText: 'The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain.',
         },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Set the manager a user (the record) reports to (param: managerId, a user in the same organization). The reporting chain drives approval routing and the own_and_reports record scope. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
 
     // ── Self-service actions (the row owner only) ─────────────────────
@@ -554,6 +602,12 @@ export const SysUser = ObjectSchema.create({
         { field: 'name', required: false, defaultFromRow: true },
         { field: 'image', required: false, defaultFromRow: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Update the caller\'s own display name and profile image (the record must be the caller\'s own user). Use when the user asks to change how their name or picture appears.',
+      },
     },
     {
       name: 'change_my_password',
@@ -607,6 +661,12 @@ export const SysUser = ObjectSchema.create({
       successMessage: 'Verification email sent — check your inbox.',
       refreshAfter: false,
       params: [],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Send the caller another email-address verification message, for their own account whose email address is not verified yet.',
+      },
     },
     {
       name: 'delete_my_account',
@@ -672,6 +732,12 @@ export const SysUser = ObjectSchema.create({
           { path: 'totpURI', label: 'Authenticator URI', format: 'qrcode' },
           { path: 'backupCodes', label: 'Backup Codes', format: 'code-list' },
         ],
+      },
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Turn on two-factor authentication for the caller\'s own account (param: the current password). Answers the authenticator URI and one-time backup codes; the user must save the codes, which are shown only once.',
       },
     },
     {
@@ -740,7 +806,9 @@ export const SysUser = ObjectSchema.create({
       // has no feature gate, and on a deployment with 2FA off (the default)
       // it read a dead "No" on every row. The state is shown on the user's
       // own record page, in the Security tab, behind the `twoFactor` gate.
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'created_at'],
+      // `banned` and `role` sit beside the email so a banned user or an
+      // admin is spotted from the list, without opening each record.
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'banned', 'role', 'source', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -1076,8 +1144,8 @@ export const SysUser = ObjectSchema.create({
       maxLength: 35,
       group: 'Profile',
       description:
-        'Preferred language for this user\'s notifications, as a language tag such as zh-CN or ja-JP. ' +
-        'When unset, the deployment\'s default language applies.',
+        'The language this user sees the interface in and receives notifications in, as a language tag ' +
+        'such as zh-CN or ja-JP. When unset, the deployment\'s default language applies.',
     }),
 
     // ── Organization ─────────────────────────────────────────────

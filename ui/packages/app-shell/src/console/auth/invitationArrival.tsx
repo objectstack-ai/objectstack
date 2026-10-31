@@ -48,6 +48,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AuthFormHeader, AUTH_LINK_CLASS, useAuth, type AuthInvitationPreview } from '@object-ui/auth';
 import { useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
+import type { SignUpOffer } from './signUpOffer.js';
 
 /** A full-width outlined link with the auth primary button's box. */
 const INVITATION_SIGN_UP_CLASS =
@@ -75,6 +76,26 @@ export function InvitationSignUpPrompt({ registerUrl }: { registerUrl: string })
         <span aria-hidden="true" className="h-px flex-1 bg-border" />
       </div>
     </div>
+  );
+}
+
+/**
+ * The plain sign-in page's line for an invitee who came without the link.
+ * Under `by-invitation` the page offers no sign-up, so a new invitee reading it
+ * had no way on; the way on is the link in the invitation email, which lands
+ * on `?redirect=/accept-invitation/ID` and its sign-up prompt. Drawn for that
+ * offer only: `decideSignUpOffer` never answers it for an invitation redirect,
+ * and under `closed` the link would not offer a sign-up either.
+ */
+export function InvitationLinkHint({ offer }: { offer: SignUpOffer }) {
+  const { t } = useObjectTranslation();
+  if (offer !== 'by-invitation') return null;
+  return (
+    <p data-testid="invitation-link-hint" className="mt-4 text-center text-sm text-muted-foreground">
+      {t('auth.login.invitationLinkHint', {
+        defaultValue: 'Have an invitation? Open the link in the invitation email to accept it.',
+      })}
+    </p>
   );
 }
 

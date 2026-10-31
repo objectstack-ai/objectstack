@@ -29,7 +29,11 @@
 //   - a third member's second session, signed out (its sign-in row about an
 //     ended session, and its sign-out row);
 //   - a bulk of rows past the old pre-scan bound, inserted as the system
-//     (the writers insert as the system too), about records that do not exist.
+//     (the writers insert as the system too), about records that do not exist,
+//     each stamped with the holder's organization the way the CRUD mirror
+//     stamps a row about a record of it: a row with no `tenant_id` is a
+//     deployment-level row, served to the platform administrator alone
+//     (#26750), so an unstamped bulk would never reach the holder.
 //
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a
 // ledgered pair in `scripts/check-test-source-alias.mjs`), and so does
@@ -246,12 +250,17 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     rowIds.goneDelete = String(goneRows.find((r) => r.action === 'delete')?.id ?? '');
     rowIds.privateCreate = String((await ledgerAtRest({ object_name: PRIVATE, record_id: id.private }))[0]?.id ?? '');
 
-    // The broad read: rows past the pre-scan bound, about records that do not exist.
+    // The broad read: rows past the pre-scan bound, about records that do not
+    // exist, in the holder's organization (a row with none is deployment-level, #26750).
     const now = new Date().toISOString();
+    const bulkOrganization = await organizationOf(await userIdOf('alc-holder@verify.test'));
     for (let i = 0; i < BULK; i++) {
       await ql.insert(
         LEDGER,
-        { action: 'update', object_name: OBJ, record_id: `alc_bulk_${i}`, user_id: null, actor: 'svc:fixture', created_at: now },
+        {
+          action: 'update', object_name: OBJ, record_id: `alc_bulk_${i}`, user_id: null, actor: 'svc:fixture',
+          tenant_id: bulkOrganization, created_at: now,
+        },
         { context: { ...SYS } },
       );
     }

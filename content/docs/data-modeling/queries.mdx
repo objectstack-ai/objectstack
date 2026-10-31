@@ -545,7 +545,9 @@ override that names no field at all (`?$searchFields=`, `?$searchFields=,`, an e
 array) is `400 VALIDATION_ERROR`, as `$select=` is; leave the parameter out to scan the
 default set. The engine used to drop unknown names and fall back to the full searchable
 set — a parameter that exists to narrow a search, silently widening it. Internal callers
-reaching `engine.find()` directly are unaffected.
+reaching `engine.find()` directly get the same two refusals for an override naming no field
+(`400 VALIDATION_ERROR`) and one naming none of the searchable fields (`400 INVALID_FIELD`);
+an override naming at least one searchable field there still has its other names dropped.
 </Callout>
 
 ### Searching by a related record's title — mirror the value

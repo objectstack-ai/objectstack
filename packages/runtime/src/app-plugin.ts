@@ -25,6 +25,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
+import { connectPackageDatasources } from './declared-datasources.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
@@ -1314,51 +1315,13 @@ export class AppPlugin implements Plugin {
                 );
             }
         }
-        try {
-            const dsDefs = this.convertedCollection(ctx, 'datasources');
-            const dsList = Array.isArray(dsDefs)
-                ? dsDefs
-                : dsDefs && typeof dsDefs === 'object'
-                    ? Object.entries(dsDefs).map(([name, def]) => ({ name, ...(def as any) }))
-                    : [];
-            if (dsList.length > 0) {
-                const metadata = ctx.getService('metadata') as
-                    | { registerInMemory?: (t: string, n: string, d: unknown) => void }
-                    | undefined;
-                if (typeof metadata?.registerInMemory === 'function') {
-                    // [#21889] Each one stamped with the package that declares
-                    // it (ADR-0010 `_packageId` / `_packageVersion`), through the
-                    // one stamping helper both other load paths use. See
-                    // `codeDefinedDatasourceOwners` for who that package is.
-                    for (const { datasource: ds, owner } of this.codeDefinedDatasourceOwners(ctx)) {
-                        if (!ds?.name) continue;
-                        metadata.registerInMemory(
-                            'datasource',
-                            ds.name,
-                            applyProtection({ ...ds, origin: 'code' }, owner),
-                        );
-                    }
-                    ctx.logger.info('Registered code-defined datasources in metadata registry', {
-                        appId,
-                        count: dsList.length,
-                    });
-                }
-            }
-        } catch (err) {
-            ctx.logger.warn('[AppPlugin] failed to register code-defined datasources', {
-                error: (err as Error)?.message ?? String(err),
-            });
-        }
-
-        // [#22989] The stack's declared `apis`, by the same route — see
-        // `registerDeclaredApiEndpoints`.
-        this.registerDeclaredApiEndpoints(ctx, appId);
-
-        // Auto-connect declared datasources (ADR-0062 D1/D2/D5). The metadata
-        // registration above only makes a datasource *visible*; to make its
-        // federated objects *queryable* with zero app boilerplate, build + open
-        // + register a live driver via the shared `'datasource-connection'`
-        // service (when present — wired by the datasource-admin plugin). The
+        // [#28039] The registration and the auto-connect (ADR-0062 D1/D2/D5) go
+        // through `connectPackageDatasources` — the ONE path, which install-local
+        // takes for a package installed into the running kernel. The metadata
+        // registration only makes a datasource *visible*; to make its federated
+        // objects *queryable* with zero app boilerplate, the shared
+        // `'datasource-connection'` service (when present — wired by the
+        // datasource-admin plugin) builds, opens and registers a live driver. The
         // service applies the D2 gate (connect only when `external`, an object
         // explicitly binds via `object.datasource`, a `datasourceMapping` rule
         // routes objects to it, or `autoConnect:true`) and the host connect
@@ -1367,8 +1330,16 @@ export class AppPlugin implements Plugin {
         //
         // Runs in `start()` (before the `kernel:ready` external-validation gate)
         // so the kernel's init-all-then-start-all ordering guarantees the
-        // connection service was already registered during init.
-        try {
+        // connection service was already registered during init. The names
+        // joined the code-datasource set in `init()`.
+        //
+        // A fail-fast connect error propagates to brick boot as intended
+        // (ADR-0062 D5): the datasource has no fallback path — `external` +
+        // onMismatch:'fail', or objects that bind to it explicitly and would
+        // otherwise fail every query with "Datasource 'x' is not registered"
+        // (#3758). The helper logs it and re-throws so the kernel surfaces the
+        // real cause.
+        {
             const dsDefs = this.convertedCollection(ctx, 'datasources');
             const dsList: any[] = Array.isArray(dsDefs)
                 ? dsDefs
@@ -1376,58 +1347,24 @@ export class AppPlugin implements Plugin {
                     ? Object.entries(dsDefs).map(([name, def]) => ({ name, ...(def as any) }))
                     : [];
             if (dsList.length > 0) {
-                // `ctx.getService` throws when a service is absent, so resolve
-                // defensively — a runtime without the datasource-admin plugin
-                // simply has no connection service, and declared datasources
-                // stay metadata-only (the legacy `onEnable` escape hatch still
-                // works). This must NOT fall into the fail-fast catch below.
-                let connection:
-                    | {
-                          connectDeclared?: (input: {
-                              datasources: any[];
-                              objects?: Array<{ name?: string; datasource?: string }>;
-                              mappedObjects?: Record<string, string[]>;
-                          }) => Promise<Array<{ name: string; status: string }>>;
-                      }
-                    | undefined;
-                try {
-                    connection = ctx.getService('datasource-connection');
-                } catch {
-                    connection = undefined;
-                }
-                if (typeof connection?.connectDeclared === 'function') {
-                    const declaredObjects = this.convertedCollection(ctx, 'objects');
-                    const objects = Array.isArray(declaredObjects) ? declaredObjects : [];
-                    const results = await connection.connectDeclared({
-                        datasources: dsList,
-                        objects,
-                        mappedObjects: this.resolveMappedObjects(ql, objects),
-                    });
-                    const connected = results.filter((r) => r.status === 'connected');
-                    if (connected.length > 0) {
-                        ctx.logger.info('Auto-connected declared datasources', {
-                            appId,
-                            connected: connected.map((r) => r.name),
-                        });
-                    }
-                } else {
-                    ctx.logger.debug('No datasource-connection service — declared datasources stay metadata-only', { appId });
-                }
+                const declaredObjects = this.convertedCollection(ctx, 'objects');
+                const objects = Array.isArray(declaredObjects) ? declaredObjects : [];
+                // [#21889] Each one stamped with the package that declares it
+                // (ADR-0010 `_packageId` / `_packageVersion`). See
+                // `codeDefinedDatasourceOwners` for who that package is.
+                await connectPackageDatasources(ctx, {
+                    appId,
+                    datasources: dsList,
+                    owned: () => this.codeDefinedDatasourceOwners(ctx),
+                    objects,
+                    mappedObjects: this.resolveMappedObjects(ql, objects),
+                });
             }
-        } catch (err) {
-            // A fail-fast connect error propagates to brick boot as intended
-            // (ADR-0062 D5): the datasource has no fallback path — `external` +
-            // onMismatch:'fail', or objects that bind to it explicitly and would
-            // otherwise fail every query with "Datasource 'x' is not registered"
-            // (#3758). Other errors are already degraded inside the connection
-            // service. Re-throw so the kernel surfaces the real cause.
-            // (Single-string message: the context logger types
-            // `error(message, error?)`, not a meta object.)
-            ctx.logger.error(
-                `[AppPlugin] declared-datasource auto-connect failed for app '${appId}': ${(err as Error)?.message ?? String(err)}`,
-            );
-            throw err;
         }
+
+        // [#22989] The stack's declared `apis`, by the same route the datasources
+        // take — see `registerDeclaredApiEndpoints`.
+        this.registerDeclaredApiEndpoints(ctx, appId);
 
         // [ADR-0130 D4] The residual of a multi-package stack — top-level
         // items no package body declares — through the metadata door's one

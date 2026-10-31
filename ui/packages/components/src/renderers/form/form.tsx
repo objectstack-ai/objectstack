@@ -42,10 +42,23 @@ import { FullscreenEditor } from '../../custom/fullscreen-editor';
 import { CharacterCount } from '../../custom/character-count';
 import { cn } from '../../lib/utils';
 import React from 'react';
-import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
+
+/**
+ * A submit refusal as the banner and the toast draw it: one string as itself,
+ * several reasons as one list item each.
+ */
+function refusalContent(refusal: string | string[]): React.ReactNode {
+  if (typeof refusal === 'string') return refusal;
+  return (
+    <ul className="list-disc space-y-1 pl-4">
+      {refusal.map((line, i) => <li key={i}>{line}</li>)}
+    </ul>
+  );
+}
 
 /**
  * Whether a `section-divider` row draws anything: a heading, a blurb, or both.
@@ -1810,7 +1823,8 @@ ComponentRegistry.register('form',
     const formRef = React.useRef<HTMLFormElement>(null);
 
     const [isSubmitting, setIsSubmitting] = React.useState(false);
-    const [submitError, setSubmitError] = React.useState<string | null>(null);
+    /** One string, or one line per reason the refusal could not mark inline. */
+    const [submitError, setSubmitError] = React.useState<string | string[] | null>(null);
     /**
      * The sonner id every OUTCOME toast of THIS form is published under.
      *
@@ -3060,10 +3074,14 @@ ComponentRegistry.register('form',
         // toast — telling the user something was wrong, but not WHAT, on a
         // surface that already knows how to mark the input. Mark them.
         const fieldErrors = extractFieldErrors(error);
+        // The fields whose reason is now written under a DRAWN input; the
+        // banner says only the rest.
+        const shownInline = new Set<string>();
         if (fieldErrors) {
           const known = fieldErrors.filter((fe) =>
             (fields as FormFieldConfig[]).some((f) => f?.name === fe.field),
           );
+          for (const fe of known) if (fieldWrapper(fe.field)) shownInline.add(fe.field);
           for (const fe of known) {
             form.setError(fe.field, {
               type: 'server',
@@ -3074,9 +3092,8 @@ ComponentRegistry.register('form',
           }
           // Only take over the whole failure when EVERY rejected field has a
           // visible input to carry it. If the server also rejected something
-          // this form does not render, fall through: the top-level message
-          // concatenates every field's reason, so the part the user cannot see
-          // inline is still said out loud instead of silently dropped.
+          // this form does not render, fall through: the banner says each
+          // reason the user cannot see inline, so none is silently dropped.
           // The same holds for a rendered-schema field with no DRAWN input
           // (a predicate-hidden tab or section): `announceFieldErrors` names
           // those, and any one of them sends the failure down the same path.
@@ -3108,19 +3125,25 @@ ComponentRegistry.register('form',
         // boundary to fix (objectstack#26059, Q3). It is read before
         // `isPermissionError`, which answers true for any 403; every other
         // denial keeps the fixed line (objectstack#24914 B′).
-        const errorMessage =
+        // A refusal listing one entry per failed rule is said one line per
+        // entry left unmarked above, not as the envelope's `; `-joined
+        // summary, which would also repeat the reasons already under inputs.
+        const unmarked = unmarkedRefusalLines(error, (field) => shownInline.has(field));
+        const errorMessage: string | string[] =
           declaredUserMessage(error) ??
           delegationScopeMessage(error) ??
           (isPermissionError(error)
             ? t('form.noPermissionToSave')
-            : extractWriteErrorMessage(error) ?? t('form.submitFailed'));
+            : unmarked && unmarked.length > 1
+              ? unmarked
+              : unmarked?.[0] ?? extractWriteErrorMessage(error) ?? t('form.submitFailed'));
         if (isPermissionError(error) && typeof console !== 'undefined') {
           console.warn('[form] write denied:', error);
         }
         setSubmitError(errorMessage);
         // Also surface as a toast so the message is visible even when the
         // in-form banner has scrolled out of view (long forms in modals/drawers).
-        toast.error(errorMessage, { id: outcomeToastId });
+        toast.error(refusalContent(errorMessage), { id: outcomeToastId });
 
         // Log errors for debugging (dev environment only)
         // process may not be defined in all environments
@@ -4055,7 +4078,7 @@ ComponentRegistry.register('form',
           {submitError && (
             <Alert variant="destructive" className="mb-4">
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{submitError}</AlertDescription>
+              <AlertDescription>{refusalContent(submitError)}</AlertDescription>
             </Alert>
           )}
 

@@ -111,7 +111,10 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
     object: 'json', array: 'array', bindata: 'binary',
   },
   // OData's EDM primitives (CSDL 4.0 §4.4), lower-cased as `canonicalizeSqlType`
-  // reads them. `Collection(Edm.String)` reaches the table as `collection`: the
+  // reads them, plus the two that only OData v2's CSDL declares: `Edm.DateTime`
+  // (a date-time with no zone, a v2 service's usual date column) and `Edm.Time`
+  // (a time of day, written as a duration since midnight). Every other v2
+  // primitive keeps its v4 name. `Collection(Edm.String)` reaches the table as `collection`: the
   // parameter strip that turns `varchar(255)` into `varchar` drops the element
   // type, and a collection property is an array whatever it holds. Not mapped,
   // so a draft flags them for review: `edm.duration`, the `edm.geography*` /
@@ -123,6 +126,7 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
     'edm.int64': 'bigint', 'edm.decimal': 'decimal', 'edm.single': 'float', 'edm.double': 'float',
     'edm.date': 'date', 'edm.timeofday': 'time', 'edm.datetimeoffset': 'datetime',
     'edm.binary': 'binary', 'edm.stream': 'binary', collection: 'array',
+    'edm.datetime': 'datetime', 'edm.time': 'time',
   },
 };
 

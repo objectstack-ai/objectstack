@@ -8,9 +8,11 @@
 
 /**
  * Turning a write-warning (objectstack-ai/objectstack#3431 / objectstack-ai/objectstack#3455) into the message the user
- * reads. Lives apart from `AdapterProvider` — and, deliberately, imports NOTHING
- * that renders — so the wording, the label resolution and the reason-branching
- * can be exercised directly.
+ * reads. Lives apart from `AdapterProvider` — and, deliberately, imports no
+ * toaster (the caller owns the sink) — so the wording, the label resolution and
+ * the reason-branching can be exercised directly. The record save surfaces'
+ * claim on answer warnings is `@object-ui/react`'s `record-save-feedback`,
+ * shared with the `object-form` drawer and modal (objectstack-ai/objectstack#28216).
  *
  * @module providers/writeWarningToast
  */
@@ -22,6 +24,7 @@ import type {
   WriteWarningEvent,
 } from '@object-ui/data-objectstack';
 import type { TranslateFn } from '@object-ui/i18n';
+import { answerWarningLines, parkAnswerWarnings } from '@object-ui/react';
 
 /**
  * i18next's `t`, narrowed to what this module uses — RE-EXPORTED from its one
@@ -237,6 +240,17 @@ function lineFor(reason: DroppedFieldsNotice['reason']): StrippedLine {
  * wrote it (it is the rule author's text); the only copy this module adds is
  * the title. An event without `warnings` produces exactly the toast it always
  * did.
+ *
+ * Except for a write a record save surface reports itself
+ * (objectstack-ai/objectstack#27999): when an open `claimAnswerWarnings`
+ * claim on `adapter` (`@object-ui/react`, objectstack-ai/objectstack#28216)
+ * matches the event, its `warnings` are parked on that claim
+ * instead, and the surface's own record-named save toast carries them. The
+ * match is decided SYNCHRONOUSLY, before this function's first `await`: the
+ * adapter emits the event inside the write, before the write's promise settles,
+ * so the claim holds the warnings by the time the surface's success handler
+ * runs, whatever the label lookup below costs. The stripped-fields toast is
+ * never claimed.
  */
 export async function emitWriteWarning(
   ev: WriteWarningEvent,
@@ -245,19 +259,19 @@ export async function emitWriteWarning(
   fieldLabel: FieldLabelFn,
   sink: WriteWarningSink,
 ): Promise<void> {
+  // Before the first `await`: see the claim paragraph above.
+  const messages = answerWarningLines(ev);
+  const claimed = messages.length > 0 && !!adapter
+    && parkAnswerWarnings(adapter, ev, () => emitAnswerWarnings(messages, t, sink));
   await emitStrippedFields(ev, t, adapter, fieldLabel, sink);
-  emitAnswerWarnings(ev, t, sink);
+  if (!claimed) emitAnswerWarnings(messages, t, sink);
 }
 
 /**
  * The write answer's advisory `warnings`, one line per distinct message, under
  * one title. Nothing when the event carries none.
  */
-function emitAnswerWarnings(ev: WriteWarningEvent, t: TranslateFn, sink: WriteWarningSink): void {
-  const messages: string[] = [];
-  for (const w of ev.warnings ?? []) {
-    if (w.message && !messages.includes(w.message)) messages.push(w.message);
-  }
+function emitAnswerWarnings(messages: string[], t: TranslateFn, sink: WriteWarningSink): void {
   if (messages.length === 0) return;
   sink.warning(
     t('detail.writeWarningsTitle', {

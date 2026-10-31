@@ -107,13 +107,12 @@ administrator, not for a contributor:
   install looks like.
 - **Every credential it needs** — for each one, its name, where the
   administrator obtains it, and which permissions or scopes it must carry. You
-  write the names; the administrator supplies the values. The platform does not
-  prompt for credentials at install yet: the install-time prompt and the
-  credential store arrive with
-  [#27237](https://github.com/objectstack-ai/objectstack/issues/27237) and the
-  Console credentials page with
-  [#27238](https://github.com/objectstack-ai/objectstack/issues/27238). Until
-  then the README is the whole hand-off. An app that ships declarative
+  write the names; the administrator supplies the values. Once the app is
+  installed, the Console lists the credentials its connectors still need in the
+  install result, and **Setup → Integrations → Connector Credentials** holds
+  every one of them ([Setting a credential](/docs/automation/connectors#setting-a-credential)).
+  The README is still where the administrator learns what each value is and
+  where to get it. An app that ships declarative
   connectors gains an offline spec-normalization tool with
   [#26709](https://github.com/objectstack-ai/objectstack/issues/26709).
 
@@ -203,8 +202,12 @@ the detail.
 4. **The dependency check.** An app that declares a dependency the environment
    lacks is refused before anything is written, one line per unmet entry
    ([App dependencies](/docs/deployment/app-dependencies)).
-5. **Credentials.** No screen yet — the administrator follows your README (see
-   above, and #27237 / #27238).
+5. **Credentials.** Once the install lands, its result lists the credentials
+   the app's connectors still need, each with a masked input and **Skip for
+   now**. A skipped one leaves its connectors disconnected until it is set in
+   **Setup → Integrations → Connector Credentials**
+   ([Setting a credential](/docs/automation/connectors#setting-a-credential)).
+   Your README says where each value comes from (see above).
 6. **Sample data.** The **⋯** (More install options) menu on the app's page
    offers **Add sample data**, then **Re-seed sample data**, and **Purge sample
    data**, which deletes only the records your seed created. Behind them are

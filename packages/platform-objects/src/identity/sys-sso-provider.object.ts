@@ -193,6 +193,12 @@ export const SysSsoProvider = ObjectSchema.create({
           { path: 'dnsRecordValue', label: 'Value', format: 'secret' },
         ],
       },
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Start domain verification for an SSO provider (the record; params: its providerId, optionally domain): answers the DNS TXT record to publish at the domain\'s DNS provider. Verifying the domain afterwards is a separate step for a human. Platform administrators only.',
+      },
     },
     {
       name: 'verify_domain',
@@ -233,6 +239,14 @@ export const SysSsoProvider = ObjectSchema.create({
       params: [
         { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Delete an SSO provider (the record; param: its providerId): users from its email domain can no longer sign in through it. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 

@@ -5,6 +5,7 @@ import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { AutomationEngine, ConnectorActionContext } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { describeHold } from '../plugin-extension-api.js';
+import { findConnectorActionInputSchema, judgeConnectorInput, TEXT_FOR_SCALAR_HINT } from '../connector-input-schema.js';
 import { resolveValueSlotMap } from './value-slot-map.js';
 
 /**
@@ -123,6 +124,31 @@ export function registerConnectorNodes(engine: AutomationEngine, ctx: PluginCont
             // envelope that faults throws with its source, like every value
             // slot's, and nothing is sent upstream.
             const input = resolveValueSlotMap(engine, cfg.input, variables, 'input', context);
+
+            // #27995 — the action's declared `inputSchema` is a contract, not a
+            // hint: the EVALUATED input is judged against it here, after the
+            // value slots resolved and before the handler is called, so a call
+            // missing a required parameter (or carrying one of the wrong type)
+            // fails this step instead of reaching the remote API. The judgment
+            // is `connector-input-schema.ts`'s, the one the pull door runs too
+            // (#28040). A `runtime` failure, not a guard: the input can come
+            // from run data, so a `fault` edge may handle it.
+            const verdict = judgeConnectorInput(
+                findConnectorActionInputSchema(engine, cfg.connectorId, cfg.actionId),
+                input,
+            );
+            if (verdict) {
+                return {
+                    success: false,
+                    code: 'VALIDATION_ERROR',
+                    error:
+                        `connector_action '${node.id}': input for '${cfg.connectorId}.${cfg.actionId}' `
+                        + `does not match the action's inputSchema — ${verdict.violations}`
+                        + `. Nothing was sent. Fix connectorConfig.input so it satisfies the inputSchema `
+                        + `GET /api/v1/automation/connectors lists for this action.`
+                        + (verdict.textForScalar ? TEXT_FOR_SCALAR_HINT : ''),
+                };
+            }
 
             try {
                 const output = await handler(input, handlerCtx);

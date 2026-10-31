@@ -1512,7 +1512,25 @@ The run holds a **single program counter** the whole time: only one item's
 approval is open at any moment; when it is decided the engine **re-enters** the
 map node to start the next item. Resuming the map's own run id while an item is
 still awaiting a service-gated decision is **refused** (403) — otherwise the
-batch would step past that item as if it had been decided. v1 is sequential and
+batch would step past that item as if it had been decided; an item open to that
+route is refused **409 `RESUME_CHILD_PENDING`**, naming the item run to resume.
+
+**A cancelled item keeps its slot.** When an item's run is cancelled
+(`cancelRun`, which leaves the map's run parked), resuming the map's own run id
+moves the batch on, and that item's entry in `outputVariable` (and in the
+node's `results`) is the closed marker
+`{ $status: 'cancelled', $itemRunId: '<the item run id>' }` instead of an
+output, so `results[i]` is still item `i`. The marker is never a run or a
+success: the node's `count` is the items that ran. A downstream step reads it
+where it reads the results — `signoffResults[i]['$status'] == 'cancelled'` (a
+child flow's output keys never start with `$`, so no real output looks like
+it). An item whose run is gone *without* a `cancelled` entry in its run history
+is refused with the same 409: the map has nothing true to record for it. A
+submitter's recall of a batch item from its revise window does this itself: the
+recall cancels the item's run and resumes the batch, so the item's slot holds
+the cancelled marker and the next item opens.
+
+v1 is sequential and
 fail-fast (the first item whose subflow fails fails the map). Concurrent fan-out (all items at once) is the
 larger [ADR-0039](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0039-token-scope-tree-execution.md)
 Track B work. Worked example: `showcase_release_signoff` → `showcase_one_task_signoff`.
@@ -2515,9 +2533,13 @@ unbound unless its declaration carries a
 [`defaultValue`](#defaultvalue--declaring-a-variable-is-not-the-same-as-binding-it);
 a param you send explicitly always wins, `false` and `null` included.
 
-**Identity.** The caller's identity (user, positions, permissions, tenant) is
-forwarded into the run, so a `runAs: 'user'` flow executes under that caller's
-row-level security. See [API Authentication](/docs/api#authentication) for
+**Identity.** The caller's identity (user, positions, permissions, tenant,
+posture rung) and language are forwarded into the run, as the caller's request
+resolved them, so a `runAs: 'user'` flow executes under that caller's
+row-level security and reads what the caller's own request reads. The rung is
+the caller's own, never the flow author's and never raised; a request without
+one starts a run without one. The run's setup adds the user's email and
+organization peers. See [API Authentication](/docs/api#authentication) for
 credentials.
 
 <Callout type="warn">

@@ -19,7 +19,7 @@
  */
 
 import React from 'react';
-import { ComponentRegistry, ExpressionEvaluator, declaredNameField, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
+import { ComponentRegistry, ExpressionEvaluator, declaredNameField, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
 import type { ComponentInput } from '@object-ui/core';
 import { actionRendersAt, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
@@ -2052,6 +2052,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       // ActionProvider user, no host predicate scope) — unknown is not denied,
       // and hiding on missing data is the worse regression.
       if (!mayInvoke(a?.requiredPermissions)) return false;
+      // [objectstack#27504] Switched off for this installation (served
+      // activation state): not offered, as the door would refuse it.
+      if (isActionSwitchedOff(a)) return false;
       // Boolean / expression visibility — supports both `visible: false`,
       // `visible: 'record.status == "open"'` and the structured shape
       // `visible: { dialect: 'cel', source: '…' }` used by spec authors.

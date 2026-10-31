@@ -2602,6 +2602,38 @@ describe('RecordPathProps stages[].terminal — declared because the path render
   });
 });
 
+// #28061 — `allowStageChange` is the opt-in that turns the path's stages into
+// presses requesting that status. Off unless authored, so the readout keeps its
+// non-interactive look.
+describe('RecordPathProps allowStageChange — opt-in, off unless authored', () => {
+  it('accepts the opt-in and keeps the authored value', () => {
+    const result = RecordPathProps.safeParse({ statusField: 'stage', allowStageChange: true });
+    expect(result.success).toBe(true);
+    expect(result.data!.allowStageChange).toBe(true);
+  });
+
+  it('leaves an existing path unchanged: no default is written', () => {
+    const authored = {
+      statusField: 'status',
+      stages: [
+        { value: 'todo', label: 'To Do' },
+        { value: 'done', label: 'Done', terminal: 'won' as const },
+      ],
+    };
+    const result = RecordPathProps.parse(authored);
+    expect(result).toEqual(authored);
+    expect('allowStageChange' in result).toBe(false);
+  });
+
+  it('refuses a non-boolean at the key, with the code and path', () => {
+    const result = RecordPathProps.safeParse({ statusField: 'stage', allowStageChange: 'yes' });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toEqual([
+      expect.objectContaining({ code: 'invalid_type', path: ['allowStageChange'] }),
+    ]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Enhanced RecordActivityProps (Unified Timeline)
 // ---------------------------------------------------------------------------

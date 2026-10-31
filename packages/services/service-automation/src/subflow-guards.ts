@@ -14,6 +14,7 @@
  */
 
 import type { FlowParsed } from '@objectstack/spec/automation';
+import { describeTurnedOffPackagedItem } from '@objectstack/types';
 import type { AutomationEngine } from './engine.js';
 
 /**
@@ -43,15 +44,12 @@ export interface SubflowGuardsHost {
     readonly activateFlowTrigger: AutomationEngine['activateFlowTrigger'];
 }
 
-/** The body of {@link AutomationEngine.describeDisabledFlow}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.describeDisabledFlow}; that method's docblock is its contract. */
 export function describeDisabledFlow(this: Pick<SubflowGuardsHost, 'flowLedgerDisabled'>, flowName: string): string {
-    if (this.flowLedgerDisabled.has(flowName)) {
-        return (
-            `Flow '${flowName}' is disabled — it is switched off for this installation in the ` +
-            `packaged-metadata activation ledger (sys_metadata_activation, ADR-0126 §7.2). ` +
-            `Re-enable the packaged flow to arm it again, or run a clone of it under a new name.`
-        );
-    }
+    // [#27966] The ledger sentence is the one switched-off packaged item
+    // sentence the action refusal reads as too; the ledger table and the ADR
+    // go to the engine's log line, not to what the caller reads.
+    if (this.flowLedgerDisabled.has(flowName)) return describeTurnedOffPackagedItem('flow');
     // Unchanged wording for the status dimension: it is what every existing
     // consumer and test reads, and this leg has no reason to move it.
     return `Flow '${flowName}' is disabled`;

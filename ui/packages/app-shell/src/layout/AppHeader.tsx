@@ -68,6 +68,7 @@ import {
   ExternalLink,
   Keyboard,
   Pencil,
+  Eye,
   MoreHorizontal,
   Info,
 } from 'lucide-react';
@@ -99,7 +100,7 @@ import { useUrlOverlay } from '../hooks/useUrlOverlay.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
 import { KEYBOARD_SHORTCUTS_PARAM } from '../urlParams.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
-import { useStudioDesignGate } from '../hooks/useStudioDesignGate.js';
+import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
 import { useSharedActivityFeed, type ActivityFeedReading } from '../hooks/sharedUserFeeds.js';
 import { useInboxBell } from '../hooks/useInboxBell.js';
 import { useHomePath } from '../hooks/useHomePath.js';
@@ -649,7 +650,13 @@ export function AppHeader({
   // and Account apps, get no bridge: Studio would open them browse-only, with
   // nothing to edit. `useStudioDesignGate` holds both halves for this bar and
   // the sidebar's Design entry; the server still refuses the write either way.
-  const studioDesignPath = useStudioDesignGate(
+  //
+  // #27356 row 12 — a read-only package's app is not left with no way in: the
+  // same gate answers it with the `view` posture, and this bar and the app
+  // switcher draw a browse entry (an eye, 「Open app in Studio」) where a
+  // writable package's app gets the pencil. The posture is the gate's, read
+  // once; the console's own apps and an unread list still draw neither.
+  const studioEntry = useStudioEntryGate(
     isApp ? appStudioRoutePath(currentApp, true, { type: routeType, name: pathParts[3] }) : null,
   );
 
@@ -913,7 +920,8 @@ export function AppHeader({
                 <AppSwitcher
                   activeAppName={activeAppName}
                   onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange(segment))}
-                  designInStudioPath={studioDesignPath}
+                  designInStudioPath={studioEntry?.path ?? null}
+                  studioPosture={studioEntry?.posture}
                 />
               </div>
             ) : appName ? (
@@ -1067,7 +1075,7 @@ export function AppHeader({
               (objectui#12615): not rendered, never disabled. An icon button
               at every width, like the bell beside it (objectui#12461): the pencil alone, named
               「Edit app」 by its aria-label and its tooltip. */}
-          {studioDesignPath && (
+          {studioEntry?.posture === 'edit' && (
             <Button
               variant="ghost"
               size="icon"
@@ -1077,8 +1085,25 @@ export function AppHeader({
               aria-label={t('topbar.editApp', { defaultValue: 'Edit app' })}
               title={t('topbar.editApp', { defaultValue: 'Edit app' })}
             >
-              <Link to={studioDesignPath}>
+              <Link to={studioEntry.path}>
                 <Pencil className="h-4 w-4" />
+              </Link>
+            </Button>
+          )}
+          {/* #27356 row 12 — a read-only package's app: the same slot, an eye
+              that opens it in Studio's browse-only posture. */}
+          {studioEntry?.posture === 'view' && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              asChild
+              data-testid="app-view-in-studio-button"
+              aria-label={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
+              title={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
+            >
+              <Link to={studioEntry.path}>
+                <Eye className="h-4 w-4" />
               </Link>
             </Button>
           )}

@@ -33,7 +33,12 @@
 //   - the off-origin case: the activation write door refuses to flip it, and
 //     the action door refuses to run it;
 //   - MCP: the type gate is open — `run_action` on a same-origin api action
-//     now reaches the exposure gate instead of "cannot be invoked via MCP".
+//     now reaches the exposure gate instead of "cannot be invoked via MCP";
+//   - the API-key lane (#28217): an identity route reads only its own
+//     signed-in session, so a key caller of `ban_user` is refused BY NAME at
+//     the door (the target's anonymous "Sign in first" was the defect) and
+//     nobody is banned, while a key caller of an api action whose target is
+//     the data door is still forwarded and served.
 //
 // `OS_SCIM_ENABLED=true` precedes the boot because `/admin/*` 501s without
 // better-auth's admin plugin, and that env knob is the one that reaches it
@@ -56,10 +61,11 @@ const TARGET_PASS = 'Target-Pass-123';
 const MEMBER_EMAIL = 'door.forward.member@example.com';
 
 /**
- * The one off-origin api action this file needs and no shipped app declares:
- * a probe object added to the showcase for this boot only. Its `target` names
- * a host the platform never sees, which is exactly the case the ruling keeps
- * browser-only.
+ * The two api actions this file needs and no shipped app declares, on a probe
+ * object added to the showcase for this boot only. `ping_remote`'s `target`
+ * names a host the platform never sees, which is exactly the case the ruling
+ * keeps browser-only. `rename_probe` targets the data door, which admits an
+ * API key: the API-key lane's control against the identity-route refusal.
  */
 const RemoteProbe = ObjectSchema.create({
   name: 'probe_remote_thing',
@@ -72,6 +78,15 @@ const RemoteProbe = ObjectSchema.create({
       label: 'Ping Remote',
       type: 'api',
       target: 'https://example.invalid/ping',
+      locations: ['record_header'],
+    },
+    {
+      name: 'rename_probe',
+      label: 'Rename Probe',
+      type: 'api',
+      method: 'PATCH',
+      target: '/api/v1/data/probe_remote_thing/${ctx.recordId}',
+      bodyExtra: { name: 'renamed-through-the-door' },
       locations: ['record_header'],
     },
   ],
@@ -87,7 +102,7 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
   let priorScim: string | undefined;
 
   const call = async (
-    auth: { token?: string; cookie?: string } | null,
+    auth: { token?: string; cookie?: string; key?: string } | null,
     method: string,
     path: string,
     body?: unknown,
@@ -95,6 +110,7 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (auth?.token) headers.Authorization = `Bearer ${auth.token}`;
     if (auth?.cookie) headers.Cookie = auth.cookie;
+    if (auth?.key) headers['x-api-key'] = auth.key;
     const res = await stack.api(path, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
     const text = await res.text();
     let json: any;
@@ -175,7 +191,12 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
 
     expect(refused.status, refused.text).toBe(409);
     expect(refused.json?.error?.code).toBe('ACTION_DISABLED');
-    expect(String(refused.json?.error?.message)).toContain('sys_metadata_activation');
+    // [#27842] The sentence is the end user's: it names where an administrator
+    // turns the action back on, and no system table (the code is the machine half).
+    const message = String(refused.json?.error?.message);
+    expect(message).toMatch(/^This action is turned off for this deployment\. /);
+    expect(message).toContain('An administrator can turn it on again under Setup › Packaged automation');
+    expect(message).not.toContain('sys_metadata_activation');
     expect(await isBanned(), 'a switched-off Ban User still banned — the #27506 defect').toBe(false);
   }, 120_000);
 
@@ -215,6 +236,43 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
 
     const anonymous = await call(null, 'POST', '/actions/sys_user/ban_user', { recordId: targetUserId });
     expect(anonymous.status, anonymous.text).toBe(401);
+  }, 120_000);
+
+  it('API-key lane: ban_user is refused by name at the door, before its identity route is called, and nobody is banned', async () => {
+    // `ban_user` was switched back on above, and the admin's session lane is
+    // served (that case). The key is the SAME admin's.
+    const minted = await call({ token: admin }, 'POST', '/keys', { name: 'door-forward-key' });
+    expect(minted.status, minted.text).toBe(201);
+    const key = String(minted.json?.data?.key);
+
+    const refused = await call({ key }, 'POST', '/actions/sys_user/ban_user', {
+      recordId: targetUserId, params: { banReason: 'dogfood-key' },
+    });
+
+    expect(refused.status, refused.text).toBe(401);
+    expect(refused.json?.error?.code).toBe('UNAUTHENTICATED');
+    const message = String(refused.json?.error?.message);
+    // The door's sentence, not the identity route's anonymous "Sign in first".
+    expect(message).toContain("Action 'ban_user' forwards to an identity endpoint ('/api/v1/auth/admin/ban-user')");
+    expect(message).toContain('accepts a signed-in session only');
+    expect(message).toContain('authenticated with an API key');
+    expect(message).not.toContain('Sign in first');
+    expect(await isBanned()).toBe(false);
+  }, 120_000);
+
+  it('API-key lane: an api action whose target is the data door is still forwarded with the key and served', async () => {
+    const minted = await call({ token: admin }, 'POST', '/keys', { name: 'door-forward-data-key' });
+    expect(minted.status, minted.text).toBe(201);
+    const key = String(minted.json?.data?.key);
+    const created = await call({ token: admin }, 'POST', '/data/probe_remote_thing', { name: 'before' });
+    expect(created.status, created.text).toBe(201);
+    const id = String(created.json?.data?.id ?? created.json?.id);
+
+    const res = await call({ key }, 'POST', '/actions/probe_remote_thing/rename_probe', { recordId: id });
+
+    expect(res.status, res.text).toBe(200);
+    const [row] = rowsOf(await ql.find('probe_remote_thing', { where: { id }, limit: 1 }, { context: SYS }));
+    expect(row?.name).toBe('renamed-through-the-door');
   }, 120_000);
 
   it('off-origin: the write door refuses to switch `ping_remote`, and the action door refuses to run it', async () => {

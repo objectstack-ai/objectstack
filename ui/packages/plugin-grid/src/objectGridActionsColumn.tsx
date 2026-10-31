@@ -7,6 +7,7 @@
 import React from 'react';
 import type { ObjectGridSchema } from '@object-ui/types';
 import { useAction, usePredicateScope, useCapabilityGate } from '@object-ui/react';
+import { isActionSwitchedOff } from '@object-ui/core';
 import { PINNED_RIGHT_SEAM_SHADOW_CLASSES } from '@object-ui/components';
 import { resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
@@ -68,7 +69,7 @@ export function resolveObjectGridActionsColumn({
   // per-record predicates and the record-level verdicts are applied. Wiring
   // alone (`operations`, a declared list) used to draw an empty column over
   // rows that offer nothing. One row is enough, so the read stops at the first.
-  const rowActionDefsGated = (resolvedRowActionDefs as any[]).filter((d) => mayInvokeRowAction(d?.requiredPermissions));
+  const rowActionDefsGated = (resolvedRowActionDefs as any[]).filter((d) => mayInvokeRowAction(d?.requiredPermissions) && !isActionSwitchedOff(d));
   // NON-AUTHOR SURFACE — see the `maxInlineActions` prop below.
   const maxInlineRowActions: number = (schema as any).maxInlineRowActions ?? 1;
   const rowCrudVerdicts = (row: any) => {
