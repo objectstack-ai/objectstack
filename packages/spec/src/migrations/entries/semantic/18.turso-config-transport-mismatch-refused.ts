@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // file — is intent no artifact records.
 export const entry: SemanticMigration = {
   id: 'turso-config-transport-mismatch-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.TursoConfig (a turso / libsql datasource.config) and the published TursoConfigSchema '
     + 'mirror of @objectstack/driver-turso — combinations of url, syncUrl, mode and timeoutMs that '

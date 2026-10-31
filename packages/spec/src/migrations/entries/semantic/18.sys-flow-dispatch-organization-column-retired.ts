@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // shape). The writer census behind the verdict is cited in the reason.
 export const entry: SemanticMigration = {
   id: 'sys-flow-dispatch-organization-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_flow_dispatch.organization_id — the injected organization column left the flow trigger '
     + 'dispatch claim ledger (packages/services/service-automation/src/sys-flow-dispatch.object.ts, '

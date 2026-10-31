@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // before is refused now, and an operator must be told who keeps that authority.
 export const entry: SemanticMigration = {
   id: 'walled-environment-metadata-writes-retired',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'on a group or isolated deployment, by a caller below the platform operator, whatever the metadata '
     + 'type: PUT, DELETE, publish and rollback of /meta/:type/:name on @objectstack/rest and PUT on the '

@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // becomes, is the author's call.
 export const entry: SemanticMigration = {
   id: 'stack-collection-duplicate-entry-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'stack.objects, datasources, pages, dashboards, reports, datasets, flows, jobs, emailTemplates, books, '
     + 'positions, permissions, capabilities, sharingRules, webhooks, hooks, mappings, analyticsCubes, '

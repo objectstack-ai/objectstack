@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // rewritten.
 export const entry: SemanticMigration = {
   id: 'cube-metric-expression-types-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'analyticsCubes[].measures.<metric>.type (data.AggregationMetricType) authored as number, string '
     + 'or boolean — the custom-SQL-expression metric types',

@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // live author is refused with the prescription instead.
 export const entry: SemanticMigration = {
   id: 'permission-modify-all-allow-delete-false-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'security.permission.objects.*.allowDelete (ObjectPermissionSchema) set to false in an entry that '
     + 'also sets modifyAllRecords: true. Modify All Records is the write bypass for edit, delete and '

@@ -11,7 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // that judgement is what this entry carries.
 export const entry: SemanticMigration = {
   id: 'manifest-permissions-string-list-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     'manifest.permissions as a flat list of permission strings (and packages[].manifest.permissions) — '
     + 'the legacy arm of ManifestPermissionsSchema left; the schema is now the structured plugin '

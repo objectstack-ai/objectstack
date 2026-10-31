@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // cannot decide is whether something the author built read either key.
 export const entry: SemanticMigration = {
   id: 'email-template-category-is-system-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'emailTemplates[].category / emailTemplates[].isSystem — an email template\'s grouping and its built-in flag',
   replacement:

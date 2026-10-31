@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'position-permissions-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_position.permissions — the "JSON-serialized array of permission strings" '
     + 'textarea column left the platform position table declared by plugin-security '

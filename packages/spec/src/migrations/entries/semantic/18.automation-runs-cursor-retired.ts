@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'automation-runs-cursor-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'api.listRuns cursor — the pagination query parameter of '
     + 'GET /api/v1/automation/:name/runs declared by ListRunsRequestSchema, its slot on '

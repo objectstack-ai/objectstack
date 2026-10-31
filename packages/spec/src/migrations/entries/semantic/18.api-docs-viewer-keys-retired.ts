@@ -16,8 +16,6 @@ import type { SemanticMigration } from '../../types.js';
 // `os migrate meta`, the upgrade guide and `spec-changes.json`.
 export const entry: SemanticMigration = {
   id: 'api-docs-viewer-keys-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'ApiDocumentationConfig.ui / RestApiPluginConfig.openApi.uiPath / '
     + 'RestApiPluginConfig.openApi.uiFramework',

@@ -6,8 +6,6 @@ import type { SemanticMigration } from '../../types.js';
 // not by a later reconciliation.
 export const entry: SemanticMigration = {
   id: 'driver-sql-calendar-day-methods-removed',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'SqlDriver protected methods calendarDayExclusiveUpperBound, calendarDayUpperBoundRewrite '
     + 'and calendarDayBetweenRewrite (inherited by SqliteWasmDriver and TursoDriver)',

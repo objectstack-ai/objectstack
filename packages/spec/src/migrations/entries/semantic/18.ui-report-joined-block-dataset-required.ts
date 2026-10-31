@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // decision, and no rewrite can name it.
 export const entry: SemanticMigration = {
   id: 'ui-report-joined-block-dataset-required',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span.
   surface: 'reports[].blocks[].dataset on a report whose type is joined: a block that binds no dataset '
     + '(the joined arm of the ReportSchema refinement)',
   replacement: 'Bind the block to a dataset: set the block\'s `dataset` to the dataset whose measures '

@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // upgrading author sees changes at a different moment: on save, not on query.
 export const entry: SemanticMigration = {
   id: 'filter-equality-array-comparand-refused-at-save',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.FilterCondition and the $eq slot of data.FieldOperators — an ARRAY as an EQUALITY '
     + 'comparand, now refused when the document is PARSED: the implicit form { field: [...] } and '

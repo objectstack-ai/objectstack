@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // make for the author.
 export const entry: SemanticMigration = {
   id: 'hook-action-body-system-identity-assignment-write-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span and a table cell.
   surface:
     'a hook declaring runAs system, or an action of type script, whose sandboxed js body source calls '
     + 'insert, update, delete, updateMany, deleteMany or upsert on ctx.api.object of sys_user_position, '

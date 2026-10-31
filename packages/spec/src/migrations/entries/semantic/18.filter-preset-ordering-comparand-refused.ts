@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'filter-preset-ordering-comparand-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'a dashboard date-range preset name (last_7_days / last_30_days / last_90_days, today, '
     + 'yesterday, this_week, last_week, this_month, last_month, this_quarter, last_quarter, '

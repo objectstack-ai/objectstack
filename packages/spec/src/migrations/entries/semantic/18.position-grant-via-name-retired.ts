@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // no entry of its own: it moved no authorable key, spelling or stored shape.
 export const entry: SemanticMigration = {
   id: 'position-grant-via-name-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'PositionGrantVia on @objectstack/spec/contracts (the via of each entry of '
     + 'PositionGrantSummary.permissionSets, served as _grantedPermissionSets on the position list '

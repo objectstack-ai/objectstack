@@ -21,8 +21,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'flow-decision-edge-branching-first-match',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'flow.nodes[].config.mode (decision) — an OMITTED mode on a decision that branches '
     + 'on its out-edges and carries two or more conditioned ones',

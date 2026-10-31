@@ -7,7 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // RETIRED_KEYS_BY_MAJOR as `ui/FormView:buttons.reset`.
 export const entry: SemanticMigration = {
   id: 'ui-form-view-buttons-reset-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     'view.form.buttons.reset and view.formViews.<key>.buttons.reset — removed from the form view '
     + 'buttons block (submit and cancel are unchanged)',

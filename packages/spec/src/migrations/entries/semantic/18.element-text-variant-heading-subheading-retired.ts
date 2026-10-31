@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // draws in that level's style.
 export const entry: SemanticMigration = {
   id: 'element-text-variant-heading-subheading-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'page components of type element:text — properties.variant authored as heading or subheading '
     + '(ElementTextPropsSchema.variant)',

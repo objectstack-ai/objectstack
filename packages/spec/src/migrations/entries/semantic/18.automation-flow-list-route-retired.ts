@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'automation-flow-list-route-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'GET /api/v1/automation — the flow-list route of the automation door, together with '
     + 'its request and response schemas ListFlowsRequestSchema and ListFlowsResponseSchema '

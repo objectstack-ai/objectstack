@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // what it cannot decide is which of two DISAGREEING names an author meant.
 export const entry: SemanticMigration = {
   id: 'cube-member-inner-name-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'analyticsCubes[].measures.<metric>.name / analyticsCubes[].dimensions.<dimension>.name — the '
     + 'inner name a cube member used to require',
