@@ -261,7 +261,9 @@ document date, the engine computes the home amount:
 - **The rate** is the row for the record's currency with the latest effective date **on
   or before** the document date. A row dated after the document never applies, and
   neither does "the most recent rate" when it is dated later. A `datetime` document date
-  is read as its calendar day in UTC.
+  is dated in the organization's timezone (the `localization.timezone` setting, UTC when
+  unset): an invoice written at 01:00 on April 1 in Shanghai takes the April 1 rate. A
+  `date` document date is its own day.
 - **The home amount** is the amount **divided by** the rate, computed in exact decimal
   arithmetic and rounded once, half away from zero, to the home currency's decimal
   places as CLDR gives them (its fraction digits): 0 for JPY, 2 for USD and CNY, 3 for

@@ -71,12 +71,15 @@ describe('import and REST writes convert through the same engine path', () => {
   let objectql: ObjectQL;
   let stub: ReturnType<typeof makeStubDriver>;
   /** What the settings service was asked, and what it answers. */
-  let settingsAsked: Array<{ ns: string; key: string; tenantId?: unknown }>;
+  let settingsAsked: Array<{ ns: string; key: string | string[]; tenantId?: unknown }>;
   let home: string | undefined;
+  let timezone: string | undefined;
 
-  async function bootKernel(withSettings: boolean) {
+  /** `grouped`: the settings service offers `getMany` (the real one does); otherwise `get` alone. */
+  async function bootKernel(withSettings: boolean, grouped = true) {
     settingsAsked = [];
     home = 'CNY';
+    timezone = undefined;
     kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
     stub = makeStubDriver();
     await kernel.use({
@@ -87,11 +90,18 @@ describe('import and REST writes convert through the same engine path', () => {
       await kernel.use({
         name: 'fake-settings', type: 'standard', version: '1.0.0',
         init: async (ctx: any) => {
+          const value = (key: string) => (key === 'currency' ? home : key === 'timezone' ? timezone : undefined);
           ctx.registerService('settings', {
             async get(ns: string, key: string, c?: { tenantId?: unknown }) {
               settingsAsked.push({ ns, key, tenantId: c?.tenantId });
-              return { value: home };
+              return { value: value(key) };
             },
+            ...(grouped ? {
+              async getMany(ns: string, keys: string[], c?: { tenantId?: unknown }) {
+                settingsAsked.push({ ns, key: keys, tenantId: c?.tenantId });
+                return Object.fromEntries(keys.map((k) => [k, { value: value(k) }]));
+              },
+            } : {}),
           });
         },
       } as any);
@@ -142,8 +152,10 @@ describe('import and REST writes convert through the same engine path', () => {
       expect(storedByRef('rest')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
       await p.updateData({ object: OBJECT, id: storedByRef('rest').id, data: { amount: 1389 }, context: { userId: 'u1', tenantId: 'org_a' } });
       expect(storedByRef('rest')).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
-      // The home currency was asked of the settings service, for the row's organization.
-      expect(settingsAsked).toContainEqual({ ns: 'localization', key: 'currency', tenantId: 'org_a' });
+      // The home currency and timezone were asked of the settings service in
+      // one grouped read, for the row's organization.
+      expect(settingsAsked).toContainEqual({ ns: 'localization', key: ['currency', 'timezone'], tenantId: 'org_a' });
+      expect(settingsAsked.every((a) => Array.isArray(a.key))).toBe(true);
     });
 
     for (const [label, p] of [['batched (insertManyData)', protocol], ['per-row (createData)', perRow]] as const) {
@@ -170,6 +182,19 @@ describe('import and REST writes convert through the same engine path', () => {
       expect(storedByRef('h')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
     });
 
+    it('a datetime document date is dated in the organization\'s localization.timezone through the REST door', async () => {
+      timezone = 'Asia/Shanghai';
+      objectql.registry.registerObject({
+        name: 'fx_order', label: 'FX order', datasource: 'fx-store',
+        fields: { ...FIELDS, invoice_date: { name: 'invoice_date', type: 'datetime' } },
+      } as any, 'test', 'test');
+      stub.storeFor('sys_exchange_rate').set('usd_0316', { id: 'usd_0316', currency: 'USD', effective_date: '2026-03-16', rate: 0.15 });
+      // 2026-03-15T17:00Z is 01:00 on the 16th in Shanghai.
+      const created = await protocol().createData({ object: 'fx_order', data: { ref: 'o', currency_code: 'USD', invoice_date: '2026-03-15T17:00:00Z', amount: 1500 }, context: { userId: 'u1', tenantId: 'org_a' } });
+      const stored = Array.from(stub.storeFor('fx_order').values()).find((r) => r.ref === 'o');
+      expect(stored, JSON.stringify(created)).toMatchObject({ amount_home: 10000, amount_rate: 0.15 });
+    });
+
     it('an unset localization.currency refuses the REST write ERR_HOME_CURRENCY_UNSET', async () => {
       home = undefined;
       const err = await protocol().createData({ object: OBJECT, data: { ref: 'x', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1 }, context: { userId: 'u1' } })
@@ -177,6 +202,16 @@ describe('import and REST writes convert through the same engine path', () => {
       expect(err?.code).toBe('ERR_HOME_CURRENCY_UNSET');
       expect(stub.storeFor(OBJECT).size).toBe(0);
     });
+  });
+
+  it('a settings service without getMany is asked key by key, and converts alike', async () => {
+    await bootKernel(true, false);
+    await protocol().createData({ object: OBJECT, data: { ref: 'k', currency_code: 'USD', invoice_date: '2026-03-15', amount: 10000 }, context: { userId: 'u1', tenantId: 'org_a' } });
+    expect(storedByRef('k')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
+    expect(settingsAsked).toEqual([
+      { ns: 'localization', key: 'currency', tenantId: 'org_a' },
+      { ns: 'localization', key: 'timezone', tenantId: 'org_a' },
+    ]);
   });
 
   it('with no settings service composed, the home currency is unset — refused, never defaulted', async () => {

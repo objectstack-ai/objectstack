@@ -324,6 +324,8 @@ import {
   settleBulkHomeAmounts,
   type HomeAmountPlanEntry,
   type HomeAmountServing,
+  type HomeLocalization,
+  type HomeLocalizationResolver,
 } from './home-amount-projection.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
@@ -9666,18 +9668,20 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * [ADR-0144 D4, Open item 4] Where the write-time home projection reads an
-   * organization's home currency: its `localization.currency` setting, or
+   * organization's localization: its `localization.currency` setting (the
+   * home currency) and its `localization.timezone` setting (the zone a
+   * `datetime` document date is dated in; ruling 6539345871, letter B), each
    * `undefined` when unset. Bridged by `ObjectQLPlugin`, which resolves the
    * settings service when a write asks, not when it starts. With no resolver
    * every organization's home currency is unset, so a write of an amount
    * declaring `homeAmount` is refused `ERR_HOME_CURRENCY_UNSET` — the engine
-   * never assumes one.
+   * never assumes one — and an unset timezone reads UTC.
    */
-  setHomeCurrencyResolver(resolver: ((organizationId: string | undefined) => Promise<string | undefined>) | undefined): void {
-    this.homeCurrencyResolver = resolver;
+  setHomeLocalizationResolver(resolver: HomeLocalizationResolver | undefined): void {
+    this.homeLocalizationResolver = resolver;
   }
 
-  private homeCurrencyResolver?: (organizationId: string | undefined) => Promise<string | undefined>;
+  private homeLocalizationResolver?: HomeLocalizationResolver;
 
   /**
    * [ADR-0144 D5, Open item 2] What one write's home projection reads, memoized
@@ -9695,8 +9699,21 @@ export class ObjectQL implements IObjectQLEngine {
    * currency.
    */
   private homeAmountServing(context: ExecutionContext | undefined): HomeAmountServing {
+    // One settings read per organization per write answers both the home
+    // currency and the timezone.
+    const localizations = new Map<string, Promise<HomeLocalization | undefined>>();
+    const localizationOf = (organizationId: string | undefined) => {
+      const key = organizationId ?? '';
+      let hit = localizations.get(key);
+      if (!hit) {
+        hit = Promise.resolve(this.homeLocalizationResolver?.(organizationId));
+        localizations.set(key, hit);
+      }
+      return hit;
+    };
     return memoizeHomeAmountServing({
-      homeCurrency: async (organizationId) => this.homeCurrencyResolver?.(organizationId),
+      homeCurrency: async (organizationId) => (await localizationOf(organizationId))?.currency,
+      timezone: async (organizationId) => (await localizationOf(organizationId))?.timezone,
       rateOn: async (organizationId, currency, onOrBefore) => {
         if (!this._registry.getObject(EXCHANGE_RATE_OBJECT)) return undefined;
         const rows = await this.find(EXCHANGE_RATE_OBJECT, {

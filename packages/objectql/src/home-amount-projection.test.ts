@@ -39,12 +39,16 @@ const SCHEMA = {
 const PLAN = planHomeAmounts(SCHEMA);
 
 /** A served rate table: `rates[currency]` is a list of `[effective_date, rate]`; reads are counted. */
-function serving(home: string | undefined, rates: Record<string, Array<[string, unknown]>> = {}) {
-  const reads = { home: 0, rate: 0 };
+function serving(home: string | undefined, rates: Record<string, Array<[string, unknown]>> = {}, timezone?: string) {
+  const reads = { home: 0, rate: 0, timezone: 0 };
   const s: HomeAmountServing = {
     async homeCurrency() {
       reads.home += 1;
       return home;
+    },
+    async timezone() {
+      reads.timezone += 1;
+      return timezone;
     },
     async rateOn(_org, currency, onOrBefore) {
       reads.rate += 1;
@@ -93,7 +97,7 @@ describe('the exact decimal arithmetic', () => {
 });
 
 describe('the document date', () => {
-  it('a date is its own day; a datetime instant is its UTC day', () => {
+  it('a date is its own day; an instant with no timezone is its UTC day', () => {
     expect(documentDateOf('2026-03-15')).toBe('2026-03-15');
     expect(documentDateOf('2026-03-31T23:30:00-05:00')).toBe('2026-04-01');
     expect(documentDateOf('2026-03-31T23:30:00Z')).toBe('2026-03-31');
@@ -101,12 +105,38 @@ describe('the document date', () => {
     expect(documentDateOf('not a date')).toBeUndefined();
     expect(documentDateOf(20260315)).toBeUndefined();
   });
+
+  it('an instant is dated in the organization\'s timezone; a calendar date is not moved by it', () => {
+    // 2026-03-15T17:00Z is 01:00 on the 16th in Shanghai and 13:00 on the 15th in New York.
+    expect(documentDateOf('2026-03-15T17:00:00Z', 'Asia/Shanghai')).toBe('2026-03-16');
+    expect(documentDateOf(new Date('2026-03-15T17:00:00Z'), 'Asia/Shanghai')).toBe('2026-03-16');
+    expect(documentDateOf('2026-03-16T02:00:00Z', 'America/New_York')).toBe('2026-03-15');
+    expect(documentDateOf('2026-03-15T17:00:00Z', 'UTC')).toBe('2026-03-15');
+    expect(documentDateOf('2026-03-15', 'Asia/Shanghai')).toBe('2026-03-15');
+    // A zone `Intl` does not know reads UTC.
+    expect(documentDateOf('2026-03-15T17:00:00Z', 'Mars/Olympus')).toBe('2026-03-15');
+  });
+
+  it('a datetime rateDate asks the timezone and picks the rate of the local day; a date rateDate never asks it', async () => {
+    const datetimePlan = planHomeAmounts({ fields: { ...SCHEMA.fields, invoice_date: { type: 'datetime' } } });
+    expect(datetimePlan[0]!.rateDateIsInstant).toBe(true);
+    const rates = { USD: [['2026-03-15', 0.1389], ['2026-03-16', 0.15]] as Array<[string, unknown]> };
+    const at0100Shanghai = { currency_code: 'USD', invoice_date: '2026-03-15T17:00:00Z', amount: 15 };
+    const sh = serving('CNY', rates, 'Asia/Shanghai');
+    expect(await projectHomeAmounts(datetimePlan, at0100Shanghai, sh.s, write)).toEqual({ amount_home: 100, amount_rate: 0.15 });
+    expect(sh.reads.timezone).toBe(1);
+    const utc = serving('CNY', rates, undefined);
+    expect(await projectHomeAmounts(datetimePlan, at0100Shanghai, utc.s, write)).toEqual({ amount_home: 107.99, amount_rate: 0.1389 });
+    const dated = serving('CNY', rates, 'Asia/Shanghai');
+    expect(await projectHomeAmounts(PLAN, { ...at0100Shanghai, invoice_date: '2026-03-15' }, dated.s, write)).toEqual({ amount_home: 107.99, amount_rate: 0.1389 });
+    expect(dated.reads.timezone).toBe(0);
+  });
 });
 
 describe('the plan', () => {
   it('reads only a record-mode amount declaring homeAmount', () => {
     expect(PLAN).toEqual([{
-      amountField: 'amount', codeField: 'currency_code', homeField: 'amount_home', rateDateField: 'invoice_date', rateField: 'amount_rate',
+      amountField: 'amount', codeField: 'currency_code', homeField: 'amount_home', rateDateField: 'invoice_date', rateDateIsInstant: false, rateField: 'amount_rate',
     }]);
     expect(planHomeAmounts({ fields: { a: { type: 'currency' } } })).toEqual([]);
     expect(planHomeAmounts(undefined)).toEqual([]);
@@ -174,7 +204,7 @@ describe('one projection', () => {
     const { s, reads } = serving(undefined);
     expect(await projectHomeAmounts(PLAN, { amount: null, currency_code: 'EUR' }, s, write))
       .toEqual({ amount_home: null, amount_rate: null });
-    expect(reads).toEqual({ home: 0, rate: 0 });
+    expect(reads).toEqual({ home: 0, rate: 0, timezone: 0 });
   });
 
   it('no home currency refuses ERR_HOME_CURRENCY_UNSET, naming the setting — never a default', async () => {
@@ -209,13 +239,14 @@ describe('one projection', () => {
     expect(reads.rate).toBe(0);
   });
 
-  it('a memoized serving reads each home currency and each (currency, date) rate once', async () => {
-    const { s, reads } = serving('USD', { EUR: [['2026-01-01', 0.9]] });
+  it('a memoized serving reads each home currency, timezone and (currency, date) rate once', async () => {
+    const { s, reads } = serving('USD', { EUR: [['2026-01-01', 0.9]] }, 'Asia/Shanghai');
     const m = memoizeHomeAmountServing(s);
+    const datetimePlan = planHomeAmounts({ fields: { ...SCHEMA.fields, invoice_date: { type: 'datetime' } } });
     for (let i = 0; i < 5; i++) {
-      await projectHomeAmounts(PLAN, { amount: i + 1, currency_code: 'EUR', invoice_date: '2026-02-01' }, m, write);
+      await projectHomeAmounts(datetimePlan, { amount: i + 1, currency_code: 'EUR', invoice_date: '2026-02-01T10:00:00Z' }, m, write);
     }
-    expect(reads).toEqual({ home: 1, rate: 1 });
+    expect(reads).toEqual({ home: 1, rate: 1, timezone: 1 });
   });
 });
 

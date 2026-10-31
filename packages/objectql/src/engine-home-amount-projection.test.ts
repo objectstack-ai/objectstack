@@ -25,6 +25,8 @@
 //    below the rate's decimals stores the full rate, never rounded and never
 //    refused (a `readonly` value is checked for shape only, so the declared
 //    scale reaches display only);
+//  - a `datetime` document date is dated in the organization's
+//    `localization.timezone` (UTC when unset); a `date` is its own day;
 //  - an update projects when it moves the amount, its code or its document
 //    date, and never otherwise (a corrected rate reaches stored rows only
 //    through a recompute).
@@ -101,12 +103,12 @@ const RATE_OBJECT = {
 };
 
 const HOME_AMOUNT = { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' };
-const invoice = (over: { home?: Record<string, unknown>; rate?: Record<string, unknown> } = {}) => ({
+const invoice = (over: { home?: Record<string, unknown>; rate?: Record<string, unknown>; dateType?: 'date' | 'datetime' } = {}) => ({
   name: 'fx_invoice',
   fields: {
     title: { type: 'text' },
     currency_code: { type: 'text', valueDomain: 'iso_4217_currency' },
-    invoice_date: { type: 'date' },
+    invoice_date: { type: over.dateType ?? 'date' },
     amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code', homeAmount: HOME_AMOUNT } },
     amount_home: { type: 'currency', readonly: true, ...over.home },
     amount_rate: { type: 'number', readonly: true, ...over.rate },
@@ -127,7 +129,7 @@ async function boot(object = invoice(), home: string | null = 'CNY') {
   await engine.init();
   engine.registry.registerObject(RATE_OBJECT as any);
   engine.registry.registerObject(object as any);
-  if (home !== null) engine.setHomeCurrencyResolver(async () => home);
+  if (home !== null) engine.setHomeLocalizationResolver(async () => ({ currency: home }));
   const rate = (currency: string, effective_date: string, value: number) =>
     d.storeFor('sys_exchange_rate').set(`${currency}_${effective_date}`, { id: `${currency}_${effective_date}`, currency, effective_date, rate: value });
   return { engine, ...d, rate };
@@ -219,9 +221,56 @@ describe('the home currency is the organization\'s setting, never a default', ()
   it('the resolver is asked for the row\'s organization', async () => {
     const t = await boot(invoice(), null);
     const asked: Array<string | undefined> = [];
-    t.engine.setHomeCurrencyResolver(async (org) => { asked.push(org); return 'CNY'; });
+    t.engine.setHomeLocalizationResolver(async (org) => { asked.push(org); return { currency: 'CNY' }; });
     await t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'CNY', amount: 1 }, { context: { isSystem: true, tenantId: 'org_a' } } as any);
     expect(asked).toEqual(['org_a']);
+  });
+});
+
+describe('a datetime document date is dated in the organization\'s localization.timezone', () => {
+  // 2026-03-15T17:00Z is 01:00 on 2026-03-16 in Shanghai, and still the 15th in UTC.
+  const AT_0100_SHANGHAI = '2026-03-15T17:00:00Z';
+  async function bootZoned(zones: Record<string, string | undefined>) {
+    const t = await boot(invoice({ dateType: 'datetime' }), null);
+    const asked: Array<string | undefined> = [];
+    t.engine.setHomeLocalizationResolver(async (org) => { asked.push(org); return { currency: 'CNY', timezone: zones[org ?? ''] }; });
+    t.rate('USD', '2026-03-15', 0.1389);
+    t.rate('USD', '2026-03-16', 0.15);
+    return { ...t, asked };
+  }
+  const as = (org: string) => ({ context: { isSystem: true, tenantId: org } }) as any;
+
+  it('an Asia/Shanghai organization writing at 01:00 local time gets the rate of that local day', async () => {
+    const t = await bootZoned({ org_sh: 'Asia/Shanghai' });
+    const row = await t.engine.insert('fx_invoice', { title: 'sh', currency_code: 'USD', invoice_date: AT_0100_SHANGHAI, amount: 1500 }, as('org_sh'));
+    expect(t.storeFor('fx_invoice').get(row.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.15 });
+    // One localization read per organization per write answers the currency and the timezone.
+    expect(t.asked).toEqual(['org_sh']);
+  });
+
+  it('a UTC organization, or one with no timezone set, keeps the UTC day', async () => {
+    const t = await bootZoned({ org_utc: 'UTC', org_unset: undefined });
+    for (const org of ['org_utc', 'org_unset']) {
+      const row = await t.engine.insert('fx_invoice', { title: org, currency_code: 'USD', invoice_date: AT_0100_SHANGHAI, amount: 1389 }, as(org));
+      expect(t.storeFor('fx_invoice').get(row.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
+    }
+  });
+
+  it('an update of the datetime re-dates it in the same timezone', async () => {
+    const t = await bootZoned({ org_sh: 'Asia/Shanghai' });
+    const row = await t.engine.insert('fx_invoice', { title: 'sh', currency_code: 'USD', invoice_date: '2026-03-15T03:00:00Z', amount: 1389 }, as('org_sh'));
+    expect(t.storeFor('fx_invoice').get(row.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
+    await t.engine.update('fx_invoice', { id: row.id, invoice_date: AT_0100_SHANGHAI }, as('org_sh'));
+    expect(t.storeFor('fx_invoice').get(row.id)).toMatchObject({ amount_home: 9260, amount_rate: 0.15 });
+  });
+
+  it('a date document date is never moved by the timezone', async () => {
+    const t = await boot(invoice(), null);
+    t.engine.setHomeLocalizationResolver(async () => ({ currency: 'CNY', timezone: 'Asia/Shanghai' }));
+    t.rate('USD', '2026-03-15', 0.1389);
+    t.rate('USD', '2026-03-16', 0.15);
+    const row = await t.engine.insert('fx_invoice', { title: 'd', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1389 }, as('org_sh'));
+    expect(t.storeFor('fx_invoice').get(row.id)).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
   });
 });
 

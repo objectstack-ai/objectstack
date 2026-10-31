@@ -83,6 +83,12 @@ export interface HomeAmountPlanEntry {
   readonly homeField: string;
   /** `homeAmount.rateDate`: the document date that picks the rate. */
   readonly rateDateField: string;
+  /**
+   * The document date is a `datetime` field: an instant, whose calendar day is
+   * taken in the organization's `localization.timezone`. A `date` field's value
+   * is its own calendar day.
+   */
+  readonly rateDateIsInstant: boolean;
   /** `homeAmount.rateField`: where the rate used is stored. */
   readonly rateField: string;
 }
@@ -105,7 +111,8 @@ export function planHomeAmounts(schema: unknown): HomeAmountPlanEntry[] {
     if (home === null || typeof home !== 'object') continue;
     const { field, rateDate, rateField } = home as { field?: unknown; rateDate?: unknown; rateField?: unknown };
     if (typeof field !== 'string' || typeof rateDate !== 'string' || typeof rateField !== 'string') continue;
-    plan.push({ amountField, codeField, homeField: field, rateDateField: rateDate, rateField });
+    const rateDateType = ((fields as Record<string, unknown>)[rateDate] as { type?: unknown } | undefined)?.type;
+    plan.push({ amountField, codeField, homeField: field, rateDateField: rateDate, rateDateIsInstant: rateDateType === 'datetime', rateField });
   }
   return plan;
 }
@@ -221,19 +228,44 @@ const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * The calendar date a document-date value names, as `YYYY-MM-DD`, or
- * `undefined` when it names none. A `date` value is its own calendar date. A
- * `datetime` value is an instant, and its calendar date is taken in UTC — the
- * one reading that gives every write path (a REST write, an import, a flow)
- * the same rate for the same stored instant, whatever zone the writer's
- * request carried.
+ * `undefined` when it names none. A `date` value is its own calendar date, and
+ * so is a bare `YYYY-MM-DD` spelling of any value. An instant (a `datetime`
+ * value) is given `timezone`, the organization's `localization.timezone`
+ * (IANA), and its calendar date is taken there (ruling 6539345871, letter B):
+ * an invoice written at 01:00 in Shanghai is dated that Shanghai day. It is
+ * the organization's setting and never the writer's request zone, so every
+ * write path (a REST write, an import, a flow) picks the same rate for the
+ * same stored instant. No timezone, or one `Intl` does not know, reads UTC,
+ * the `localization.timezone` default — the `autonumber-format` reading.
  */
-export function documentDateOf(value: unknown): string | undefined {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString().slice(0, 10);
+export function documentDateOf(value: unknown, timezone?: string): string | undefined {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : calendarDayIn(value, timezone);
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
   if (CALENDAR_DATE.test(text)) return text;
   const ms = Date.parse(text);
-  return Number.isNaN(ms) ? undefined : new Date(ms).toISOString().slice(0, 10);
+  return Number.isNaN(ms) ? undefined : calendarDayIn(new Date(ms), timezone);
+}
+
+/** The `YYYY-MM-DD` calendar day of `instant` in `timezone` (IANA), UTC when absent or unknown. */
+function calendarDayIn(instant: Date, timezone: string | undefined): string {
+  if (timezone && timezone !== 'UTC') {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(instant);
+      const y = parts.find((p) => p.type === 'year')?.value;
+      const m = parts.find((p) => p.type === 'month')?.value;
+      const d = parts.find((p) => p.type === 'day')?.value;
+      if (y && m && d) return `${y}-${m}-${d}`;
+    } catch {
+      // An unknown zone reads UTC, below.
+    }
+  }
+  return instant.toISOString().slice(0, 10);
 }
 
 // ── What the projection reads ─────────────────────────────────────────────
@@ -252,13 +284,27 @@ export interface ExchangeRateRow {
 export interface HomeAmountServing {
   /** The organization's `localization.currency`, or `undefined` when unset. */
   homeCurrency(organizationId: string | undefined): Promise<string | undefined>;
+  /** The organization's `localization.timezone` (IANA), or `undefined` when unset (read as UTC). */
+  timezone(organizationId: string | undefined): Promise<string | undefined>;
   /** The `currency` row with the latest `effective_date` on or before `onOrBefore`, or `undefined`. */
   rateOn(organizationId: string | undefined, currency: string, onOrBefore: string): Promise<ExchangeRateRow | undefined>;
 }
 
-/** Wrap a serving so each (organization, currency, date) and each organization's home currency is read once. */
+/** An organization's two localization settings the projection reads; each `undefined` when unset. */
+export interface HomeLocalization {
+  /** `localization.currency`: the home currency. */
+  readonly currency?: string;
+  /** `localization.timezone` (IANA): the zone a `datetime` document date is dated in. */
+  readonly timezone?: string;
+}
+
+/** Reads an organization's {@link HomeLocalization}; the engine's host bridge to the settings service. */
+export type HomeLocalizationResolver = (organizationId: string | undefined) => Promise<HomeLocalization | undefined>;
+
+/** Wrap a serving so each (organization, currency, date) and each organization's home currency and timezone are read once. */
 export function memoizeHomeAmountServing(serving: HomeAmountServing): HomeAmountServing {
   const homes = new Map<string, Promise<string | undefined>>();
+  const zones = new Map<string, Promise<string | undefined>>();
   const rates = new Map<string, Promise<ExchangeRateRow | undefined>>();
   return {
     homeCurrency(organizationId) {
@@ -267,6 +313,15 @@ export function memoizeHomeAmountServing(serving: HomeAmountServing): HomeAmount
       if (!hit) {
         hit = serving.homeCurrency(organizationId);
         homes.set(key, hit);
+      }
+      return hit;
+    },
+    timezone(organizationId) {
+      const key = organizationId ?? '';
+      let hit = zones.get(key);
+      if (!hit) {
+        hit = serving.timezone(organizationId);
+        zones.set(key, hit);
       }
       return hit;
     },
@@ -441,7 +496,7 @@ export async function projectHomeAmounts(
           + `currency ${home}: the exchange rate is the one in force on this date`,
       }]);
     }
-    const date = documentDateOf(dateValue);
+    const date = documentDateOf(dateValue, entry.rateDateIsInstant ? await serving.timezone(write.organizationId) : undefined);
     if (date === undefined) continue;
 
     const row = await serving.rateOn(write.organizationId, code, date);

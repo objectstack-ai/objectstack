@@ -99,6 +99,14 @@ const FX_INVOICE = {
   },
 };
 
+/** The same amount, dated by a `datetime`: its calendar day is taken in the organization's timezone. */
+const FX_ORDER = {
+  ...FX_INVOICE,
+  name: 'fx_order',
+  label: 'FX order',
+  fields: { ...FX_INVOICE.fields, invoice_date: { name: 'invoice_date', type: 'datetime' } },
+};
+
 const appWith = (objects: unknown[]) => ({
   id: 'com.objectstack.dogfood.home-amount-projection',
   name: 'Home amount projection',
@@ -125,16 +133,17 @@ for (const cell of CELLS) {
       let driver: SqlDriver;
       let engine: ObjectQL;
       let home = 'CNY';
+      let timezone: string | undefined;
 
       beforeAll(async () => {
         driver = await cell.make();
         engine = new ObjectQL();
         engine.registerDriver(driver, true);
         await engine.init();
-        engine.registerApp(appWith([SysExchangeRate, FX_INVOICE]));
+        engine.registerApp(appWith([SysExchangeRate, FX_INVOICE, FX_ORDER]));
         await engine.syncSchemas();
         await installDefaultOrganization(engine);
-        engine.setHomeCurrencyResolver(async () => home);
+        engine.setHomeLocalizationResolver(async () => ({ currency: home, timezone }));
         for (const [currency, effective_date, rate] of RATES) {
           await engine.insert('sys_exchange_rate', { currency, effective_date, rate, source: 'manual' }, SYS);
         }
@@ -224,6 +233,29 @@ for (const cell of CELLS) {
           expect(err?.code).toBe('ERR_EXCHANGE_RATE_MISSING');
         } finally {
           engine.setTenancyPostureProvider(() => undefined);
+        }
+      });
+
+      it('a datetime document date is dated in localization.timezone, through the column and back', async () => {
+        home = 'CNY';
+        // 2026-03-31T17:00Z is 01:00 on 2026-04-01 in Shanghai; USD has a new rate from April 1.
+        const at0100Shanghai = '2026-03-31T17:00:00Z';
+        const readOrder = async (id: unknown) => {
+          const back = await engine.findOne('fx_order', { where: { id }, context: SYS.context } as never) as Record<string, unknown>;
+          return { home: Number(back.amount_home), rate: Number(back.amount_rate) };
+        };
+        try {
+          timezone = 'Asia/Shanghai';
+          const sh = await engine.insert('fx_order', { name: 'sh', currency_code: 'USD', invoice_date: at0100Shanghai, amount: 1500 }, SYS);
+          expect(await readOrder(sh.id)).toEqual({ home: 10000, rate: 0.15 });
+          // An amount edit reads the stored datetime back from the column and dates it alike.
+          await engine.update('fx_order', { id: sh.id, amount: 3000 }, SYS);
+          expect(await readOrder(sh.id)).toEqual({ home: 20000, rate: 0.15 });
+          timezone = undefined;
+          const utc = await engine.insert('fx_order', { name: 'utc', currency_code: 'USD', invoice_date: at0100Shanghai, amount: 1389 }, SYS);
+          expect(await readOrder(utc.id)).toEqual({ home: 10000, rate: 0.1389 });
+        } finally {
+          timezone = undefined;
         }
       });
 
