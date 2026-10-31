@@ -313,7 +313,7 @@ async function boot(shape: Shape, sets: PermissionSet[]) {
     { id: 'ups:p_admin', user_id: 'p_admin', permission_set: 'admin_full_access', organization_id: null },
   ]);
 
-  const served = async (object: string, persona: Persona): Promise<string[] | string> => {
+  const read = async (object: string, persona: Persona): Promise<string[] | string> => {
     try {
       const rows = (await engine.find(object, { context: { ...persona } } as never)) as Array<{ id: string }>;
       return rows.map((r) => r.id).sort();
@@ -321,6 +321,21 @@ async function boot(shape: Shape, sets: PermissionSet[]) {
       const err = e as { code?: string; status?: number };
       return `refused ${err.code} ${err.status}`;
     }
+  };
+  // [#23181] Each (object, persona) read once per stack. No case writes after
+  // the seeding above, so a second read of the same pair answers what the first
+  // did; the pins that read a pair twice (the per-object sweep and the
+  // restored-copies comparison) read the same verdict, read once.
+  const reads = new Map<string, Promise<string[] | string>>();
+  const served = async (object: string, persona: Persona): Promise<string[] | string> => {
+    const key = `${object} :: ${JSON.stringify(persona)}`;
+    let answer = reads.get(key);
+    if (!answer) {
+      answer = read(object, persona);
+      reads.set(key, answer);
+    }
+    const value = await answer;
+    return Array.isArray(value) ? [...value] : value;
   };
   /** The (object, operation) pairs at which `persona`'s collection is an object default. */
   const census = async (persona: Persona, objectNames: readonly string[], operations: readonly string[]): Promise<string[]> => {
@@ -341,6 +356,32 @@ async function boot(shape: Shape, sets: PermissionSet[]) {
     return collected.map((p: Policy) => `${p.name}${isObjectDefaultRowScopePolicy(p) ? ' (object default)' : ''}`).sort();
   };
   return { engine, security, served, census, collectedNames };
+}
+
+// [#23181] The first boot's first loads (the driver's and the plugin's cold
+// paths, the first secured read) are paid here, at module scope, outside every
+// case's clock: clocked windows measure behaviour, never loading. Nothing this
+// stack answers is read; the file's `afterAll` destroys it with the rest.
+await (await boot(SHAPES[0], defaultPermissionSets)).served(TOUCHED[0], PERSONAS.member_default);
+
+/**
+ * [#23181] One stack per (shape, set list), booted by the first describe that
+ * asks for it and shared by the rest. Every case here only reads (`served`,
+ * `explain`, the collections), so a describe reads the stack it would have
+ * booted; the explain and must-keep describes ask the first shape's two stacks
+ * the per-shape sweep already booted.
+ */
+const stacks = new Map<string, Promise<Awaited<ReturnType<typeof boot>>>>();
+function stackFor(shape: Shape, sets: 'shipped' | 'restored') {
+  const key = `${shape.label} :: ${sets}`;
+  let stack = stacks.get(key);
+  if (!stack) {
+    stack = sets === 'shipped'
+      ? boot(shape, defaultPermissionSets)
+      : registeredObjects().then((objects) => boot(shape, withCopiesRestored(objects)));
+    stacks.set(key, stack);
+  }
+  return stack;
 }
 
 /** The user whose rows a persona reads as its own: the delegator, for an agent. */
@@ -376,8 +417,8 @@ describe.each(SHAPES)('the shipped sets serve the identity objects as before —
   let shipped: Awaited<ReturnType<typeof boot>>;
   let restored: Awaited<ReturnType<typeof boot>>;
   beforeAll(async () => {
-    shipped = await boot(shape, defaultPermissionSets);
-    restored = await boot(shape, withCopiesRestored(await registeredObjects()));
+    shipped = await stackFor(shape, 'shipped');
+    restored = await stackFor(shape, 'restored');
   });
 
   // One case per object, not one sweep over all of them: the restored-copies
@@ -418,8 +459,8 @@ describe('explain names the object default where a dropped copy used to be the r
   let shipped: Awaited<ReturnType<typeof boot>>;
   let restored: Awaited<ReturnType<typeof boot>>;
   beforeAll(async () => {
-    shipped = await boot(shape, defaultPermissionSets);
-    restored = await boot(shape, withCopiesRestored(await registeredObjects()));
+    shipped = await stackFor(shape, 'shipped');
+    restored = await stackFor(shape, 'restored');
   });
   type RlsLayer = { layer: string; verdict: string; detail: string; record?: { rules: Array<Record<string, unknown>> } };
   const rlsLayer = (decision: { layers: RlsLayer[] }): RlsLayer => {
@@ -472,7 +513,7 @@ describe('explain names the object default where a dropped copy used to be the r
 describe('what the sets keep (pointer 6280763190, must-keep; the ledger, measured)', () => {
   let walled: Awaited<ReturnType<typeof boot>>;
   beforeAll(async () => {
-    walled = await boot(SHAPES[0], defaultPermissionSets);
+    walled = await stackFor(SHAPES[0], 'shipped');
   });
 
   it('a member\'s write collection on each kept `all` object carries the set\'s self scope beside the ownership floor, never the default', async () => {
