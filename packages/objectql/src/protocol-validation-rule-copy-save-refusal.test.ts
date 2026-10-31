@@ -93,8 +93,9 @@ function makeHost() {
             assertEngineFindOnePredicate(_t, o);
             return findRow(o.where)?.row ?? null;
         },
-        async find(_t: string, o: { where: Record<string, unknown> }) {
-            return Array.from(rows.values()).filter((r) => matches(r, o.where));
+        async find(_t: string, o: { where: Record<string, unknown>; limit?: number }) {
+            const found = Array.from(rows.values()).filter((r) => matches(r, o.where));
+            return typeof o?.limit === 'number' ? found.slice(0, o.limit) : found;
         },
         async insert(table: string, data: Record<string, unknown>) {
             if (table !== 'sys_metadata') return { id: 'side_table' };
