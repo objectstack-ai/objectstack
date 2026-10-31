@@ -89,3 +89,8 @@
 id = "GHSA-xcx6-jx8p-x3h5"
 ignoreUntil = 2026-11-26
 reason = "https://github.com/advisories/GHSA-xcx6-jx8p-x3h5 — the only patched @azure/msal-node is 7.1.0, a major no published @azure/identity accepts yet (4.13.1 here and 4.14.0, the latest, both require ^6), and it arrives only transitively through tedious 18.6.2 (driver-sql's optional mssql peer, dev tree only) → @azure/identity; the flaw is in the authorization-code flow (acquireTokenByCode), which tedious's client-credential and managed-identity sign-in never calls; remove when @azure/identity accepts msal-node 7.1+ and tedious takes that release."
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-11-30
+reason = "https://github.com/advisories/GHSA-g3hv-75wg-m249 — the only patched minimatch is 11.0.1, a breaking major (it removes makeRe and AST) that no published parent accepts yet: eslint 10.14.0, @eslint/config-array 0.23.5, @typescript-eslint/typescript-estree 8.72.1, @microsoft/api-extractor 7.60.1 (exact 10.2.3), @oclif/core 5.1.10, @ts-morph/common 0.29.0, typedoc 0.28.20 and readdir-glob 3.0.0 all declare ^10, and every copy already sits on 10.2.6, the newest 10.x, through the pnpm-workspace.yaml override; remove when those parents accept minimatch 11.0.1+."
