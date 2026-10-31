@@ -24,7 +24,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
@@ -182,7 +182,7 @@ const agents = "'service_agent' in current_user.positions";
 const reps = "'sales_rep' in current_user.positions";
 
 describe('AppContent — an app opens on its declared per-audience landing (objectstack#28450)', () => {
-  let warn: ReturnType<typeof vi.spyOn>;
+  let warn: MockInstance<typeof console.warn>;
   beforeEach(() => {
     viewerRole = 'member';
     viewerPositions = [];
