@@ -803,7 +803,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
-    const { viewTabItems, titleSwitcher } = useObjectViewTitleSwitcher({
+    const { viewTabItems, titleSwitcher, titleLabel } = useObjectViewTitleSwitcher({
         views,
         savedViews,
         objectDef,
@@ -967,6 +967,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
              <ObjectViewPageHeader
                  objectDef={objectDef}
                  titleSwitcher={titleSwitcher}
+                 titleLabel={titleLabel}
+                 objectListHref={appName && objectName ? `/apps/${appName}/${objectName}` : undefined}
                  objectPluralLabel={objectPluralLabel}
                  objectDesc={objectDesc}
                  createButton={createButton}
