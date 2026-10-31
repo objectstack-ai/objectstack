@@ -3218,9 +3218,11 @@ const en = {
       // Same pair as `auth.login.socialButton` / `orText`, for sign-up.
       socialButton: 'Sign up with {provider}',
       orText: 'or continue with email',
+      captchaRetry: 'Retry',
       errors: {
         userExists: 'An account with this email already exists. Try signing in instead.',
         selfRegistrationClosed: 'Self-registration is not open on this system. Ask an administrator for an invitation.',
+        captchaFailed: 'The security check did not complete. Please try it again.',
         emailDomainNotAllowed: "This email's domain is not allowed to register here. Use your organization email, or ask an administrator for an invitation.",
         // #27509 — `selfRegistrationClosed` for a visitor holding an invitation
         // link; `{{email}}` is the MASKED address the preview returns.

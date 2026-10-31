@@ -59,6 +59,9 @@ beforeEach(() => {
   authState = {
     user: null,
     signUp: vi.fn(async () => undefined),
+    // The wizard reads the auth config for the opt-in Turnstile site key
+    // (objectstack#28100); none is served here.
+    getAuthConfig: vi.fn(async () => null),
     // No bootstrap organization ever appears: the wizard takes the create branch.
     refreshOrganizations: vi.fn(async () => []),
     updateOrganization: vi.fn(async () => undefined),

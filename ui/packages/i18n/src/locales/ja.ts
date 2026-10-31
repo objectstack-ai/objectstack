@@ -2690,9 +2690,11 @@ const ja = {
       signInText: "サインイン",
       socialButton: "{provider} で新規登録",
       orText: "またはメールアドレスで続行",
+      captchaRetry: "再試行",
       errors: {
         userExists: "このメールアドレスのアカウントはすでに存在します。代わりにサインインしてください。",
         selfRegistrationClosed: "このシステムではセルフ登録を受け付けていません。管理者に招待を依頼してください。",
+        captchaFailed: "セキュリティチェックが完了しませんでした。もう一度お試しください。",
         emailDomainNotAllowed: "このメールアドレスのドメインはここでの登録が許可されていません。組織のメールアドレスを使用するか、管理者に招待を依頼してください。",
         invitationSentTo: "この招待は {{email}} 宛てに送信されました。招待を承諾するには、そのアドレスで登録してください。",
         invitationAddressOnly: "この招待は送信先のアドレスでのみ承諾できます。そのアドレスで登録してください。",
