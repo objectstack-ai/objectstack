@@ -8,6 +8,7 @@
 · **Amended** (2026-10-15, ruling of record 6181988435 on #23488, letter A) — D12's position↔set binding right and its environment-set authoring right are retired (`AdminScope.manageBindings` and `AdminScope.authorEnvironmentSets`, ADR-0049 enforce-or-remove): a position's sets and a permission set's body are environment definitions, and the definition write is `manage_metadata`'s per [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3, never a delegate scope's. D12's *what* is user↔position assignments (and direct set grants) inside the subtree; read its bindings and authoring clauses as superseded by this line.
 · **Amended** (2026-10-14, [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) D3 item 5, ruling C of record 6159279205 on #23267) — D9's last bullet holds for `everyone` alone: a package suggests `everyone` bindings and the admin confirms each, while no door binds a set to `guest` (no package suggestion, no confirmation, no operator bind) until ADR-0138 D3 item 5's bind door is built, an act of the environment's administrator, never of a package. Read that bullet's `guest` half as superseded by this line.
 · **Amended** (2026-10-17, ruling of record 6228728551 on #23960, letter B) — D12 names three kinds of administrator, tenant-level, organization-level and delegated: an organization administrator (`organization_admin` / `organization_admin_no_bypass` for the organization, not a platform administrator) creates and removes `sys_user_position` / `sys_user_permission_set` rows for that organization's members when every set the row distributes has no `*` wildcard superuser bit, no `adminScope` and only `scope: 'org'` capabilities; `admin_full_access`, platform sets, `organization_admin` itself and every delegated set stay outside, and organization-administrator status is conferred by membership grade only. Strict containment and the `everyone` / `guest` anchors are unchanged. See the note under D12.
+· **Amended** (2026-10-31, ruling of record 6545950368 on #28367, go as shaped) — D10 gains rule 5, the **agent forward credential**: an `api` action's in-process forward carries the agent principal in a credential the server mints itself, bound to that one forward, single-use, short-lived and unreachable out of process, never the caller's token or key and never a human session. Two cells of the credential-kind × target-door table flip from "refuse by name" to "accept with a forward credential" (an OAuth-connected agent at an identity route and at a platform route), and a scope-family rule bounds every target outside MCP. See the amendment under D10.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),
@@ -66,7 +67,9 @@ Twelve decisions:
 - **D10** — A **principal taxonomy** (`kind: human | agent | service | guest | system`,
   `audience: internal | external`, optional `onBehalfOf`) enters ExecutionContext. **AI agents run
   on the intersection** of their own grants and their delegator's, under a lint-enforced ceiling,
-  with human co-sign required for destructive operations.
+  with human co-sign required for destructive operations. An action's in-process forward carries
+  the agent principal in a server-minted, single-use forward credential, never the user's
+  (rule 5, amended 2026-10-31).
 - **D11** — OWD gains an **external dimension**: optional `externalSharingModel`, default
   `private`, validated `external ≤ internal`. The spec shape lands in P1.
 - **D12** — **Delegated administration**: admin capability itself becomes scoped (BU subtree +
@@ -404,7 +407,7 @@ depends on:
   no interactive login, no seat, its own audit trail. Lint: no VAMA, no destructive bits without
   explicit justification. Exists so customers stop wiring integrations through a human admin
   account — the classic audit finding.
-- **`agent`** — an AI actor. Four defining rules:
+- **`agent`** — an AI actor. Five defining rules (the fifth added 2026-10-31):
   1. **Intersection, never union**: acting for a user, effective permission =
      *agent's own grants ∩ the delegator's grants* — the confused-deputy prevention that OAuth
      on-behalf-of and Kerberos S4U converged on. An over-privileged agent prompted by an
@@ -419,6 +422,11 @@ depends on:
      MCP client door alone. A caller of any other kind records the principal it authenticates as,
      and the missing `performed_by` is itself the record that the principal acted for itself; for
      the API-key case see the 2026-09-16 note at the end of this decision.
+  5. **A forward carries the agent, never the user** (amended 2026-10-31): when an agent runs an
+     `api` action, the in-process forward reaches its target with a forward credential the server
+     mints for that one forward, which resolves there to this same agent principal. The caller's
+     token or key never travels, and no human session is minted. See the amendment at the end of
+     this decision.
   Task-scoped, time-boxed agent grants build on the grant-lifecycle follow-up ADR (see
   *Named follow-ups*).
 - **`guest`** — resolves to the `guest` position (D9) and nothing else.
@@ -480,6 +488,186 @@ alias tax on every API.
 > `packages/spec/src/kernel/execution-context.zod.ts#performedBy` is a one-key object precisely so
 > a sibling can be added without re-shaping a shipped field; it reserves the room, ⛔ not the name.
 > Ruling: director seat, batch #195 item 2, maintainer 「同意」 2026-09-20 — letter **C**.
+
+#### Amendment (2026-10-31, #28367) — the agent forward credential (rule 5) [ruled]
+
+**What this decides.** How an agent principal crosses an `api` action's in-process forward. A
+`type: 'api'` action with a same-origin `target` runs by forwarding a request to that target inside
+the process (`packages/runtime/src/action-execution.ts#forwardApiAction`), and until now the
+forward carried the caller's own credentials (`API_FORWARD_HEADER_ALLOWLIST`) so the target would
+authorize the same principal the action door admitted. That works for a person and fails for an
+agent. The OAuth access token that makes a caller an agent principal is honoured on the MCP
+endpoint alone, and an identity route (the auth mount, `/api/v1/auth/…`) reads its own signed-in
+session and nothing else. So the action door could admit an agent the user consented to
+(`actions:execute`) for an action the author exposed (ADR-0011 `ai.exposed`, the identity action
+buckets of its 2026-10-30 addendum), and the target would then read that agent as nobody.
+
+The #28178 ruling (option B, record 6540286612) made that failure loud: one table, credential
+kind × target door, shared by `run_action`, the REST action door and `list_actions`, refuses such
+a forward by name before the target is called, and the API-key refusal of #28217
+(`packages/runtime/src/action-execution.ts#apiActionIdentityRouteKeyRefusal`) rides the same table.
+This amendment is the other branch of that decision: the credential that lets the forward reach
+its target with the agent intact. It does not move the agent's ceiling, and it does not hand the
+agent the user.
+
+**Rule 5 — a forward carries the agent, never the user.** When the action door forwards an
+agent's `api` action, the forward reaches its target with an **agent forward credential**. These
+properties are the decision, each of them binding:
+
+1. **The server mints it.** It is never the caller's bearer, cookie or API key. A forward that
+   carries it carries none of the caller's identity headers, so the caller's token never reaches
+   the target. It is minted only after the action door's own gates have passed for this run:
+   exposure (`ai.exposed`), the action's permission against the agent principal, the confirmation
+   (ADR-0011 `ai.requiresConfirmation`, rule 3's co-sign), and the operator's activation switch
+   (ADR-0126). A refused run mints nothing.
+2. **It is bound to one forward**: one method, one route (the resolved path the forward requests),
+   one action run (the object, the action and the record it names), in the one organization the
+   user's consent bound. Presented with any other method or route, it is refused.
+3. **It is single-use, short-lived and non-replayable.** It is spent by its first presentation,
+   whether the target accepts the call or refuses it. It expires when its forward answers, and in
+   any case after a fixed bound no longer than the forward's own request timeout, which the code
+   pins. A second presentation is refused.
+4. **It is unreachable out of process.** It exists only inside the process that minted it and is
+   presented only through the in-process injector. A request that arrives over the network
+   carrying anything that looks like it resolves as if it carried nothing. It is never stored,
+   never logged, never written to a response body or header, and never recorded in an audit row.
+
+**What it resolves to at the target: the same agent principal.** The target's context is built
+by the shared assembler (`packages/core/src/security/assemble-execution-context.ts#entryFields`)
+from the provenance the minting door hands over, never re-derived from a token:
+`principalKind: 'agent'`; `permissions` = the scope-derived ceiling
+(`packages/spec/src/ai/mcp.zod.ts#scopesToAgentPermissionSets`); `systemPermissions` exactly as
+this decision already gives an agent (the delegator's under `actions:execute`, none without it);
+`onBehalfOf` = the delegating user; `performedBy` = the agent's client; `oauthScopes`; the
+consent's organization. Rule 1's intersection, rule 2's ceiling and rule 4's dual attribution
+therefore hold at the target as they hold at the action door. No principal kind is added.
+
+**No human session.** Option C of #28178, minting a session for the forward, stays refused: a
+session is valid at every identity route, for its whole lifetime, wherever it is presented, so it
+would hand the agent the user's whole reach. The identity mount serves its routes through
+better-auth, which reads a session and nothing else, so at that door the credential is resolved
+before better-auth runs and better-auth is shown the delegating user as its caller for that one
+request only: a request-scoped view built in memory, with no `sys_session` row, no token, no
+cookie, and nothing that outlives the request or is handed back to anyone. Two gates then stand,
+and the agent passes only if both do: the action door's (the agent's intersected authority, the
+exposure and the confirmation, checked before the mint) and better-auth's own (the delegating
+user's, at the target). That is rule 1's intersection, read across the two doors. The agent and
+its user are carried into the identity mount's attribution scope
+(`packages/plugins/plugin-auth/src/auth-actor-attribution.ts#runWithAuthActorScope`), so an
+identity write records `performed_by` (the agent) and `on_behalf_of` (the user). And the
+credential-rotation headers a target can answer (`API_FORWARD_RELAYED_RESPONSE_HEADERS`) are never
+relayed to a caller whose forward carried a forward credential: a target that mints a credential
+cannot pass one to an agent, whatever the action declares.
+
+**The table, cell by cell.** The table the #28178 ruling set (credential kind × target door,
+shared by `run_action`, the REST action door and `list_actions`), with the cells this amendment
+flips marked **FLIPS**. Every other cell keeps its answer, and every refusal it keeps is still
+given by name, before the forward, with the target never called.
+
+| Caller's credential at the action door | `identity` — the auth mount (`/api/v1/auth/…`) | `mcp` — the MCP endpoint | `platform` — every other same-origin route (data door, declared endpoints, plugin routes) |
+|:--|:--|:--|:--|
+| `session` (a signed-in person) | accept, the caller's own session (unchanged) | accept (unchanged) | accept (unchanged) |
+| `api_key` (its owner's credential) | **refuse by name (unchanged)** | accept (unchanged) | accept (unchanged) |
+| `oauth` (an agent principal) | **FLIPS:** refuse by name → accept with a forward credential | accept, the caller's own token (unchanged; no forward credential) | **FLIPS:** refuse by name → accept with a forward credential, under the scope-family rule below |
+
+Two cells flip and one refusal stays:
+
+- **`oauth` × `identity` flips.** This is the cell that keeps the identity actions ADR-0011
+  exposes out of an agent's reach today.
+- **`oauth` × `platform` flips**, bounded by the scope-family rule. Without the rule this cell
+  would let an action reach a route that checks system permissions only, past the families the
+  user consented to.
+- **`api_key` × `identity` keeps refusing by name.** An API key is its owner's credential, not an
+  agent principal (the 2026-09-16 note above): the principal a key admits is the owner, a human.
+  The forward credential is defined to carry an agent principal, so a key has none for it to
+  carry. A credential the identity mount accepted on a key's behalf would carry the owner's whole
+  reach, which is a human session under another name: option C. A key caller who needs an
+  identity action uses a signed-in session, as the existing refusal already tells them.
+  Reopening this cell is its own decision, ⛔ not a reading of this one.
+- **`oauth` × `mcp` is unchanged.** The MCP endpoint honours the caller's own token, so no forward
+  credential is minted for it.
+- An anonymous caller is in no row: the action door's own floor answers it first, and nothing is
+  minted.
+
+**The scope-family rule, for every target outside MCP.** At the MCP endpoint the consented tool
+families (`data:read`, `data:write`, `actions:execute`, `metadata:write`) decide which tools
+exist, and the scope-derived ceiling bounds object access. Outside MCP there are no tool families.
+A target that gates on system permissions only, with no object check for the ceiling to narrow
+(identity routes, plugin administration routes, setup routes), would see an agent's
+`systemPermissions`, which under `actions:execute` are the delegator's whole list. So a forward
+credential is minted only when the agent holds the family the forward needs:
+
+1. **Every forward credential needs `actions:execute`.** Only the action doors mint it, and they
+   serve an agent only under that scope.
+2. **The method names a data family.** A safe method (`GET`, `HEAD`) needs `data:read` or
+   `data:write`. Any other method needs `data:write`. An agent the user consented to read with can
+   read through an action, and can never change state through one, at any target, including a
+   target that has no object check.
+3. **A state-changing method on the metadata door (`/api/v1/meta/…`) is outside the flip** and
+   keeps refusing by name. An agent authors metadata through the MCP authoring tools under
+   `metadata:write`, which save drafts that a person publishes (cloud ADR-0112), never through an
+   action forward.
+4. A forward the rule refuses is refused by name before the mint, the same way the table's other
+   refusals are, and `list_actions` marks the action from the same predicate, so the listing and
+   the run door cannot disagree.
+
+**Where the code half lives, and what it pins.** None of it is written by this amendment; the
+code PR is a separate change on #28367, made after this amendment lands.
+
+- `packages/runtime`, the action doors (`packages/runtime/src/action-execution.ts#forwardApiAction`
+  and the table beside it): the mint after the gates, bound to the built request; the two flipped
+  cells and the scope-family predicate on the one table, read by `run_action`, the REST action
+  door and `list_actions` alike; the in-process registry that spends and expires each credential.
+- `packages/runtime`, the HTTP dispatcher's context resolution
+  (`packages/runtime/src/security/resolve-execution-context.ts`): a forward credential presented
+  through the in-process injector resolves to the agent provenance it was minted with.
+- `packages/rest`, the REST face's context resolution (`packages/rest/src/rest-server.ts`, which
+  hands the assembler `oauth: undefined` by construction today): it accepts the forward
+  credential, and nothing else, as agent provenance. An OAuth access token presented from outside
+  stays unaccepted there.
+- `packages/plugins/plugin-auth`, the identity mount
+  (`packages/plugins/plugin-auth/src/auth-manager-request-routing.ts#handleRequest`): the
+  resolution before better-auth runs, the request-scoped view, the agent's attribution, and no
+  credential header relayed to an agent caller.
+- `packages/core` is unchanged: the provenance passes through `entryFields`, so the agent envelope
+  is still built in one place.
+
+The code PR owes these pins, and each refusal pin is ablated (the forbidden behaviour put back,
+seen red, restored):
+
+- each flipped cell, positively, driven by a real OAuth-connected agent rather than a session:
+  an exposed identity action and a platform action are served, and the audit row records both
+  `performed_by` and `on_behalf_of`;
+- every refusal the table keeps still refuses by name: `api_key` × `identity`, a state-changing
+  method on the metadata door, and each scope-family refusal (a `data:read`-only agent with a
+  state-changing method, at an identity target and at a platform target);
+- the credential's properties: a second presentation refused; a different method or route
+  refused; an expired one refused; one presented from outside the process resolving as nobody;
+  none in any response header, log line or audit row;
+- the intersection at the target: an agent whose user lacks the target's permission is refused
+  by the target;
+- no session: a forward creates no `sys_session` row, and a credential-rotating target answers
+  no credential header to the agent;
+- the boundary, unmoved: an outside OAuth access token is still refused at the data door and at
+  the identity mount;
+- the mint and each acceptance seam carry this decision's id in the code, with an anchor in
+  `scripts/adr-anchors/`.
+
+**What does not change.** Where an outside caller's OAuth access token is honoured (the MCP
+endpoint alone); which credentials an identity route accepts from outside the process; the API-key
+reading of the 2026-09-16 note; rules 1 to 4; ADR-0011's exposure, buckets and confirmation; the
+principal kinds. The forward credential is bound to one action run, but it is not the run id the
+2026-09-20 status awaits: it lives for one forward and is never recorded.
+
+**Two sentences above stop being exhaustive when the code half lands**, and that PR corrects
+them in the same change: rule 4's "today the OAuth / MCP client door alone", and the 2026-09-16
+note's "agent provenance is not representable" on the REST face. A forward credential becomes the
+second way a door resolves an agent principal, and it is only ever minted from the first: an agent
+the MCP OAuth door already admitted. Until then both sentences stay true as written.
+
+Ruling: director seat, batch #434 item 4, maintainer 「同意」 2026-10-31 — **go, as shaped**
+(record 6545950368; the card's shape and triage 6540849042). The cells are named here, before any
+code, as the ruling orders.
 
 ### D11 — OWD gains an external dimension (`externalSharingModel`)
 
