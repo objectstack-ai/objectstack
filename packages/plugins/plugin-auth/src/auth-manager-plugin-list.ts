@@ -79,6 +79,7 @@ import {
 } from './auth-schema-config.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
+import { buildTurnstileSignUpPlugin, reportHalfConfiguredTurnstile, resolveTurnstileKeys } from './turnstile-sign-up.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -215,6 +216,17 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   // browser deployments; bearer is additive, not a replacement.
   const { bearer } = await import('better-auth/plugins/bearer');
   plugins.push(bearer());
+
+  // Opt-in Cloudflare Turnstile on email sign-up: mounted only when BOTH keys
+  // are configured, through the same resolver `getPublicConfig()` advertises
+  // `features.turnstileSiteKey` from. Not an optional plugin: a guard that
+  // fails to build must fail the build, never leave sign-up open while the
+  // Console renders a widget. See `turnstile-sign-up.ts`.
+  reportHalfConfiguredTurnstile();
+  const turnstileKeys = resolveTurnstileKeys();
+  if (turnstileKeys) {
+    plugins.push(await buildTurnstileSignUpPlugin(turnstileKeys));
+  }
 
   if (enabled.organization) {
     // [#25224 cut 15] The body of this factory moved to

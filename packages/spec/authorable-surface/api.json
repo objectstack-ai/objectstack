@@ -211,6 +211,7 @@
     "api/AuthFeaturesConfig:phoneNumber",
     "api/AuthFeaturesConfig:phoneNumberOtp",
     "api/AuthFeaturesConfig:ssoEnforced",
+    "api/AuthFeaturesConfig:turnstileSiteKey",
     "api/AuthFeaturesConfig:twoFactor",
     "api/AuthProviderInfo:enabled",
     "api/AuthProviderInfo:id",

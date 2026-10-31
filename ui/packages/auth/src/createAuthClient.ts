@@ -517,6 +517,11 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         // of the invitation. Only sent when the caller has somewhere to go,
         // so the server default is untouched otherwise.
         ...(signUpData.callbackURL ? { callbackURL: signUpData.callbackURL } : {}),
+        // The opt-in Turnstile challenge reads its token from this header
+        // (better-auth's `captcha` plugin), not from the body.
+        ...(signUpData.captchaToken
+          ? { fetchOptions: { headers: { 'x-captcha-response': signUpData.captchaToken } } }
+          : {}),
       });
       if (error) {
         throw toAuthError(error);

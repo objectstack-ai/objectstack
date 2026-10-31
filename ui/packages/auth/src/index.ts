@@ -34,6 +34,13 @@ export { AuthGuard, type AuthGuardProps } from './AuthGuard.js';
 export { AuthShell, type AuthShellProps, type AuthShellBrandPanel } from './AuthShell.js';
 export { LoginForm, type LoginFormProps, type LoginFormLabels } from './LoginForm.js';
 export { RegisterForm, type RegisterFormProps, type RegisterFormLabels } from './RegisterForm.js';
+export {
+  TurnstileWidget,
+  TURNSTILE_SCRIPT_URL,
+  type TurnstileWidgetProps,
+  type TurnstileWidgetLabels,
+  type TurnstileApi,
+} from './TurnstileWidget.js';
 export { ForgotPasswordForm, type ForgotPasswordFormProps, type ForgotPasswordFormLabels } from './ForgotPasswordForm.js';
 export { SocialSignInButtons, type SocialSignInButtonsProps } from './SocialSignInButtons.js';
 export { UserMenu, type UserMenuProps } from './UserMenu.js';

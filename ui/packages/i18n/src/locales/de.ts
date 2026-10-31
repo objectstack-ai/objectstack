@@ -2688,9 +2688,11 @@ const de = {
       signInText: "Anmelden",
       socialButton: "Mit {provider} registrieren",
       orText: "oder mit E-Mail fortfahren",
+      captchaRetry: "Erneut versuchen",
       errors: {
         userExists: "Ein Konto mit dieser E-Mail existiert bereits. Versuchen Sie sich anzumelden.",
         selfRegistrationClosed: "Die Selbstregistrierung ist in diesem System nicht möglich. Bitten Sie einen Administrator um eine Einladung.",
+        captchaFailed: "Die Sicherheitsprüfung wurde nicht abgeschlossen. Bitte versuchen Sie es erneut.",
         emailDomainNotAllowed: "Die Domain dieser E-Mail-Adresse ist für die Registrierung hier nicht zugelassen. Verwenden Sie die E-Mail-Adresse Ihrer Organisation oder bitten Sie einen Administrator um eine Einladung.",
         invitationSentTo: "Diese Einladung wurde an {{email}} gesendet. Registrieren Sie sich mit dieser Adresse, um sie anzunehmen.",
         invitationAddressOnly: "Diese Einladung kann nur mit der Adresse angenommen werden, an die sie gesendet wurde. Registrieren Sie sich mit dieser Adresse.",
