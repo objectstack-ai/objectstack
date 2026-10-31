@@ -10,9 +10,9 @@
  *       refusal is the inline error on Label; typing a Label then saves;
  *   (b) CONTROL — the same page over a served form whose Label row is not
  *       required: an empty Label saves, the field stays optional;
- *   (c) a field the served SCHEMA requires keeps its own verdict: Save still
- *       sends (the server's refusal path, as before) and the new message is not
- *       added beside the schema's.
+ *   (c) a field the served SCHEMA requires keeps its own verdict, the one this
+ *       page gave before (the create seed's placeholder refusal), and the new
+ *       message is not added beside it.
  *
  * The REAL page over a REAL `MetadataClient` whose transport is an in-memory
  * server recording every `PUT`, with the real served form from
@@ -182,12 +182,18 @@ describe('a served required row holds Save (objectstack#28179)', () => {
     await screen.findByTestId('landed', {}, { timeout: 8000 });
   });
 
-  it('(c) a field the served schema requires keeps its own verdict: Save still sends, no second message', async () => {
+  it('(c) a field the served schema requires keeps its own verdict, unchanged — no second message', async () => {
+    // The served schema requires `label`, so the schema's own door decides an
+    // empty one: the create seed's placeholder is never saved
+    // (`engine.validation.seedPlaceholderUnset`, objectui#12810). That is the
+    // verdict this page gave before; the required-row rule adds nothing to it.
     served.schema = { ...PERMISSION_JSON_SCHEMA, required: [...((PERMISSION_JSON_SCHEMA.required as string[]) ?? []), 'label'] };
     const { nameBox } = await openNewPermissionSet();
     fireEvent.change(nameBox, { target: { value: 'sales_ops' } });
     fireEvent.click(saveButton());
-    await waitFor(() => expect(server.puts).toHaveLength(1), { timeout: 8000 });
+    await screen.findByText(/before saving: a new item is never saved with the placeholder/, {}, { timeout: 8000 });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(server.puts).toEqual([]);
     expect(screen.queryByText(REQUIRED)).toBeNull();
   });
 });
