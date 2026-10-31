@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 128 |
-| Proposed | 5 |
+| Accepted | 129 |
+| Proposed | 4 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -71,13 +71,13 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0002](./0002-environment-database-isolation.md) | Environment-Per-Database Isolation | Accepted | 2026-04-19 | *The v3.4/v4.0 "per-organization databas…* | — |
 | [ADR-0003](./0003-package-as-first-class-citizen.md) | Package as First-Class Citizen with Versioned Releases | Accepted — revised by cloud ADR-0007 (2026-06-12): `syspackageinstallation… | 2026-04-20 | ADR-0002 | cloud ADR-0007 |
 | [ADR-0004](./0004-cloud-multi-kernel.md) | Cloud Control Plane + Per-Project Kernels | Superseded — 2026-04-23 — the physical split between `apps/cloud` | 2026-04-22 | — | — |
-| [ADR-0005](./0005-metadata-customization-overlay.md) | Metadata Customization Overlay (Artifact + sysmetadata Delta) | Accepted — 2026-05-16 · Amended (2026-05-22, see "Amendment: post-ADR-0006… | 2026-05-16 | — | — |
+| [ADR-0005](./0005-metadata-customization-overlay.md) | Metadata Customization Overlay (Artifact + sysmetadata Delta) | Accepted — 2026-05-16 · Amended (2026-05-22, see "Amendment: post-ADR-0006… | 2026-05-16 | — | ADR-0146 |
 | [ADR-0006](./0006-project-environment-split.md) | Environment & Project as Independent Siblings — v3 | Superseded — by v4 (`0006-project-environment-split.v4.md`) — 2026-05-20 | 2026-05-20 | v1, v2 | ADR-0006 v4 |
 | [ADR-0006 v2](./0006-project-environment-split.v2.md) | Three-Layer Tenancy — Organization, Project, Environment | Superseded — by v4 (`0006-project-environment-split.v4.md`) — 2026-05-20 | 2026-05-20 | — | ADR-0006 v4 |
 | [ADR-0006 v4](./0006-project-environment-split.v4.md) | Environment & Project — v4 (drop dev-workspace Project, unify on Package) | Accepted — v4 — supersedes v3 — API-surface vocabulary boundary recorded 2… | 2026-05-20 | v1, v2, v3 | — |
 | [ADR-0007](./0007-settings-manifest-and-kv-store.md) | Settings — Manifest + K/V Store + Resolver (Apple-style) | Accepted — backend implemented; UI pending (objectui) (proposed 2026-05-20… | 2026-05-20 | — | — |
 | [ADR-0008](./0008-metadata-repository-and-change-log.md) | Metadata Repository, Change Log & Subscription (M0 → M4) | Accepted — 2026-05-22 · Amended 2026-04-13 — branch concept removed (see §… | 2026-05-22 | *ad-hoc HMR wiring in `packages/metadata…* | — |
-| [ADR-0009](./0009-execution-pinned-metadata.md) | Execution-Pinned Metadata | Accepted | 2026-05-22 | — | — |
+| [ADR-0009](./0009-execution-pinned-metadata.md) | Execution-Pinned Metadata | Accepted — · Superseded in part by ADR-0146 (2026-10-31) — the resume read… | 2026-05-22 | — | ADR-0146 |
 | [ADR-0010-metadata-protection-model](./0010-metadata-protection-model.md) | Metadata Protection Model | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-05-29 | — | — |
 | [ADR-0010-nl-to-flow-authoring](./0010-nl-to-flow-authoring.md) | Natural-Language → Flow Authoring (Platform Capability) | Draft — 2026-05-24 | 2026-05-24 | — | — |
 | [ADR-0011](./0011-actions-as-ai-tools.md) | Actions as AI Tools (Operational Parity) | Accepted — implemented (2026-06-04) | 2026-06-04 | — | — |
@@ -118,7 +118,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) | Additive materialization with a visibility gate — drafts narrow to mutations | Accepted — 2026-06-12 · Amended 2026-08-09 (#4829, maintainer ruling 2026-… | 2026-06-12 | — | — |
 | [ADR-0046](./0046-package-docs-as-metadata.md) | Package documentation as metadata — flat `src/docs/.md` compiled into the manifest | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0047](./0047-object-ui-run-modes.md) | Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice | Accepted — 2026-06-12; revised 2026-06-19 — framework scope implemented (`… | 2026-06-12 | — | — |
-| [ADR-0048](./0048-cross-package-metadata-collision.md) | Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution | Revised — 2026-06-13 — supersedes the original per-item collision | 2026-06-13 | — | — |
+| [ADR-0048](./0048-cross-package-metadata-collision.md) | Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution | Revised — 2026-06-13 — supersedes the original per-item collision detecti… | 2026-06-13 | — | ADR-0146 |
 | [ADR-0049](./0049-no-unenforced-security-properties.md) | Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate) | Accepted — 2026-06-15 — implemented: fail-closed `DESTRUCTIVEOPERATIONS` (… | 2026-06-15 | — | — |
 | [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Proposed — 2026-06-15 · Amended (2026-10-20, letter B′ on #24692, ruling r… | 2026-06-15 | — | — |
 | [ADR-0051](./0051-inline-metadata-views-in-docs.md) | Inline metadata views in docs — the ` ```metadata ` fenced block | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
@@ -195,12 +195,12 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0123](./0123-no-active-organization-session-semantics.md) | An authenticated session with no active organization is a legal state — reads resolve to nothing, tenant-scop… | Accepted — 2026-08-13 | 2026-08-13 | — | — |
 | [ADR-0124](./0124-server-enforces-client-is-courtesy.md) | The server is the enforcement point; client-side gating is a usability courtesy | Accepted — 2026-08-18 — retroactive recording of an already-practised rule… | 2026-08-18 | — | — |
 | [ADR-0125](./0125-release-approval-gate-replaces-the-typed-version.md) | The human act that authorises a release is the environment approval, not a typed version string | Accepted — 2026-08-20 — accepted by the merge that landed it on `main` (#1… | 2026-08-20 | — | — |
-| [ADR-0126](./0126-packaged-metadata-customization-model.md) | The platform customization model for packaged metadata — three regimes, one activation ledger | Amended — 2026-09-04 by ADR-0131 D6 — maintainer, verbatim: 「所以 ADR-0126… | 2026-09-04 | — | — |
+| [ADR-0126](./0126-packaged-metadata-customization-model.md) | The platform customization model for packaged metadata — three regimes, one activation ledger | Amended — 2026-09-04 by ADR-0131 D6 — maintainer, verbatim: 「所以 ADR-0126… | 2026-09-04 | — | ADR-0146 |
 | [ADR-0127](./0127-authorization-cache-invalidation-contract-and-ttl-bound.md) | No authorization answer is cached without a declared invalidation contract and a TTL bound | Accepted — 2026-08-25 — maintainer ruling on #11633, verbatim 「接受你的建议，继续」,… | 2026-08-25 | — | — |
 | [ADR-0128](./0128-producer-discriminated-aad-for-cryptocontext.md) | The AAD binding on `CryptoContext` is producer-discriminated | Accepted — 2026-09-07 — accepted by the maintainer's reply of 2026-09-07 (… | 2026-09-07 | — | — |
 | [ADR-0129](./0129-object-name-is-the-canonical-id.md) | Object `name` is the canonical id — literal module prefix, no separate `namespace` field | Accepted — (2026-08-29; maintainer ruling on #12918, option 甲 — recorded a… | 2026-08-29 | — | — |
 | [ADR-0130](./0130-release-artifact-as-co-ownership-boundary.md) | The release artifact is the co-ownership boundary — one artifact, N packages | Accepted — 2026-09-01 — accepted by the merge that landed it on `main` (#1… | 2026-09-01 | — | — |
-| [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) | Organization ownership is total — no NULL `organizationid`; declared metadata stays in code; a row exists onl… | Accepted — 2026-09-04 — accepted by the merge that landed it on `main` (#1… | 2026-09-04 | — | — |
+| [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) | Organization ownership is total — no NULL `organizationid`; declared metadata stays in code; a row exists onl… | Accepted — 2026-09-04 — accepted by the merge that landed it on `main` (#1… | 2026-09-04 | — | ADR-0146 |
 | [ADR-0132](./0132-multi-organization-runtime-is-open-core.md) | The multi-organization runtime is open core — single-database organization isolation ships open; only the ent… | Accepted — 2026-09-07 — accepted by the merge that landed it on `main` | 2026-09-07 | — | — |
 | [ADR-0133](./0133-org-management-open-basics.md) | Organization management — the open basics; a mirror of cloud ADR-0081 D1/D3/D4 in the repository whose code e… | Accepted — 2026-09-07 — accepted by the merge that landed it on `main` (#1… | 2026-09-07 | — | — |
 | [ADR-0134](./0134-env-side-scim-provisioning.md) | Env-side SCIM provisioning — `@better-auth/scim` is the mechanism, and this platform writes the deactivation | Proposed — 2026-09-07. This file is a MIRROR of the open, mechanism half of | 2026-09-07 | — | — |
@@ -208,12 +208,12 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0137](./0137-predicate-fault-semantics-are-contract.md) | A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank pre… | Accepted — 2026-09-18 — this record declares; it implements nothing. D1's… | 2026-09-18 | — | — |
 | [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) | The guest model — one anonymous principal, a closed list of doors, one grants channel, one organization rule,… | Accepted — 2026-10-13, accepted by the maintainer's approval of the pull r… | 2026-10-13 | — | — |
 | [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) | One engine-internal semi-join leaf — "the ids of object X this caller may read" — pushed down by ObjectQL, ne… | Accepted — 2026-10-11, accepted by the merge that landed it on `main` | 2026-10-11 | — | — |
-| [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | — |
+| [ADR-0141](./0141-inter-app-dependency-declared-checked-before-install.md) | An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install… | Proposed — 2026-10-25; first draft 2026-10-24. `docs/adr/` is Tier H (Prim… | 2026-10-25 | — | ADR-0146 |
 | [ADR-0142](./0142-ownership-queue-membership-claim-and-assignment-rules.md) | An ownership queue is a platform primitive — a queue entity, membership through the existing recipient kinds,… | Proposed — 2026-10-25 · Amended (2026-10-28, ruling `6457475657` on #25769… | 2026-10-25 | — | — |
 | [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) | Outbound connector auth is open tier — OAuth2 grants, vendor app-credential exchange and request signing in o… | Accepted — 2026-10-28. Proposed 2026-10-27 (#26833, which also landed the… | 2026-10-28 | — | — |
 | [ADR-0144](./0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md) | Multi-currency — a record currency in a sibling code field, dated exchange rates, and a home-currency amount… | Accepted — 2026-10-28, ruled on objectstack#27119 (ruling `6465431966`, de… | 2026-10-28 | — | — |
 | [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Accepted — 2026-10-28, #27251 · Amended (2026-10-28, #27291 — one clause e… | 2026-10-28 | — | — |
-| [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) | Studio designs, Setup administers — one editor per metadata item, the whole metadata catalog in Studio, and a… | Proposed — 2026-10-30 — drafted on the maintainer's instruction in the pro… | 2026-10-30 | — | — |
+| [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) | Package-level override — every customization of an installed package lives in its paired `.custom` package, t… | Accepted — 2026-10-31 — rewritten in place from the Proposed draft of 2026… | 2026-10-31 | ADR-0126, ADR-0131, ADR-0005, ADR-0048, ADR-0009, ADR-0141 | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

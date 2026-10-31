@@ -1,9 +1,6 @@
 # ADR-0048: Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution
 
-**Status**: Revised (2026-06-13) — supersedes the original *per-item collision
-detection* framing. The runtime guard shipped under the original proposal is
-**retained as a same-package authoring backstop**; the strategic direction for
-the app-marketplace era is revised below.
+**Status**: Revised (2026-06-13) — supersedes the original *per-item collision detection* framing. The runtime guard shipped under the original proposal is **retained as a same-package authoring backstop**; the strategic direction for the app-marketplace era is revised below. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — §3.3's sentence that a context-free read "is best-effort: it returns the first match": a read of a name a code package ships has an owner — that package, or its declared override in the paired `<base>.custom` package — and a same-named item of another package is served only under its own address (ADR-0146 D8); qualify-to-cross and the 2026-10-08 addendum stand.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
