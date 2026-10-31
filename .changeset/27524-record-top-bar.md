@@ -15,7 +15,9 @@ The record page v4 draws one 40 px top bar above the record header, on every fac
 - **Left: the breadcrumb.** At the root it reads 「对象 › 记录名」 (for example 「Leads › Mira Costa」). The object returns to the list: in a pane it closes the pane, and on a page it goes to the list the page was opened from, or to the object's list. One level down in a pane, the bar keeps 「← 路径」 as before. A page opened under a `?from=` trail shows ← and the same path, and each ancestor links to its page.
 - **Right, in a fixed order.** First the counter 「3 / 21」 and ↓ ↑. Its tooltip names the list's view. Then ⊟, then ⤢ / ⤡, then ✕. Each control is drawn only where it applies:
   - In a pane, the counter and ↓ ↑ show whenever the pane has a list context. ✕ shows on the pane faces only, and it closes the whole path.
-  - On a page, the counter, ↓ ↑ and ⤡ 「收为抽屉」 (Collapse to drawer) show only for a page the list row's ↗ opened. ↓ ↑ and `j` / `k` step through that list's rows: a step replaces the page with the sibling's page, and ⤡ returns to the list with the record you stepped to open. The arrow keys still scroll the page. A page opened directly shows only ⊟.
+  - On a page, the counter and ↓ ↑ show only for a page a list opened: the row's ↗, or a row click or record link on a list whose rows open as pages. ↓ ↑ and `j` / `k` step through that list's rows: a step replaces the page with the sibling's page. The arrow keys still scroll the page.
+  - ⤡ 「收为抽屉」 (Collapse to drawer) shows only for a page the row's ↗ opened. It returns to the list with the record you stepped to open in the pane.
+  - A page opened directly shows only ⊟.
   - While a pane is open over a page, the pane owns `j` / `k`.
 - **⊟ moves into the bar.** The right-column switch (「右栏」, ⌘⇧,) leaves the record header's action row. It is drawn in the top bar only where the face's tier has a right column. In a pane, the record puts it into the pane's own bar. A host's plain overlay without the console's pane keeps it at the end of the header's action row.
 - **The crumb row goes.** The row above the record header that held 「‹ origin」 and 「Collapse to drawer」 is removed. Both now live in the top bar.
