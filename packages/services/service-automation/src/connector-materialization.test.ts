@@ -1076,13 +1076,40 @@ describe('ADR-0143 D4 — a grant-bearing instance is served through its credent
         expect(engine.resolveConnectorAction('vendor', 'ping')).toBeUndefined();
     }
 
-    it('holds an `app-credential` instance degraded (its vendor exchanges are not run yet), even on an opted-in provider', async () => {
+    it('serves an `app-credential` instance through its credential handle on an opted-in provider, with no static auth (ADR-0143 D2.2)', async () => {
         const { factory, calls } = makeFakeProvider();
         const kernel = await boot(
             [providerConnector('vendor', { auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_x', credentialRef: 'SECRET' } })],
             { providerFactory: factory, providerOptions: { credentialHandle: true }, credentialResolver: () => 'resolved-secret' },
         );
-        expectHeld(automationOf(kernel), calls, "auth type 'app-credential'", 'never called without its credential');
+        const engine = automationOf(kernel);
+        expect(calls).toHaveLength(1);
+        expect(calls[0].auth).toBeUndefined();
+        expect(calls[0].credentialHandle).toMatchObject({ connector: 'vendor' });
+        expect(engine.getConnectorDegradedReason('vendor')).toBeUndefined();
+        // ⛔ The app secret never reaches the provider: only the handle does.
+        expect(JSON.stringify(calls[0])).not.toContain('resolved-secret');
+        await kernel.shutdown();
+    });
+
+    it('⛔ holds an `app-credential` instance degraded on a provider that does not ask the credential handle', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'app-credential', vendor: 'wecom', appId: 'ww_x', credentialRef: 'SECRET' } })],
+            { providerFactory: factory, credentialResolver: () => 'resolved-secret' },
+        );
+        expectHeld(automationOf(kernel), calls, "auth type 'app-credential', but provider 'fake' does not yet ask the per-dispatch credential handle", 'never called without its credential');
+        await kernel.shutdown();
+    });
+
+    it('holds an `app-credential` instance whose app secret does not resolve, naming the reference', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'app-credential', vendor: 'dingtalk', appId: 'ding_x', credentialRef: 'DING_SECRET' } })],
+            { providerFactory: factory, providerOptions: { credentialHandle: true }, credentialResolver: () => undefined },
+        );
+        expect(calls).toHaveLength(0);
+        expect(automationOf(kernel).getConnectorDegradedReason('vendor')).toContain('DING_SECRET');
         await kernel.shutdown();
     });
 
