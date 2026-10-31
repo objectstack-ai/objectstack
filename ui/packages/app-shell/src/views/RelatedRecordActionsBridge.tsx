@@ -20,7 +20,10 @@
  *                 its list showed as the level's ↑ ↓ set — unless the child
  *                 object declares another way of opening; elsewhere, navigate
  *                 to the child record's detail route. A lookup value takes
- *                 the same door (`openRecord`).
+ *                 the same door (`openRecord`). On a phone there is no drawer:
+ *                 the record is pushed as a page over this one, with this
+ *                 page as its way back and the list's rows as its ↑ ↓ set
+ *                 (objectstack#27058, `./recordPagePush.ts`).
  *   - 增 / 改   → open the child form as an OVERLAY on the parent detail
  *                 (objectstack-ai/objectstack#2604 D3: a child task's return target is ALWAYS the parent
  *                 detail with the subtable refreshed — never a route, which
@@ -76,8 +79,8 @@
  * directions below are the record header's verbatim.
  */
 
-import { useCallback, useMemo } from 'react';
-import { useHref, useNavigate, useSearchParams } from 'react-router-dom';
+import { useCallback, useMemo, useRef } from 'react';
+import { useHref, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   RelatedRecordActionsProvider,
   notifyDataChanged,
@@ -97,6 +100,8 @@ import { documentHref } from './documentHref.js';
 import { exactRecordListFilter, recordListPath } from './useOpenRecordList.js';
 import { resolveRecordFormTarget } from '../utils/recordFormNavigation.js';
 import { opensInRecordDrawer, useRecordDrawer } from './recordDrawerContext.js';
+import { recordPagePushState } from './recordPagePush.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 /**
  * Notify open related lists for `objectName` to refetch.
@@ -305,6 +310,13 @@ export function RelatedRecordActionsBridge({
   children,
 }: RelatedRecordActionsBridgeProps) {
   const navigate = useNavigate();
+  // The page this bridge sits on, read when a record opens: on a phone it is
+  // the pushed page's way back (objectstack#27058). A ref, so the handlers
+  // the related lists hold do not change with every navigation.
+  const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
+  const phone = usePhoneViewport();
   const { runner } = useAction();
   const [, setSearchParams] = useSearchParams();
   const perms = usePermissions();
@@ -400,6 +412,10 @@ export function RelatedRecordActionsBridge({
    * record as the level being left. Otherwise SPA-navigate by its router
    * path, because `navigate` applies the basename itself. Either way only a
    * routable target opens, as before: the drawer's ⤢ goes to that route.
+   *
+   * On a phone (objectstack#27058) the navigation is a push over this page:
+   * the history state names this page as the way back, with `siblings` as
+   * the ↑ ↓ set (`recordPagePushState`).
    */
   const openRecord = useCallback(
     (objectName: string, recordId: string | number, siblings?: ReadonlyArray<string | number>) => {
@@ -412,9 +428,14 @@ export function RelatedRecordActionsBridge({
         });
         return;
       }
+      if (phone && parentObjectName && parentRecordId) {
+        const { pathname, search } = locationRef.current;
+        navigate(path, { state: recordPagePushState({ pathname, search }, parentTitle, siblings) });
+        return;
+      }
       navigate(path);
     },
-    [recordPath, navigate, drawer, objects, parentTitle],
+    [recordPath, navigate, drawer, objects, parentTitle, phone, parentObjectName, parentRecordId],
   );
 
   // objectstack-ai/objectstack#2604 D3 — open a child create/edit task as the console's global record

@@ -13,8 +13,8 @@ import { metadataText } from '../hooks/useNavTargetLabel.js';
 export type ViewLabelLookup = (objectName: string, viewName: string, fallback: string) => string;
 
 /**
- * A view's name wherever the console names it — the object page's desktop tab
- * bar and mobile switcher draw the same string (objectui#11295), the record
+ * A view's name wherever the console names it — the object page's view
+ * switcher draws the same string on every width (objectui#11295, objectstack#27058), the record
  * page's way back (`location.state.from`) names the open view the same way, so
  * the link and the tab agree (objectui#11733), and the app header's title on a
  * `/view/NAME` route reads it too, so the header and the tab agree

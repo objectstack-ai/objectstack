@@ -51,6 +51,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { closedObject, strictObject, strictObjectError, type StrictObjectOptions } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema, SystemIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
@@ -5902,6 +5903,8 @@ function viewItemBaseShape() {
     ),
     // ADR-0010 — runtime protection envelope (internal — set by loader).
     ...MetadataProtectionFields,
+    // ADR-0146 D2 — the override declaration (authored; travels with the item).
+    ...OverrideDeclarationFields,
   };
 }
 
@@ -6551,6 +6554,8 @@ function flattenedViewOverlayFields<K extends 'list' | 'form'>(kind: K) {
     hidden: retiredKey(VIEW_ITEM_HIDDEN_RETIRED),
     protection: ProtectionSchema.optional(),
     ...MetadataProtectionFields,
+    // ADR-0146 D2 — the override declaration (authored; travels with the item).
+    ...OverrideDeclarationFields,
     // Structural guards — a flattened overlay is neither a record nor a container.
     config: z.undefined().optional(),
     list: z.undefined().optional(),

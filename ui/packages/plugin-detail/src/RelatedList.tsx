@@ -49,7 +49,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
-import type { ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement } from '@objectstack/spec/ui';
 import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard } from '@object-ui/fields';
 import {
   buildExpandFields,
@@ -142,16 +142,19 @@ export interface RelatedListProps {
    * insert (e.g. the AI-seat cap) surface as an inline error.
    *
    * `picker.filter` restricts which records the dialog offers, and is typed as
-   * the spec's own `ViewFilterRule[]` rather than `any` (#3831): it goes to
+   * the spec's own `ViewFilterElement[]` rather than `any` (#3831): it goes to
    * `RecordPickerDialog`'s `baseFilter` VERBATIM, so the authored vocabulary is
    * the one enforced — a looser type here is where a wrong shape would hide.
+   * The element is a flat rule or an any-of group `{ or: [rule, ...] }`
+   * (objectstack#28020, #28462); the dialog lowers both through
+   * `toFilterNodeSafely`.
    */
   add?: {
     picker: {
       object: string;
       valueField?: string;
       labelField?: string;
-      filter?: ViewFilterRule[];
+      filter?: ViewFilterElement[];
     };
     linkField?: string;
     label?: string;
@@ -255,13 +258,14 @@ export interface RelatedListProps {
    * for the list's own scope).
    *
    * Two shapes arrive, both produced by our own layers: the spec vocabulary
-   * (`ViewFilterRule[]`) as authored, and an ObjectQL AST node as composed by
+   * (`ViewFilterElement[]`: flat rules and any-of `{ or }` groups,
+   * objectstack#28462) as authored, and an ObjectQL AST node as composed by
    * `ElementDataSourceGate` (which ANDs component/view/binding filters through
    * `mergeFilterNodes` before this component ever sees them). Both are lowered
    * here through that same single sink — the repo's one filter→wire exit — so no
    * second conversion dialect appears.
    */
-  filter?: ViewFilterRule[] | FilterNode;
+  filter?: ViewFilterElement[] | FilterNode;
   /**
    * Enable text filtering. The box keeps a row when a column the list shows
    * contains the term; a masked column (a `password` / `secret` field, or any

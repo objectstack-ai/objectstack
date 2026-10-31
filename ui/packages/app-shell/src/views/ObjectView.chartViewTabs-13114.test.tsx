@@ -24,8 +24,9 @@
  *    grid view from it switches back to the grid.
  *  - CONTROL: a grid view draws the same one switcher, and no tab bar in the
  *    list's toolbar.
- *  - CONTROL: the switcher sits in the page header the phone does not draw
- *    (`hidden sm:block`); the app bar's switcher is the phone's control.
+ *  - On a phone (objectstack#27058) the page header is not drawn and the same
+ *    one switcher heads the chart face instead (`list-phone-title`), outside
+ *    the hidden header; the app bar draws no view switcher of its own.
  *  - The view description is shown once (objectui#12528): a chart face, with
  *    no toolbar row, carries it as the switcher's tooltip; a grid face draws it
  *    as the list's info control, and the switcher carries none.
@@ -211,12 +212,17 @@ describe('objectui#13114 — a chart view keeps the view switcher', () => {
     expect(screen.getByTestId('view-description-info')).toHaveAttribute('title', 'Every project');
   });
 
-  it('CONTROL: the switcher is in the page header a phone does not draw — the app bar switcher is the phone\'s control', async () => {
+  it('on a phone the one switcher heads the chart face, outside the page header a phone does not draw', async () => {
     setViewportWidth(390);
     mountProjects('budget_chart');
     await chartFace();
 
-    expect(screen.getByTestId('list-view-switcher').closest('.hidden.sm\\:block')).not.toBeNull();
+    // objectstack#27058 — one switcher, and it is the phone title's.
+    expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
+    const switcher = screen.getByTestId('list-view-switcher');
+    expect(switcher.closest('[data-testid="list-phone-title"]')).not.toBeNull();
+    expect(switcher.closest('.hidden.sm\\:block')).toBeNull();
+    expect(switcher).toHaveTextContent('Budget by Account');
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
   });

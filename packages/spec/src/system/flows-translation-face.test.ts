@@ -116,6 +116,10 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
   'flow._packageId': noReader(FRAMEWORK_FIELD),
   'flow._packageVersion': noReader(FRAMEWORK_FIELD),
   'flow._lockDocsUrl': noReader(FRAMEWORK_FIELD),
+  'flow.overrides': noReader(
+    'the override declaration (ADR-0146 D2): a base package id and the base version the override was taken from, '
+    + 'read by the customization doors and never drawn for a person running the flow',
+  ),
 
   // FlowNodeSchema (its `config` is judged per type below)
   'node.id': noReader('the node id — the address of `screens.<node_id>`, `refusals.<node_id>` and `approvals.<node_id>`'),

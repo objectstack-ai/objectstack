@@ -350,6 +350,23 @@
       "verifiedAt": "2026-09-27",
       "evidence": "packages/rest/src/meta-item-read-gate.ts#filterAppForUserWithReason (`if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access'))` — the ADR-0045 publish gate, which judges THIS key and deliberately not `hidden`); packages/runtime/src/domains/packages.ts#handlePackagesRequest (POST /packages/:id/publish-drafts flips it to `false` — never deletes it, because ADR-0045 §3 keeps publish and unpublish symmetric)",
       "note": "MACHINE-MANAGED publish gate (ADR-0045 §3, amended 2026-08-09 / #4829) — never authored: written by the AI additive-materialization path (cloud) and cleared by POST /packages/:id/publish-drafts. SERVER-enforced: filterAppForUser withholds an unpublished app from every metadata response except a builder's (studio/setup access), for direct-URL preview. Declared on AppSchema rather than omitted because the write path validates against that schema (saveMetaItem → 422; Registry.validate('app') → AppSchema.parse), so the flip itself would be unwritable otherwise. Stored pre-amendment rows carrying `hidden: true` are rewritten here by the ADR-0087 conversion `app-hidden-to-unpublished`. 2026-08-28: RE-ANCHORED (commit 8f10a79f7) and REPOINTED, both legs — `rest-server.ts:2669` had rotted onto a docblock about a diagnostic view being neither translated nor cached, ~480 lines below the gate, and `packages.ts:245` onto the domain-wide anonymous-deny floor, ~270 lines above the flip. Re-closed by hand against 8cb96ec41."
+    },
+    "overrides": {
+      "status": "planned",
+      "verifiedAt": "2026-10-31",
+      "note": "PLANNED RECORD (ADR-0146 D2, the spec card N-08): the override declaration `overrides: { package, basedOn }`, one field set (`OverrideDeclarationFields`, packages/spec/src/kernel/override-declaration.zod.ts) spread on the thirteen types `OVERRIDE_TYPE_CLASSIFICATION` classifies `overridable`. CARRIED today, measured: it survives the metadata save's schema parse, `defineStack()` and `GET /packages/:id/export` (packages/spec/src/kernel/override-declaration.test.ts; packages/runtime/src/domains/packages-export-override-declaration.test.ts). ACTED ON by nothing yet: the write gate that admits a declared override from the paired `<base>.custom` and refuses an undeclared same-named item, and the effective read that serves the declared document over the base's, are later cards of ADR-0146's Rollout (P1). Flip to `live` on the commit that lands the reader, citing it.",
+      "children": {
+        "package": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row): the base package id the declaring item replaces an item of. The pair predicate the write gate will read is `isCustomizationPairOf` (packages/spec/src/kernel/customization-package.ts). The schema refuses a `.custom` id here at parse."
+        },
+        "basedOn": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row). RECORDED, NEVER JUDGED by contract (ADR-0146 D2, 'Decided here' item 2): no door compares it with the installed base, produces an upgrade diff from it, or refuses on it. Its whole reading is a person's (Studio's override chip, the export); it stays `planned` until that reader lands, and must never gain a gate."
+        }
+      }
     }
   }
 }

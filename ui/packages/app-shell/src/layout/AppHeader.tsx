@@ -55,9 +55,6 @@ import {
 import {
   Search,
   HelpCircle,
-  ChevronDown,
-  Check,
-  Lock,
   LogOut,
   Plus,
   Layers,
@@ -93,7 +90,6 @@ import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appRouteSegment, appStudioRoutePath } from '../utils/index.js';
 import { getIcon } from '../utils/getIcon.js';
-import { useMobileViewSwitcher } from './MobileViewSwitcherContext.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
 import { useUrlOverlay } from '../hooks/useUrlOverlay.js';
@@ -483,7 +479,6 @@ export function AppHeader({
   // object document's own `listViews` (objectui#11295, objectui#11336).
   const servedViews = useServedViewItems();
   const { currentAppName, recordTitle } = useNavigationContext();
-  const mobileSwitcher = useMobileViewSwitcher();
 
   /**
    * Help menu — lazily-loaded `doc` metadata (ADR-0046) so the "?" menu can
@@ -942,60 +937,12 @@ export function AppHeader({
               moreLabel={t('common.more', { defaultValue: 'More' })}
             />
 
-            {/* Mobile: current page label or view switcher */}
-            {mobileSwitcher && mobileSwitcher.views.length > 0 ? (
-              mobileSwitcher.views.length > 1 ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="sm:hidden flex items-center gap-0.5 min-w-0 ml-1 rounded-md px-1.5 py-1 text-sm font-medium hover:bg-accent active:bg-accent/80 transition-colors"
-                      aria-label={t('topbar.switchView', { defaultValue: 'Switch view' })}
-                    >
-                      <span className="truncate max-w-[180px]">
-                        {mobileSwitcher.triggerLabel ??
-                          mobileSwitcher.views.find((v) => v.id === mobileSwitcher.activeViewId)?.label ??
-                          lastSegmentLabel}
-                      </span>
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="min-w-[220px] max-w-[280px]">
-                    {mobileSwitcher.views.map((v) => {
-                      const isActive = v.id === mobileSwitcher.activeViewId;
-                      return (
-                        <DropdownMenuItem
-                          key={v.id}
-                          onSelect={() => {
-                            if (!isActive) mobileSwitcher.onChange(v.id);
-                          }}
-                          className="gap-2"
-                        >
-                          {v.icon ? (
-                            <span className="shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{v.icon}</span>
-                          ) : null}
-                          <span className="flex-1 truncate">{v.label}</span>
-                          {v.locked ? (
-                            <Lock className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                          ) : null}
-                          {isActive ? (
-                            <Check className="h-4 w-4 shrink-0 text-foreground" aria-hidden />
-                          ) : null}
-                        </DropdownMenuItem>
-                      );
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <span className="text-sm font-medium sm:hidden truncate min-w-0 ml-1">
-                  {mobileSwitcher.triggerLabel ?? mobileSwitcher.views[0].label}
-                </span>
-              )
-            ) : (
-              <span className="text-sm font-medium sm:hidden truncate min-w-0 ml-1">
-                {lastSegmentLabel}
-              </span>
-            )}
+            {/* Mobile: the current page's label. A list's view switcher is
+                the list's own title, drawn in its toolbar row on a phone
+                (objectstack#27058), so the bar draws no view dropdown. */}
+            <span className="text-sm font-medium sm:hidden truncate min-w-0 ml-1">
+              {lastSegmentLabel}
+            </span>
           </>
         )}
       </div>

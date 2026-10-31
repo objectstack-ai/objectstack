@@ -8,6 +8,7 @@ import { ElementApiDataSourceSchema } from './page.zod';
 import { strictObject, type StrictObjectOptions } from '../shared/strict-object';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { requiredOneOf } from '../shared/refinement-projection';
 
@@ -2110,6 +2111,8 @@ export const AppSchema = lazySchema(() => strictObject(
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 }).superRefine(checkAppLandingItems));
 
 /**
