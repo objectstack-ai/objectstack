@@ -187,6 +187,35 @@ describe('report export control (exportOptions, #25873)', () => {
     expect(downloads[0].blob.type).toContain('text/csv');
   });
 
+  it('CSV of a two-level summary is the drawn grouped table: headers, inner rows, subtotals, total', async () => {
+    // objectstack-ai/objectstack#27975 — the export writes the grouped face cell for cell.
+    renderReport(
+      { ...SUMMARY, rows: ['owner', 'stage'], values: ['amount'] },
+      {
+        result: {
+          rows: [
+            { owner: 'Amy Chen', stage: 'Prospecting', amount: 1200 },
+            { owner: 'Amy Chen', stage: 'Proposal', amount: 300 },
+            { owner: 'Zoe Admin', stage: 'Proposal', amount: 50 },
+          ],
+          object: OBJECT,
+          totals: [
+            { dimensions: ['owner'], rows: [{ owner: 'Amy Chen', amount: 1500 }, { owner: 'Zoe Admin', amount: 50 }] },
+            { dimensions: [], rows: [{ amount: 1550 }] },
+          ],
+        },
+      },
+    );
+    await screen.findByTestId('dataset-report-total-row');
+    await openMenu();
+    fireEvent.click(await screen.findByTestId('report-export-csv'));
+    await waitFor(() => expect(downloads).toHaveLength(1));
+
+    const csv = parseCsv(await blobText(downloads[0].blob));
+    expect(csv).toEqual(drawnTable());
+    expect(csv.map((row) => row[0])).toEqual(['owner', 'Amy Chen', '', '', 'Subtotal', 'Zoe Admin', '', 'Subtotal', 'Total']);
+  });
+
   it('absent formats offers both CSV and XLSX', async () => {
     renderReport(SUMMARY);
     await openMenu();

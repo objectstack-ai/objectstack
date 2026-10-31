@@ -7,8 +7,7 @@ import type { SemanticMigration } from '../../types.js';
 // `18.by-id-write-unreadable-row-not-found`, for the predicate door. The entry
 // carries the changed answer to the one reader the ledger serves here — the
 // upgrade guide — because a caller that branched on the old answer has no
-// schema error to find it by. No backticks in `surface`: the upgrade guide
-// renders it inside a code span and a table cell.
+// schema error to find it by.
 export const entry: SemanticMigration = {
   id: 'predicate-write-unreadable-row-not-matched',
   surface:

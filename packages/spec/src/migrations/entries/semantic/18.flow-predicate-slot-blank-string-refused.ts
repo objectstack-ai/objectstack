@@ -10,9 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // INVERTS the edge. These slots are declared `z.string()`, are refused under
 // PREDICATE_SLOT_STRING_REFUSAL, and keep their run with `'false'` or no
 // `visibleWhen` — a different prescription, which one entry cannot carry for both.
-//
-// No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-// span already, and a nested backtick would close it.
 export const entry: SemanticMigration = {
   id: 'flow-predicate-slot-blank-string-refused',
   surface:

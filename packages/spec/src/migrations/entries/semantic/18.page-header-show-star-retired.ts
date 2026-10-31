@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // is a third-party host that wires its own favorites toggle.
 export const entry: SemanticMigration = {
   id: 'page-header-show-star-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'page.component.page:header.showStar — the follow star beside the record title',
   replacement:
     'Nothing: delete the key, whether it was `true` or `false`. The record\'s favorites entry is the '

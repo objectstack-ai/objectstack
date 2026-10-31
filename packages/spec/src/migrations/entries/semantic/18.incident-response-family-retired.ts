@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'incident-response-family-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the incident-response family, retired whole: the eight defs system/Incident, '
     + 'system/IncidentCategory, system/IncidentNotificationMatrix, '

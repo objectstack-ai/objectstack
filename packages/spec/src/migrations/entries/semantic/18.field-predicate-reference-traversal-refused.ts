@@ -7,9 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // predicate reaches (or, for an option, never enforces it); what moved is that
 // `objectstack validate` now says so before deploy. No D2 conversion — see
 // `reason`.
-//
-// No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-// span already, and a nested backtick would close it.
 export const entry: SemanticMigration = {
   id: 'field-predicate-reference-traversal-refused',
   surface:

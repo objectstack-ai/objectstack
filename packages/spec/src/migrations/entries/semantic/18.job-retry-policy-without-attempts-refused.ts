@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // for the author — whether a job that never stated a count should retry at all.
 export const entry: SemanticMigration = {
   id: 'job-retry-policy-without-attempts-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface: 'job.retryPolicy declared with maxRetries omitted or 0 (system/job.zod.ts)',
   replacement:
     '`retryPolicy: { maxRetries: N, … }` with N ≥ 1 (for example 3, the count such a block ran with '

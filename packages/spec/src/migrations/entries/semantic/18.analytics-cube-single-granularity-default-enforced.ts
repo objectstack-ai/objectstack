@@ -10,8 +10,7 @@ import type { SemanticMigration } from '../../types.js';
 // default" or "the one interval I happened to list" is the author's intent,
 // which the chain cannot read. The protocol-18 conversion
 // `cube-sub-day-granularities-removed` is why the entry is owed even to an
-// author who never wrote a one-interval list. No backticks in `surface`: the
-// upgrade guide renders it inside a code span and a table cell.
+// author who never wrote a one-interval list.
 export const entry: SemanticMigration = {
   id: 'analytics-cube-single-granularity-default-enforced',
   surface:

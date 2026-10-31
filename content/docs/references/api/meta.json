@@ -32,6 +32,7 @@
     "plugin-rest-api",
     "storage",
     "---More---",
+    "app-bundle",
     "error-code-ledger",
     "misc",
     "package-api-assembled",

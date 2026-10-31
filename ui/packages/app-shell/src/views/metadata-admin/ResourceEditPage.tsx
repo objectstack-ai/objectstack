@@ -681,12 +681,18 @@ function MetadataResourceEditPageImpl({
     },
     [handleDraftChange],
   );
-  const { markTouched: markCreateFieldTouched } = useCreateDerive({
+  const { markTouched: markCreateFieldTouched, underivable } = useCreateDerive({
     rules: config.createDerive,
     draft,
     onPatch: onCreatePatch,
     enabled: !!createMode,
   });
+  // objectstack#28232 — a label the slug rule cannot turn into a name leaves
+  // Name empty; the form says so under it until the author types one.
+  const createFieldNotes =
+    underivable.length > 0
+      ? Object.fromEntries(underivable.map((f) => [f, t('engine.create.nameNotDerived', locale)]))
+      : undefined;
 
   // Effective hidden-fields for create mode: collapse the form to just
   // the identity inputs declared by the type (or required-fields ∪
@@ -3443,6 +3449,7 @@ function MetadataResourceEditPageImpl({
                             revealIssues={revealIssues}
                             onInlineIssueFieldsChange={setInlineIssueFields}
                             onRequiredRowFieldsChange={setRequiredRowFields}
+                            fieldNotes={createFieldNotes}
                           />
                         )}
                       </div>
@@ -3470,6 +3477,7 @@ function MetadataResourceEditPageImpl({
                 revealIssues={revealIssues}
                 onInlineIssueFieldsChange={setInlineIssueFields}
                 onRequiredRowFieldsChange={setRequiredRowFields}
+                fieldNotes={createFieldNotes}
               />
             )}
             {/* objectui#7611 — under the designer, too: `position` renders

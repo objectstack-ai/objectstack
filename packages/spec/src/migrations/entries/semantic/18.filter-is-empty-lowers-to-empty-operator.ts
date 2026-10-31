@@ -11,9 +11,8 @@ import type { SemanticMigration } from '../../types.js';
 // the upgrade guide and spec-changes.json.
 export const entry: SemanticMigration = {
   id: 'filter-is-empty-lowers-to-empty-operator',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it. No ' / ' either: the
-  // schema build reads that separator as a boundary between registered clauses.
+  // No ' / ' in `surface`: the schema build reads that separator as a boundary
+  // between registered clauses.
   surface:
     'data.FilterCondition — the lowering of the view operators is_empty, isempty, is_not_empty '
     + 'and isnotempty (on a ViewFilterRule, a sharing rule and any filter array), and a $empty '

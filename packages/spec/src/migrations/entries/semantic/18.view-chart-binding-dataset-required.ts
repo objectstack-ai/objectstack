@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // decision, and a fabricated binding is the defect this closes.
 export const entry: SemanticMigration = {
   id: 'view-chart-binding-dataset-required',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span.
   surface:
     'A list view whose type is chart and whose effective chart binding names no dataset: no chart block '
     + 'and no options.chart bag, or, on a flattened view overlay saved through the metadata write door, an '

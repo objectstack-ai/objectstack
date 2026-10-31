@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // and no D2 conversion rewrites it.
 export const entry: SemanticMigration = {
   id: 'translation-flow-screen-title-text-slot-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'translation.flows.<flow>.screens.<node_id>.title — a translated screen heading, in a stack\'s translations '
     + 'or a translation metadata item, carrying a single-brace token such as {name}, or a double-brace hole over a '

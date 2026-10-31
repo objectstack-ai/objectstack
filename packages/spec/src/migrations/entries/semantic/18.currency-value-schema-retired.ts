@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'currency-value-schema-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'data.currencyValue (the whole of CurrencyValueSchema in data/field.zod.ts — 1 def, '
     + 'data/CurrencyValue, and 2 exported names: CurrencyValueSchema and CurrencyValue)',

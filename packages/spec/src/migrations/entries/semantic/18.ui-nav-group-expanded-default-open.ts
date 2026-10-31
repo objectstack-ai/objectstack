@@ -19,8 +19,6 @@ import type { SemanticMigration } from '../../types.js';
 // tracker number.
 export const entry: SemanticMigration = {
   id: 'ui-nav-group-expanded-default-open',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'ui.GroupNavItem.expanded — an OMITTED expanded on an app navigation group',
   replacement: 'nothing, to take the platform default: the group opens on first view. To keep a '
     + 'group closed until the user opens it — an advanced or developer section the daily user '

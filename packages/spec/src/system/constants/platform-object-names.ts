@@ -123,8 +123,8 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
   ],
   /** `@objectstack/plugin-webhooks` — outbound webhook registrations. */
   'plugin-webhooks': ['sys_webhook'],
-  /** `@objectstack/service-automation` — flow run history, dispatch-idempotency ledger, write-only flow and connector credentials. */
-  'service-automation': ['sys_automation_run', 'sys_connector_credential', 'sys_flow_credential', 'sys_flow_dispatch'],
+  /** `@objectstack/service-automation` — flow run history, dispatch-idempotency ledger, write-only flow and connector credentials, connector connections (ADR-0143 D3). */
+  'service-automation': ['sys_automation_run', 'sys_connector_connection', 'sys_connector_credential', 'sys_flow_credential', 'sys_flow_dispatch'],
   /** `@objectstack/service-mailbox` — inbound mail: mailboxes, mirrored messages, record associations. */
   'service-mailbox': ['sys_mail_association', 'sys_mail_message', 'sys_mailbox'],
   /** `@objectstack/service-messaging` — notification & delivery pipeline. */

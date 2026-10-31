@@ -199,14 +199,17 @@ describe('GET /packages/:id — the detail door carries the same verdict (#14375
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('GET /packages — the verdict is additive and computed, never stored (#14375)', () => {
-    it('pin 5: apart from `writable`, every row deep-equals the registry\'s own record', async () => {
+    it('pin 5: apart from the served verdicts, every row deep-equals the registry\'s own record', async () => {
         const { dispatcher, registry } = make();
         const rows = await list(dispatcher);
         const records = registry.getAllPackages() as unknown as Row[];
         expect(rows).toHaveLength(records.length);
         for (const record of records) {
-            const { writable, ...rest } = byId(rows, record.manifest.id);
+            // [#28318] `disableable` is the other served verdict, pinned in
+            // `packages-disableable-verdict.test.ts`; set aside here by name.
+            const { writable, disableable, ...rest } = byId(rows, record.manifest.id);
             expect(typeof writable).toBe('boolean');
+            expect(typeof disableable).toBe('boolean');
             // Built from the pre-change shape (the registry record itself), not
             // re-derived from the new code.
             expect(rest).toEqual(record);

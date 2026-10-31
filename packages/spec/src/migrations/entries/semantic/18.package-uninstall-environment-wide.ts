@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // (protocol 17) introduced.
 export const entry: SemanticMigration = {
   id: 'package-uninstall-environment-wide',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the organizationId and allTenants members of the deletePackage request of '
     + '@objectstack/metadata-protocol (DeletePackageRequest), the two TENANT_SCOPE_REQUIRED refusals '

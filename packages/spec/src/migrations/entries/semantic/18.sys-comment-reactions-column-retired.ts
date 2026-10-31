@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // records, and `os migrate apply` refuses the column drop until it has.
 export const entry: SemanticMigration = {
   id: 'sys-comment-reactions-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_comment.reactions — the JSON textarea column that held every emoji reaction to a comment '
     + 'as one map of emoji to user ids, on the comment row itself, left the platform comment table '

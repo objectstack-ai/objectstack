@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // disagreement reads as its binding and is refused on its next write.
 export const entry: SemanticMigration = {
   id: 'permission-set-package-id-binding-mismatch-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'security.permission.packageId (PermissionSetSchema, ADR-0086 D3) with a value that disagrees with '
     + 'the package the set is shipped from or saved into: another package\'s id, or any value (the empty '

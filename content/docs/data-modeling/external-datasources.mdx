@@ -227,8 +227,11 @@ pull an otherwise-working replica out of the load balancer.
 An object bound to a datasource with no live driver fails with
 `ERR_DATASOURCE_UNAVAILABLE` (HTTP **503**), and the message says which situation
 it is ([#3828](https://github.com/objectstack-ai/objectstack/issues/3828)):
-refused by policy, or a connect that failed under
-`OS_ALLOW_DRIVER_CONNECT_FAILURE`. A datasource name that was never declared
+refused by policy, or a connect that failed. A failed connect is recorded the
+same way whether it failed at startup under `OS_ALLOW_DRIVER_CONNECT_FAILURE`,
+at a package install or in Setup, so the message names no origin; it says a
+restart re-runs the connect only while that flag is set, and then only for a
+datasource declared in code. A datasource name that was never declared
 still gets the original `is not registered` — that one really is an authoring
 bug, and there is nothing to add.
 
