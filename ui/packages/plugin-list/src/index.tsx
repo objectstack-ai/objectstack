@@ -324,7 +324,7 @@ const LIST_VIEW_INPUTS: ComponentInput[] = [
   {
     name: 'calendar',
     type: 'object',
-    description: 'The calendar, `{ startDateField, endDateField, titleField, colorField, allDayField }`.',
+    description: 'The calendar, `{ startDateField, endDateField, titleField, colorField, allDayField, initialDate }`; `initialDate` is where it opens: `first_record`, `next_record` or a date-macro token such as `{next_month_start}`, today when omitted.',
   },
   {
     name: 'gantt',

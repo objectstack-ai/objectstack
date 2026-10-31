@@ -21,7 +21,7 @@ Namespace `plugin-calendar`.
 | Input | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `objectName` | `string` |  | ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-calendar` schema refuses a block that declares none of them, unless the node's `dataSource.object` names the object, which then lands on this key. |
-| `calendar` | `object` |  | startDateField, endDateField, titleField, colorField |
+| `calendar` | `object` |  | startDateField, endDateField, titleField, colorField, allDayField, initialDate (where the calendar opens: `first_record`, `next_record` or a date-macro token such as `{next_month_start}`; omitted, today) |
 | `filter` | `array` |  | Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, narrowing the records the calendar fetches. Lowered to `$filter` on the query. |
 | `sort` | `array` |  | Sort order in `[{ field, order }]` form, ordering the records the calendar fetches. Lowered to `$orderby` on the query. |
 | `defaultView` | `enum`: `month`, `week`, `day` |  | The grid the calendar opens on. A narrow viewport downgrades `day` to `month`; the author’s choice is otherwise honoured on first render. |
@@ -312,7 +312,7 @@ Namespace `plugin-list`.
 | `bulkActions` | `array` of `string` |  | Names of the actions offered once rows are selected. Needs a multi-row `selection`. |
 | `bulkActionDefs` | `array` of `object` |  | Full bulk-action definitions, the spec's `BulkActionDef`: a mass update (`operation: "update"` with a `patch`) or delete, or a named action run once for the whole selection. |
 | `kanban` | `object` |  | The board, the spec's kanban block: `{ groupByField, columns, titleField, summarizeField }`. `groupByField` is the lane field and `columns` the fields on each card. |
-| `calendar` | `object` |  | The calendar, `{ startDateField, endDateField, titleField, colorField, allDayField }`. |
+| `calendar` | `object` |  | The calendar, `{ startDateField, endDateField, titleField, colorField, allDayField, initialDate }`; `initialDate` is where it opens: `first_record`, `next_record` or a date-macro token such as `{next_month_start}`, today when omitted. |
 | `gantt` | `object` |  | The gantt chart, `{ startDateField, endDateField, titleField, progressField, dependenciesField }`. Both date fields are needed to draw it. |
 | `gallery` | `object` |  | The gallery, `{ coverField, titleField, visibleFields, cardSize, … }`. |
 | `timeline` | `object` |  | The timeline, `{ startDateField, endDateField, titleField, groupByField, colorField, scale }`. |
