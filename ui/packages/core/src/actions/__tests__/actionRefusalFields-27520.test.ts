@@ -37,6 +37,15 @@ describe('a refused action keeps its per-field entries (objectstack#27520 row 11
     ]);
   });
 
+  it('keeps the entries when the refusal also carries a producer-marked userMessage', () => {
+    const out = interpretActionResponse({ ok: false, status: 400 }, {
+      ...SUBMIT_REFUSAL,
+      error: { ...SUBMIT_REFUSAL.error, userMessage: 'Add the issue date, then submit again.' },
+    }, 'Action "submit"');
+    expect(out.ok).toBe(false);
+    expect(out.fieldErrors).toEqual(SUBMIT_REFUSAL.error.details.fields);
+  });
+
   it('drops an entry with no field, and sets nothing when none is left', () => {
     const out = interpretActionResponse({ ok: false, status: 400 }, {
       success: false,
