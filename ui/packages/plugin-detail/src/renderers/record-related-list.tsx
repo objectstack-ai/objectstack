@@ -36,10 +36,7 @@ import {
 } from '@object-ui/core';
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
-import { RelatedArrangementScopeContext } from '../ArrangedRelatedTab';
-import { RelatedDefaultChangedHint, RelatedFootLine } from '../RelatedCardStack';
-import { RelatedCardChromeContext, RelatedListCompactContext } from '../relatedListCompact';
-import { relatedCardId } from '../synth/relatedArrangement';
+import { RelatedListCompactContext } from '../relatedListCompact';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
 import { RelatedListStackSlot } from '../RelatedListEmptyFold';
@@ -879,41 +876,9 @@ const NoParentRecord: React.FC<{
  * block bound under one entry point and unbound under another is the same
  * "declared but not reached" shape in miniature.
  */
-export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps> = elementDataSourceBlock((props) => {
-  const { schema } = props;
-  // objectstack#27055 — inside the tabbed tier's 关联 tab the reader's
-  // arrangement applies (`ArrangedRelatedTab`): every list carries its chrome;
-  // the tab's last list closes it with the changed-default hint and the foot
-  // line (the hidden lists, 「恢复默认顺序」).
-  const scope = React.useContext(RelatedArrangementScopeContext);
-  const arrangedId =
-    scope && typeof schema?.objectName === 'string' && typeof schema?.relationshipField === 'string'
-      ? relatedCardId(schema.objectName, schema.relationshipField)
-      : null;
-  const chrome = scope && arrangedId ? scope.chromeOf(arrangedId) : null;
-  if (scope && arrangedId && chrome) {
-    const lines = scope.lastId === arrangedId && (
-      <>
-        {scope.defaultChanged && <RelatedDefaultChangedHint onRestore={scope.restoreDefault} />}
-        <RelatedFootLine
-          hiddenCount={scope.hiddenCount}
-          onShowHidden={scope.showHidden}
-          rearranged={scope.rearranged}
-          onRestoreDefault={scope.restoreDefaultArrangement}
-        />
-      </>
-    );
-    return (
-      <>
-        <RelatedCardChromeContext.Provider value={chrome}>
-          <RecordRelatedListBound {...props} />
-        </RelatedCardChromeContext.Provider>
-        {lines}
-      </>
-    );
-  }
-  return <RecordRelatedListBound {...props} />;
-});
+export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps> = elementDataSourceBlock((props) => (
+  <RecordRelatedListBound {...props} />
+));
 
 /** The block bound to its parent record and its child rows — see above. */
 const RecordRelatedListBound: React.FC<RecordRelatedListRendererProps> = (props) => {

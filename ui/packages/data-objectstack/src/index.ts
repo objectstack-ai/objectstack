@@ -87,6 +87,7 @@ import {
   type DatasetDrillRange,
 } from '@object-ui/core';
 import { MetadataCache } from './cache/MetadataCache';
+import { AppBundleStore, indexAppBundle, type AppBundleAnswer } from './app-bundle';
 import { MetadataClient } from './metadata-client';
 import { formatMetadataError } from './metadata-error';
 import {
@@ -936,6 +937,22 @@ export function serializeOrderBy(orderby: QueryParams['$orderby']): string | und
  * request on a different client, and never fills this key.
  */
 const VIEW_LIST_KEY = 'list:view';
+
+/**
+ * Whether a key handed to {@link ObjectStackAdapter.invalidateCache} names an
+ * item an app bundle holds (objectstack#27627), in every spelling the cache's
+ * keys and its host callers use: a bare object name (this adapter's object
+ * key), `view:OBJECT:NAME`, `TYPE:NAME` (app-shell `MetadataService`), and a
+ * type's list key (`list:TYPE`, {@link VIEW_LIST_KEY}), which names every
+ * item of that type.
+ */
+function cacheKeyNamesBundledItem(key: string, bundles: AppBundleStore): boolean {
+  if (!key.includes(':')) return bundles.holds('object', key);
+  const [head, ...rest] = key.split(':');
+  if (head === 'list') return bundles.holdsType(rest.join(':'));
+  if (head === 'view' && rest.length >= 2) return bundles.holds('view', rest.slice(1).join(':'));
+  return bundles.holds(head, rest.join(':'));
+}
 
 const discoveryCache = new Map<string, Promise<unknown>>();
 
@@ -3341,6 +3358,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   private connected: boolean = false;
   private connectPromise: Promise<void> | null = null;
   private metadataCache: MetadataCache;
+  // objectstack#27627 — the app metadata bundles this session entered
+  // (`loadAppBundle`); a by-name metadata read of an item the active one holds
+  // is answered from it (`fetchObjectSchemaFresh`, `installBundledItemReads`).
+  private appBundles: AppBundleStore;
   private connectionState: ConnectionState = 'disconnected';
   private connectionStateListeners: ConnectionStateListener[] = [];
   private batchProgressListeners: BatchProgressListener[] = [];
@@ -3485,6 +3506,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     this.metadataCache = new MetadataCache(config.cache);
     // objectui#13044 — after the cache, which the wrap reads.
     this.installViewListShare();
+    // The bundle's answers stand as long as the cache's entries do (the
+    // cache's own default lifetime when none is configured).
+    this.appBundles = new AppBundleStore(
+      (appId, etag) => this.requestAppBundle(appId, etag),
+      config.cache?.ttl || 5 * 60 * 1000,
+    );
+    this.installBundledItemReads();
     this.autoReconnect = config.autoReconnect ?? true;
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 3;
     this.reconnectDelay = config.reconnectDelay ?? 1000;
@@ -4463,6 +4491,75 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         return bound(...args).finally(() => this.metadataCache.invalidate?.(VIEW_LIST_KEY));
       };
     }
+  }
+
+  /**
+   * Answer this adapter's client's by-name metadata reads of bundled items
+   * from the app bundle (objectstack#27627).
+   *
+   * `client.meta.getItem(type, name)` is the one door every published by-name
+   * read here goes through — {@link getView}, {@link getPage}, {@link getApp},
+   * {@link getItems}, {@link probeMetaItemAccess}, and app-shell's
+   * `MetadataProvider` through {@link getClient} — so an item the active
+   * bundle holds is answered there, as the route's envelope, and never asked
+   * by name. An item it does not hold, and any call with options, goes to the
+   * route as before. Objects are answered the same way in
+   * {@link fetchObjectSchemaFresh}, which reads the route without the SDK.
+   *
+   * A write through any of the client's metadata write doors marks the
+   * bundles stale once it settles, whatever it wrote: the next bundled read
+   * asks the bundle again first, so it is never answered from before the
+   * write. Same wrap shape and bound as {@link installViewListShare}.
+   */
+  private installBundledItemReads(): void {
+    const meta = this.client.meta;
+    const original = meta.getItem.bind(meta);
+    meta.getItem = ((...args: Parameters<typeof original>) => {
+      const [type, name, options] = args;
+      if (options !== undefined) return original(...args);
+      return this.appBundles.read(type, name).then((entry) =>
+        entry ? (structuredClone(entry.envelope) as Awaited<ReturnType<typeof original>>) : original(type, name),
+      );
+    }) as typeof meta.getItem;
+
+    for (const door of ['saveItem', 'deleteItem', 'publishItem', 'rollbackItem'] as const) {
+      const write = meta[door] as ((...args: any[]) => Promise<unknown>) | undefined;
+      if (typeof write !== 'function') continue;
+      const bound = write.bind(meta);
+      (meta as any)[door] = (...args: any[]) => bound(...args).finally(() => this.appBundles.markStale());
+    }
+  }
+
+  /**
+   * Enter an app: load its metadata bundle, or revalidate the one this
+   * session already holds with `If-None-Match` (objectstack#27627). From then
+   * on, a by-name read of an item the bundle holds — an object definition, a
+   * view, a page, a dashboard, the app — is answered from it; anything else
+   * keeps its by-name route.
+   *
+   * Never rejects: an app with no bundle (refused, unknown, a server without
+   * the route, a failed request) leaves every read to its by-name route.
+   *
+   * @param appId - the app's name, as `GET /meta/app/:name` addresses it
+   */
+  loadAppBundle(appId: string): Promise<void> {
+    return this.appBundles.enter(appId);
+  }
+
+  /** The one round trip behind {@link loadAppBundle}. */
+  private async requestAppBundle(appId: string, etag: string | undefined): Promise<AppBundleAnswer> {
+    await this.connect();
+    // The client's conditional read: a `304` is answered as `notModified`,
+    // any other refusal rejects (the store reads that as no bundle).
+    const answer = await this.client.meta.getAppBundle(appId, etag ? { ifNoneMatch: etag } : undefined);
+    if (answer.notModified) return { status: 'unchanged' };
+    const items = indexAppBundle(answer.data);
+    // A bundle holding a member whose field visibility the server could not
+    // settle is served `no-store` with no validator: it answers the reads
+    // that waited on it and is not kept.
+    if (!answer.etag) return { status: 'fresh', items, noStore: true };
+    // The validator goes back as the server spelled it, a weak `W/` included.
+    return { status: 'fresh', etag: `${answer.etag.weak ? 'W/' : ''}"${answer.etag.value}"`, items };
   }
 
   /**
@@ -5576,34 +5673,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * still gets a cheap `304`. We go through `fetchImpl` (the adapter's
    * authenticated fetch) rather than `client.meta.getItem` because the SDK does
    * not expose the request cache mode.
+   *
+   * An object the active app bundle holds is answered from it instead, as the
+   * route's envelope, and never asked by name (objectstack#27627,
+   * {@link loadAppBundle}).
    */
   private async fetchObjectSchemaFresh(objectName: string): Promise<unknown> {
-    const url = `${this.baseUrl}/api/v1/meta/object/${encodeURIComponent(objectName)}`;
-
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    // Bearer (server-to-server) callers configure `this.token`; cookie/console
-    // auth is injected by `fetchImpl` (the authenticated fetch wrapper).
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    const res = await this.fetchImpl(url, {
-      method: 'GET',
-      headers,
-      // Revalidate instead of serving the stale `max-age` body (see doc above).
-      cache: 'no-cache',
-    });
-
-    if (!res.ok) {
-      const errBody: any = await res.json().catch(() => ({ message: res.statusText }));
-      const envelope = readErrorEnvelope(errBody);
-      const err: any = new Error(envelope.message ?? res.statusText);
-      err.status = res.status;
-      err.code = envelope.code;
-      throw err;
-    }
-
-    const body: any = await res.json();
+    const bundled = await this.appBundles.read('object', objectName);
+    const body: any = bundled ? structuredClone(bundled.envelope) : await this.requestObjectSchema(objectName);
     // Unwrap defensively across server/SDK response shapes: the standard
     // `{ success, data }` envelope, an `{ item }` wrapper, or the bare item.
     const data = body && typeof body === 'object' && 'success' in body && 'data' in body ? body.data : body;
@@ -5632,6 +5709,35 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // reads it and no metadata write ever carries it.
     markSwitchedOffActions(item, data && typeof data === 'object' ? (data as any).disabledActions : undefined);
     return attachObjectSortability(item, data && typeof data === 'object' ? (data as any).sortability : undefined);
+  }
+
+  /** The by-name route read behind {@link fetchObjectSchemaFresh}: its response body. */
+  private async requestObjectSchema(objectName: string): Promise<unknown> {
+    const url = `${this.baseUrl}/api/v1/meta/object/${encodeURIComponent(objectName)}`;
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    // Bearer (server-to-server) callers configure `this.token`; cookie/console
+    // auth is injected by `fetchImpl` (the authenticated fetch wrapper).
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const res = await this.fetchImpl(url, {
+      method: 'GET',
+      headers,
+      // Revalidate instead of serving the stale `max-age` body (see {@link fetchObjectSchemaFresh}).
+      cache: 'no-cache',
+    });
+
+    if (!res.ok) {
+      const errBody: any = await res.json().catch(() => ({ message: res.statusText }));
+      const envelope = readErrorEnvelope(errBody);
+      const err: any = new Error(envelope.message ?? res.statusText);
+      err.status = res.status;
+      err.code = envelope.code;
+      throw err;
+    }
+    return res.json();
   }
 
   /**
@@ -5785,6 +5891,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // read asked after this write is answered neither by the stored list nor
     // by a list request sent before it.
     this.metadataCache.invalidate?.(VIEW_LIST_KEY);
+    if (this.appBundles.holds('view', viewName)) this.appBundles.markStale();
   }
 
   /**
@@ -7233,6 +7340,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    */
   invalidateCache(key?: string): void {
     this.metadataCache.invalidate(key);
+    // objectstack#27627 — and the bundles, when the key names an item one of
+    // them holds: its next read must reach the server, so the bundle asks
+    // again (`If-None-Match`) before answering it.
+    if (key === undefined || cacheKeyNamesBundledItem(key, this.appBundles)) this.appBundles.markStale();
   }
 
   /**
@@ -7240,6 +7351,9 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    */
   clearCache(): void {
     this.metadataCache.clear();
+    // objectstack#27627 — the world the bundles were read in is gone (an
+    // organization, session or locale switch).
+    this.appBundles.clear();
   }
 
   /**

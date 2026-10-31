@@ -387,6 +387,18 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // (objectui#11818).
   const appSegment = appAddressSegment(apps, matchedApp) ?? appName ?? appRouteSegment(activeApp);
 
+  // objectstack#27627 — entering an app loads its metadata bundle, and
+  // re-entering it revalidates the one held (`loadAppBundle`): from then on the
+  // by-name metadata reads of everything the app reaches are answered from it.
+  // Only the app the URL names: a pseudo-route's fallback app is not entered.
+  // A host adapter without the bundle keeps every by-name read.
+  const bundleAppName: string | undefined = typeof matchedApp?.name === 'string' ? matchedApp.name : undefined;
+  useEffect(() => {
+    const load = dataSource?.loadAppBundle;
+    if (!bundleAppName || typeof load !== 'function') return;
+    void load.call(dataSource, bundleAppName);
+  }, [dataSource, bundleAppName]);
+
   // objectstack-ai/objectstack#26183 — a URL that reached the app through its
   // NAME alias moves to the app's one address, path, search, hash and history
   // state kept. The alias still opens (old bookmarks and shared links keep

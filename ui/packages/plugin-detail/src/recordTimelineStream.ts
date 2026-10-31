@@ -46,6 +46,14 @@ export interface RecordTimelinePanel {
 
 export const RecordTimelinePanelContext = React.createContext<RecordTimelinePanel | null>(null);
 
+/**
+ * Where the 动态 stream drawn in full — the 动态 tab — reports how many
+ * entries it holds, for the tab's count chip on the record page's tab row
+ * (objectstack#27524, Target 8). Reported while the 全部 chip is on, the
+ * whole stream; `null` while unknown. `null` anywhere else: nothing reports.
+ */
+export const RecordTimelineCountContext = React.createContext<((count: number | null) => void) | null>(null);
+
 /** One audit-log entry as the host enriches it (`RecordDetailView`'s history read). */
 export interface AuditEntryLike {
   id?: string | number;

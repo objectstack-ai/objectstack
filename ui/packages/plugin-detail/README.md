@@ -817,6 +817,17 @@ then each related list in the reader's arrangement, then Approvals and
 Attachments. The reader's ⊟ (`rightColumn`) takes the right column out of the
 two-column tiers; there is no tabbed tier.
 
+A tab row closes the record header in every tier (`RecordTabRow`): 「概览」
+(Overview), then 动态, then one tab per related panel in the reader's
+arrangement, each with its count. A tab is its panel's whole face: choosing it
+draws the full list (every column, paging, sort, inline edit) or the full
+stream below the row, with the header unchanged, and the URL carries it
+(`?related=<object>.<field>`, `?related=timeline`); 「概览」 or Esc returns. The
+row shows as many tabs as its own width fits, measured on every resize, and
+folds the rest into 「+N ▾」, which lists them with their counts and ends with
+the hidden panels' tabs. 「概览」, at least one more tab and the active tab are
+always on the row.
+
 The related panels load counts first and rows on demand (`RelatedCardStack`).
 Every panel's count is asked in one request set, and each panel is a
 placeholder until the set has answered. A panel counted at 0 reads no rows. A
