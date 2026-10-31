@@ -181,11 +181,6 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 (`date`) rate, and that rate in `rateField` (`number`), both `readonly: true`.
 Cross-currency totals sum `field`.
 
-`homeAmount` (`'record'` only, all three required): the engine stores the
-home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
-(`date`) rate, and that rate in `rateField` (`number`), both `readonly: true`.
-Cross-currency totals sum `field`.
-
 ### Select with Default
 
 ```typescript

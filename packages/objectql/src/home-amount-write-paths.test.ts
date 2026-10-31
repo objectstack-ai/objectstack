@@ -58,7 +58,7 @@ function makeStubDriver() {
 const OBJECT = 'fx_invoice';
 const HOME_AMOUNT = { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' };
 const FIELDS = {
-  code: { name: 'code', type: 'text' },
+  ref: { name: 'ref', type: 'text' },
   currency_code: { name: 'currency_code', type: 'text', valueDomain: 'iso_4217_currency' },
   invoice_date: { name: 'invoice_date', type: 'date' },
   amount: { name: 'amount', type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code', homeAmount: HOME_AMOUNT } },
@@ -115,9 +115,9 @@ describe('import and REST writes convert through the same engine path', () => {
     if (kernel?.getState() === 'running') await kernel.shutdown();
   });
 
-  const storedByCode = (code: string) => {
-    const hits = Array.from(stub.storeFor(OBJECT).values()).filter((r) => r.code === code);
-    expect(hits.length, `one stored row for ${code}`).toBe(1);
+  const storedByRef = (ref: string) => {
+    const hits = Array.from(stub.storeFor(OBJECT).values()).filter((r) => r.ref === ref);
+    expect(hits.length, `one stored row for ${ref}`).toBe(1);
     return hits[0]!;
   };
   const protocol = () => new ObjectStackProtocolImplementation(objectql as never) as unknown as ImportProtocolLike & {
@@ -129,7 +129,7 @@ describe('import and REST writes convert through the same engine path', () => {
   };
   const metaMap = new Map<string, any>(Object.entries(FIELDS));
   const importRows = (p: ImportProtocolLike, rows: Array<Record<string, unknown>>, over: Record<string, unknown> = {}) => runImport({
-    p, objectName: OBJECT, metaMap, writeMode: 'insert', matchFields: ['code'], dryRun: false, runAutomations: false,
+    p, objectName: OBJECT, metaMap, writeMode: 'insert', matchFields: ['ref'], dryRun: false, runAutomations: false,
     trimWhitespace: true, skipBlankMatchKey: false, context: { userId: 'usr_importer', tenantId: 'org_a' }, rows, ...over,
   } as any);
 
@@ -138,10 +138,10 @@ describe('import and REST writes convert through the same engine path', () => {
 
     it('the REST door (protocol createData / updateData) converts on create and on an amount change', async () => {
       const p = protocol();
-      await p.createData({ object: OBJECT, data: { code: 'rest', currency_code: 'USD', invoice_date: '2026-03-15', amount: 10000 }, context: { userId: 'u1', tenantId: 'org_a' } });
-      expect(storedByCode('rest')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
-      await p.updateData({ object: OBJECT, id: storedByCode('rest').id, data: { amount: 1389 }, context: { userId: 'u1', tenantId: 'org_a' } });
-      expect(storedByCode('rest')).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
+      await p.createData({ object: OBJECT, data: { ref: 'rest', currency_code: 'USD', invoice_date: '2026-03-15', amount: 10000 }, context: { userId: 'u1', tenantId: 'org_a' } });
+      expect(storedByRef('rest')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
+      await p.updateData({ object: OBJECT, id: storedByRef('rest').id, data: { amount: 1389 }, context: { userId: 'u1', tenantId: 'org_a' } });
+      expect(storedByRef('rest')).toMatchObject({ amount_home: 10000, amount_rate: 0.1389 });
       // The home currency was asked of the settings service, for the row's organization.
       expect(settingsAsked).toContainEqual({ ns: 'localization', key: 'currency', tenantId: 'org_a' });
     });
@@ -149,30 +149,30 @@ describe('import and REST writes convert through the same engine path', () => {
     for (const [label, p] of [['batched (insertManyData)', protocol], ['per-row (createData)', perRow]] as const) {
       it(`an import, ${label}, converts each row and refuses a row with no rate in force`, async () => {
         const summary = await importRows(p(), [
-          { code: 'a', currency_code: 'USD', invoice_date: '2026-03-15', amount: '10000' },
-          { code: 'b', currency_code: 'CNY', amount: '12.345' },
-          { code: 'c', currency_code: 'USD', invoice_date: '2025-06-30', amount: '1' },
+          { ref: 'a', currency_code: 'USD', invoice_date: '2026-03-15', amount: '10000' },
+          { ref: 'b', currency_code: 'CNY', amount: '12.345' },
+          { ref: 'c', currency_code: 'USD', invoice_date: '2025-06-30', amount: '1' },
         ]);
         expect(summary.results.map((r: any) => r.ok)).toEqual([true, true, false]);
         expect(JSON.stringify(summary.results[2])).toContain('ERR_EXCHANGE_RATE_MISSING');
-        expect(storedByCode('a')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
-        expect(storedByCode('b')).toMatchObject({ amount_home: 12.35, amount_rate: 1 });
-        expect(Array.from(stub.storeFor(OBJECT).values()).some((r) => r.code === 'c')).toBe(false);
+        expect(storedByRef('a')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
+        expect(storedByRef('b')).toMatchObject({ amount_home: 12.35, amount_rate: 1 });
+        expect(Array.from(stub.storeFor(OBJECT).values()).some((r) => r.ref === 'c')).toBe(false);
       });
     }
 
     it('a historical (preserveAudit) update-mode import of the home column is recomputed over, not kept', async () => {
-      await importRows(protocol(), [{ code: 'h', currency_code: 'USD', invoice_date: '2026-03-15', amount: '10000' }]);
-      const summary = await importRows(perRow(), [{ code: 'h', amount_home: '1', amount_rate: '9' }], {
+      await importRows(protocol(), [{ ref: 'h', currency_code: 'USD', invoice_date: '2026-03-15', amount: '10000' }]);
+      const summary = await importRows(perRow(), [{ ref: 'h', amount_home: '1', amount_rate: '9' }], {
         writeMode: 'update', treatAsHistorical: true,
       });
       expect(summary.results.map((r: any) => r.ok)).toEqual([true]);
-      expect(storedByCode('h')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
+      expect(storedByRef('h')).toMatchObject({ amount_home: 71994.24, amount_rate: 0.1389 });
     });
 
     it('an unset localization.currency refuses the REST write ERR_HOME_CURRENCY_UNSET', async () => {
       home = undefined;
-      const err = await protocol().createData({ object: OBJECT, data: { code: 'x', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1 }, context: { userId: 'u1' } })
+      const err = await protocol().createData({ object: OBJECT, data: { ref: 'x', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1 }, context: { userId: 'u1' } })
         .then(() => null, (e: { code?: string }) => e);
       expect(err?.code).toBe('ERR_HOME_CURRENCY_UNSET');
       expect(stub.storeFor(OBJECT).size).toBe(0);
@@ -181,7 +181,7 @@ describe('import and REST writes convert through the same engine path', () => {
 
   it('with no settings service composed, the home currency is unset — refused, never defaulted', async () => {
     await bootKernel(false);
-    const err = await protocol().createData({ object: OBJECT, data: { code: 'x', currency_code: 'CNY', amount: 1 }, context: { userId: 'u1' } })
+    const err = await protocol().createData({ object: OBJECT, data: { ref: 'x', currency_code: 'CNY', amount: 1 }, context: { userId: 'u1' } })
       .then(() => null, (e: { code?: string }) => e);
     expect(err?.code).toBe('ERR_HOME_CURRENCY_UNSET');
   });
