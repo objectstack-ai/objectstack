@@ -98,12 +98,6 @@ export interface ConsoleServerActionOptions {
    */
   t?: ConsoleServerActionTranslate;
   /**
-   * The session's language (a BCP-47 tag), read per refusal: the language the
-   * field names of a required-fields hint are joined in. Optional: without it
-   * the runtime's default locale joins them.
-   */
-  locale?: () => string | undefined;
-  /**
    * SPA route hop, for a handler that returned `openIn: 'self'` alongside its
    * `redirectUrl`. The console passes react-router's `navigate` — the router
    * this app already uses; nothing new is introduced here.
@@ -126,7 +120,6 @@ function withRequiredFieldsHint(
   result: ActionResult,
   action: ActionDef,
   t: ConsoleServerActionTranslate,
-  locale: string | undefined,
 ): ActionResult {
   const names = [...new Set(
     (result.fieldErrors ?? [])
@@ -134,12 +127,8 @@ function withRequiredFieldsHint(
       .map((entry) => entry.label || entry.field),
   )];
   if (names.length === 0 || !result.error) return result;
-  let fields: string;
-  try {
-    fields = new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(names);
-  } catch {
-    fields = names.join(', ');
-  }
+  // The pack's list punctuation, the key the form's field lists join with.
+  const fields = names.join(t('validation.formInvalidJoiner', ', '));
   const hint = action.label
     ? t('console.serverAction.fillRequiredThenRetry', 'Fill in {{fields}}, then run “{{action}}” again.', { fields, action: action.label })
     : t('console.serverAction.fillRequiredFirst', 'Fill in {{fields}} first.', { fields });
@@ -270,7 +259,7 @@ export function createConsoleServerActionHandler(opts: ConsoleServerActionOption
         closeTab(preOpenedTab);
         // Don't toast here — the ActionRunner's post-execution hook surfaces
         // `error` as a toast; toasting here too double-fires it.
-        return withRequiredFieldsHint(result, action, t, opts.locale?.());
+        return withRequiredFieldsHint(result, action, t);
       }
       // ── redirectUrl convention ────────────────────────────────────────
       // Read off the HANDLER's return value, not the action envelope wrapping

@@ -31,13 +31,13 @@ function refusing(message: string, fields: unknown[]) {
   })) as unknown as ServerActionFetch;
 }
 
-function handlerOver(fetch: ServerActionFetch, locale = 'en') {
+function handlerOver(fetch: ServerActionFetch, t?: (key: string, englishDefault: string, values?: Record<string, string>) => string) {
   return createConsoleServerActionHandler({
     fetch,
     baseUrl: () => '',
     resolveObject: () => 'showcase_invoice',
     onRefresh: () => {},
-    locale: () => locale,
+    t,
   });
 }
 
@@ -50,23 +50,25 @@ describe('a required-field refusal names what to fill in (objectstack#27520 row 
     expect(res.error).toBe('Issued On is required. Fill in Issued On, then run “Submit for Sign-off” again.');
   });
 
-  it('joins several required fields in the session’s language, each once', async () => {
+  it('joins several required fields with the pack’s list punctuation, each once', async () => {
     const fields = [
       { field: 'issued_on', code: 'required', label: 'Issued On' },
       { field: 'due_on', code: 'required', label: 'Due On' },
       { field: 'issued_on', code: 'required', label: 'Issued On' },
     ];
     const en = await handlerOver(refusing('Two fields are required', fields))(SUBMIT);
-    expect(en.error).toBe('Two fields are required. Fill in Issued On and Due On, then run “Submit for Sign-off” again.');
-    const de = await handlerOver(refusing('Zwei Felder fehlen', fields), 'de')(SUBMIT);
-    expect(de.error).toContain('Issued On und Due On');
+    expect(en.error).toBe('Two fields are required. Fill in Issued On, Due On, then run “Submit for Sign-off” again.');
+    const zhJoiner = (key: string, englishDefault: string, values?: Record<string, string>) =>
+      key === 'validation.formInvalidJoiner' ? '、' : englishDefault.replace(/\{\{(\w+)\}\}/g, (_h, n: string) => values?.[n] ?? '');
+    const zh = await handlerOver(refusing('两个字段为必填项', fields), zhJoiner)(SUBMIT);
+    expect(zh.error).toContain('Fill in Issued On、Due On,');
   });
 
   it('keeps the server’s own stop, and ends a CJK sentence with its own', async () => {
     const fields = [{ field: 'issued_on', code: 'required', label: '开具日期' }];
     const stopped = await handlerOver(refusing('Issued On is required.', fields))(SUBMIT);
     expect(stopped.error?.startsWith('Issued On is required. Fill in')).toBe(true);
-    const zh = await handlerOver(refusing('开具日期为必填项', fields), 'zh')(SUBMIT);
+    const zh = await handlerOver(refusing('开具日期为必填项', fields))(SUBMIT);
     expect(zh.error?.startsWith('开具日期为必填项。Fill in 开具日期')).toBe(true);
   });
 
