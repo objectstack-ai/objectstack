@@ -1,5 +1,507 @@
 # @object-ui/console
 
+## 18.3.0
+
+### Minor Changes
+
+- 2d05cd4: fix(ui): a form view's `layout: 'horizontal'` draws each label beside its field, a tabbed form keeps it, and the form page draws `type: 'tabbed'` as tabs (#26843)
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A form view's `layout: 'horizontal'` reached every console form but drew nothing different, and the form page ignored `type: 'tabbed'`:
+  
+  - **`layout: 'horizontal'`** now places each field's label in a fixed column beside its control from the `sm` breakpoint up; below `sm` (a phone) the field stays stacked, label above control, as `vertical` draws it. The description and validation message stay under the control. `vertical`, and a form view with no `layout`, draw exactly as before. Before, the form renderer read the key only to align its action row.
+  - **A tabbed form** (`type: 'tabbed'`) now keeps an authored `layout: 'horizontal'` on every tab. It used to draw its fields `vertical` whatever the form view said.
+  - **The form page** (`/forms/:name`, and the public `/f/:slug`) now draws a `type: 'tabbed'` form view as one tab per section: `defaultTab` opens first, `tabPosition` places the strip, and a section hidden by its `visibleWhen` draws no tab. A submit carries every section's fields, the closed tabs' included, and a submit refused for a missing field opens the tab that holds it. A tabbed form view with a single section draws it stacked, as before. The page also draws `layout: 'horizontal'` rows. Before, it drew every section stacked and every label above its field.
+- 6af79c1: fix(console): every console form entry point renders the form view's `buttons`, `layout` and `defaults`, and a tabbed form with subforms opens on its `defaultTab` (#26843)
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A form view's `buttons`, `layout` and `defaults` saved and published, but the console set its own values over them, depending on which entry point opened the form:
+  
+  - **The full-page record form** (`/new`, `/record/:id/edit`) and **the New / Edit dialog** set `showSubmit: true`, their own submit and cancel labels and `layout: 'vertical'`, so an authored `buttons.submit.label`, `buttons.*.show: false` or `layout: 'horizontal'` did nothing. Both now read them from the form view the flow selects. An authored label may be a per-locale map. The New dialog also ignored `defaults`; a create there now opens with them.
+  - **`defaults` and the host's own opening values merge per field.** A URL prefill, a parent pre-link or a seeded calendar day still wins for the fields it names, and the form view's `defaults` fill the rest. Before, a create carrying any prefill dropped `defaults` entirely. An edit never reads `defaults`.
+  - **The form page** (`/forms/:name`, and the public `/f/:slug`) never read `buttons` or `defaults`. An authored submit or cancel label now shows, `show: false` removes the button (the public form still draws no Cancel), and a create opens with `defaults`, over the object's own field defaults and under a `?prefill_` param.
+  - **A tabbed form with subforms** opened on its first tab with the strip on top. `ObjectForm` now hands `defaultTab` / `tabPosition` (and `layout`) through `MasterDetailForm` to the header form. The modal's tabbed layout reads both keys, and its subforms arm now renders the header tabbed instead of stacked.
+  - **A hidden Cancel on a master-detail form** (`showCancel: false`, or `buttons.cancel.show: false`) is no longer drawn: the action bar draws Cancel only when it is handed `onCancel`, and both form arms now hand none.
+  
+  `buttons.reset` and the drawer keys (`drawerSide` / `drawerWidth`) are not covered: no console entry point draws a reset button or opens a form view as a drawer.
+
+### Patch Changes
+
+- c4c515a: fix(app-shell): the route's object-read failure and the page's record-load failure are announced to assistive technology
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two load-failure blocks in the Console drew an `Empty` with no `role`, so a screen reader heard nothing when the read failed: the route slot shown when the by-name read of the route's object gets no answer (`route-object-read-failed`), and the custom page's record-scope read failure (`page-record-load-failed`). Both are now drawn by the shared `DataErrorState` from `@object-ui/components`, which is `role="alert"` by construction, so a failed read is announced and reads differently from an empty one.
+  
+  Their titles, messages, i18n keys and defaults, test ids and Retry controls are unchanged; Retry rides in the component's `children` so it keeps its own test id. The visible change is the shared component's look: a small destructive icon square above the title.
+- 8eeb3b3: feat(spec)!: retire the list view's `options` bag; stored bags fold onto the top-level blocks, and the renderers read the blocks alone (#25923)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered list-view-options-bag-folded, ui-list-view-options-bag-folded -->
+  
+  A flattened list view overlay carried every per-kind block twice: as the top-level `kanban`, `calendar`, `gallery`, `timeline`, `gantt`, `map`, `tree` and `chart`, and again under a legacy `options` bag the top-level block won over per key. Each renderer re-implemented that merge. The bag is retired, and each block has one spelling.
+  
+  - **`@objectstack/spec`**: the list overlay's `options` is a removed-key tombstone. The view write door refuses a body that carries it, by name, with the prescription to move each `options.KIND` block to `KIND`. The ADR-0087 D2 conversion `list-view-options-bag-folded` folds a stored bag onto the top-level blocks before a row is served (the top-level value wins per key; for `chart`, whose block replaced the bag whole, a bag beside a block is dropped), and `os migrate meta --from 17` lists the same edits for a source. A bag it cannot fold (an `options.grid`, a non-object block, a bag on a form view) is left in place with a TODO. The D3 entry `ui-list-view-options-bag-folded` names what the fold cannot decide: the bag was judged with every key optional, so a folded block can still miss a key its block requires. The page `list-view` component row shares the tombstone.
+  - **`@object-ui/types`**: `ListViewSchema.options` takes the spec's tombstone by reference, so every published door refuses a bag at `options` with the spec's text, and the TypeScript face has no bag. `NamedListView.options` is a `?: never` tombstone that names the top-level blocks. The dataset-chart filter refusal reads the `chart` block alone, and the page node's flat `options` is refused with the bag's own text rather than pointed at `properties.options`.
+  - **`@object-ui/plugin-list`**: `ListView` reads each kind from its top-level block alone: the render branches, the capability gate, the projection and expand collectors and the fetch effect's dependencies no longer read `options`. The `list-view` registration publishes no `options` input.
+  - **`@object-ui/app-shell`**: the object page relays each per-kind block at the top level of the list schema, held by value per block so an equal rebuild keeps its identity, and no longer forwards a stored bag. The interface page sends one `map` block (its derivation with the authored keys laid over) and no bag. The Studio view preview and the list-view inspector no longer fold a bag; the server does. `storedLegacyOptions` is removed.
+  - **`@object-ui/plugin-view`**: the host list schema carries the active view's blocks at the top level instead of under `options`.
+  - **`@object-ui/plugin-map`**: two development warnings name the view's `map` block instead of `options.map`.
+  - **`@object-ui/console`, `@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/lint`**: test pins only (the registry parity row, the write door's refusal and served fold, and the lint finding), no runtime change.
+  
+  **BREAKING** for a list view body, a page `list-view` node or a `ListView` host that writes `options`.
+  
+  - **Before.** `{ type: 'kanban', columns: ['name'], options: { kanban: { groupByField: 'stage' } } }` was accepted at the view write door and drew a board laned on `stage`, and `ListView` read the bag beside the top-level blocks.
+  - **Now.** The write door and every `@object-ui/types` door refuse `options` by name, and `ListView` reads no bag. A view already stored with one is served folded onto its top-level blocks and renders from them. On the object page those blocks now pass through the same relay defaults as a block written top-level (the kanban `titleField: 'name'` floor, for one), so a folded row can draw differently from its bag where the bag left such a key unset. No reachable source stores a bag (census: 0 rows), and `ObjectView.storedRowParity-10380` pins the folded rendering.
+  - **Fix.** Move each block to the top level: `{ type: 'kanban', columns: ['name'], kanban: { groupByField: 'stage', columns: ['name'] } }`, keeping the top-level value where both set a key, and add any key the block requires that the bag never had (a kanban's `columns`, a gantt's `titleField`, a chart's `dataset` and `values`). A grid's settings are top-level keys of the view. Run `os migrate meta --from 17` for a source, with `--write` to apply the edits it can prove.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- fd97351: fix(console): the standalone `/forms/:name` route shows select option labels in the language the user chose
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** A user whose chosen language differed from the browser's (a zh-CN user on an en-US browser) saw the form's field labels in their language and every select option in the browser's. The route read the form view, the object schema and the record with a bare `fetch`, so the server localized the schema, option labels included, by the browser's `Accept-Language`.
+  - **Now.** The internal form route (`/forms/:name` and `/apps/:appName/forms/:name`) sends its API requests through the console's authenticated fetch, the same channel the in-app record form (`?form=ID`) reads the object schema over. That fetch sends the session's language as `Accept-Language`, so the server answers option labels in the language the user chose. An option the translation bundle does not cover keeps its authored label. No second translator is added.
+  - **Unchanged.** The public anonymous form `/f/:slug` keeps its bare `fetch`.
+- 319d6fa: feat(auth,app-shell,i18n,console): an invitation link opened signed out names the inviter and the organization on the sign-in and sign-up pages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A visitor who opened an invitation link while signed out landed on 「接受邀请 · 请使用收到邀请的邮箱。」 and then 「注册账号并加入」, and neither page said who had invited them or to which organization. The server has answered that question anonymously since `GET /api/v1/auth/organization/invitation-preview?id=ID`, but no page read it.
+  
+  - **`@object-ui/auth`:** `getInvitationPreview(invitationId)` on the auth client, `AuthProvider` and `useAuth()`, with the `AuthInvitationPreview` type (`organizationName`, `inviterName`, `email`). It needs no session. It resolves the preview, resolves `null` for the server's not-found answer, and rejects with the server's `code` and the HTTP `status` on any other failure.
+  - **`@object-ui/app-shell`:** `useInvitationPreview(redirect)` and `invitationArrivalCopy(page, preview, t)`. `DefaultLoginPage` and `DefaultRegisterPage` use them for a visitor arriving from `/accept-invitation/ID`, and the card reads 「林晓 邀请你加入 晓林装饰工作室」. The masked invited address (`z***@example.com`) is shown as the address to use. It never fills the email field, because a masked value is not an address. An unknown or expired invitation, a failed read, or a server without the route keeps the generic copy.
+  - **`@object-ui/console`:** the console's own `/login` and `/register` do the same.
+  - **`@object-ui/i18n`:** `auth.login.invitationPreviewTitle`, `auth.login.invitationPreviewTitleNoInviter`, `auth.login.invitationPreviewDescription` and `auth.register.invitationPreviewDescription`, in all ten locale packs.
+  
+  What to do: nothing. A host that mocks `useAuth()` without `getInvitationPreview` keeps the generic invitation copy.
+- a71564f: fix(app-shell): the approval step line draws the route the request's run took, not the flow graph's first branch
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The approval step line used to draw the request's `flow_steps`. The approvals read builds that list by walking the flow from its start and taking the `approve` edge, else the `true` edge, else the first edge at every node. So a request that a decision routed down another branch showed rungs it never reaches. A contract routed from the manager to the finance-only rung read "manager · legal + finance (joint) · executive · general manager" while it waited on the finance controller.
+  
+  What changes:
+  
+  - On a business record's approvals panel, the line now shows the steps the pending request's flow run has passed, oldest first, then the pending step. Each step comes from a request the run actually opened: same flow run, another node, approved, and opened before the pending one. A step approved in several rounds is shown once. Nothing ahead of the pending step is shown, because no request row says which branch the run takes next.
+  - The approvals list serves a request only to its participants, so a step the viewer had no part in is left out rather than guessed. With fewer than two steps, no line is drawn.
+  - On the approval request page, the decision panel no longer draws a step line. Its row proves only its own step, which the page header already names. The line returns there once the approvals read serves the route the run takes.
+  
+  What to do: nothing. Nothing a flow, page or object declares changes.
+- 8222fa8: fix(console,i18n): the OAuth consent screen explains the `metadata:write` scope and never shows an unknown scope as its bare spelling
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`.** The consent screen at `/oauth/consent` names every MCP scope in a sentence. The sentences come from `@objectstack/spec`'s `MCP_OAUTH_SCOPE_CONSENT_COPY`, the copy the spec declares beside each scope, through a switch that is exhaustive over `McpOauthScope`: a scope added to the spec without a case here fails to compile. `metadata:write` used to appear as that raw string beside three plain sentences. It now reads "Build and change this app's metadata as drafts, within your own permissions — a person publishes them". A scope the page cannot name renders as "Unrecognised permission: SCOPE" instead of the bare scope string, which could read as a description of the grant.
+  - **`@object-ui/i18n`.** Every locale pack gains `oauth.consent.scope.metadataWrite` and `oauth.consent.scope.unrecognised` (the latter takes a `{{scope}}` placeholder). `TranslationKeys` widens by these two keys.
+- a90163d: fix(app-shell): the field-permission editor shows and writes exactly what the runtime enforces for a field with no explicit rule
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A field row without a rule.** In the permission-set editor (Studio Access, and the permission sets under Setup), a field the set declares no field rule for is not constrained by the set: the object grant decides. Its row now shows the object row's own Read and Edit, in grey with a dashed edge, and says it follows the object. A field rule shows its own Read and Edit in the usual colour. A rule that grants Read or Edit the object row does not is ringed in amber, and its tooltip says that a holder of this set alone cannot use it.
+  - **Every control writes only what changes on screen.** A click on a row without a rule changes only the box it lands on. The field shortcuts move each visible row to their target and leave a row that already shows it as it is: **Read-only all** (renamed from **Read all**, since it switches Edit off), **Write all**, and **Clear**, which returns the visible rows to the object grant. Adding a row condition (**When (edit)**) to a row without a rule changes no box.
+  - **The permission-set preview** (also shown for each permission set under a position) lists every field rule the set declares, tagged hidden, read-only or editable.
+  - **`@object-ui/i18n`:** in the `studio` namespace, `perm.field.bulk.readable` reads "Read-only all" (「全部只读」), four new keys explain the grey and amber boxes (`perm.field.inherited.legend`, `perm.field.inherited.tip`, `perm.field.capped.read` and `perm.field.capped.edit`), and `engine.permissionPreview.fls.readOnly` tags a read-only rule in the preview.
+  
+  What to do: open the field rows of the permission sets you maintain and check them against what you intend. Coloured boxes are rules the set declares; grey boxes follow the object. **Clear** on a row returns it to the object grant.
+- 23ee3ae: fix(app-shell): a record page on a deployment without the approvals service no longer logs the record-lock read's 501
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a deployment that composes no approvals service, such as a fresh `npm create objectstack` scaffold, every record page asks the server whether an approval locks the record, and the server answers `501 NOT_IMPLEMENTED`. That answer is designed: it means there is no lock service, so no approval can lock the record, and the page already treated it that way. But the read went through the SDK client, which logs every non-2xx response as an error before its caller sees it. So each record open printed `HTTP request failed: GET /api/v1/approvals/records/OBJECT/ID/lock -> 501 [NOT_IMPLEMENTED]` in red, which reads like a broken server.
+  
+  What changes:
+  
+  - The record page reads the lock directly, the same way it already reads the approval requests, so no client logger runs first. A 501 is read silently.
+  - After a 501, the page does not ask again for any record until the page is reloaded. The browser's own network line for that first request still appears once, because the server answers the approval-requests read `200` with an empty list and the page cannot tell the service is missing until it asks.
+  - Any other failure of the lock read still logs, through the same logger the SDK client used: `HTTP request failed: GET URL -> STATUS [CODE]`, with a 404 still demoted to a debug line. The next record open asks again.
+  
+  What to do: nothing. Nothing a flow, page or object declares changes.
+- 9fab076: feat(spec,plugin-approvals,app-shell): the approvals get serves a request's own route, and both approval step lines draw it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The single request read (`GET /api/v1/approvals/requests/:id`) served one step list, `flow_steps`: the flow's trunk, walked from its start by taking the `approve` edge, else the `true` edge, else the first edge. A request a decision routed off the trunk was not on it. A contract routed from the manager to the finance-only rung was served the manager, the joint legal + finance rung, the executive and the general manager, all upcoming, and not its own rung.
+  
+  What changes:
+  
+  - `ApprovalRequestRow` gains `flow_route`, served on the same single reads as `flow_steps`. Its `steps` are the approval steps the request's flow run has passed (earlier requests of the same run, on another node, approved, in the order the run opened them, one entry per step), then the request's own step, then, for a pending request, the steps ahead that the flow's graph decides on its own when each step approves.
+  - Nothing past an undecided branch is listed. The walk ahead stops at a decision node, a conditioned edge, several out-edges, a loop back, or a node that runs other nodes (`subflow`, `map`, `loop`). `ahead` then reads `undecided`. It reads `end` when the walk reached the flow's end, and `decided` for a request that is already decided, whose route ends at itself.
+  - `flow_steps` is served unchanged. Its doc now says it is the trunk and that a step line never draws it.
+  - The business record's approvals panel draws the pending request's `flow_route`, so a viewer who took no part in an earlier rung now sees it too. Before, the panel rebuilt the line from the request rows the list read served that viewer.
+  - The approval request page draws its request's `flow_route`, at any status, where it had stopped drawing a step line at all.
+  
+  What to do: nothing. A client that reads `flow_steps` reads what it read before. A client that draws a request's progress should draw `flow_route` instead.
+- 3271a08: fix(console): a share link to a non-chat record shows the record's fields as read-only rows, not raw JSON
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The share-link page `/s/:token` printed `JSON.stringify(record)` in a code block for every object except `ai_conversations`: field API names, unformatted values and nested objects as JSON.
+  - **Now.** The page renders one read-only row per key the resolve answer carries. The label is the key humanized (`annual_revenue` reads "Annual Revenue"). The value is formatted by its JSON shape: ISO dates and date-times in the visitor's locale, numbers grouped, booleans as Yes / No, lists and nested objects as short text, and an empty value as a dash. System fields such as `id` and `created_at` are shown after the business fields. A record with no fields left reads "No data".
+  - **Unchanged.** The page shows exactly the fields the server returned: redacted fields stay absent and the "Some fields are hidden by the owner" line still renders. The `ai_conversations` transcript, the resolve request, its headers and the password flow do not change.
+  - **Not yet.** Field labels and field types are not in the resolve answer, and an anonymous visitor cannot read the object's metadata, so authored labels, picklist labels, currency and lookup names do not show yet.
+- 85c40fd: fix(app-shell): Home, the app switcher and the `app:launcher` block no longer offer an app the user's permission sets hide
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A permission set's `tabPermissions: { APP: 'hidden' }` hides an app from the member's launcher. The server applies that hide in one place, `GET /api/v1/me/apps`, and the console never read it: Home's tiles, the app switcher's menu and the `app:launcher` page block all listed `GET /api/v1/meta/app`, which still serves the hidden app because a hidden app keeps opening from a direct URL. So the member saw, and could open, the tile their admin had hidden.
+  
+  What changes:
+  
+  - The console reads `GET /api/v1/me/apps` once per user, beside its `/auth/me/permissions` read, and every launcher surface narrows its `/meta/app` list by that answer's app names. The tiles keep the labels, icons and publish state `/meta/app` serves.
+  - An app the answer was not asked about is not hidden by it: an app that is installed or published after the read stays on the launcher, and the console asks again.
+  - Home waits for the first answer, as it waits for the app list, so a hidden tile is never drawn and then removed.
+  - A deployment without the security plugin answers `404` there; the launcher then lists every app the user can open, as before. Any other failure does the same and says so once on the browser console.
+  - A hidden app still opens from its URL, and the switcher still names it while the user is in it. `default_off` is not a hide and changes nothing.
+  
+  What to do: nothing. A permission set that already hides an app now hides it on Home, in the switcher and in launcher blocks.
+- cbb3a1a: fix(console): the approvals inbox names the flow, the step and the object in the language the user chose
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** A user whose chosen language differed from the browser's (a zh-CN user on an en-US browser) read every inbox row's flow, step and object in the authoring language, while the request page showed the same request translated. The inbox read the approvals routes with a bare `fetch`, so the approvals door picked its labels by the browser's `Accept-Language`.
+  - **Now.** Every approvals call the inbox makes goes through the console's authenticated fetch, the channel the request page already reads over. It sends the session's language as `Accept-Language`, and the door answers `process_label`, `step_label` and `object_label` from the app's pack (`flows.FLOW.label`, `flows.FLOW.approvals.NODE.label`, `objects.OBJECT.label`). A flow, step or object the pack does not cover keeps its stored label. No second translator is added. The inbox's object filter now lists each object by that label instead of its machine name, and search matches the object label too.
+  - **Unchanged.** What is stored on the request row. The Setup › Approval Requests object list reads the generic data door, which serves the stored labels.
+- 69df290: fix(app-shell): the permission matrix's object rows show exactly what the runtime enforces for every grant shape
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Object rows.** In the permission-set editor (Studio Access, and the permission sets under Setup), each object row shows the object grant the runtime applies to that object. A row that inherits its grant is drawn in grey with a dashed edge, the look inherited field rows already use, with a tooltip and a legend line saying where the grant comes from. Editing such a row writes an entry for the object that starts from what the row shows.
+  - **Summaries.** "Only granted", the granted-object count and the delegated-admin companion list under Admin scope read the object grant as the rows show it.
+- 829fcf2: feat(app-shell): Studio orders an object's related lists, and a field group can place a related table
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Object settings, `relatedLists`.** The Settings tab lists the object's inbound relationships (each `lookup` / `master_detail` field of a child object that points at it) as an ordered list: drag a row or use the move buttons to reorder, and add a relationship from the picker. An entry is the child object's name, or `object.field` when that child points at the object through more than one field. Relationships no entry names follow, greyed and not draggable, in the default order (owned children first, then lookups). The list orders only: a relationship hidden with `relatedList: false` is listed and marked hidden, and the switch stays on the field. A preview shows the record page's resulting order, split into body tables and side cards. Removing the last entry removes the key.
+  - **Every write is checked first.** An entry that names no inbound relationship is never written, since `defineStack` and the publish door refuse it. A stored one keeps its row, marked, and the next change to the list leaves it out. Nothing is written until the object list has loaded.
+  - **Field groups.** The group inspector in the form layout designer has a "Place a related table here" picker that writes the group's `relatedList` from the same relationships. It is withheld while the group still holds fields, and it does not offer a relationship another group already places. In the designer, a group that places a table is drawn in its place as that table and accepts no dropped fields.
+  - **Shared ordered list.** The highlight fields editor and the related lists editor draw the same draggable, keyboard-movable rows.
+- fd73f2b: feat(app-shell): Studio authors what the record page reads about related lists, highlight fields, and new record pages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Field inspector, lookup and master-detail fields.** A "Related list on the parent record" section with a three-state control (Show / Don't show / Primary (in body)) writes `relatedList`: Don't show writes `false`, Primary writes `'primary'`, and Show leaves the key absent, the spec's own "true or absent = shown". Below it, `relatedListFilter` is edited with the same filter builder the dataset designer and the list toolbar use, instead of being absent from the inspector. A stored filter the builder cannot hold (nested, OR) is kept as stored and named.
+  - **Related-list block inspector.** The `record:related_list` block exposes `columns` (the child object's fields), `sort` (field and order rows), `filter` (the list toolbar's filter builder), `limit`, `showViewAll` (shown on when unset, the spec default) and `add`, beside the object, relationship field and title. A stored value in the other arm of a union, such as a string `sort` or `columns` given as saved-view column objects, is shown as JSON rather than as an empty or garbled list. The limit hint now reads 5, the renderer's own default.
+  - **Object settings.** `highlightFields` is an ordered list: drag a row or use the move buttons to reorder, add fields up to six, and see the highlight strip preview in the picked order. Removing the last field removes the key.
+  - **New record pages.** A record page created in the metadata editor now starts `kind: 'slotted'` with no slots, which is the synthesized default page, and it keeps following the object. The create form's kind follows the page type until the author picks one. Choosing `full` at create still copies the synthesized regions. In the page designer, a slotted record page says it is the default page and offers "Convert to full page", which copies the regions it renders, switches the kind to `full` and drops `slots`. An empty slotted page now opens on the slot editor instead of a blank regions canvas.
+- b88519e: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(spec): a book's *Uncategorized* group no longer lists the pages a sibling book places (#27091)
+  
+  When two books split one package's docs, for example a user manual and an admin manual gated by `audience: { permissionSet }`, each book's tree used to list the other book's pages under a trailing *Uncategorized* group. `resolveBookTree` judged "claimed" against the book's own groups only. ADR-0046 §6.4 rolls up only the docs "left unplaced", and a doc a sibling book places is placed.
+  
+  - **`resolveBookTree(book, docs, bookPackage?, books?)`** takes an optional fourth argument, every registered book. With it, the *Uncategorized* group holds only the docs of the book's packages that no book claims. The claim judge is `resolveBookClaimedDocs` over each book, the same claim set `resolveDocAudiences` unions audiences over. Without it, the tree is the same as before.
+  - **`GET /meta/book/:name/tree`** passes the books it already reads, so an administrator opening the user manual no longer sees the admin pages under *Uncategorized*. A doc that no book claims still rolls up there.
+  - **The console's docs pages** render the book sidebar with the console's own copy of the resolver (`book-nav.ts`). It takes the same optional fourth argument, and the reader and the book landing pass the authored books, so the sidebar no longer lists a sibling book's pages under *Uncategorized* either.
+  
+  The change only removes entries from the catch-all: a sibling book's docs appear nowhere new, and a doc's effective audience (§6.7) does not change.
+- 4265176: feat(console): a shared record shows its authored field labels, picklist labels and currency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** The share-link page `/s/:token` labelled each row of a non-chat record with the field key humanized ("Annual Revenue") and formatted each value by its JSON shape only, so a picklist showed its stored code and a currency amount showed a plain number.
+  - **Now.** The page reads the resolve answer's `fields` projection. Each row carries the field's authored label. A picklist value shows its authored option label and colour, one badge per value for a multi-select. A currency amount is formatted in the currency the field declares (`currencyConfig`), through the same resolution the record detail view uses; a field with no fixed currency and no tenant default still shows a plain amount.
+  - **Lookups.** A lookup row shows its authored label and the stored record id. The page never reads the referenced record: an anonymous visitor cannot, so the target's name is not shown.
+  - **Unchanged.** A key the projection does not describe, and an answer from a server that does not send `fields`, keep the humanized label and the JSON-shape value. Redacted fields stay absent. The page makes no request beyond the resolve call.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- a33fce2: feat(spec,plugin-form)!: `ObjectForm` lays a form out and no longer picks its container; the `object-form` block drops `formType: 'split'` and `SplitForm` retires, while the block keeps opening `drawer` and `modal` forms itself
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (the `object-form` block's `formType` refuses `split`; its `splitDirection`, `splitSize`, `splitResizable` and `sections[].pane`, the `object-master-detail-form` block's `sections[].pane`, and `FormViewSchema.splitDirection`, are tombstones)
+  
+  <!-- adr-0087: not-required (already-registered form-view-presentation-types-removed, ui-form-view-type-layout-only) 18.3.0 is unreleased, so this change widens those two entries in place: the conversion now strips splitDirection and reaches object-form page blocks, four new RETIRED_KEYS_BY_MAJOR rows record the tombstoned keys, and the D3 entry names the block -->
+  
+  **BREAKING** accept-set narrowing on the `object-form` page block and the form view (`@objectstack/spec`), and a removed export (`@object-ui/plugin-form`). ADR-0050, the renderer half of #27155.
+  
+  The model: a form's `formType` says how it lays out its sections. Where it opens is the caller's. On the `object-form` block the caller is the block itself, so `drawer` and `modal` stay there as the two containers the block opens; `split` drew two panes and had no other reader, so it leaves with its renderer.
+  
+  - **FROM → TO (block).** `formType: 'split'` → `formType: 'tabbed'` (one tab per section) or delete the value for `simple`; delete each section's `pane` and the block's `splitDirection` / `splitSize` / `splitResizable`. To edit child records beside the parent, use an `object-master-detail-form` block. `formType: 'drawer'` and `formType: 'modal'` are unchanged. The `object-master-detail-form` block's parent `sections` share the shape, so delete each section's `pane` there too.
+  - **FROM → TO (form view).** `splitDirection` on a form view → delete it. It joins `splitSize` and `splitResizable`, which left in the same release.
+  - **The one-line fix.** Delete the retired value and keys. `os migrate meta --from 17` lists the edits for existing sources, and `--write` applies them. A stored page or view row is converted when it is read (the `form-view-presentation-types-removed` conversion now reaches `object-form` page blocks, the section `pane` of `object-master-detail-form` blocks, and `splitDirection` too), so a block saved with `split` keeps loading as a `simple` form.
+  - **What the parse says.** `formType: 'split'` is refused by name with its prescription ("'split' was removed from the `object-form` `formType` enum in @objectstack/spec 18.3.0 (ADR-0050) — …"); each tombstoned key is refused on every `formType`. TypeScript rejects each at the authoring site.
+  - **`@object-ui/plugin-form`.** `ObjectForm` renders the `simple`, `tabbed` and `wizard` layouts only; a `formType` of `drawer` or `modal` on a node handed straight to `<ObjectForm>` now renders the inline form, and the host opens its own drawer or dialog around it (the console's New and Edit dialogs already mount `ModalForm` themselves). The registered `object-form` block routes `drawer` and `modal` through the new internal `ObjectFormContainer`, which hands the node to `DrawerForm` or `ModalForm` as before. `SplitForm`, `SplitFormProps` and `SplitFormSchema` are no longer exported, and the block no longer publishes the `splitDirection`, `splitSize` and `splitResizable` inputs. FROM `import { SplitForm } from '@object-ui/plugin-form'` → TO a `TabbedForm`, or the `form` renderer's `fieldPanes` for a host that composes panes itself.
+  - **`@object-ui/types`.** `ObjectFormSchema.formType` is `'simple' | 'tabbed' | 'wizard' | 'drawer' | 'modal'`, and its `splitDirection` / `splitSize` / `splitResizable` are the spec's tombstones by reference; the section `pane` member is gone.
+  - **Console.** Studio's page-block inspector no longer offers `Split` for an `object-form` (its `engine.inspector.pageBlock.option.formType.split` string is removed from `@object-ui/i18n`), the record page passes no split keys, and a view whose `type` is not one of the three form layouts is no longer taken for a form (`@object-ui/console`).
+  - **Supersedes one line of the form view `type` entry (#27155).** That entry says `splitDirection` stays declared; in this release it leaves too.
+  - **Unchanged.** `drawerSide`, `drawerWidth`, `modalSize` and `modalCloseButton` keep their readers: the block's drawer and modal containers. The enforce-or-remove question for `drawerSide` / `drawerWidth` on form views stays on #27153.
+- 1ed3360: fix(types, console): a shared `record`-mode currency amount shows its record's own currency (ADR-0144 D2, D9)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The share-link resolve answer's field projection (`buildShareLinkResolveAnswer`, `@objectstack/types`) carried a currency field's `currencyMode` and `defaultCurrency` only, so a shared `record`-mode amount, whose currency lives in a sibling code field, rendered as a plain number. A currency field's projected `currencyConfig` now also carries `currencyField`, the amount's code-field pointer, when the answer's `record` carries that code field. A link that redacts the code field gets neither the code nor the pointer, so the answer still describes nothing the record hides, and the amount shows as a plain number.
+  
+  The shared-record page hands the shared record to the currency face, which reads the code from it, so the amount shows in the currency its own record names. Every other field and every other key of the answer is unchanged.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself.
+- 0d45c0e: fix(ui): a wizard form keeps `layout: 'horizontal'`, and the form page draws `type: 'wizard'` as steps (#27224)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A wizard form view (`type: 'wizard'`) dropped two things it declares:
+  
+  - **A wizard form** now keeps an authored `layout: 'horizontal'` on every step, drawing each label beside its field from the `sm` breakpoint up, as simple and tabbed forms already do. It used to draw its fields `vertical` whatever the form view said. `vertical`, and a form view with no `layout`, draw exactly as before.
+  - **The form page** (`/forms/:name`, and the public `/f/:slug`) now draws a `type: 'wizard'` form view as one step per section, the way the app's wizard form does: a step indicator (hidden by `showStepIndicator: false`), **Next** checks the current step's required fields before the next step opens, **Back** is always free, a later step opens from the indicator once completed or under `allowSkip`, and the last step's **Submit** carries every step's fields. A submit refused for a missing field opens the step that holds it and marks it in the indicator. A wizard form view with a single section draws it stacked, as before. Before, the page drew every section stacked on one page with no steps.
+- b10fd65: fix(studio): a flow node's key / value map puts each field name on its own line, so the name is readable
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** In the flow inspector, each row of a key / value map (a Create Record or Update Record node's field values, an HTTP node's headers, an Assignment node's assignments) put the key box, the value box and up to two buttons on one line. In the 300 px inspector the key box showed about nine characters, so a field name read "subj" or "dueD".
+  - **Now.** A row stacks: the key on its own line beside the remove button, the value on the line under it beside the text / expression toggle where the map has one. The same field name shows about 24 characters. Nothing about what the map stores changes.
+- 968925c: fix(studio): the publish review names the flow steps that changed instead of "Also changed: ~ nodes"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Expanding a flow draft in the publish review compared every top-level key other than `fields` whole. A flow keeps all of its steps in one `nodes` list, so any step edit read "Also changed: ~ nodes".
+  - **Now.** A flow's steps are compared one by one, matched by `id`: a row per step added, changed or removed, led by the step's label with its id beside it, and a changed step names the properties that differ (`config` one level down, as `config.fields`). `edges` and the flow's other keys stay under "Also changed:".
+  - **Unchanged.** A reorder alone, or a step list not keyed by `id`, keeps the `nodes` row, so a draft that differs never reads as unchanged. Other item types are compared as before.
+- 7e200b4: fix(studio): a read-only package's flow Enabled switch no longer looks like a live control
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** In Studio's Automations pillar, a read-only (code) package's flow showed its Enabled switch with a green track. The switch was already disabled, but it read as one the author could flip.
+  - **Now.** On a read-only package the track is muted and a lock sits beside the word. The thumb position, the word (Enabled or Disabled) and `aria-checked` still say whether the flow is on. The read-only reason on the wrapper is unchanged.
+  - **Unchanged.** A writable package's switch keeps its green track and stays operable.
+- b223072: fix(setup): a packaged flow the deployment does not run no longer shows a green switch, and a scheduled-work policy row says so in plain words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** On Setup › Packaged automation, a flow whose activation flag is on but which the engine has not armed showed the switch's green "on" track beside an outlined "Not running here" badge. An administrator read the green track as "running". When the cause was the deployment's scheduled-work policy, the only explanation was the platform's sentence behind Details, which names an environment variable the administrator cannot set from the browser.
+  - **Now.** A not-running row's switch draws a muted on-track. A row whose engine cause is `deployment_policy` reads "On, but this deployment does not run scheduled work" in place of the badge, localized in all ten packs (new key `packagedAutomation.notRunningDeploymentPolicy`). The platform's sentence stays verbatim behind Details.
+  - **Unchanged.** The switch stays enabled, stays checked while the flag is on, and still writes the flag. Rows with the other causes (`disabled_subflow`, `missing_trigger`, `binding_failure`) keep "Not running here". Running rows keep the primary track and "On"; off rows keep "Off".
+- e24d4eb: fix(setup): a permission set's field rows no longer offer the platform's bookkeeping columns
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Expanding an object in a permission set listed every field of the merged definition, so the platform's search companion `__search` sorted first and `organization_id` / `owning_business_unit_id` sat among the object's own fields.
+  - **Now.** A field the platform marks both `system` and `hidden` is not offered, the same rule the Studio Data rail, form designer and pickers already apply. The bulk shortcuts act only on the offered rows.
+  - **Unchanged.** A field the set already carries an entry for still draws as written, also while the draft clears it. An author's own hidden field and the system `owner_id` still draw. How a save writes is unchanged, and the row-condition editor still knows every field name.
+- b74793c: fix(setup): Position › Add holder's user picker shows each person's email beside their name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** On a Setup position page, Add holder opened a user picker that drew one column, the user's name. An administrator could not tell two people of the same name apart, nor confirm the account before granting the position, although the holder list on the same page already shows each holder's email under the name.
+  - **Now.** The picker draws a Name column and an Email column (`sys_user`'s `name` and `email`), and titles each person by `sys_user` as the registry serves it.
+  - **Unchanged.** The picker still draws only the columns the caller may read: for a caller whose policy denies `sys_user.email`, the Email column is not drawn and the Name column stands alone. Choosing people still assigns the position by name, offers the active organization's members only, and skips anyone who already holds it.
+- ddbd08e: fix(console): a refused form submit marks the fields it names; the markdown editor's placeholder takes the sans stack
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/console`**: the form page (`/f/:slug`, `/forms/:name` and `/apps/:appName/forms/:name`) used to answer every refusal with one banner and one toast and nothing on the inputs. Each refused field is now marked: `aria-invalid` on its control, and the reason under the control, which the control names in `aria-describedby`. The client required check marks each empty required field ("Name is required"). The server's field-level refusals (`400 VALIDATION_FAILED` with `fields[]`, flat or in the wrapped envelope, and `409 UNIQUE_VIOLATION` naming its `field`) mark the fields the form draws, read with `extractFieldErrors` from `@object-ui/react`, the reader the record dialog uses. A faulted `visibleWhen` marks its field and points it at the banner, which already names the field and the rule. A refusal that names no field, or only fields the form does not draw, marks nothing. On a tabbed or wizard form view the first marked field's tab or step opens. Editing a marked field clears its mark. The banner and the toast are unchanged.
+  - **`@object-ui/fields`**: the markdown, html and richtext editor (`RichTextField`) keeps `font-mono` for the source a person types, and its placeholder now uses the sans stack (`placeholder:font-sans`), so a form's "Describe your request" no longer reads as code. This applies on every host.
+- 38bab22: fix(console): the assistant's draft preview is no longer cut off in a narrow chat pane
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The chat and the draft preview open side by side, and each keeps a minimum width (360 px for the chat, 420 px for the preview). In a pane narrower than the two together, such as the in-app assistant dock at a 1024 px window, the chat kept its minimum and pushed the preview past the pane's edge, so only a sliver of it showed.
+  
+  Below 780 px the pane now previews the way it already does on a phone: the chat keeps the full width, a Preview button above the composer offers the preview, and opening it shows the preview over the whole pane, with its close button returning to the chat. At 780 px and wider nothing changes: the preview opens beside the chat with the draggable divider. The width is the pane's own, so the full-page assistant at a desktop width keeps its split.
+  
+  What to do: nothing.
+- 198da49: fix(setup): Permission set › Add user's picker shows each person's email beside their name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** On a Setup permission-set page, Assigned users › Add user opened a user picker that drew one column, the user's name. An administrator could not tell two people of the same name apart, nor confirm the account before granting the set, although the assigned-user list on the same page already shows each person's email under the name.
+  - **Now.** The picker draws a Name column and an Email column (`sys_user`'s `name` and `email`), and titles each person by `sys_user` as the registry serves it.
+  - **Unchanged.** The picker still draws only the columns the caller may read: for a caller whose policy denies `sys_user.email`, the Email column is not drawn and the Name column stands alone. Choosing people still writes the grant by name (`{ user_id, permission_set }`), offers the active organization's members only, and shows the AI-seat cap refusal inline.
+- 6d8372a: fix(console): `/forms/NAME` for a form that does not exist renders the console's localized not-found state, not a raw English error (#27446)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The internal form route threw `Form metadata not found: view/NAME` for any failed `/meta/view` read, and the page rendered that English text verbatim, whatever the session language.
+  
+  - **A 404 is "no such form".** The page now draws the console's shared not-found state, with the catch-all route's pack keys (`console.notFound.title`, `console.notFound.description`, `console.notFound.back`) in the session language, and a Go back button. The metadata route answers 404 both for a missing view and for one the caller may not read, so the page says the one thing both mean.
+  - **Every other failure keeps the error banner.** A non-404 failure now says `Could not load form metadata (STATUS): view/NAME`, instead of claiming the form was not found.
+  - No i18n key is added or changed. The public `/f/:slug` route is unchanged.
+- e16a7af: fix(app-shell): opening a notification from Home's "My work → Notifications" card marks it read, as the bell does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Clicking a notification in the top-bar bell marked it read and then opened its link. Clicking the same notification on the Home page's "My work → Notifications" card only opened the link: no `POST /api/v1/notifications/read` was sent, the server's `unreadCount` did not change, and the bell kept its badge after a reload.
+  
+  Both places now use one open action, `openInboxNotification`. It marks the notification read first, then opens its link, or opens the inbox when the notification has no link. The Home card marks read through the bell's own write (`useInboxBell().markRead`), so it sends the same request, keyed by the notification's event id. Once the inbox feed re-reads, the Home card's unread count and the bell's badge drop.
+- b761968: fix(console): an app-root or console-root deep link keeps its query and hash when it redirects to the landing page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Opening `/apps/APP?palette=1` on an app whose root redirects to its first navigation entry landed on that page with no query string, so the command palette never opened; the same held for every URL overlay param (`?recordId=`, `?form=`) and for the hash, and for `/?palette=1` at the console root. Both redirects now carry search and hash across. When the landing entry has a query of its own (a `page` entry's `params`, an object entry's `filters` or `runAction`), the two merge: a key the link names replaces the landing's value for that key instead of doubling it.
+- ca4b5d5: fix(console): a public-form submit the browser blocks no longer leaves the previous attempt's banner on screen
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A control the browser judges invalid, such as a malformed address in an `email` row, stops the submit before the page's own submit handler runs, so the banner kept the previous attempt's text: "Required: Name, Email, Message" after all three were filled. The page now judges a blocked attempt again with its own checks over the rows the submit would judge: when they refuse something the banner names it, otherwise the banner clears. Each control the browser refused is marked with the browser's own message. Native format validation is kept, and a server refusal still shows its banner.
+- 91e9797: fix(console): after a language switch, date and number cells format in the new language, not until the next page load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Switching the language from the avatar menu changes the UI language first and writes the signed-in user's `sys_user.locale` second. The switch remounts `LocalizationFetchProvider`, whose read of `GET /api/v1/auth/me/localization` could reach the server before that write committed and answer the previous language (or, for a user with no stored language yet, the browser's `Accept-Language`). `useDisplayLocale` ranks that answer above the UI language, so under 中文 a list grid's date cells kept reading `Oct 11` beside Chinese headers until a full page load, while a record page opened by URL read `2026年10月11日`.
+  
+  The provider now reads again on every write to the signed-in user's own `sys_user` row that reaches the data-invalidation bus (the language switch's write and the profile page's). The re-read starts after the write has settled and opts out of joining a request still in flight from before it, so its answer is the one that lands. The single date formatter (`formatDate` through `useDisplayLocale`) is unchanged.
+- 0561a98: fix(console-auth): an invitation link the server no longer knows reads "This invitation link is no longer valid" instead of offering a sign-up it will refuse, and a refused invitee is told which address the invitation was sent to
+  
+  Clause-②: no (`getInvitationPreview`'s exported signature is unchanged; it now resolves `null` only for the preview door's own not-found body, which is what its documented contract already said)
+  
+  Metadata-protocol: none
+  
+  The signed-out invitation preview answers one 404 for an unknown, expired, accepted, rejected or cancelled invitation. The login and register pages read that 404 as "no preview", kept the "Accept your invitation … Create an account and join" flow, and the sign-up then failed with "Self-registration is not open on this system. Ask an administrator for an invitation." — telling a person holding an invitation link to go and get one.
+  
+  - **A dead link.** All four pages (the console's `/login` and `/register`, and app-shell's `DefaultLoginPage` and `DefaultRegisterPage`) now show "This invitation link is no longer valid" with a link to the plain sign-in, and no sign-up prompt or form. The copy does not say which of the five cases it is, because the server does not say.
+  - **A refused invitation sign-up.** A `SELF_REGISTRATION_CLOSED` refusal on a register page opened from an invitation link reads the preview again. If the invitation is gone, the page shows the same notice. If it is still pending, the refusal reads "This invitation was sent to i***@example.com. Register with that address to accept it.", using the masked address the preview already returns.
+  - **`@object-ui/auth`.** `getInvitationPreview` resolves `null` only for a 404 that carries the door's `RESOURCE_NOT_FOUND` body. A 404 without it (a server that does not have the route) now rejects like any other failed read, so a page keeps its generic invitation copy instead of calling a valid link dead.
+  - **`@object-ui/app-shell`.** New `useInvitationArrival` (`preview`, `gone`, `recheck`) and `InvitationGoneNotice`; `useInvitationPreview` is unchanged. `signUpRefusalMessages` takes an optional invitation argument.
+  - **`@object-ui/i18n`.** Five new keys in all ten packs: `auth.login.invitationGoneTitle`, `auth.login.invitationGoneDescription`, `auth.login.invitationGoneSignIn`, `auth.register.errors.invitationSentTo`, `auth.register.errors.invitationAddressOnly`.
+- f40b777: Clause-②: yes (widening: `@object-ui/app-shell` exports `InvitationLinkHint` and `@object-ui/plugin-form` exports `useInitialFieldFocus`; no accept set moves)
+  Metadata-protocol: none (platform object metadata only, no authorable key: `sys_invitation.status` options gain display labels, with `rejected` read as "Declined"; the role param of the four `invite_user` actions, `sys_member.add_member` and `sys_member.update_member_role` gains one shared `helpText`; `sys_invitation.resend_invitation` gains a `description` and carries its email and role over from the row; `sys_member.update_member_role` gains a `description` naming the member; the `expired` invitations list projects `role`)
+  
+  The Invitations screens read more clearly and behave more predictably. Invitation statuses show as labels (Pending, Accepted, Declined, Expired, Canceled) instead of raw values. Every role picker that grants an organization role explains each role on its own line, and Change Role names the member it changes. Resend is a confirmation that names the invitee and keeps the invitation's email and role, instead of an editable form. The workspace's cancel dialog dismisses with "Keep invitation".
+  
+  The console's action dialogs check an email or URL param before anything runs and mark a malformed value on its field. They open on their first editable field instead of Cancel, and closing one returns focus to the control that opened it: an action button that was disabled while its action ran, a row menu's trigger, or the first opener when a param dialog hands over to a result dialog. This applies to every action that uses the param, confirm and result dialogs.
+  
+  The sign-in page tells a visitor to open their invitation link where sign-up is by invitation only. After accepting an invitation, the page says the user joined the organization and as which role, and Continue enters it.
+- 637cfc6: fix(studio): plainer authoring in Studio — option labels first, named validation rules, labelled condition fields, object labels on flow cards, honest field counts, a Create that says why it is off, and a publish toast that points to Access
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Picklist options** read Label first, and a new option's stored value is filled in from its label until the author types one, so three labelled options are three saved options. An authored option's value never moves when it is relabelled. The lifecycle kind (Open / Won / Lost) is offered only on the field the record path follows, or where an option already declares one.
+  - **Validation rules**: a new rule's API name follows its message (`Hours over 40` → `hours_over_40`) until the name is edited; an authored rule keeps its name. The condition builder lists fields by label, with the CEL spelling beside it, under "Pick a field". The rule type, severity and name labels are in plain words.
+  - **Flow canvas**: a node card names the object it works on by the object's label.
+  - **Object header**: counts the fields the canvas shows, and the platform's own columns apart (`2 fields (+8 system)`); "1 field" is singular.
+  - **Add field**: a Create that cannot run yet stays focusable and says what is missing.
+  - **Read-only inspectors**: disabled text areas take the muted disabled look.
+  - **Publish**: the "one atomic release" wording is plain ("together: all of them go live, or none do"), and a publish that put an app or object live says members need a permission set, with an "Open Access" action.
+  - **Studio access refusal** names who grants access (an administrator, in Setup → Permission Sets), in every language pack and in the Console's own fallback sentence. The publish confirm note's all-or-nothing wording is translated in every pack too.
+- 72b08ee: docs(skills): hand-written inventory counts are deleted; the names and the source of truth stay
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-data` counted its field types ("49") in SKILL.md and in `rules/field-types.md`, and its lifecycle events ("8") in SKILL.md and `references/data-hooks.md`; `objectstack-automation` counted its built-in node types ("20"); `objectui/README.md` counted its plugins ("18"); `objectui/guides/schema-expressions.md` counted the formula registry ("30 functions"); `objectstack-query` counted the aggregate functions ("six"). No gate reads any of those numbers against the tree, so each one goes wrong the moment the inventory moves, and a wrong count misleads the reader more than no count.
+  - **Now.** The numbers are gone; every enumeration that taught something (the node-type tables, the plugin names, the function table, the aggregate names) stays, and each page still points at the file or schema that is the source of truth. Deletion only: every touched file shrinks under its unchanged token ceiling.
+  - The same deletion in shipped READMEs and one shipped source comment: `@objectstack/spec` (a `//` comment in `src/kernel/metadata-plugin.zod.ts`, which ships), `@objectstack/metadata` (README), and the `@object-ui/*` READMEs of i18n, plugin-grid, components, fields, types, plugin-form and console. No schema, key or behaviour changes.
+- 6cf3e0b: fix(console): a language picked on the sign-in page reaches date and number formatting
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A user with no stored `sys_user.locale` who picked 中文 on the sign-in page saw every list grid's date cells as `Nov 18` beside Chinese headers, on every page load. `<html lang>` already followed the pick, but `LocalizationFetchProvider` reads `GET /api/v1/auth/me/localization` through `sharedGetJson`'s bare `fetch`, so that one read never carried the `<html lang>` `Accept-Language` every other console API call carries; the server answered its `Accept-Language` rung in the browser's language, and `useDisplayLocale` formats with that answer.
+  
+  When the device holds an explicit language choice, the read now states that language as its `Accept-Language`, and reads again when the choice changes. The server's rung order is unchanged (a stored `sys_user.locale` still answers first), and so is `useDisplayLocale`'s precedence. With no choice on the device the browser's header still goes out, so a first visit's language seed and this read keep sharing one request.
+- 9b85162: docs(skills): the objectui data-integration guide stops teaching the MSW plugin removed in 12.0
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `skills/objectui/guides/data-integration.md` taught a frontend-first setup built on the MSW plugin package, removed in 12.0 (its last npm release is 11.0.0, so the install still succeeds and pulls an 11.x plugin into the current stack), and eval 2 of `evals/data-integration.json` rewarded that answer.
+  - **Now.** The section "Frontend-first development" names the two supported paths: a static scope with no backend, or the real server run locally with `os dev` behind a Vite `/api` proxy. It states that `os dev` persists to SQLite, that `--fresh` gives a throwaway database, and that the retired in-memory driver is refused. Eval 2 grades `os dev`, `proxy` and `objectstack.config`, and refuses the MSW setup. Net -35 lines in the guide.
+  - **Console.** `VITE_USE_MOCK_SERVER`, which no source reads, leaves `.env.development`, `.env.production` and the Vercel build command. The `mockServiceWorker.js` rewrite exclusion and the `vendor-msw` chunk row in `docs/deployment.md` go too. No runtime behaviour changes.
+- 2a0b37b: fix(console): a missing or unavailable public `/f/:slug` form tells the guest so in their language, not as a raw English error (#27756)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The public form route threw `Failed to load form (STATUS): BODY` for any failed `GET /forms/:slug`, and the page rendered that English text verbatim to the anonymous visitor, server body included, whatever the session language.
+  
+  - **A 404 is "no such form".** The resolver answers 404 for a slug that is unknown, unpublished or no longer anonymous. The page now draws the console's shared not-found state (`console.notFound.title`, `console.notFound.description`), as the internal `/forms/NAME` route does. There is no Go back button on this route: the visitor is a guest from a shared link, with no console page to return to.
+  - **Every other failure keeps a banner, localized.** It reads the existing `form.errorLoading` key ("Error loading form"). The server's body is never read, so it cannot reach the page.
+  - No i18n key is added or changed.
+- 421bb6b: fix(setup): a new metadata item whose name the editor already refuses is not sent, and one mistake is one message
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** On Setup › Permission Sets › New (and every metadata create page), a Name the editor flagged as invalid was sent on Save anyway. The page then showed the server's refusal ("is not a legal metadata item name"), and after the next edit also the summary banner ("does not match the spec — 1 validation error(s)") and the inline error under Name: three messages for one mistake.
+  - **Now.** While the editor's own check refuses the Name of a new item, Save sends nothing and the error under Name is the message; a Name filled in from the Label, never touched, shows its error there too once Save is pressed. The summary banner no longer repeats an error the form already draws on its field, and a server refusal that names a field the form draws is said on that field only.
+  - **Unchanged.** Every other check the editor runs while you type stays advisory: Save still sends, and the server has the last word (an existing item is never held by it). Errors the form cannot draw on a field (the whole item, a nested key, a field off screen) are still listed in the banner.
+- f8633c7: fix(app-shell): the permission-set grid signals cut columns, keeps its Object column in view, labels expanded field rows by their own header, and tells apart two fields that share a label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The permission-set grid is wider than its pane at 1440 px and on a phone, on the Setup page and on the Studio Access pillar's Objects tab alike:
+  
+  - **Cut columns are signalled.** While columns are cut on the right (the Bulk column at 1440 px), the pane's right edge fades; the fade goes once the last column is in view.
+  - **The Object column stays in view.** The Object column, header and rows, is pinned to the pane's left edge and draws its edge once rows slide under it. On a phone the pinned column shows the object's label alone, so the boxes keep the room to scroll.
+  - **Expanded field rows keep their own header.** An expanded object's field header (Field / Read / Edit / When) pins under the matrix's header row while the field list is in view, so field rows are no longer read against the object columns above them.
+  - **Two fields with one label are told apart.** When two of an object's fields share a label (an authored `owner` beside the platform's `owner_id`, both "Owner"), each row draws its API name as the distinguishing text instead of a muted aside.
+- 121d1a5: fix(console): a record save whose answer carries warnings shows one toast, the record-named save message carrying the warning lines
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A save from the record form (the overlay dialog, its child-form task, or the full-page form) that passed a `severity: 'warning'` validation rule showed two toasts: the write-warning channel's "Saved — with warnings" with the rule messages, then the form's own `OBJECT "TITLE" updated`. It now shows one: the record-named save message, on the warning variant, with each distinct rule message on its own line. While a record form is open, the write-warning channel hands the answer warnings of the write that form makes (that record's update, or a create of that object) to the form instead of toasting them; the stripped-fields notice keeps its own toast, and any other write keeps the "Saved — with warnings" toast.
+- 9f13ee8: Clause-②: yes (widening: @object-ui/react gains the public export unmarkedRefusalLines; no accept set moves)
+  Metadata-protocol: none
+  
+  A save refused by two or more validation rules now lists each rule's message on its own line in the form's banner and toast, instead of the server's `; `-joined summary. A rule that names a field the form draws keeps its message under that input, and the banner says only the rest. The refusal envelope is unchanged: the console reads the one `fields[]` entry per rule it already carried. `@object-ui/react` adds `unmarkedRefusalLines(err, isShownInline)`, which answers those lines (or `null` when the refusal has no entry list, so the caller keeps the envelope's message).
+- 10fc9bf: fix(console): a domain-bearing settings select shows the option name for a stored code
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A settings `select` that declares a `valueDomain` (Company → Country, Localization → Default country, Time zone, Currency) showed its stored value bare in the box, so a stored `DE` read as `DE` and the option names were visible only in the suggestion list. The box now shows the matching option's name ("Germany (DE)") and the suggestions are offered by name; picking one still stores its code. A code typed by hand is committed as typed and reads as its name once the field loses focus, and a value outside the option list is still committed verbatim and judged by the server, as before.
+- fc5d509: feat(plugin-auth): opt-in Cloudflare Turnstile on email sign-up — off unless both `OS_TURNSTILE_SITE_KEY` and `OS_TURNSTILE_SECRET_KEY` are set
+  
+  Clause-②: yes (widening: the public auth config gains `features.turnstileSiteKey`, served only while the challenge is on; `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` and `AuthFeaturesConfigSchema` gain `turnstileSiteKey`; with the challenge on, `/sign-up/email` answers better-auth's `captcha` refusals `400 MISSING_RESPONSE`, `403 VERIFICATION_FAILED` and `500 UNKNOWN_ERROR`; two new env vars; `@object-ui/auth` gains `TurnstileWidget`, `TURNSTILE_SCRIPT_URL`, `RegisterForm`'s `turnstileSiteKey` prop and `captchaFailed`/`captchaRetry` labels, `SignUpData.captchaToken` and a fifth `signUp` argument; `@object-ui/app-shell` gains `signUpCaptchaFailedMessage`)
+  Metadata-protocol: added
+  
+  A deployment can now ask for a human check before an email/password account is created. Set both variables and:
+  
+  - **The server** mounts better-auth's `captcha` plugin with the `cloudflare-turnstile` provider on `/sign-up/email` only. A sign-up without a token in the `x-captcha-response` header is refused before anything is read or written, a token is verified with Cloudflare using the secret, and a verification that cannot complete fails closed. Sign-in and password reset are not challenged (better-auth's default list would have included them; it is overridden). The per-address rate limit still runs first. Server-side registrations through `auth.api.signUpEmail` (the development admin seed, demo staff) are unaffected.
+  - **The public auth config** (`GET /api/v1/auth/config`) serves `features.turnstileSiteKey`, the public site key, and never the secret.
+  - **The Console** renders the challenge on `/register` and on the first-run `/setup` wizard, holds submit until it is solved, and sends the token. A failed, expired or refused challenge shows one retry message, never Cloudflare's code or the plugin's text. The Console document's content-security-policy admits `https://challenges.cloudflare.com` in `script-src` and `frame-src` only while both variables are set.
+  
+  With either variable unset or blank nothing changes: no plugin, no config key, no widget, the same policy. A deployment that sets only one gets one boot `warn` naming the missing variable.
+- @objectstack/sdui-parser@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

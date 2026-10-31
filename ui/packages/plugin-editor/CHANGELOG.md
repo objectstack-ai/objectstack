@@ -1,5 +1,89 @@
 # @object-ui/plugin-editor
 
+## 18.3.0
+
+### Patch Changes
+
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [4daad78]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [47b6392]
+- Updated dependencies [6866e2e]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [a122269]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [fbe344b]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [27e4d65]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [eef8373]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [2655ebd]
+- Updated dependencies [a33fce2]
+- Updated dependencies [1ed3360]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [10755db]
+- Updated dependencies [f0857d2]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [4c5023a]
+- Updated dependencies [efa2915]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [9324232]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [bf658d1]
+- Updated dependencies [c1b52de]
+- Updated dependencies [8a1f467]
+- Updated dependencies [5c083e8]
+- Updated dependencies [0027c4a]
+- Updated dependencies [5e1342a]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [916531a]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [71de060]
+- Updated dependencies [bed8306]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [7eda096]
+- Updated dependencies [64bc7fa]
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

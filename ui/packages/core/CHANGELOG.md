@@ -1,5 +1,427 @@
 # @object-ui/core
 
+## 18.3.0
+
+### Minor Changes
+
+- 79ed6f7: feat(formula, plugin-email, messaging, automation, ui)!: a template `currency` hole with no argument formats in the organization's default currency, and with none the render refuses it; nothing formats in US dollars by default any more (#26939)
+  
+  Clause-②: no (narrowing) — a mail send or render (`sendTemplate`, `renderTemplate`, and the messaging email and inbox channels on them), a flow text slot (notify, http, screen, end) and a templated formula evaluation refuse a `{{ amount | currency }}` hole with no argument when no default currency reaches the render, which they formatted in US dollars before. Authoring is unchanged: the hole is still accepted at save and publish. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `content/docs/automation/flows.mdx` and `content/docs/data-modeling/formulas.mdx` state the tenant default and the refusal; no skill under `skills/**` taught the dollar default (the formula skill names the formatter grammar only), so no skill line changes.
+  
+  <!-- adr-0087: registered template-currency-no-argument-tenant-default -->
+  
+  **BREAKING** semantic change of the `currency` formatter's no-argument form (`@objectstack/formula`), served by every template dialect: mail templates, flow text slots, and action / bulk-action confirm and success copy.
+  
+  - **Before.** `{{ amount | currency }}` formatted the amount in US dollars (`$1,234.50`) whatever currency the amount was in and whatever the organization's default currency was.
+  - **Now.** It formats in the organization's default currency, the `localization.currency` setting (Setup → Localization) that a currency field and a dashboard measure already display in: `CN¥1,234.50` for an `en-US` reader and `¥1,234.50` for a `zh-CN` reader when the default is CNY. Every server-side read goes through `resolveLocalizationContext` (`@objectstack/core`); the UI reads `useLocalization().currency`.
+  - **With no default currency.** The render refuses the hole by name and names the remedy: set the default, or write `currency:CODE` (a mail template's refusal also names `currency:@path`). A mail send or render fails with `TEMPLATE_INVALID` and nothing is sent; a messaging delivery records it as a permanent failure. A flow node with such a hole in a text slot fails with the refusal, which no fault edge routes. An action's confirm or success sentence is shown as written, the existing fallback for a sentence the template engine refuses.
+  - **How each host hands the default over.** `SendTemplateInput.currency` / `RenderTemplateInput.currency` (`@objectstack/spec/contracts`), filled by the messaging email and inbox channels from the delivery's organization, and by the auth mails (verification, password reset, invitations, magic link, notices) from the organization the mail names or, for identity mail, the deployment-wide setting (`@objectstack/plugin-auth`, once, on the email service it wires); `AutomationContext.currency`, seeded once at run setup from the run's tenant (`AutomationEngine.setTenantCurrencyResolver`, which the automation plugin wires), persisted with a suspended run and inherited by a subflow; `EvalContext.currency` in `@objectstack/formula`, a reserved channel like `locale`, never bound as a root; `ActionRunner.setTenantCurrency` in `@object-ui/core`, installed by the React action providers.
+  - **Unchanged.** `{{ amount | currency:EUR }}` formats in the code it names, with or without a default. A variable, field or root named `currency` is a value, never the default. Compile, `validateExpression` and the publish gates accept the no-argument form as before. A template with no no-argument currency hole needs no default.
+  - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
+  
+  **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+  
+  **Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` and hole-grammar changes (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`, `26660-mail-hole-grammar`) describe a `currency` hole formatting in US dollars, and the first three say a hole with no argument still does. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
+- 4c5023a: fix(core): a bare-string predicate is read as CEL, the way the spec defines it and the server reads it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  `@objectstack/spec` defines a bare string in a predicate slot as shorthand for `{ dialect: 'cel', source }`, and the server evaluates it on CEL. The console read the shorthand on its legacy JavaScript expression grammar instead, so a predicate using CEL-only syntax faulted there: a navigation entry with `visible: "'org_owner' in current_user.positions"` was hidden from everyone (the navigation gate withholds an entry whose predicate faults), and a page block with `visibleWhen: "size(page.items) > 0"` never rendered, while the same source written as an envelope worked.
+  
+  - `ExpressionEvaluator.evaluateCondition` evaluates a bare string on the canonical `@objectstack/formula` CEL engine, the same route a `{ dialect: 'cel' }` envelope takes, with the same fault policy (`onFault`, `throwOnError`).
+  - `toPredicateInput` normalizes a bare string into `{ dialect: 'cel', source }`, as the spec's input schema does, instead of wrapping it as a `${…}` template.
+  - `evalRowPredicate` (list conditional formatting and row-action predicates) keeps only a `${…}` template on the legacy engine; any other bare string is evaluated on CEL. A string with legacy-only syntax still prints the one-time warning that prescribes the CEL spelling.
+  - Unchanged: a `${…}` template still evaluates on the legacy engine, and so does the `source` of an envelope whose dialect is not `cel`.
+  
+  **BREAKING**: a bare-string predicate is read on CEL only, as the spec defines it: a predicate that relied on syntax only the legacy JavaScript grammar reads (for example `===`, `.includes(…)`, `.length`, or a read of a `data.*` key the bound scope does not hold) now faults instead of evaluating, and each surface applies its existing fault policy (a navigation entry or a `visible` / `visibleWhen` gate is withheld, a `disabled` gate disables). The server already reads the shorthand as CEL and rejects those spellings, so the console was the only reader that accepted them; measured in this repository, 0 authored predicates outside tests used them. Write such a predicate in CEL, the one predicate language the spec and the server define (ADR-0032).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowed spellings were never valid under the protocol: the spec defines a bare string as CEL and the server already evaluated it on CEL and rejected them, so no stored metadata the server accepted changes meaning and there is nothing for objectstack migrate meta to rewrite -->
+- 5c083e8: fix(core): `evaluatePlainCondition` reads a bare-string predicate as CEL, the way the spec defines it and `evaluateCondition` reads it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  `@objectstack/spec` defines a bare string in a predicate slot as shorthand for `{ dialect: 'cel', source }`, the server evaluates it on CEL, and `ExpressionEvaluator.evaluateCondition` reads it on CEL. The published `evaluatePlainCondition(condition, record)` export still read a bare string on the legacy JavaScript expression grammar, so a host calling it got the opposite dialect from every other predicate path: a CEL-only predicate such as `status in ['overdue', 'urgent']` or `size(tags) > 0` faulted and answered `false`.
+  
+  - A bare string handed to `evaluatePlainCondition` is evaluated on the canonical `@objectstack/formula` CEL engine, the route `evaluateCondition` gives it, so a predicate that evaluates gets the same verdict from both. Record fields stay readable both bare (`status`) and under `data.` (`data.status`).
+  - The function's answer is unchanged in shape: `true` only when the predicate evaluates to `true`; a fault, a non-boolean result and a blank condition answer `false`, with no console line.
+  - Unchanged: a `${…}` template is still evaluated on the legacy engine.
+  
+  **BREAKING**: a bare string passed to `evaluatePlainCondition` is read on CEL only, as the spec defines it. A predicate that relied on syntax only the legacy JavaScript grammar reads (for example `===`, `!==`, `?.`, `??`, `.includes(…)` or `.length`) now faults and the function answers `false` where it used to evaluate. Write the predicate in CEL, the one predicate language the spec and the server define (ADR-0032): equality is `==`, membership is `in`, a substring test is `.contains(…)`, a length is `size(…)`, a presence test is `has(…)`. Measured in this repository, nothing outside its own tests calls the export.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowed operand is the condition argument a host passes to the evaluatePlainCondition function at runtime, not metadata: no packages/spec schema declares it, no stored row or package source carries it, and its only reader is this function, so there is nothing for objectstack migrate meta to rewrite -->
+
+### Patch Changes
+
+- a260556: fix(types,core,components,plugin-form)!: `FormField` drops its open index signature, and a form-view field's `immutable` locks the control once the record exists
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/types/src/form.ts#FormField, ui/packages/core/src/validation/server-owned-value.ts#FieldWithDeclaredDefault) Two published TypeScript interfaces each lose their open index signature and nothing else: no member is removed or renamed, no metadata key, accepted value, export or error code moves, the zod mirror `FormFieldSchema` and the strict authoring face are unchanged, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler (excess-property error naming the undeclared key). -->
+  
+  **BREAKING** type-surface narrowing, compile-time only.
+  
+  - **`@object-ui/types`.** `FormField` no longer ends in `[key: string]: any`. A key no member declares — a misspelling included — is now a compile error on a fresh `FormField` literal, as it already was on every node type since `BaseSchema` closed. The declared members are unchanged, and so are the zod mirror `FormFieldSchema` and the strict face `StrictAnyComponentSchema`, which already refused undeclared keys.
+  - **`@object-ui/core`.** `FieldWithDeclaredDefault`, the parameter type of `isServerOwnedValue`, drops its `[key: string]: unknown` signature, so a `FormField` value is assignable to it. It still reads only `field.defaultValue`.
+  - **`@object-ui/components`.** The form renderer types the field's raw metadata carrier as `Record<string, unknown> | FormField` (the stashed object field, else the field config itself), instead of reading the config through the signature.
+  - **`@object-ui/plugin-form`.** The host-written `group` key (copied from the object field for the field-group fallback) and the section-divider disclosure keys (`collapsible`, `collapsed`, `onToggle`) are typed on package-local hand-off types instead of riding the signature.
+  
+  **Fix (`@object-ui/plugin-form`).** A form-view field declaring `immutable: true` (spec `FormField.immutable`, "editable on create, locked once the record exists") is now drawn disabled when the form edits an existing record, and stays editable on a create form. It used to be copied onto the runtime field as `immutable`, which no renderer reads, so an edit form left the control editable.
+  
+  What to do: nothing if your `FormField` literals use only declared keys. Otherwise the compiler names each undeclared key on the literal that carries it (an excess-property error): correct a misspelling to the declared member, or, for a key only your host writes and reads, type it on a local intersection such as `FormField & { group?: string }` where its producer and reader live.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 47b6392: fix(core): a declared action's confirm dialog is titled with the action's label, and a danger action's confirm button is destructive
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Before, clicking an action that declares `confirmText` always opened a dialog titled 「确认操作」 / "Confirm Action" with a neutral 「继续」 / "Continue" button: the action's own label and its `variant: 'danger'` never reached the dialog. `ActionRunner` now hands its `ConfirmationHandler` the existing `options` bag:
+  
+  - `title` and `confirmText` are the action's `label`, already localized by the surface that dispatches it.
+  - `destructive: true` when the action declares `variant: 'danger'`, which paints the console's confirm button in the destructive style, as the record Delete already does.
+  - The cancel button keeps the host's own copy. An action with neither a label nor the danger variant is asked with the message alone, as before.
+  
+  What to do: nothing. No key is added; the action already declares its label and variant. A custom `ConfirmationHandler` that ignores its second argument behaves as before.
+- a20824f: `SPEC_ACTION_KEYS` lists `disabledReason`, the key `@objectstack/spec` added to `ActionSchema` beside `disabled` (objectstack#26786). An action that carries it is no longer counted as having an unknown key, and the inventory pin is green again.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- e1bfde3: fix(core): an `api` action's target is interpolated before a registered `api` handler sends it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An `api` action whose `target` carries `${ctx.recordId}` (or any other `${ctx.X}` / `${param.X}` token) went out on the wire with the literal placeholder (`/api/v1/data/gapdata_item/$%7Bctx.recordId%7D`) when a host had registered its own `api` handler, as the Console does, so a record-level PATCH or POST hit a record that does not exist. A `url` action with the same token already resolved it. `ActionRunner` now runs its one target substitution on an `api` target before handing the action to a registered `api` handler, with the same scopes and the same per-value `encodeURIComponent` a `url` target gets. The built-in executor already did this and is unchanged; a registered handler for any other type still receives its target as authored.
+- 27e4d65: fix(core): the console runs a stored action that leaves `type` to its default as a script action
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ActionSchema.type` defaults to `script`, but the console runs a stored action row as it was stored, not as the spec parses it. An action saved without `type`, such as the blank New skeleton in Studio or a row an older Studio build wrote, had its route resolved to its own name, matched no executor and was refused as "not executable".
+  
+  - **The action runner now reads a missing `type` as the spec's default** at the one place it picks the dispatch route. A typeless `{ name, body }` action and a typeless `{ name, operation: 'update', patch }` action both reach the registered `script` dispatch, which posts the platform action route.
+  - **Unchanged:** an unknown `type` and a completely empty schema are still refused; a handler registered under the action's name still runs first; a typeless action that declares a runner key of its own (`navigate`, `api`, `endpoint`, `onClick`, `redirect`, an explicit `reload` or `close`) still runs on that key.
+  - No writer adds `type`, and no stored row changes.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- 9324232: fix(console): a packaged action switched off for this deployment is no longer offered as a live button
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An administrator can switch a packaged action off in Setup › Packaged automation. The action door then refuses it, but the console kept offering the button on the record header, in action bars and in list rows, so a click could only fail. The object reads now serve the names of the switched-off actions beside the object (#27842), and the console stops offering those actions everywhere it already hides an action whose capability the user lacks: the record header, action bars, record quick actions, list and related-list toolbars, row and bulk actions. Turning the action back on in Setup brings the button back.
+  
+  `@object-ui/core` adds four exports for this: `isActionSwitchedOff(action)`, `markSwitchedOffActions(schema, served)`, `markSwitchedOffActionsByObject(objects, served)` and `ACTION_SWITCHED_OFF_KEY`. The data layer stamps a switched-off action entry under that symbol key, which survives a spread and never reaches JSON, so an action handed back to a metadata write never carries it.
+  
+  What to do: nothing. A backend that does not serve the names hides nothing, as before.
+- 0ac6dab: feat(console): a bulk result names the records it wrote, and a required-field refusal says what to fill in
+  
+  Clause-②: yes (widening: `ActionResult` gains the optional `fieldErrors` member, `ActionFieldError` is a new export of `@object-ui/types`, and `ActionResponseOutcome` gains `fieldErrors`; no accept set moves)
+  Metadata-protocol: none
+  
+  - **Bulk action result.** After a bulk action such as Mark Done, the result read only "Succeeded 2 / 2". It now lists the records that succeeded, named the way the confirm step names them (the object's name field). The list appears when every failure is reported against a record of the run; when the server answered a bare count, the result keeps to the count rather than name a record that may have failed.
+  - **Required-field refusal from an action.** Running an action whose write the server refuses for a missing required field, such as Submit for Sign-off on a draft invoice with no Issued On, used to say only "Issued On is required". It now continues "Fill in Issued On, then run “Submit for Sign-off” again." Several fields are joined in the session's language. Any other refusal is shown as the server wrote it.
+  - For code that dispatches actions through `createServerActionHandler`: a failed `ActionResult` now carries the refusal's per-field entries as `fieldErrors` (field, code, message, label), read from the answer's `error.details.fields`. `error` is unchanged.
+- 9e4f1cf: Clause-②: yes (widening: @object-ui/core gains the public export formatMonthBucketLabel; no accept set moves)
+  Metadata-protocol: none
+  
+  Dashboard numbers and chart labels stay readable on a phone:
+  
+  - **KPI value.** A dataset-bound KPI tile's value now shrinks to fit its tile, the way the plain metric tiles already did, instead of being cut with an ellipsis (`$1,090,00...` on a phone). Past the smallest size it keeps the ellipsis and shows the full figure as a tooltip. A short value looks as before.
+  - **Month axis.** A chart over a month-bucketed date dimension labels its axis `Oct 2025` in the reader's locale, not the raw bucket key `2025-10`. The chart tooltip's header reads the same label. The key itself is unchanged in the data, so drill-through and ordering are unaffected. `@object-ui/core` adds `formatMonthBucketLabel(value, locale)`, which answers that label for a `YYYY-MM` key and `undefined` for anything else.
+  - **Legend swatches.** A bar or area chart's legend draws a colour swatch for every series; it drew none, because those marks fill from a gradient. A comparison (`compareTo`) series' swatch is drawn hollow, so it reads apart from the solid swatch of the series it overlays in the same colour.
+  - **Horizontal bar labels.** A horizontal bar chart's category labels are drawn in full on a phone, wrapped to at most two lines inside the axis, instead of cut to eight characters (`In Progr…`). A label still too long ends in an ellipsis and shows the full text as a tooltip.
+- 5e1342a: fix(plugin-form): a create form offers a `state_machine`-governed select only the machine's `initialStates`, so no option on it ends in `invalid_initial_state`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An object's `state_machine` validation can declare `initialStates`, the values a new record may be created in; the server refuses an insert with any other value (`invalid_initial_state`). Create forms used to offer every option of that select anyway, so a user picking, say, `active` on the showcase "New Project + Tasks" form learned only from the refusal after submit that `planned` was the one value allowed.
+  
+  Now every create form layout (the in-page form, the master-detail header, the drawer, the dialog, the tabbed and wizard forms) offers such a select only its `initialStates`, through the same field gate that already narrows an edit form to the moves from the stored value. Two rules hold:
+  
+  - A machine that declares no `initialStates`, or that is `warning`/`info`, inactive or update-only, leaves the create form's options unconstrained, exactly where the server does not police the insert.
+  - The value the form opens with (a seeded `default: true` option or the caller's pre-fill) stays offered even outside `initialStates`, so the form never silently drops what it was handed; the server's refusal still names it.
+  
+  `@object-ui/core` gains `stateMachineInitialValues(objectSchema, fieldName)`, the insert-side sibling of `stateMachineNextValues`.
+- c0f9fdb: fix(console): a record delete says it cannot be undone, and the success toast names the record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A record delete is permanent (there is no recycle bin), yet the one-record confirm only asked "Are you sure you want to delete this record?" and the success toast said "Record deleted" (record page) or "Task deleted successfully" (list) without saying which record went.
+  
+  - **The question.** `objectActions.deleteConfirm` (the list row, the record page and the object-view grid Delete) and plugin-detail's `detail.deleteConfirmation` now end with the pack's own "This cannot be undone." sentence, the one the batch question already carried, in all ten locale packs.
+  - **The toast.** `recordDelete.successText` (`@object-ui/core`) names the deleted record by the same display-name resolver the confirm title reads: `Task "Website Relaunch" deleted`. A record with nothing nameable keeps `{{label}} deleted successfully`. The record page, the console list and the object-view grid all use it; `recordDelete.run` takes an optional `objectDef` so the name follows the object's declared `nameField`. A batch delete keeps its count.
+  - `@object-ui/i18n` gains `objectActions.deletedNamed` in all ten packs. There is no Undo: there is nothing to restore from.
+- 2e20454: fix(app-shell): a single-record action in a list's header is disabled, with the reason, unless exactly one row is selected, and is not drawn where the rows cannot be selected
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a list, a header action that runs on one record (for example Tasks → **Reassign…**, placed at `list_item` and `list_toolbar`) was drawn enabled with nothing selected, and said "select a row first" only after a click. Where the grid draws no row checkboxes, it could never work.
+  
+  - **0 rows or several rows:** the action is drawn disabled. Its tooltip and accessible description are the refusal a click already gave ("This action runs on a single record — select a row first." / "… select exactly one row."), in the session's language, from the existing `actions.selectRowFirst` / `actions.selectExactlyOneRow` keys.
+  - **Exactly one row:** the action is enabled and runs as before.
+  - **A list whose rows cannot be selected:** the action is not drawn.
+  - **Object-level actions** (declared at `list_toolbar` only) are unchanged with no rows selected. With several rows selected they are disabled with the "select exactly one row" reason, because a click is refused the same way.
+  - **The header has no rule of its own.** It asks the action runner for the early refusal a launch would get (the dispatch handler's `refuseBeforeInput`, the same check that refuses a click before any dialog opens). That check stays as the backstop, for example for a `?runAction=` deep link.
+  
+  New public members (additive):
+  
+  - `@object-ui/core`: `ActionRunner.launchRefusal(action)` returns the early refusal `execute` would give the action against the runner's current context, translated by its key, or `undefined` if there is none. It runs, sends and shows nothing. `ActionRunner.subscribeContext(listener)` calls `listener` after every `updateContext` and returns an unsubscribe function.
+  - `@object-ui/types`: `ActionContext.selectionAvailable?: boolean` tells whether the list publishing `selectedRecords` lets its rows be selected at all.
+  - `@object-ui/plugin-grid`: `ObjectGrid` publishes `selectionAvailable` beside `selectedRecords` in the action context, and clears it when it unmounts.
+- a7bdac4: `SPEC_ACTION_KEYS` lists `submitText`, the key `@objectstack/spec` adds to `ActionSchema` for the param dialog's submit button label. An action that carries it is not counted as having an unknown key, and the inventory pin stays green.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 916531a: `SPEC_ACTION_KEYS` lists `pressed`, the per-reader pressed-state predicate `@objectstack/spec` added to `ActionSchema`. An action that carries it is no longer counted as having an unknown key, and the inventory pin stays green. No surface reads the key yet.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- bed8306: feat(console): an action's param dialog names its own submit verb — `submitText` is drawn on the submit button in place of "Confirm"
+  
+  Clause-②: yes (widening) — `@object-ui/types` `UIActionSchema` and `@object-ui/core` `ActionDef` gain the optional member `submitText`, typed by derivation from the spec's `ActionSchema`; `@object-ui/i18n` `useObjectLabel()` gains the resolver `actionSubmitText`. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **The console.** The dialog an action opens to collect its `params` draws the action's `submitText` on its submit button ("Send", "Log Call"). Both param-collection handlers resolve it the way they resolve `description`: the translation bundle's `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action) first, then the authored inline locale map collapsed to the active language, then the authored string. An action that names no verb keeps "Confirm", and the button still says "Uploading…" while a file param uploads. `action:button`, `action:icon`, `action:group` and `action:menu` forward the key to the runner.
+  - **Studio.** The action form offers the key ("Submit button label"), translated in every shipped locale.
+  - **`os i18n extract`.** Scaffolds `objects.OBJECT._actions.ACTION.submitText` (or `globalActions.ACTION.submitText`) for an action with a non-empty `params` — the only action `translateAction` overlays it onto — and no slot for any other action.
+  - **Spec.** The liveness ledger row for `ActionSchema.submitText` is `live`, with its author warning dropped; the key's description no longer says no renderer shows it.
+- 85a1b9d: feat(console): a kanban view's `kanban.lanes` now decides which lanes the board draws, and in what order
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `kanban.lanes` (an ordered list of the group field's stored option values) was declared in the spec but the Console did not read it yet, so a board still drew one lane per option. A task board that filters out completed tasks kept an always-empty `Completed` lane, and an author could not reorder lanes.
+  
+  - **The board draws the listed lanes, in the listed order.** Each lane is titled with its option's label, and a translated label still wins. A lane whose option is a `lost` lifecycle kind still starts collapsed. Without `lanes` the board is unchanged: one lane per option.
+  - **Nothing is hidden.** A record whose value is not listed lands in the board's `Uncategorized` lane, both when the board groups loaded records and when it pages each lane on its own. To keep records off the board, filter the view.
+  - **Both routes agree.** A list view and an `object-view` element hand the lanes to the board the same way.
+  - **`@object-ui/core`**: new `kanbanDeclaredLanes(lanes, options)`, which turns a list view's `kanban.lanes` into the `object-kanban` node's `columns`.
+  - **`@objectstack/spec`**: the liveness ledger records `kanban.lanes` as live.
+- 7eda096: The record header and the declared actions bar now draw an action's `pressed` predicate. A button whose action declares `pressed` is a toggle button: `aria-pressed="true"` and Shadcn's toggle-on face while the predicate holds for this reader and record, `aria-pressed="false"` while it does not. A predicate that cannot be evaluated draws the unpressed button and is reported once. Display only: a pressed action stays enabled and still runs. `ActionDef` declares `pressed`, derived from the spec's `ActionSchema.pressed`.
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [f486e9c]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [2e20454]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+  - @object-ui/types@18.3.0
+  - @objectstack/formula@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

@@ -1,5 +1,248 @@
 # @objectstack/plugin-webhooks
 
+## 18.3.0
+
+### Patch Changes
+
+- 2efd903: docs(plugin-webhooks): the `sys_webhook` object says a row is a webhook an organization authors, and that a declared webhook is not a row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `sys_webhook` object description shown in Setup and Studio said a webhook declared in code with `defineStack({ webhooks })` / `defineWebhook()` was "materialized into rows on boot". That boot seeder is retired: a declared webhook is read from the metadata registry and writes no `sys_webhook` row. The description now says a row is a subscription authored in the Studio editor or through the API, and that a declared webhook is read from the registry.
+  
+  The help text of two system fields is corrected the same way. `managed_by`: `package` names a copy the retired 18.0 boot seeder wrote, which nothing writes now, and `platform` is reserved. `customized`: it is read by the ownership ceremony (an edited copy under a declared name is kept as a clone, a pristine one deleted), not by a boot seeder. The English bundle is regenerated, and the zh-CN, ja-JP and es-ES strings for these three texts are re-translated. No behaviour, field or option changes.
+- 5448585: fix(service-settings): Setup → Settings help says what a setting does in business words, and Country is a picker that shows names and stores the code
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An administrator in Setup → Settings read help written like code comments. It now names the effect, and the technical detail stays in the deployment docs.
+  
+  - **Authentication.** The help names the Self-registration audience by the labels the page shows (Invitation only, Allowlisted email domains, Open), not by their stored keys. It no longer quotes env var names (the email-verification override, the Google client ID and secret), the stack-config paths, the API-key error codes or permission-set API names; it says "set in the server configuration" instead.
+  - **Feature Flags.** The beta banner says a feature set in the server configuration is locked for the whole deployment, without quoting an env var.
+  - **Mail.** The durable-queue help no longer names the queue's object, and the Send-test-email result for a log-only provider says the message was "kept in the email log" (`@objectstack/plugin-email`).
+  - **Webhooks.** The `sys_webhook` description, shown as the Webhooks subtitle, says what a webhook is without `defineStack` / `defineWebhook()` or the auto-enqueuer (`@objectstack/plugin-webhooks`).
+  - **The inherited-value badge** names the layer "Organization" (组织 / 組織 / Organización) instead of "Tenant".
+  - **Country pickers.** Company → Country and Localization → Default country are `select`s whose options are every ISO 3166-1 alpha-2 code with its name, in each shipped locale (`Germany (DE)`, `德国 (DE)`). The stored value is still the code, a stored code is one of the options, and the `iso_3166_alpha2` value domain stays the enforcement boundary, so the set of accepted values is unchanged. The names come from `Intl.DisplayNames`; the codes come from the shared `ISO_3166_ALPHA2_CODES`.
+  
+  Every shipped pack (en, zh-CN, ja-JP, es-ES) carries the same wording.
+- 6cc5374: fix(plugin-webhooks)!: gate webhook redelivery on webhook-administration access
+  
+  Clause-②: no (narrowing) — `POST /api/v1/webhooks/redeliver` admits only a signed-in caller entitled to administer webhooks, in an organization a current membership backs on a walled posture, where it admitted every signed-in caller. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration changes, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. What narrows is the set of callers one HTTP door admits; the remedy is a permission grant an administrator makes, which no ledger entry can derive. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this change (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** accept-set narrowing at the webhook redeliver door (`@objectstack/plugin-webhooks`), on both faces: the self-hosted mount and the `webhooks` service's `handleRedeliver`. The caller's entitlement is decided server-side by the security service before the request body is read or any delivery row is looked up.
+  
+  - **The entitlement.** The security service's object-level `update` admission on `sys_webhook` (`ISecurityService.explain`), for the caller's execution context as the platform's request-context composition resolves it, the same answer the data API's write gate gives that caller. The shipped administrator permission sets carry it; a member baseline does not.
+  - **The organization.** That context is resolved with the deployment's tenancy posture, as the data API resolves it: on a walled posture (`isolated`, `group`) a session's active-organization claim that no current membership backs is not kept, and the door answers that caller with the same `403`. The replay is scoped to the organization the caller was admitted in.
+  - **An unentitled caller** is answered `403 PERMISSION_DENIED`, the same answer whatever the request names, so the refusal carries no row-specific detail and nothing is replayed.
+  - **Fail closed.** A deployment with no security service registered, or a check that cannot be decided (including a tenancy service that is registered and cannot answer), answers `503 SERVICE_UNAVAILABLE` and replays nothing. A kernel that serves the door with no security service says so once at boot, naming the remedy.
+  - **Unchanged for an entitled caller:** the auth gate, `401` for no session, the `400` body refusals, the active-organization scoping (`404` outside it), the redelivery veto's `409`s and the `200` replay. The door still admits no API key.
+  
+  Migration: a deployment that relied on non-administrators pressing redeliver grants them `allowEdit` on `sys_webhook` through a permission set; a caller on a walled posture switches to an organization it belongs to.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/service-messaging@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

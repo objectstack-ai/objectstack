@@ -1,5 +1,83 @@
 # @objectstack/hono
 
+## 18.3.0
+
+### Patch Changes
+
+- 481ade6: fix(runtime)!: a same-origin `type: 'api'` action is dispatched through the action doors, so its packaged-action switch holds (#27506)
+  
+  Clause-②: no (narrowing) — no key, accepted value or export of `@objectstack/spec` changes. Two published runtime surfaces narrow for their consumers: `POST /actions/_activation/:object/:action` now refuses (409) to flip an off-origin `type: 'api'` action it accepted and recorded before, and the `headers` member of `@objectstack/runtime`'s `HttpDispatcherResult.response` is widened from `string` values to `string | string[]`, which a reader that assigned a value to a `string` no longer compiles against. An api action that reaches `POST /actions/:object/:action` or MCP `run_action` now passes the doors' gates (the sign-in floor, `requiredPermissions`, the activation switch, the param contract, the subject-row load) before its target runs, where the console's direct fetch passed none of them.
+  Metadata-protocol: none
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author writes is retired, renamed or re-shaped: no metadata key, accepted value or stored row moves, and `objectstack migrate meta` has nothing to rewrite. What narrows is a door's answer (409 where a flip of an off-origin api action used to be recorded) and a published TypeScript member's value type (`HttpDispatcherResult.response.headers`, widened to `string | string[]`), whose affected party is a code consumer reached by its own compiler, not a metadata upgrader; the member's declaration is neither a Zod projection nor referenced by any `packages/spec` surface. No ADR-0087 id is named or touched (not registered or already-registered), the packages publish (not unpublished), the widened member was concretely typed at base (not type-surface-only), and no export is retired (not runtime-export-retired). -->
+  Skills-docs: `content/docs/ui/actions.mdx` (the `type` table and the "Call it over REST" dispatch table) now state the same-origin forward and the off-origin refusal; no file under `skills/**` teaches that an api action is refused by the doors or invisible to MCP (`skills/objectstack-ui/rules/actions.md` shows an api action only as a declaration), so no skill line changes.
+  
+  Switching off a `type: 'api'` packaged action in the ADR-0126 §8 ledger did not stop it: the console fetched the action's `target` directly, the `/actions` door answered 400 for the type, and the MCP `run_action` bridge refused it outright — so "Ban User switched off" still banned, and an agent could not do what a human click could. Ruled on #27506 (option C, in three steps; this is the server step, ADR text in #27610, the console in #27611):
+  
+  - **Same-origin api actions are server-dispatched.** `POST /api/v1/actions/:object/:action` and MCP `run_action` accept a `type: 'api'` action whose `target` is a path on this origin. The door runs every gate it already runs, then **forwards the request in-process** to the declared target (`IHttpServer.getRawApp()`'s request injector) with the caller's own credentials (`Authorization`, `Cookie`, the admin-session recovery header, tenant and proxy headers, the proxy headers carried as the caller sent them for the target's own `server.trustProxy` rule to judge) and the body the declaration assembles by the console's own rules — `recordIdParam` / `recordIdField` from the subject row (refused by name when the row cannot supply it), `bodyShape.wrap`, the `outputs.*` fold, `organizationId` for an `/api/v1/auth/` target, `bodyExtra` merged last, `method` (no body on `DELETE`), `${param.*}` / `${ctx.recordId}` / `${ctx.user.id}` / `${ctx.org.id}` / `{field}` in the path. The forwarded URL is `http://<Host header><path>`, the URL the direct request has at this process; a caller-sent `X-Forwarded-Host` / `X-Forwarded-Proto` never chooses it. The target still authorizes the caller itself (ADR-0066 D4); its status and JSON body are the door's answer (its `data` unwrapped, as the console's direct fetch handed `result.data`), and a credential rotation it emits is relayed: over REST every `Set-Cookie` line plus `set-auth-token` / `set-admin-session-token`, so `impersonate_user` works through the door on both the cookie and the bearer lane; over MCP **only the bearer pair** — no `Set-Cookie` line enters a tool result, because the MCP door admits cookie sessions and a tool result is JSON text whatever receives it can read. A disabled api action answers **409 `ACTION_DISABLED`** and the target is never called; a forwarded request that lands back on an action door is refused (400), as is a `${ctx.selection.*}` target token or a `{{page.<var>}}` body token the server cannot resolve (400, naming it; any other `{{…}}` is the author's literal text); a target that answers 2xx with a non-JSON body is refused **502** naming its content-type (the console's direct fetch read such an answer as `{}`); a kernel with no in-process request path answers 503 and does not send the caller around the door.
+  - **Off-origin api actions stay browser-only, and cannot be switched.** A `target` on another host is still refused by both doors (400, naming the origin), MCP does not list it, and `POST /actions/_activation/:object/:action` refuses to flip it (**409**) with the reason — a ledger row nothing would consult is not recorded.
+  - **MCP lists same-origin api actions** on the same terms as every other action (`ai.exposed`, the caller's permissions, no `sys_*` object).
+  - **`HttpDispatcherResult.response.headers`** accepts a `string[]` value, emitted as one header line per element; the Hono server plugin's route `res.header` and the published `@objectstack/hono` adapter's `toResponse` (its `response` arm and both `stream` arms) append an array instead of comma-joining it (the only correct spelling for `Set-Cookie`).
+  
+  **BREAKING** at two published runtime surfaces (`@objectstack/runtime`).
+  
+  - **The activation write door, `POST /api/v1/actions/_activation/:object/:action`.** *Before:* flipping a `type: 'api'` action whose `target` is on another origin was accepted and recorded as a ledger row, which nothing ever consulted — the switch read as set and did nothing. *Now:* that request is refused `409` (`error.code` `RESOURCE_CONFLICT`) with a message naming the origin and saying why (the browser calls that origin directly and this server never sees the request), and no row is written. Same-origin api actions, and every other action type, flip exactly as before. *Who sees it:* a Setup caller or script that switched an off-origin api action off and read the 2xx as "stopped". *The remedy:* none at the door — move the action's `target` onto this origin (a path starting with `/`) to make it switchable, or remove the action from the app; a script that treated the 2xx as success now reads the 409 reason.
+  - **The type `HttpDispatcherResult.response.headers`** (`packages/runtime/src/http-dispatcher.ts`). *Before:* `Record<string, string>`. *Now:* `Record<string, string | string[]>`; an array is one header line per element, and the `/actions` door emits one for `Set-Cookie`. *Who sees it:* an adapter or host outside this repository that reads the member and hands each value to a `string`-typed header setter (`error TS2345`). *The remedy, one line:* branch on `Array.isArray(value)` and emit each element as its own header line (Hono: `c.header(name, line, { append: true })`; Fetch `Headers`: `headers.append(name, line)`); joining the array with `, ` is NOT equivalent for `Set-Cookie`. The two in-repo adapters (`@objectstack/plugin-hono-server`, `@objectstack/hono`) ship that change in this release.
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [b3f7344]
+- Updated dependencies [a98693d]
+- Updated dependencies [8c0306f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [4f93696]
+- Updated dependencies [96e7a43]
+- Updated dependencies [e1ab32e]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [67cf0b1]
+- Updated dependencies [e46e25c]
+- Updated dependencies [045cfa4]
+- Updated dependencies [685d9f3]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [efdf11a]
+- Updated dependencies [1ed3360]
+- Updated dependencies [7735d1d]
+- Updated dependencies [33ab543]
+- Updated dependencies [e0aed00]
+- Updated dependencies [481ade6]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [db44327]
+- Updated dependencies [2fc3861]
+- Updated dependencies [bc496bf]
+- Updated dependencies [47c3e12]
+- Updated dependencies [03cc871]
+- Updated dependencies [e8cdf4e]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [95f545e]
+- Updated dependencies [3a054cb]
+- Updated dependencies [c4390f7]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [b6db369]
+- Updated dependencies [645534d]
+- Updated dependencies [d70e94a]
+- Updated dependencies [7d846b5]
+- Updated dependencies [7abe151]
+- Updated dependencies [3238750]
+- Updated dependencies [744ad0a]
+- Updated dependencies [125ad06]
+- Updated dependencies [8771726]
+- Updated dependencies [4a7b99f]
+- Updated dependencies [04b1402]
+- Updated dependencies [79bf748]
+  - @objectstack/runtime@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/plugin-hono-server@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

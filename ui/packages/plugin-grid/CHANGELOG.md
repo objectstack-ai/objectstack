@@ -1,5 +1,640 @@
 # @object-ui/plugin-grid
 
+## 18.3.0
+
+### Minor Changes
+
+- 17b5152: feat(spec,ui)!: a record opens one way per object — `navigation.mode` keeps `drawer` (now the default), `page`, `new_window` and `none`; `modal`, `split` and `popover` are retired, and a list page's `recordAction` drops `modal`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`navigation.mode` refuses `modal`, `split` and `popover`; `interfaceConfig.recordAction` refuses `modal`; an omitted `navigation.mode` defaults to `drawer` instead of `page`)
+  
+  <!-- adr-0087: registered navigation-mode-overlay-values-removed, ui-record-open-overlay-modes-retired -->
+  
+  **BREAKING** accept-set narrowing and default change on the record-open surface (`@objectstack/spec`), with the console following it in the same release.
+  
+  The model, ruled by the maintainer: an object has one default way to open a record — the drawer, which expands to the full page (the same record page at two widths) — and `page` only for an object that declares it. A centred dialog and a popover were extra surfaces for the same record, and the side-by-side pane is each reader's own choice, not something an author fixes for every reader.
+  
+  - **FROM → TO.** `navigation.mode: 'modal'`, `'split'` or `'popover'` (on a list view, an object's `listViews` entry, or a page list block: `list-view`, `object-grid`, `object-kanban`, `object-calendar`, `object-map`, `object-gantt`, `object-tree`, `object-timeline`) → delete the value; the block takes the `drawer` default. `interfaceConfig.recordAction: 'modal'` → delete the value; the default is `drawer`. Declare `page` only for an object whose record should open as a full page.
+  - **The one-line fix.** Delete the retired value. `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` row is converted when it is read (the `navigation-mode-overlay-values-removed` conversion), so a view saved from Studio with one of the three values keeps loading and opens the drawer.
+  - **What the parse says.** Each retired value is refused by name with its prescription, for example "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — …", at `defineStack` as `STACK_SCHEMA_INVALID` / 422. TypeScript rejects each at a `NavigationMode` position. A misspelt mode keeps zod's own message.
+  - **The default.** A navigation block written without `mode` parses to `drawer` (it parsed to `page`). The console never honoured that `page` for a list with no navigation block, because it guessed the surface from the object's field count; that guess is retired too. A list of an object with no authored navigation opens a clicked record in the drawer, whatever its field count, and a mobile viewport still pages. An artifact or stored row that a released toolchain parsed carries the old `page` written out and keeps opening as a full page; delete it to take the drawer.
+  - **The split pane.** It is now a reader's preference, read by the console's object page from the browser (`os:record-open-mode`, `drawer` or `split`, default `drawer`). It applies only to a record that opens in the drawer; an object or view that declares `page` keeps its declaration.
+  
+  The console (`@object-ui/*`): `useNavigationOverlay` defaults a block without `mode` to `drawer` and treats `drawer` as the one overlay mode. `NavigationOverlay` keeps the drawer face and the split face the console's object page draws from the preference; its `modal` and `popover` faces, the `popoverTrigger` / `popoverAnchorRef` props and the `useOverlayAnchor` export are removed, because no caller can reach them. The grid, kanban, calendar, gantt and tree renderers drop their `split` and `popover` plumbing. The registered `object-view` renderer opens records in the drawer (a page on a mobile viewport) instead of paging a field-heavy object. The Studio list-view inspector offers the four live modes, and the list page's `recordAction` the three live values.
+  
+  Migration for code that imported the removed component API: drop `popoverAnchorRef` / `popoverTrigger` from a `NavigationOverlay` call and any `useOverlayAnchor()` call; pass `mode="split"` with `mainContent` for a side-by-side pane.
+- 79ed6f7: feat(formula, plugin-email, messaging, automation, ui)!: a template `currency` hole with no argument formats in the organization's default currency, and with none the render refuses it; nothing formats in US dollars by default any more (#26939)
+  
+  Clause-②: no (narrowing) — a mail send or render (`sendTemplate`, `renderTemplate`, and the messaging email and inbox channels on them), a flow text slot (notify, http, screen, end) and a templated formula evaluation refuse a `{{ amount | currency }}` hole with no argument when no default currency reaches the render, which they formatted in US dollars before. Authoring is unchanged: the hole is still accepted at save and publish. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `content/docs/automation/flows.mdx` and `content/docs/data-modeling/formulas.mdx` state the tenant default and the refusal; no skill under `skills/**` taught the dollar default (the formula skill names the formatter grammar only), so no skill line changes.
+  
+  <!-- adr-0087: registered template-currency-no-argument-tenant-default -->
+  
+  **BREAKING** semantic change of the `currency` formatter's no-argument form (`@objectstack/formula`), served by every template dialect: mail templates, flow text slots, and action / bulk-action confirm and success copy.
+  
+  - **Before.** `{{ amount | currency }}` formatted the amount in US dollars (`$1,234.50`) whatever currency the amount was in and whatever the organization's default currency was.
+  - **Now.** It formats in the organization's default currency, the `localization.currency` setting (Setup → Localization) that a currency field and a dashboard measure already display in: `CN¥1,234.50` for an `en-US` reader and `¥1,234.50` for a `zh-CN` reader when the default is CNY. Every server-side read goes through `resolveLocalizationContext` (`@objectstack/core`); the UI reads `useLocalization().currency`.
+  - **With no default currency.** The render refuses the hole by name and names the remedy: set the default, or write `currency:CODE` (a mail template's refusal also names `currency:@path`). A mail send or render fails with `TEMPLATE_INVALID` and nothing is sent; a messaging delivery records it as a permanent failure. A flow node with such a hole in a text slot fails with the refusal, which no fault edge routes. An action's confirm or success sentence is shown as written, the existing fallback for a sentence the template engine refuses.
+  - **How each host hands the default over.** `SendTemplateInput.currency` / `RenderTemplateInput.currency` (`@objectstack/spec/contracts`), filled by the messaging email and inbox channels from the delivery's organization, and by the auth mails (verification, password reset, invitations, magic link, notices) from the organization the mail names or, for identity mail, the deployment-wide setting (`@objectstack/plugin-auth`, once, on the email service it wires); `AutomationContext.currency`, seeded once at run setup from the run's tenant (`AutomationEngine.setTenantCurrencyResolver`, which the automation plugin wires), persisted with a suspended run and inherited by a subflow; `EvalContext.currency` in `@objectstack/formula`, a reserved channel like `locale`, never bound as a root; `ActionRunner.setTenantCurrency` in `@object-ui/core`, installed by the React action providers.
+  - **Unchanged.** `{{ amount | currency:EUR }}` formats in the code it names, with or without a default. A variable, field or root named `currency` is a value, never the default. Compile, `validateExpression` and the publish gates accept the no-argument form as before. A template with no no-argument currency hole needs no default.
+  - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
+  
+  **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+  
+  **Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` and hole-grammar changes (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`, `26660-mail-hole-grammar`) describe a `currency` hole formatting in US dollars, and the first three say a hole with no argument still does. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
+
+### Patch Changes
+
+- 7bdff7e: refactor(plugin-grid): `ObjectGrid`'s row-height sync, column state and mobile affordances move into three sibling hooks
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three adjacent blocks at the top of the `ObjectGrid` component move verbatim out of `ObjectGrid.tsx`. The effect that follows a changed `schema.rowHeight` goes to `useObjectGridRowHeightSync` (`objectGridRowHeight.ts`). The column-state persistence (the storage key, the `columnState` seed, the sync of a host-supplied `columnState` and `saveColumnState`) goes to `useObjectGridColumnState` (`objectGridColumnState.ts`). Pull to refresh and the card-view breakpoint go to `useObjectGridMobile` (`objectGridMobile.ts`). `ObjectGrid` calls each hook where its block stood, so its hook order, its stored column state and its rendered output do not change. No name is renamed, and the package entry is unchanged.
+  
+  What to do: nothing.
+- f79ec28: refactor(plugin-grid): `ObjectGrid`'s column generator, column post-processing and Actions column move into three sibling modules
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The last three blocks of the move-only split leave `ObjectGrid.tsx` verbatim. `generateColumns`, which turns the authored columns or the object's fields into column drafts, goes to the hook `useObjectGridGenerateColumns` (`objectGridGenerateColumns.tsx`). The column post-processing (field-type enrichment, the fold onto the declared column type, and the user's persisted widths and order) goes to `resolveObjectGridPersistedColumns` (`objectGridPersistedColumns.ts`). The Actions column and the pinned column sets go to `resolveObjectGridActionsColumn` (`objectGridActionsColumn.tsx`). `ObjectGrid` calls each where its block stood, so its hook order, its columns and its rendered output do not change. No name is renamed, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 68edbcf: refactor(plugin-grid): `ObjectGrid`'s grouping and column summaries move into two sibling hooks
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two adjacent blocks of the `ObjectGrid` component move verbatim out of `ObjectGrid.tsx`. The grouping (the group value formatter, the date-family group faces, the server group headers and row pages, and the grouped data) goes to `useObjectGridGrouping` (`objectGridGrouping.ts`), together with `temporalGroupHeading`, which draws a date group's heading. The cross-page fan-out query, the resolved match total and the column summaries go to `useObjectGridSummaries` (`objectGridSummaries.ts`). `ObjectGrid` calls each hook where its block stood, so its hook order, its queries and its rendered output do not change. No name is renamed, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 14f3099: refactor(plugin-grid): `ObjectGrid`'s query inputs and grouping decisions move into two sibling hooks
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two adjacent blocks of the `ObjectGrid` component move verbatim out of `ObjectGrid.tsx`. The projection keys and the view's filter, sort, search and server-paging state go to `useObjectGridQueryInputs` (`objectGridQueryInputs.ts`). The masked grouping-key refusal, the server-grouping decision, the two grouping refusals, the fetch window and the held group row query go to `useObjectGridGroupingDecisions` (`objectGridGroupingDecisions.ts`). `ObjectGrid` calls each hook where its block stood, so its hook order, its queries, its warnings and its rendered output do not change. No name is renamed, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 66244ac: refactor(plugin-grid): `ObjectGrid`'s row load moves into a sibling hook
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The row load of the `ObjectGrid` component moves verbatim out of `ObjectGrid.tsx` into `useObjectGridRowLoad` (`objectGridRowLoad.ts`): the data-invalidation nonce, the one async load effect, the host `findParams` reset of "select all matching" and the page-1 reset on a query change. `toOrderByClause`, whose only caller is the load effect, moves with it. `ObjectGrid` calls the hook where the block stood, so its hook order, its queries and its rendered output do not change. No name is renamed, and the package entry is unchanged.
+  
+  What to do: nothing.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7414fc8: feat(plugin-list,plugin-grid,i18n): the Display menu's Open records section — the reader's drawer | split preference, or the object's declared full page — and a host node beside each row's record link (#26681)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@object-ui/plugin-list`**: `ListView` takes a `recordOpen` host prop and hands it to the Display menu (`ViewSettingsPopover`), which draws an Open records section after Layout. For a drawer-mode object it offers two segments, Drawer | Split, writing the reader's own preference through the host's `setPreference`, with a note that the choice is the reader's and that both expand to the full page. For an object or view that declares `navigation.mode: 'page'` it draws one read-only line instead; for `new_window` and `none`, nothing. A host that passes no `recordOpen` draws no section, so every other host is unchanged. It is a host prop, not a view key: no metadata is added, and the section neither counts toward the Display trigger's changed-settings count nor returns under "Reset to view default".
+  - **`@object-ui/plugin-list`** and **`@object-ui/plugin-grid`**: `ListView` and `ObjectGrid` take a `recordLinkAdornment` host prop — a node drawn beside each row's record link, after the anchor and never inside it: beside the first column the view links (`link: true`), else beside the auto-linked primary field. `rowAdornment` is unchanged: it sits beside the row's title, which need not be where the record opens from. The console passes an "open as full page" arrow through it for a row that opens the drawer. Absent, the link cell is exactly the anchor it was.
+  - **`@object-ui/i18n`**: the section's five `list.*` strings (`recordOpen`, `recordOpenDrawer`, `recordOpenSplit`, `recordOpenNote`, `recordOpenDeclaredPage`) and `console.objectView.openAsPage`, the tooltip of the console list's open-as-full-page arrow, in all ten packs.
+- 74133d9: fix(plugin-grid): a grouped list on a phone draws its group headers and cards instead of the desktop table
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Below the 768px card breakpoint, `ObjectGrid` turned a plain list into one card per row but kept a grouped list (`grouping`) on its desktop table, so on a phone the titles were cut mid-word and every other column sat behind the pinned Actions column. A grouped list now takes the plain list's card layout: each group's header (its toggle, label and count), then that group's rows as the same cards, then, on a server-grouped list, the group's own pager. Collapsing a group hides its cards, and the grouped pager still pages whole groups. At a desktop width the grouped table is unchanged, and so is the plain list's card view, which now draws through the same card renderer.
+  
+  What to do: nothing.
+- c4ad55c: fix(plugin-grid): a promoted bulk action's field-backed lookup param keeps the field's `lookupFilters`, `lookupColumns`, `lookupPageSize` and `descriptionField`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A view's `bulkActions` can name an object action whose param is backed by a lookup field (`{ field }`). The selection bar's dialog resolved that param through the same resolver as the single-record dialog, but then dropped the field's picker settings. So the selection-toolbar picker offered records the field's `lookupFilters` hides from the row-menu picker, and ignored the field's declared columns, page size and description field. The bulk dialog now hands those four settings to the record picker under the names the single-record dialog uses, so both pickers offer the same records.
+  
+  What to do: nothing. A lookup field's `lookupFilters` now also narrows the selection-bar picker of any promoted bulk action that takes its param from that field.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- ad2c286: fix(plugin-grid): inline edit opens no cell editor on a row the server's record-grained write verdict refuses
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An editable grid gated its cells on the object-level grant only, while the row kebab on the same rows also read the server's record-grained `update` verdict. A row that sharing, ownership or RLS refuses lost Edit from its kebab but still opened a cell editor, and the save was refused by the server. Now the cells read the same verdict as the kebab:
+  
+  - **A refused row reads as read-only.** No click, double-click or Enter opens an editor on it, and its cells show no edit cursor. A click on such a cell reaches the row as it does on a read-only grid. Selection, navigation and the row menu are unchanged.
+  - **One verdict, fail open.** The cells and the kebab read one batched explain probe for the rows on screen. A row with no answer yet, a failed or absent probe, or a row with no id keeps the object-level behaviour, as before. An editable grid with no kebab Edit now asks the same probe.
+  - **New runtime slot `DataTableSchema.isRowEditable`.** `(row) => boolean`, supplied by the host and read by `data-table` before it opens a cell editor. It only narrows `editable`: absent, every row follows `editable` and the column locks as before. It is a function, not metadata, so the zod mirror refuses an authored value by name.
+- 10cbfac: fix(plugin-grid): a bulk action's result lists each refused record by its title, not by its id
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a bulk action is refused for some of the selected records, the result panel lists every refusal with the reason the server gave. Each refusal used to be labelled with the record's raw id (`lead_2: … is already a member of this campaign`), so the user had to work out which record it was. It is now labelled with the record's title, resolved the same way the confirm step lists the affected records (the object's `nameField`, or `Record #<id>` when the record has no readable title). An entry that is not a record of the run, such as a row with no id or a batch the server answered with a count only, keeps its id. The counts and the error CSV are unchanged.
+- 69991ff: fix(plugin-grid, plugin-detail): a formula declaring `returnType: 'currency'` reads as money in list cells and on the record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `Field.formula` with `returnType: 'currency'` and its own `currencyConfig` read as a bare grouped number (`90,000.00`) beside the currency fields it was computed from (`$150,000.00`). The formula cell already draws a declared currency through the currency cell, but the grid's configured columns and the record page's field enrichment rebuilt the field from a picked key list that left `returnType` out, so the cell never saw it. Both now hand `returnType` through beside `currencyConfig`, and the formula reads `$90,000.00`. A formula declaring `number`, or nothing, keeps the bare number.
+- 9324232: fix(console): a packaged action switched off for this deployment is no longer offered as a live button
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An administrator can switch a packaged action off in Setup › Packaged automation. The action door then refuses it, but the console kept offering the button on the record header, in action bars and in list rows, so a click could only fail. The object reads now serve the names of the switched-off actions beside the object (#27842), and the console stops offering those actions everywhere it already hides an action whose capability the user lacks: the record header, action bars, record quick actions, list and related-list toolbars, row and bulk actions. Turning the action back on in Setup brings the button back.
+  
+  `@object-ui/core` adds four exports for this: `isActionSwitchedOff(action)`, `markSwitchedOffActions(schema, served)`, `markSwitchedOffActionsByObject(objects, served)` and `ACTION_SWITCHED_OFF_KEY`. The data layer stamps a switched-off action entry under that symbol key, which survives a spread and never reaches JSON, so an action handed back to a metadata write never carries it.
+  
+  What to do: nothing. A backend that does not serve the names hides nothing, as before.
+- 0ac6dab: feat(console): a bulk result names the records it wrote, and a required-field refusal says what to fill in
+  
+  Clause-②: yes (widening: `ActionResult` gains the optional `fieldErrors` member, `ActionFieldError` is a new export of `@object-ui/types`, and `ActionResponseOutcome` gains `fieldErrors`; no accept set moves)
+  Metadata-protocol: none
+  
+  - **Bulk action result.** After a bulk action such as Mark Done, the result read only "Succeeded 2 / 2". It now lists the records that succeeded, named the way the confirm step names them (the object's name field). The list appears when every failure is reported against a record of the run; when the server answered a bare count, the result keeps to the count rather than name a record that may have failed.
+  - **Required-field refusal from an action.** Running an action whose write the server refuses for a missing required field, such as Submit for Sign-off on a draft invoice with no Issued On, used to say only "Issued On is required". It now continues "Fill in Issued On, then run “Submit for Sign-off” again." Several fields are joined in the session's language. Any other refusal is shown as the server wrote it.
+  - For code that dispatches actions through `createServerActionHandler`: a failed `ActionResult` now carries the refusal's per-field entries as `fieldErrors` (field, code, message, label), read from the answer's `error.details.fields`. `error` is unchanged.
+- 75ecaf4: fix(ui): a refused inline-grid save marks its cells and says every reason; a refused form save is said once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Inline grid edit, Save All.** When the server refused a row, the save bar showed one shortened line, with the rest only in a tooltip, and no cell showed which value was wrong. Now every reason is shown in full on its own line under the toolbar, and each cell the refusal names gets a red outline with its reason on hover. Editing a marked cell removes its outline.
+  - **Field rules before sending.** The grid's built-in saves now check an edited value against the field's own rules (required, min / max, length, email / URL pattern) before sending, and refuse a row that breaks one in the same way the server would. That row is not sent; the other rows still save.
+  - **Save All placement.** The grid toolbar is padded, so the Save All / Cancel All buttons no longer sit against the right edge of the grid.
+  - **Refused form save.** When the server refused a form save, such as one blocked by a validation rule on a Studio-authored object, the form showed a banner and an identical error toast. It now shows the banner only, scrolled into view, and a retry still replaces that banner instead of adding another. This reverses the earlier one-error-toast behaviour.
+- 72b08ee: docs(skills): hand-written inventory counts are deleted; the names and the source of truth stay
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-data` counted its field types ("49") in SKILL.md and in `rules/field-types.md`, and its lifecycle events ("8") in SKILL.md and `references/data-hooks.md`; `objectstack-automation` counted its built-in node types ("20"); `objectui/README.md` counted its plugins ("18"); `objectui/guides/schema-expressions.md` counted the formula registry ("30 functions"); `objectstack-query` counted the aggregate functions ("six"). No gate reads any of those numbers against the tree, so each one goes wrong the moment the inventory moves, and a wrong count misleads the reader more than no count.
+  - **Now.** The numbers are gone; every enumeration that taught something (the node-type tables, the plugin names, the function table, the aggregate names) stays, and each page still points at the file or schema that is the source of truth. Deletion only: every touched file shrinks under its unchanged token ceiling.
+  - The same deletion in shipped READMEs and one shipped source comment: `@objectstack/spec` (a `//` comment in `src/kernel/metadata-plugin.zod.ts`, which ships), `@objectstack/metadata` (README), and the `@object-ui/*` READMEs of i18n, plugin-grid, components, fields, types, plugin-form and console. No schema, key or behaviour changes.
+- c1b52de: feat(components,plugin-grid,i18n,app-shell): record pane v4 mechanics — the split pane beside the list, the non-modal drawer over it, ⤢ maximize in place, the drag range, and the list's narrowed faces (#27545, part A)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  No metadata key is added, removed or read differently. The console wires these mechanics in a following change; until then it passes none of the new props, and its only change here is the pane's default width.
+  
+  - **`@object-ui/components`**: `NavigationOverlay`.
+    - **Split face.** The pane sits beside the list the host hands over (`mainContent`), at that list's full height. The list is one element in every state, so it is not remounted by the overlay. Below a 1000 px content area (`RECORD_SPLIT_MIN_CONTENT_PX`) the split face falls back to the drawer.
+    - **Drawer.** Over a `mainContent` list, the drawer is non-modal and draws no dimming overlay: an outside click leaves it open, and ✕ and `Esc` close it. A drawer with no list is the modal sheet it was.
+    - **Width.** The divider drags from 360 px to 60vw. A remembered width is drawn inside that range (`min(Npx, 60vw)`). An authored width is no longer floored at `min(60vw, 880px)`.
+    - **New `maximizable` prop.** It draws ⤢ / ⤡ and maximizes the pane in place. The pane's width becomes the viewport less the live sidebar width (`--sidebar-width`, or `--sidebar-width-icon` when collapsed; `SIDEBAR_WIDTH_FALLBACK` / `SIDEBAR_WIDTH_ICON_FALLBACK` where the variable does not reach). The list stays mounted and inert under it. `Esc` restores, and a closed pane forgets it.
+    - **New `activeListRecordId` prop.** A list under the pane reads its narrowed face (`useRecordListFace()`: `columns` at ≥ 440 px, `cards` below, `full` with no pane beside it) and which of its rows is the open record (`ActiveListRow`, `useIsActiveListRecord`, `ActiveListRecordProvider`, `RecordListFaceProvider`). The open row is a per-row subscription, so a change re-renders the row it leaves and the row it reaches, not the list.
+    - **`onExpand`** is drawn as ↗.
+    - **`DataTable`** marks the open record's row (`data-active-record`, `aria-current`) and scrolls it into view.
+  - **`@object-ui/plugin-grid`**: `ObjectGrid` narrowed to `columns` keeps its first three view columns that are not avatars, plus its row actions. Narrowed to `cards`, it draws one card row per record, with the name and two chips. Under no pane nothing changes.
+  - **`@object-ui/i18n`**: `detail.maximize` and `detail.restoreSize` in all ten packs.
+  - **`@object-ui/app-shell`**: the console's record pane defaults to 720 px (`md`, clamped to 92vw) whatever the object's field count. `size: 'auto'` and no size both read as `md`, and an authored `size` or `width` stands. This applies to the object page's drawer and to the record page's related-record drawer.
+  
+  What a console reader sees from this change alone:
+  
+  - The record drawer's page button is drawn as ↗ instead of ⤢. It still opens the full page, under the same name.
+  - The record drawer is 720 px wide (at most 92vw) whatever the object's field count. Before, it took 480 to 1200 px by field count and was widened to at least `min(60vw, 880px)`: 864 px at a 1440 px viewport for an object of up to eight fields.
+  - A reader who chose Split in the Display menu sees the pane as a side panel. It draws no title heading. Its divider drags from 360 px to 60vw. The list beside it narrows to three columns, or to card rows below 440 px. The open row is not tinted yet: the console does not pass `activeListRecordId` until the following change. Below a 1000 px content area, the pane becomes a non-modal drawer over the list.
+- 277275a: feat(plugin-grid,plugin-list,app-shell,i18n): record pane v4 in the console — a record opens beside the list by default, ⤢ maximizes it in place on the same URL, and the full page opens only from the row's ↗ and the record header's ⋯ (#27545)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  No metadata key is added, removed or read differently: every change is in how the console opens a record from a list, and in the reader's own preference. The mechanics (the split face, the non-modal drawer, maximize, the list's narrowed faces) shipped in the change before this one.
+  
+  - **`@object-ui/app-shell`**
+    - The object page opens a record beside the list unless the reader prefers the drawer (Display menu); a reader who prefers the full page gets it from a row click. Below a 1000 px content area the pane is a non-modal drawer over the list.
+    - The list is one element whatever the pane does, so it keeps its scroll. A click on another row swaps the pane's root record. The open row is tinted, follows ↑ ↓ and scrolls into view.
+    - A `?recordId=` change (a row click, a step) re-renders none of the list: the router's setter and the list's handlers no longer change identity with the URL.
+    - The bar's ⤢ maximizes the pane in place and no longer routes; nested levels share it. The full page opens from the row's ↗ and from the record header's `⋯`, whose last host item is 「Open as full page」. 「Collapse to drawer」 is drawn only on a page the ↗ opened.
+    - A step keeps the record on screen until the next one arrives, and ↑ ↓ warm the related counts of both neighbours.
+  - **`@object-ui/plugin-list`**
+    - The Display menu's Open records section draws a third segment, Full page, when the host passes the new optional `recordOpen.selectPage`; a host that passes none sees two segments, as before, but now in the order Split | Drawer (it was Drawer | Split), since Split is the default. `recordOpen.preference`, an input the section only reads, also accepts `'page'`. `setPreference` still takes `'split' | 'drawer'`, so a host's setter keeps its type. The note says a record's ↗ always opens the full page.
+    - Beside a record pane the record-count bar no longer prints the count (the console prints it under the list); the rest of the row stays.
+  - **`@object-ui/plugin-grid`**: narrowed beside a pane, the row-actions column keeps its header's accessible name but draws no label, so it is only as wide as its ⋮.
+  - **`@object-ui/i18n`**: `list.recordOpenPage` in all ten packs, and `list.recordOpenNote` reworded in all ten.
+- 4d1f52c: fix(plugin-grid): the import wizard's "Match on" no longer offers a field the server refuses as a match key (#27567)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  In "Update existing" and "Update if matched, else create", "Match on" listed every mapped field. The server refuses a match key whose value is a list or a structured payload (`400 INVALID_REQUEST`, #27465), so ticking such a field got the whole import refused at Validate. The list now leaves those fields out, by the same spec definitions the server's `multiValueMatchKeyRefusal` reads (`isMultiValueField`, `STRUCTURED_JSON_TYPES` from `@objectstack/spec/data`): a `multiple: true` lookup, user, select, radio, file or image field; a multiselect, checkboxes or tags field; and a JSON-stored type such as `json` or `address`. Single-value fields are offered as before.
+  
+  The wizard's field shape (`ImportWizardProps['fields']`) takes an optional `multiple` flag, carried from the object schema by the console's import targets; a host that leaves it out still has the inherently multi and structured types filtered by type.
+  
+  What to do: nothing.
+- 2e20454: fix(app-shell): a single-record action in a list's header is disabled, with the reason, unless exactly one row is selected, and is not drawn where the rows cannot be selected
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a list, a header action that runs on one record (for example Tasks → **Reassign…**, placed at `list_item` and `list_toolbar`) was drawn enabled with nothing selected, and said "select a row first" only after a click. Where the grid draws no row checkboxes, it could never work.
+  
+  - **0 rows or several rows:** the action is drawn disabled. Its tooltip and accessible description are the refusal a click already gave ("This action runs on a single record — select a row first." / "… select exactly one row."), in the session's language, from the existing `actions.selectRowFirst` / `actions.selectExactlyOneRow` keys.
+  - **Exactly one row:** the action is enabled and runs as before.
+  - **A list whose rows cannot be selected:** the action is not drawn.
+  - **Object-level actions** (declared at `list_toolbar` only) are unchanged with no rows selected. With several rows selected they are disabled with the "select exactly one row" reason, because a click is refused the same way.
+  - **The header has no rule of its own.** It asks the action runner for the early refusal a launch would get (the dispatch handler's `refuseBeforeInput`, the same check that refuses a click before any dialog opens). That check stays as the backstop, for example for a `?runAction=` deep link.
+  
+  New public members (additive):
+  
+  - `@object-ui/core`: `ActionRunner.launchRefusal(action)` returns the early refusal `execute` would give the action against the runner's current context, translated by its key, or `undefined` if there is none. It runs, sends and shows nothing. `ActionRunner.subscribeContext(listener)` calls `listener` after every `updateContext` and returns an unsubscribe function.
+  - `@object-ui/types`: `ActionContext.selectionAvailable?: boolean` tells whether the list publishing `selectedRecords` lets its rows be selected at all.
+  - `@object-ui/plugin-grid`: `ObjectGrid` publishes `selectionAvailable` beside `selectedRecords` in the action context, and clears it when it unmounts.
+- b1e1dcf: feat(console): a save's toast shows the notice a hook set on the write, still one toast per write
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A create or update answer can carry a `notice`: one message a hook on the write set for the person who made it, such as "Sent to your manager for approval". The Console now shows it. The record form's save toast (the record dialog, its child-form task and the full-page form), the `object-form` drawer and modal, and the grid's inline-edit saves (the per-row save and "Save All") keep their own message as the title and show the notice under it. The toast stays a success when the notice is the only news, and moves to the warning variant, with the notice leading the lines, when the answer also carried warnings. A write no save surface reports itself, such as the record page's inline edit Save bar, gets one toast from the write-warning channel instead: an info toast with the notice as the hook wrote it, or the notice leading the "Saved — with warnings" lines.
+  
+  - **`@object-ui/data-objectstack`**: `WriteWarningEvent` gains an optional `notice`, read off the single-record create and update answers. The event is now also emitted when the notice is the answer's only news. What `create` and `update` resolve is unchanged.
+  - **`@object-ui/react`**: new type `RecordSaveFeedback` (`warnings`, optional `notice`). `AnswerWarningClaim.take` returns it, `AnswerWarningsEvent` gains `notice`, and `toastRecordSave` takes it as its third argument. These exports have not been released yet, so no released signature changes.
+- 700ec85: feat(console): a percent field with `percentDisplay: 'plain'` shows the percentage with no progress bar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `FieldSchema.percentDisplay` (`bar` or `plain`) was declared ahead of its renderer, so every percent field still drew a progress bar, including rates and probabilities such as an opportunity's win probability. The Console now reads it:
+  
+  - **The percent cell.** `PercentCellRenderer` in `@object-ui/fields` prints the formatted percentage alone when the field says `percentDisplay: 'plain'`. An absent key or `bar` keeps the bar beside the number, as before. The number itself is unchanged: same storage reading (`max`), same decimal places (`scale`), same locale.
+  - **Every read-only host.** The list grid, the record page's fields and header chips, the quick-look panel, related lists and gallery cards all draw that one cell. Each builds the cell's field metadata key by key, so each now copies `percentDisplay` beside `useGrouping`: the grid's three configured-column paths, the detail enrichment key list (record page fields and header chips), the quick-look panel, the related list and the gallery card.
+  - **The field form.** The field designer offers a `percentDisplay` select (Bar / Plain) on `percent` fields. Left untouched it writes nothing, and the field keeps the bar.
+  - **The contract.** `percentDisplay`'s describe no longer says the Studio UI does not read it, and its liveness row is `live`, naming those relay sites.
+  
+  Nothing to migrate: a field that already says `plain` now shows it.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [2302b92]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8c8c5b5]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [b53322d]
+- Updated dependencies [28804e8]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [c68869c]
+- Updated dependencies [9f181af]
+- Updated dependencies [2dd332d]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [47b6392]
+- Updated dependencies [d31329f]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [94bab5a]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [0d07de2]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [fc92c62]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [81b4599]
+- Updated dependencies [d7df639]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [8243694]
+- Updated dependencies [2140821]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [2594f5b]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [48bffe3]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [1e8e529]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [b223072]
+- Updated dependencies [e199adf]
+- Updated dependencies [ddbd08e]
+- Updated dependencies [7614f8f]
+- Updated dependencies [359e935]
+- Updated dependencies [5b17215]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [d220b9b]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [69991ff]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [50d05cb]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [3702be4]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [8a1f467]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [2f2c6b9]
+- Updated dependencies [5c083e8]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a5d7098]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [946395d]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c4cb5ec]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [b339465]
+- Updated dependencies [e15a87c]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [916531a]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [3ba5206]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [91e4652]
+- Updated dependencies [001c04b]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [99a6a78]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [64e5efd]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @objectstack/spec@18.3.0
+  - @object-ui/fields@18.3.0
+  - @object-ui/plugin-detail@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/mobile@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/permissions@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

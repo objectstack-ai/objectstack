@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/fields",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "description": "Field renderers and registry for ObjectUI",
   "license": "MIT",
   "type": "module",

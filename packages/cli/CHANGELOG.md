@@ -1,5 +1,948 @@
 # @objectstack/cli
 
+## 18.3.0
+
+### Minor Changes
+
+- a9f654e: feat!: ownership queues: records wait in a queue until a member claims them, and assignment rules route new records (ADR-0142)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-queue-field-reserved -->
+  
+  **BREAKING** for one shape only: an object whose records have a user owner (`ownership: 'user'`, the default) can no longer declare its own field named `queue`. The platform now injects a `queue` column on every such object, and `registerObject` refuses the declaration with `422 INVALID_METADATA` (`ObjectQueueColumnRefusedError`), naming the object. An `objectExtensions` entry that declares `queue` on such an object is not refused, because an extension is folded over its object at read time: its `queue` is ignored, the platform's column stands, and a warning names the extension. The remedy: rename the business field (for example `support_queue`) and copy its data across, or, when the object's records have no user owner, declare `ownership: 'business_unit'`, `'org'` or `'none'`. The upgrade guide entry is `object-queue-field-reserved`.
+  
+  Beside that, two enum additions: `ShareRecipientType` gains `queue` (a sharing rule can now name a queue as its recipient), and the `queue` approver type is authorable again (it leaves `NON_AUTHORABLE_APPROVER_TYPES`, so it is no longer marked deprecated). Two metadata types are new: `queue` and `assignment_rule`.
+  
+  - **`@objectstack/spec`**: new `queue` and `assignment_rule` metadata types (`QueueSchema`, `AssignmentRuleSchema`) and the stack keys `queues` and `assignmentRules`. A declared queue's members are positions. New `IOwnershipQueueService` contract, registered under `ownership-queue`. `queue` joins the injected system columns of `ownership: 'user'` objects and `PUBLIC_FORM_SERVER_MANAGED_FIELDS`. `APPROVER_VALUE_BINDINGS.queue` reads both a declared queue and an organization's `sys_queue` row, and `APPROVER_ORG_SCOPED.queue` is `true`. The explain rule kinds `queue_membership` and `queue_claim` are new. `QUEUE_NOT_FOUND` (422) is registered under plugin-security.
+  - **`@objectstack/objectql`**: objects with `ownership: 'user'` get a system-managed `queue` column beside `owner_id`. Declaring your own `queue` field on one is refused at registration (`INVALID_METADATA`), and an extension's own `queue` field on one is ignored with a warning. An update can carry a write precondition: when it no longer matches, the update answers `409 CONCURRENT_UPDATE`. Declared assignment rules run once for each inserted row that has no owner and no queue after the `beforeInsert` hooks. A rule can park the row in a queue, or pick a member by `round_robin` or `least_loaded`. Assignment never refuses an insert. `kernel:ready` refuses to boot a stack that declares queues or assignment rules when no `ownership-queue` service is registered.
+  - **`@objectstack/metadata-core`**: `queue` is classified as an injected system column.
+  - **`@objectstack/metadata`**: the artifact door registers a stack's `queues` and `assignmentRules`, so an artifact-only runtime serves them.
+  - **`@objectstack/plugin-sharing`**: three new objects, `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, and the `ownership-queue` service. The service resolves a queue name from the registry first, then from the organization's own rows, and has one member expander. A record with no owner that sits in a queue can be read and edited by the queue's members, never deleted. The `queue` sharing recipient grants matched records to the queue's members, and its grants are recomputed when membership changes or the queue is switched on or off.
+  - **`@objectstack/plugin-security`**: the owner gate handles `queue`. A **claim** sets `owner_id` from empty to yourself, by id. It is admitted when the sharing model allows you the record, and only one claimant wins: the loser gets `409`. A **release** gives your own record back to its home queue. A **move** to another queue needs the transfer grant, and a queue name that does not resolve is refused with `422 QUEUE_NOT_FOUND`. An insert that names a queue needs the transfer grant or membership of that queue. A guest can supply neither. Explain reports the queue reasons on the sharing layer.
+  - **`@objectstack/plugin-approvals`**: a `queue` approver resolves to the queue's members when the step opens. An empty queue adds nobody and logs a warning. The `queue:<name>` placeholder is never written again.
+  - **`@objectstack/lint`**: a queue-only approval node is reported `approval-approvers-may-resolve-empty`, and the org-axis red line admits the queue recipient. Two new advisory rules come with `os explain` entries: `assignment-rule-user-target` (warning) and `assignment-rule-queue-unstaffed` (info).
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, so `os migrate organization-ownership` plans them instead of refusing.
+  - **`@objectstack/runtime`**: `POST /security/_activation/:type/:name` also switches a declared `queue` or `assignment_rule` on and off.
+  - **`@objectstack/platform-objects`**: the two new metadata types' labels, and the queue recipient option, are translated in zh-CN, ja-JP and es-ES.
+  - **`@object-ui/app-shell`**: the flow designer no longer warns that a queue approver resolves to nobody.
+  - **`@objectstack/skills`**: the platform skill lists `queues` and `assignmentRules` among the stack's top-level keys.
+  
+  What to do: rename any `queue` field on a user-owned object, or in an extension of one, as above. Every other existing stack behaves as before. To use queues, declare `queues` and `assignmentRules` in your stack, and make sure plugin-sharing is installed: it registers the `ownership-queue` service.
+- 4f05de4: feat(spec): a joined report's block headings and a master-detail field's inline grid heading are translatable
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  Two authored, user-visible labels had no translation slot, so a zh-CN user read them in the authoring language and `os i18n check` could not see the gap:
+  
+  - **A joined report's blocks.** The `reports` translation group declares `blocks`, keyed by the block's `name`: `reports.<report>.blocks.<block>.label` / `.description`. `translateReport` overlays them on each block of the served report (`GET /meta/report`), which is what the joined renderer draws above each block.
+  - **A field's `inlineTitle`.** `FieldTranslationSchema` declares `inlineTitle`: `objects.<child>.fields.<field>.inlineTitle`, on the child object whose master-detail (or lookup) field declares the heading. `translateObject` overlays it on the served child object (`GET /meta/object`), which is what the console copies onto the parent's form as the inline grid's heading.
+  
+  Both follow the packaged-base rule (ADR-0029 D9.2a): a string an org re-authored on top of the packaged declaration keeps its text. An authored `inlineTitle` with no entry keeps its authored text; the child object's plural label is never substituted for it.
+  
+  `os i18n extract` scaffolds both keys and `os i18n check` counts them: a block's `label` / `description` under the report bucket, `inlineTitle` under the field bucket. A block without a `label`, or a field without an `inlineTitle`, is recorded without being demanded.
+- b3f7344: feat(spec): a hook declares its refusal catalogue, and its body refuses by code, answered in the caller's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A hook can now declare `refusals`: one entry per SCREAMING_SNAKE code, each with the `message` the user reads and an optional 4xx `status` (default `400`). A sandboxed `body` then refuses by code only: it throws an error carrying a declared `code`, and the body runner answers with the entry. The message is translated through `hooks.<hook>.refusals.<CODE>.message` in the caller's locale, the code reaches the caller's error envelope as `declaredCode` (beside the status's registered `code`), and the status is the entry's. The body's own error text and `status` are not what the caller reads.
+  
+  - **Spec.** `HookSchema.refusals` (`HookRefusalSchema`: `message`, `status?`). A new `hooks` group on the translation bundle, `hooks.<hook>.refusals.<CODE>.message`, and `hookRefusalMessageKey`. A message is plain text: a `{{ }}` hole is refused at save, so a later parameter slot stays additive. `HookContext.session.locale` declares the caller's locale.
+  - **Undeclared codes are refused loudly.** A code the body throws literally (`{ code: 'X' }`, or `e.code = 'X'; throw e`) that the catalogue does not declare fails the save at `body.source`. Any other undeclared code, and a throw with no code, is a `500` fault at run time that names the hook and the code. A catalogue on a hook with no sandboxed `js` body (an in-process `handler`, an expression body) is refused at save, since nothing would answer it. All of this applies only to a hook that declares `refusals`; a hook without one is answered exactly as before.
+  - **Runtime.** The body runner resolves the throw against the catalogue and picks the translation through the `i18n` service, negotiated against the locales it holds. An error a `ctx.api` call raised that the body lets leave unchanged, a crash, and the sandbox's own faults pass through untouched. ObjectQL copies the request's locale onto the hook session.
+  - **CLI.** `os i18n extract` scaffolds one key per declared entry and `os i18n check` counts them, in a new `hook` coverage bucket.
+  - **Lint.** A translation keyed to a hook the stack does not define, or to a code its `refusals` does not declare, is reported as `translation-target-unknown`.
+  - **Console.** The translation preview shows a `hooks` category (en/zh labels), and the translation loader lists `hooks` among the spec groups.
+  
+  Nothing to do for existing hooks. To use it, declare `refusals` on a sandboxed hook and throw its codes.
+- 13dc413: feat(spec): a greyed action says why — `disabledReason` beside `disabled`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `ActionSchema` gains one optional key, `disabledReason`: the sentence a greyed action shows to say why it is unavailable, beside the `disabled` predicate that greys it. An action that does not declare it parses exactly as before, and the console keeps its default reason, "Not available for this record".
+  
+  ```ts
+  defineAction({
+    name: 'submit_for_approval',
+    label: 'Submit for approval',
+    objectName: 'clm_contract',
+    disabled: "record.legal_review_status != 'approved'",
+    disabledReason: 'An approved legal review is required before the contract enters approval.',
+  });
+  ```
+  
+  - **An `I18nLabel`.** A plain string or an inline locale map (`{ en, 'zh-CN' }`). A blank string is refused at parse: `''` or whitespace only. Omit the key to keep the default. The locale-map arm is the `InlineLocaleMapSchema` every `I18nLabel` takes, so a map is not checked for blank values. `disabledMessage`, `disabledTooltip`, `disabledHint` and `disabledText` are renamed onto it.
+  - **Translated with the copy keys.** The slot is `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an action with no `objectName`), beside `confirmText` and `successMessage`. `translateAction` overlays it, and `os i18n extract` (`@objectstack/cli`) scaffolds it for an action that declares one and seeds nothing for one that does not.
+  - **Display only.** It does not change what `disabled` evaluates to and is never read as a condition: `os validate` checks `disabled`, not `disabledReason`. It is not access control either. A call that reaches the server anyway is refused by the action's own rules (its body or hook, `requiredPermissions`), never by this text.
+  - **Studio.** The action editor's Placement section gains a "Disabled Reason" row under "Disabled", translated in `@objectstack/platform-objects` for zh-CN, ja-JP and es-ES.
+  
+  Nothing renders the key yet. The console's greyed-action surfaces (the record header, the record section bar, the declared actions bar and the four `action:*` renderers) read it in the follow-up change. Until then the liveness ledger marks it `planned` with `authorWarn`, so `os validate` warns an author who declares it that nothing shows it yet.
+- 031d97a: feat(spec,rest,cli): a doc book's title and section titles are translatable — `books.<name>` in the translation bundle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A package that ships its docs in two languages showed a half-translated manual: each doc's body followed the reader's locale (`doc.translations`, `<name>.<locale>.md`), but the book title and every sidebar section title stayed in the authoring language. The book's own inline `translations` map was retired in 17.0.0 because nothing read it, and the translation bundle had no key for a book.
+  
+  - **`@objectstack/spec`:** `TranslationData` (and the registered `translation` item and the platform bundle, which share its groups) gains `books`, keyed by the book's `name`: `label`, `description`, and `groups.<key>.label` for each group by its stable `key` (strict: any other key is refused; `name` / `title` point at `label`, and `sections` / `chapters` / `toc` point at `groups`; the singular group spelling `book` points at `books`). A new translator, `translateBook`, overlays them and is registered in the metadata-document dispatch, so `GET /meta/book` (list and item) is served in the request's locale. A key the bundle does not carry keeps the authored string. The rejection for the retired inline `translations` map on a book now names the bundle keys to move the strings to.
+  - **`@objectstack/rest`:** `GET /meta/book/:name/tree` translates the book it resolves through the same dispatch before rendering the spine, so the tree, the book list and the console's docs sidebar agree. `MetaBookTreeSources` gains `resolveI18nService()`, which both transports supply.
+  - **`@objectstack/runtime`:** the dispatcher's book-tree route supplies the same i18n service, so it answers the localized tree `RestServer` answers.
+  - **`@objectstack/cli`:** `os i18n extract` scaffolds `books.<name>.label` / `.description` and `books.<name>.groups.<key>.label` from the stack's `books[]`, and `os i18n check` / `os lint` coverage report an untranslated one as `i18n/missing-book`.
+  - **`@objectstack/lint`:** `translation-target-unknown` resolves `books.<name>` against the declared books (a sibling package's included, and a package id for its implicit book) and `books.<name>.groups.<key>` against that book's group `key`s, so a mistyped book name or group key is an error instead of a translation nothing reads.
+  - **`@object-ui/i18n`:** the console's language loader recognises `books` as a translation group, so a served document that carries only book translations is namespaced like any other.
+  
+  Example (`zh-CN` bundle of an English-authored package):
+  
+  ```ts
+  books: {
+    crm_manual: {
+      label: '使用手册',
+      groups: { start: { label: '快速上手' }, pipeline: { label: '销售管道' } },
+    },
+  },
+  ```
+- 99aeee6: fix(cli)!: `os validate` and `os build` refuse a seed record value the seed load would refuse, with the load's own code and sentence, located at the record's field (#27259)
+  
+  Clause-②: no (narrowing) — `os validate` and `os build` refuse a stack whose seed record carries a value the record validator refuses at seed load (a currency written `{ value, currency }`, an unreadable number, a value outside a field's options, an unreadable date), which both commands passed before. What the runtime stores and refuses does not move: every row refused here was already refused when the seed loaded. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. The refusal moves earlier, from the seed load to the authoring commands, with the load's own wording: a seed row it names was already dropped at load, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at `os validate` and `os build` (`@objectstack/cli`); one new export on `@objectstack/objectql`.
+  
+  - **Before.** A seed record such as `budget: { value: 10, currency: 'USD' }` on a currency field passed `os validate` with "Validation passed" (exit 0) and `os build` emitted the artifact. The row was refused only when the seed loaded, by the record validator: `Budget is a currency amount: write it as a bare number …`, one dropped row in the boot log.
+  - **Now.** Both commands judge every seed record value with the judge the load runs, and refuse with that judge's code and sentence, located at the value: `data[0].records[4].budget: Budget is a currency amount: write it as a bare number … (invalid_number)`, exit 1. `--json` carries each issue as `{ location, object, field, code, message }`.
+  - **One judge.** The verdict is `validateInsertValues` (`@objectstack/objectql`, new): the insert write's own normalizations (a blank on a typed field is `null`, a numeric string is its number, a scalar on a multi-value field is wrapped) and then the same record-validator call the insert path makes. The field map is the runtime registry's, built from the stack's objects and picklists. So a value the load accepts after a rewrite (`'10'` on a number field) still passes.
+  - **Left to the load.** `required` on a missing value (a default or a hook may fill it; an explicit `[]` on a required multi-value field is refused `required` here, as at load), a field the object does not declare (`defineSeed` already refuses it), and every value the load rewrites or a deployment decides: an expression envelope (the `cel` template), a `seedFile(path)`, a reference, file or structured-JSON field, a field bound to a picklist another package declares, and a dataset whose object another package declares.
+  - **Known limits.** A `beforeInsert` hook is not run at authoring time, so a value a hook would rewrite into an accepted shape is refused here though the load stores it. A dataset whose object is declared only under `manifest.objects`, outside `packages[]`, is not judged.
+  - **Who sees it.** A stack shipping a seed row the load already drops. The four example apps in this repository (`app-todo`, `app-crm`, `app-showcase`, `app-multi-package`) carry none and pass unchanged.
+  
+  **The remedy.** Write the value in the shape the message names, for a currency a bare number such as `10`, with the currency in the field's `currencyConfig`.
+- ebed73b: fix(cli)!: `docs/nav-target` judges the navigation each package body contributes on a multi-package artifact
+  
+  Clause-②: no (narrowing) — on a multi-package `composeStacks(…, { manifest: 'preserve' })` artifact, a `type: 'doc'` item in a package body's `navigationContributions`, whose `doc` or `book` names nothing the artifact carries, built clean before and is now refused by `os build`, `os validate` and `os lint` (`docs/nav-target`).
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package's public surface changes: the build-time docs lint now reaches the navigation contributions a package body carries, judging them by the rule it already applies to a single-package stack's contributions. A refused item is fixed in the contribution; there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in the build-time docs lint (`os build`, `os validate`, `os lint`).
+  
+  - **Before.** The `docs/nav-target` check read `navigationContributions` off the artifact's top-level manifest only. On a multi-package `preserve` artifact that manifest is the owner package's copy, so a contribution from any other package was never judged: a dead `doc` or `book` target built clean and degraded at runtime.
+  - **Now.** When the stack carries `packages[]`, the check reads each package body's `navigationContributions` (the owner's included, judged once); otherwise the top-level manifest's. A contributed `doc` item resolves against every doc the artifact carries, and a `book` item against the declared books and package ids, as a single-package contribution always did.
+  - **Unchanged.** A stack with no `packages[]` is judged exactly as before.
+  
+  **The remedy.** For a refused item, name a doc in `src/docs/*.md` or a declared book (a package id is its own implicit book), or remove the item from the contribution. The refusal message names the nearest match.
+- bf658d1: docs(cli): `os explain app` says a `report` navigation item may omit `reportName` to open the app's report index
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The `navigation` row of `os explain app` now ends its `report -> reportName` target with "(omit it on a report item to open the app's report index)", the widening `@objectstack/spec` ships in this release. Only the help text changes; the command's behaviour and output shape are the same. Graded `minor` because this PR declares `Metadata-protocol: added`, which sets the floor for every package it moves.
+- 47c3e12: fix(cli)!: `os plugin install` and the boot-time loader parse an artifact's compiled manifest through `ManifestSchema`, so a stale `.osplugin` (e.g. `packaging: 'manifest-deps'`) is refused with the schema's prescription instead of failing at boot as `import_failed`
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: `ManifestSchema` is consumed as it stands, and what changes is that two more doors hold the compiled manifest inside an artifact to it, as `os plugin build` already holds the source manifest. The refusal is the schema's own message (for `manifest-deps`, the retirement prescription), and the fix is to the source manifest and a rebuild, so there is nothing new for a metadata migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at `os plugin install` (`@objectstack/cli`) and at the boot-time loader for installed plugins (`@objectstack/runtime`'s `loadInstalledPlugins` / `verifyInstalledPlugins`, run by `os serve`, `os dev` and `os start`).
+  
+  - **Before.** Both doors `JSON.parse`d the artifact's `objectstack.plugin.json` and read only `id` and `version` (and `runtime`, `main`, `integrity`, `permissions` by hand). An artifact built before a schema change installed: one carrying the retired `packaging: 'manifest-deps'` installed, and at boot its externalized imports failed and it was refused as `import_failed`, without the retirement prescription. Any other compiled-manifest drift (a missing `name` or `type`, an unknown key) installed the same way.
+  - **Now.** One helper, `readCompiledPluginManifest` (a new named export of `@objectstack/runtime`'s root entry, with its result type `CompiledPluginManifestRead`: the one widening in this change), parses the compiled manifest through `ManifestSchema` for both doors.
+    - `os plugin install` refuses an invalid one before anything is unpacked, as `manifest_invalid`, listing the schema's issues (`--json`: `details`). For `manifest-deps` that is the retirement prescription. Nothing is written under the plugin home and no installation is recorded.
+    - The boot loader refuses the plugin by name as `manifest_invalid` (a new `InstalledPluginRefusalCode`), with the schema's message, before anything of it is imported. It stays non-fatal: the boot goes on and every other installed plugin loads.
+    - `os plugin install`'s `manifest_incomplete` and `integrity_malformed` refusals are gone: a missing `id` / `version` and a malformed `integrity` map are schema issues, refused as `manifest_invalid`.
+  - **Also.** `os plugin build`'s native-addon refusal names, for a bundled package that builds or ships a native addon, the files that import it and the chain that reaches it from the plugin's own source (`src/index.ts → ws → bufferutil`), the way the `.node`-module line already names its importers. A transitive hit now traces to the direct dependency.
+  - **Who sees it.** Anyone installing, or booting with, an `.osplugin` whose compiled manifest `ManifestSchema` refuses: one built by an `os plugin build` from before a schema change, or one assembled by hand.
+  
+  **The remedy.** Fix the plugin's source `objectstack.plugin.json` as the refusal says (for `manifest-deps`: delete the `packaging` key; `bundled` is the default and the only strategy) and rebuild the artifact with `os plugin build`, then sign and install it again. An artifact `os plugin build` produced from a valid manifest installs and boots unchanged.
+- ed0e71d: fix(cli)!: `os plugin publish` parses the artifact's compiled manifest through `ManifestSchema` before anything is uploaded, so a stale `.osplugin` (e.g. `packaging: 'manifest-deps'`) is refused at the publisher's terminal with the schema's prescription instead of failing later at its consumer's install
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: `ManifestSchema` is consumed as it stands, and what changes is that a third door, `os plugin publish`, holds the compiled manifest inside an artifact to it, as `os plugin build` holds the source manifest and `os plugin install` and the boot-time loader hold the compiled one. The refusal is the schema's own message (for `manifest-deps`, the retirement prescription), and the fix is to the source manifest and a rebuild, so there is nothing new for a metadata migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at `os plugin publish` (`@objectstack/cli`).
+  
+  - **Before.** `os plugin publish` `JSON.parse`d the artifact's `objectstack.plugin.json` and checked only that `id` and `version` were present and that `integrity` was an object. An artifact built before a schema change uploaded: one carrying the retired `packaging: 'manifest-deps'` reached the registry and was refused only at its consumer's `os plugin install`. Any other compiled-manifest drift (a missing `name` or `type`, an unknown key) uploaded the same way.
+  - **Now.** The publish parses the compiled manifest with `readCompiledPluginManifest` (`@objectstack/runtime`), the one helper `os plugin install` and the boot-time loader already use, before any request leaves the machine.
+    - A manifest the schema refuses stops the publish with `The artifact's objectstack.plugin.json is not a valid plugin manifest, so nothing was published:` and one line per schema issue. For `manifest-deps` that line is the retirement prescription. Neither the package row nor the version is posted.
+    - The hand-rolled malformed-`integrity` refusal is gone: a malformed map is a schema issue now. `Artifact manifest is missing id or version.` is now reached only by an empty `--manifest-id`.
+    - A valid artifact publishes unchanged: the uploaded `plugin_manifest` is still the manifest the artifact carries, byte for byte, without the defaults the parse stamps (`scope`, `defaultDatasource`).
+    - `readOspluginManifest` (internal to the CLI) parses through the same helper and is now async.
+  - **Who sees it.** Anyone publishing an `.osplugin` whose compiled manifest `ManifestSchema` refuses: one built by an `os plugin build` from before a schema change, or one assembled by hand.
+  
+  **The remedy.** Fix the plugin's source `objectstack.plugin.json` as the refusal says (for `manifest-deps`: delete the `packaging` key; `bundled` is the default and the only strategy), rebuild the artifact with `os plugin build`, re-sign it with `os plugin sign`, and publish it again. An artifact `os plugin build` produced from a valid manifest publishes unchanged.
+- 7c3cc88: feat(spec): a form view's thank-you panel is translated through `objects.OBJECT._views.VIEW.submitBehavior.title` / `.message`
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A form whose `submitBehavior` is `{ kind: 'thank-you', title, message }` used to confirm a submit in the authoring language only: the strict `_views` translation entry declared no key for the panel, and `translateView` never read `config.submitBehavior`. A public form read in another language showed a translated heading and field labels, then a source-language confirmation.
+  
+  - **The key.** `objects.OBJECT._views.VIEW.submitBehavior` takes `title` and `message`, nested the way the authored copy is nested, so the panel's heading never shares a key with the form's own `title`. A `thankYou` key is refused naming `submitBehavior`, and `url` / `kind` are refused with a prescription, since neither is display copy.
+  - **The overlay.** `translateView` overlays the two strings onto the served form's `config.submitBehavior`, on the same locale chain and under the same rule as the form's `title`: only a `kind: 'thank-you'` panel is translated, only copy the form authors (a key cannot invent a `message` the form left to the console's default), a missing key keeps the authored string, and a string edited on top of the packaged view keeps the edit (ADR-0029 D9.2a, judged per string). The anonymous `GET /api/v1/forms/SLUG` already serves the translated view config under `Accept-Language`, so a public form's visitor now reads the panel in their language with no client change.
+  - **Extraction and coverage.** `os i18n extract` scaffolds `_views.VIEW.submitBehavior.title` / `.message` for every form a view container serves and for a `viewKind: 'form'` item, keyed by its runtime identity, and the coverage report counts an authored panel a supported locale leaves untranslated.
+  - **Lint.** `os lint` accepts a `submitBehavior` key on exactly the views a `title` key is legal on (a named form view, the default form, a form item) and refuses one over a list view.
+- 361ea24: feat(spec): a page `object-form`'s thank-you panel is translated through `pages.PAGE.components.ID.submitBehavior.title` / `.message`
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A page that embeds an `object-form` with `submitBehavior: { kind: 'thank-you', title, message }` used to confirm a create in the authoring language only: the strict `pages.PAGE.components.ID` translation entry declared no key for the panel, and `translatePage` never read `properties.submitBehavior`. A form view's own panel already had its key (`objects.OBJECT._views.VIEW.submitBehavior`); the page form, which takes the same member by reference, had none.
+  
+  - **The key.** `pages.PAGE.components.ID.submitBehavior` takes `title` and `message`, under the form component's own `id`, beside its `title` and `description`. It is the page's copy, so two pages binding the same object can word their panels differently. The node is the form view's panel node, built by one factory, so a `thankYou` key is refused naming `submitBehavior`, and `url` / `kind` are refused with a prescription. An `object-form` without an `id` has no key: give it one.
+  - **The overlay.** `translatePage` overlays the two strings onto the component's `properties.submitBehavior` through the same function `translateView` uses for a form view's panel: only a `kind: 'thank-you'` panel is translated, only copy the form authors (a key cannot invent a `message`), and a missing key keeps the authored string. A form nested in a container is reached by the id route, as every other component copy is.
+  - **Extraction and coverage.** `os i18n extract` scaffolds `pages.PAGE.components.ID.submitBehavior.title` / `.message` for every `object-form` the page addresses, and the coverage report counts an authored panel a supported locale leaves untranslated.
+  - **Lint.** `os lint` refuses a `submitBehavior` key under a component that is not an `object-form`, and under a component id the page does not declare, offering the nearest form id.
+
+### Patch Changes
+
+- 48ee8b6: feat(cli): `os validate`, `os build` and `os lint` report `manifest.dependencies` ranges at build time (ADR-0141 D2, author side)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The pre-install dependency check refuses a package whose `dependencies` range it cannot read, and judges a dependency the same artifact delivers for presence only. Until now the author first heard of either from someone else's environment: a `422 DEPENDENCY_MISSING` on install, or, for an in-artifact mismatch, never. The three authoring commands now judge every `dependencies` entry of the packages one install would deliver (each `packages[]` body of an ADR-0130 artifact, or the top-level manifest of a single package) with the install's own predicate, `checkDeclaredDependencies` from `@objectstack/metadata-core`. Nothing re-parses the range grammar.
+  
+  - **Error**: a range outside the stated grammar on an entry the artifact does not deliver, and a `dependencies` that is not a `{ PACKAGE_ID: VERSION_RANGE }` record. The install refuses these whatever the target environment holds, so `os build` refusing them refuses nothing the platform would install.
+  - **Warning**: what the install admits. That is an entry naming a sibling package of the same artifact whose declared `manifest.version` the range does not admit (core bumped to `2.0.0` while a module still declares `^1.0.0`), a co-delivered entry whose range cannot be read, or a sibling whose version is not `MAJOR.MINOR.PATCH`.
+  
+  Whether an out-of-artifact dependency is installed, and at what version, is still judged only at install. No build can see the target environment.
+- ab3c776: fix(cli): `os build` writes the same legacy runtime module for an unchanged app, so its content-hashed name and the artifact's `runtimeModule` ref stop changing on every rebuild
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The legacy runtime module (`dist/objectstack-runtime.HASH.mjs`) is named by a hash of its bytes, but those bytes used to differ on every build. The build wrote a temporary esbuild entry beside the config under a name made of the process id and the current time, and esbuild prints each input's path into the module, as a comment above its code and in the inline sourcemap. Those paths were also relative to the directory `os build` ran from. So every rebuild of an unchanged app shipped a new file name and a new `runtimeModule` ref in `dist/objectstack.json`, and building the same app from another directory or another checkout did too.
+  
+  The entry is now handed to esbuild in memory under one fixed name, and every path in the module is relative to the config's own directory. Two builds of an unchanged app now ship byte-identical modules under one name, wherever they run. No temporary file is written next to the config any more. The module's exports and behaviour are unchanged.
+- b198f91: fix(cli): `os dev`'s in-place organization-ownership upgrade names what stopped it, and the exact command that carries on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the organization-ownership boot guard refuses a development database, `os dev` copies it and runs the ceremony on it in place. When that upgrade did not finish, it could exit with 「The upgrade did not run to a report」 and no cause.
+  
+  What changes:
+  
+  - The ceremony's own refusal is printed in its own words, also when the terminal forces colour (`FORCE_COLOR`): the refusal lines are read with colour stripped, and the `✗` glyph is no longer printed twice.
+  - An apply that stopped with no refusal of its own (an uncaught error, a crash, a signal) says how it ended and prints the end of its log, without the kernel's boot narration.
+  - A report file still holding the apply's reservation text, or one that does not parse, is read as "no report", with the cause, never as "a blocker (above)" with nothing above. A blocked report that names no blocker prints the log's cause too.
+  - A stale `organization_id` the plan gives the column-drop fate is upgraded as before, but no longer silently: before the apply runs, `os dev` prints per table how many stamped values the drop discards, and names the copy that keeps them.
+  - Each failed upgrade ends on the exact command that carries on: `os migrate organization-ownership --dev --database-url URL --apply --plan-file PLAN --backup-taken`, with the database and the plan the upgrade wrote.
+  
+  The copy taken before the upgrade is kept, as before. A development database with a stale `organization_id` column on `sys_flow_credential` and `sys_secret` (objects that no longer declare it) is upgraded and starts under `os dev`, now pinned by a test. The production ceremony is unchanged.
+  
+  What to do: nothing.
+- a5df094: feat(cli): `os migrate audit-key-material` removes the encrypted key-material columns from the audit-ledger copies 18.2.0 and earlier wrote
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Run `os migrate audit-key-material --apply` once after upgrading from 18.2.0 or earlier.** The audit writer no longer copies the encrypted key-material column of a secret-store or settings row into `sys_audit_log` (`new_value`, `old_value`) or `sys_activity` (both halves of `metadata`). Copies written before that still carry it.
+  
+  - **The command.** `os migrate audit-key-material` removes those columns with the writer's own helper, through `@objectstack/plugin-audit`'s `migrateKeyMaterialCopies` (the hot tables) and `migrateArchivedKeyMaterialCopies` (the archive datasource `sys_audit_log` archives to). It is a dry run by default (counts, writes no row), `--apply` writes, and its flags are `os migrate audit-mail-bodies`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The report is counts only, per table, and never prints a value.
+  - **What changes in a row.** Only the key-material keys of the copy are removed. Every other key of the copy and every other column of the row stay byte-identical, the row's `updated_at` included. A column of the same name in a copy of any other object is left alone.
+  - **Idempotent.** A copy without the columns has nothing to remove, so a second run rewrites nothing; re-running finishes an interrupted run. A failed read or write exits `1`, and so does an archive datasource the run could not examine (`not-connected` / `unknown` in the `--json` document's `archive` entries, as for `audit-mail-bodies`).
+- 753683a: fix(cli): `os lint` and `os i18n check` merge a locale's translation bundles the way the runtime serves them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A multi-package artifact carries one translation bundle per package, each naming the same locales. The runtime deep-merges them per locale, so `GET /api/v1/i18n/translations/LOCALE` serves every package's keys. i18n coverage folded them with a merge of its own that kept only `objects`, `globalActions`, `messages`, `metadataForms` and a later bundle's whole `apps.APP` entry. Every dashboard, dataset, page, flow, report and picklist a later package translated read as missing, and a later package that contributed navigation into an app dropped the app's own navigation labels. HotCRM measured 330 such warnings under `os lint --strict`.
+  
+  Coverage now calls the runtime's own deep merge (`deepMerge` from `@objectstack/core`), so the lint reads exactly the served tree. Navigation labels merge per node id, because `apps.APP.navigation` is a map keyed by id. A single-bundle stack reads as before, and a key no bundle carries is still reported once.
+- 91a4036: fix(cli)!: `docs/metadata-embed-ref` judges a package's doc against that package and the packages it declares as dependencies (#27090)
+  
+  Clause-②: yes (narrowing) — a multi-package artifact's package docs may now embed their own package's `state_machine`, `flow` and `permission` items, and those of the packages they declare in `manifest.dependencies`, which `os build`, `os validate` and `os lint` refused before. Two shapes that built before are refused: a package's inline body doc with a dead embed (no pass judged it), and, in an artifact that keeps a flattened top level, a package doc embedding an item of a sibling it does not declare.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package's public surface changes: the build-time docs lint resolves a metadata embed in the scope ADR-0051 already gives it (the doc's own package, then its dependencies). A refused embed is fixed in the doc, or by declaring the dependency; there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in the build-time docs lint (`os build`, `os validate`, `os lint`), beside a widening.
+  
+  - **Before.** Every embed was judged against the artifact's top level. A composed multi-package artifact (`composeStacks(…, { manifest: 'preserve' })`) carries its definitions under `packages[]` and nothing at the top level, so a package doc embedding its own package's object was refused with "does not exist in this package", and a package's inline `defineStack({ docs })` doc was never judged at all. An artifact that keeps a flattened top level (a reconciled composition) resolved every package doc's embeds against the whole artifact.
+  - **Now.** A package's docs (directory and inline alike) resolve against that package's body plus the packages of this artifact its `manifest.dependencies` names. The stack-level docs (`src/docs/`, unclaimed inline docs) resolve against the stack's top level plus the package the artifact's `manifest.id` names, which is the package they ship on, and its declared dependencies. A declaration is one-way. A refusal names the scope it judged: "does not exist in this package", or "in this package or its declared dependencies (IDS)".
+  - **Unchanged.** A stack with no `packages[]` is judged against its own collections, as before. Links between docs still resolve across the whole artifact.
+  
+  **The remedy.** A refused embed of a sibling package's item: declare that package in the embedding package's `manifest.dependencies`, or move the doc to the package that owns the item. A dead reference: fix the name.
+- d4ff1a0: feat(cli, runtime, core): `os serve` loads the plugins `os plugin install` installed, re-verifying each before any of its code is imported, and dispatches on the declared `runtime` tier; `os plugin disable | enable | uninstall` (#27123)
+  
+  Clause-②: no (narrowing) — `@objectstack/core`'s `PluginLoader` (so every `kernel.use`) refuses a plugin object whose `signature` no host recorded a verdict for, where any well-formed signature passed. Nothing of `@objectstack/spec` changes; the rest (the boot loader, the commands, the new exports) widens
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/plugin-loader.ts#PluginLoader) The one narrowing is a runtime check of a published runtime class: `PluginLoader` refuses a plugin object's `signature` that no host recorded a verdict for. No Zod schema, no spec declaration and no stored representation carries that field or the verdict, so there is nothing for the metadata migration to rewrite and no tombstone; what an out-of-repo host changes is its own code, as the Migration paragraph says. -->
+  
+  **BREAKING** accept-set narrowing at `kernel.use` (`@objectstack/core`): a plugin object carrying a `signature` is refused unless the host that verified its artifact recorded that verdict against the object.
+  
+  The second slice of ADR-0025's local install loop (§3.5 M1). Before this, an installed plugin was unpacked and recorded, and nothing loaded it.
+  
+  **Migration (`@objectstack/core`):** a host outside this repo that passes `kernel.use` a plugin object carrying a `signature` now has that plugin refused (`Plugin X carries a signature … that no host verified against its artifact`), where any well-formed signature used to pass. FROM: setting `plugin.signature` and calling `kernel.use(plugin)`. TO: verify the artifact yourself, then call `recordPluginArtifactVerdict(plugin, { signature, keyId, fingerprint, artifactSha256 })` from `@objectstack/core` before `kernel.use`; or leave `signature` unset. No plugin in this repo sets it.
+  
+  - **The boot-time loader** (`@objectstack/runtime`: `loadInstalledPlugins`, `verifyInstalledPlugins`). `os serve` (and `os dev` / `os start` through it) calls it after the config's own `plugins` are registered and before the kernel bootstraps, then `kernel.use`s each plugin that passed, so dependency order and health checks stay the kernel's. For each installation of this project and environment, in this order, the first failing check refuses that plugin by name, before anything of it is imported:
+    - the record names the directory the store derives for its id and version (`install_dir_unexpected`); nothing is read from or removed under any other;
+    - a disabled id is skipped, before anything of it is read. A disable-state file that is there and cannot be read refuses each plugin instead (`disabled_state_unreadable`): an unreadable disable is not taken for none;
+    - the kept `artifact.osplugin` hashes to the recorded sha256 (`artifact_changed`, `install_dir_missing`); a kept file larger than any artifact an install accepts is refused without being read;
+    - its detached signature, over the raw kept bytes and before anything is inflated, names the recorded key id, the key is `active` in `sys_trusted_key` with the fingerprint the install verified, and it verifies (`signature_missing`, `signature_malformed`, `signature_key_mismatch`, `signature_key_untrusted`, `signature_key_revoked`, `trusted_key_invalid`, `trusted_key_changed`, `signature_invalid`, `trusted_keys_unreadable`). The signature covers the bytes only; what ties them to the record's id and version is the manifest comparison below. So a key revoked since install refuses the plugin at its next boot. An install admitted under `--trust-unsigned` loads with a warning on every boot;
+    - the unpacked tree is byte-for-byte the artifact, with no other file and no symbolic link, and the artifact's manifest is the recorded id and version (`tree_changed`, `manifest_mismatch`, `artifact_unreadable`);
+    - **the tier dispatch point** (`dispatchPluginRuntime`, ADR-0025 §3.6): `runtime: 'node'` imports the entry module in process; `sandbox` and `worker` are refused by name until M3 routes them (`runtime_not_dispatched`), with no in-process fallback; a manifest that declares no tier is refused (`runtime_undeclared`, default-deny);
+    - the entry module is a file of the artifact (`entry_missing`).
+  
+    A check that throws on one installation (a file it cannot read, one that vanished mid-walk) refuses that plugin by name too (`install_unreadable`): one installation never fails the boot. What passed is then imported by the rule a stack's `plugins` entry takes (a plain bundle is wrapped in `AppPlugin`). The refusals from here on come after the entry module's top-level code ran, so the plugin is not registered but its module was evaluated: the import throws (`import_failed`), it exports no plugin or reading its export throws (`not_a_plugin`), it declares a signature other than the verified one (`signature_conflict`), and the host's own `plugin_name_taken` / `kernel_refused`.
+  
+    A bare `@objectstack/*` import inside a verified install directory resolves to the packages the host runs on (a resolve hook, `module.register`): `os plugin build` leaves them external, and an install directory under `OS_HOME` has no `node_modules` holding them. Every other bare specifier resolves as Node resolves it from the install directory, and a file the plugin imports lazily is read when it is imported, after the check.
+  
+    The environment's trusted keys are read once per boot, through the same read-only one-shot boot `os plugin install` reads them through, and only when a signed install needs them; with no installations file nothing is read at all. A refused plugin does not stop the boot: it is printed as one `✗` line naming the refusal, and the banner counts the refusals; a loader that throws outright is one `loader_failed` line, and the boot goes on without installed plugins. An installed plugin never replaces a plugin the boot already registered under the same name (`plugin_name_taken`); a host plugin registered later under the same name replaces the installed one, with the kernel's warning.
+  - **The kernel's signature check is real.** `PluginLoader` used to pass any well-formed `signature` a plugin carried. The host that verified the artifact now records its verdict against the plugin object (`recordPluginArtifactVerdict`, `@objectstack/core`), and the loader refuses a plugin whose signature no host verified. This stops a `signature` field from reading as verified; it is not a boundary against code already running in the process, which can call the public `recordPluginArtifactVerdict` itself.
+  - **`os plugin install`** verifies the signature over the raw bytes before it inflates the archive, refuses an artifact file larger than any artifact may unpack to before reading it, and bounds the inflate (`MAX_UNPACKED_ARTIFACT_BYTES`, 256 MiB; the reader moved to `@objectstack/core` as `readTarGz`, re-exported where the CLI read it). The reader takes regular files and directories only, joins a POSIX `prefix` onto the name, refuses a link, device or extension header and a cut-short entry by name, and copies neither its input nor its files. **`os plugin publish`** reads an artifact through the same reader, so its preflight, beside `install`'s, now refuses an artifact that inflates past 256 MiB or carries a link, device, extension-header or cut-short entry, where the old reader inflated without bound and read every entry as a file; `os plugin build` writes regular files only. The checks, the write and the record now run under the installations lock. An artifact whose tier the boot does not dispatch installs with a warning naming the refusal, and `--json` carries `boot: { loads, error }`.
+  - **`os plugin disable ID` / `os plugin enable ID`** keep an installed plugin from loading, or load it again, at the next boot (the package disable-state store, keyed by the plugin environment id). On a disable-state file they cannot read they refuse (`disable_state_failed`) and write nothing. **`os plugin uninstall ID`** marks the installation; the next boot loads nothing of it and, under the installations lock and only while the record is still the marked one (`record_changed` otherwise: an id installed again since the boot read the records keeps its fresh install), removes its directory unless another project sharing the home and environment still records it, drops the record and forgets its disable. A removal that fails is `uninstall_failed`, and a record still marked is tried again at the next boot. Each command refuses an id this project has not installed by name (`plugin_not_installed`, also when it was removed while the command ran); `--json` on all three.
+  - **The installations file takes a lock** for every read-modify-write: `<file>.lock`, created exclusively with the writer's pid, thread and a fresh token. A writer waits up to 10 s for a live holder, then refuses naming it (`PluginInstallationsLockedError`, which the commands report as `installations_locked`); the commands report any other failure under their own code. A lock a crashed process left is cleared by the next writer: its pid is not a live process, or it is older than 5 minutes, or it names the writer's own pid and thread while the writer holds nothing (another thread of the same process is a live holder), or it cannot be parsed and is older than a second. Clearing holds `<file>.lock.steal` and removes the lock only while it is still the file judged stale, so two writers that judge the same lock stale cannot both take it; a writer releases its lock only while the file is still its own.
+- 10f27b6: feat(cli, runtime, platform-objects): `os plugin install ./x.osplugin` installs a signed plugin artifact locally, after verifying its signature against the environment's trusted publisher keys and its files against the manifest's `integrity` map (#27123)
+  
+  Clause-②: no — no key, accepted value or export of `@objectstack/spec` changes; the new object and commands are platform code, not authorable metadata
+  Metadata-protocol: none
+  
+  The first slice of ADR-0025's local install loop (§3.5 M1). Before this, a built and signed `.osplugin` had no command that installed it.
+  
+  - **`os plugin keygen --out PATH`** writes a publisher Ed25519 key pair: `PATH.key.pem` (private, mode `0600`, stays with the publisher) and `PATH.pub.pem`, and prints the key id and the public key's fingerprint (`sha256:` + hex of the SPKI DER bytes). It never overwrites a key file without `--force`.
+  - **`os plugin trust add PUB.pem --key-id ID`**, **`trust list`**, **`trust revoke ID`** manage the environment's trusted keys in the new deployment-level object `sys_trusted_key` (registered by `PlatformObjectsPlugin`, beside `sys_secret`; no tenant column; `manage_platform_settings`; the API offers reads only). The writes run in system context and are recorded by the audit mirror. Only a public key is accepted: a PEM holding a private key, or a key that is not Ed25519, is refused. One key id names one key and one key carries one key id. A revoked row stays, and neither its key id nor its key is trusted again.
+  - **`os plugin install ARTIFACT`** reads the archive and refuses, by name and with exit status 1, before anything is written:
+    - an entry that could land outside the install directory, two entries that differ only in letter case, or a file that is also the directory of another entry (`artifact_entries_refused`);
+    - a file whose digest is not the one the manifest's `integrity` map declares, a declared file that is missing, or a packaged file the map does not name (`integrity_mismatch`);
+    - a missing signature (`signature_missing`), one that is there but cannot be read (`signature_unreadable`), a malformed one (`signature_malformed`), a key id the environment does not trust (`signature_key_untrusted`) or has revoked (`signature_key_revoked`), a trusted-key row whose fingerprint is not its key's (`trusted_key_invalid`), and a signature that does not verify over the artifact's bytes (`signature_invalid`);
+    - an installations file it cannot read (`record_unreadable`), which a write would clobber, and an install directory that already holds other bytes no installation of this project put there (`install_dir_taken`): two projects sharing one `OS_HOME` and environment share the directory, and one does not overwrite the other's install.
+  
+    It then unpacks the artifact to `<OS_HOME>/plugins/<env>/<id>/<version>/`, keeping the original `artifact.osplugin` and `artifact.osplugin.sig` beside the files, and writes an installation record (the version, the key id and fingerprint it verified against) to `<OS_HOME>/plugin-installations/`, keyed by environment and project like the package disable-state store. A swap that fails puts the earlier install of the same version back. `--trust-unsigned` installs an artifact that has no signature, with a warning on stderr; it never makes a present signature that fails verification pass. `--json` prints one document.
+  - **Not yet.** `os serve` does not load installed plugins: the boot-time loader is the next slice of the same loop.
+  
+  `@objectstack/runtime` exports the two stores both sides read: `addTrustedKey`, `listTrustedKeys`, `revokeTrustedKey`, `resolveTrustedKey`, `readPublisherPublicKey`, `publicKeyFingerprint`, and `pluginInstallDir`, `loadPluginInstallations`, `recordPluginInstallation`.
+- fe9e856: feat(spec, cli)!: `bundled` is the one plugin packaging strategy — `manifest-deps` is retired, and `os plugin build` refuses a native addon (#27123)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered manifest-packaging-manifest-deps-removed, manifest-packaging-manifest-deps-retired -->
+  
+  ADR-0025 v2 §3.3 makes `bundled` the only dependency-packaging strategy. `manifest-deps` kept every dependency external and packed `package.json` and the lockfile beside the bundle, but nothing ever installed them, so a plugin built with it could not load them. A compiled `.node` addon can be neither bundled nor run by every host, so a plugin may not carry one.
+  
+  - **`@objectstack/spec`**: `PluginPackagingSchema` is `['bundled']`. `manifest-deps` is a retired value: every door that parses a manifest refuses it at `packaging` with the prescription — `ManifestSchema` (an `objectstack.plugin.json` at `os plugin build`, a stack's `manifest` at `defineStack`, the ObjectQL registry), a packaged artifact's `packages[].manifest`, and the `POST /packages` install body — and TypeScript no longer admits it. The ADR-0087 D2 conversion `manifest-packaging-manifest-deps-removed` deletes the value from a stack's `manifest` and from each `packages[].manifest` (`os migrate meta --from 17`), and the D3 entry `manifest-packaging-manifest-deps-retired` carries the change to the upgrade guide. The `packaging` liveness row is `planned`: a one-member enum has no fork left to read.
+  - **`@objectstack/cli`**: `os plugin build` packs one strategy. It inlines every dependency except the host-provided `@objectstack/*` packages and no longer packs `package.json` or `pnpm-lock.yaml`. It refuses a native addon before it writes anything, naming each one it finds: a `.node` file the bundle imports (with its importer), a bundled package that declares a node-gyp build or ships a `.node` binary, and a `.node` file under `assets/`. An addon loaded at run time from an absolute or computed path outside every bundled package is not visible to the build.
+  
+  **BREAKING** for a plugin manifest that writes `packaging: 'manifest-deps'`, and for a plugin that carries a native addon.
+  
+  - **Before.** `packaging: 'manifest-deps'` built an artifact that left the dependencies out and carried `package.json` for an install step that never ran. A plugin importing a `.node` file failed in esbuild with a bare "Bundle failed"; one whose dependency located its binary at run time, or that kept a `.node` file under `assets/`, built an artifact that could not load it on a host without that binary.
+  - **Now.** `manifest-deps` is refused at the manifest (`objectstack.plugin.json is invalid:` names `packaging`, exit 1, no artifact). A native addon is refused by name (`Native addon refused: …`, exit 1, no artifact).
+  - **Fix.** Delete the `packaging` key, or write `bundled`. A stack source gets the edit from `os migrate meta --from 17` (`--write` applies it); an `objectstack.plugin.json` is edited by hand. Replace a native addon with a pure-JavaScript or WebAssembly alternative.
+- 194e66c: feat(platform-objects): `sys_exchange_rate` — an organization's dated exchange rates, with a Setup list under Localization
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A new system object holds the rates multi-currency amounts are converted with, one row per currency and effective date:
+  
+  - **Columns.** `currency` (an ISO 4217 code, checked on write), `rate` (exact decimal, 12 decimal places and 24 digits in all, strictly positive), `effective_date` (date) and `source` (`manual` / `import` / `app`, default `manual`).
+  - **Direction.** One row means 1 unit of the organization's home currency (Localization → Default currency) = `rate` units of the row's currency, so a home amount is the foreign amount divided by `rate`. The sentence is exported as `EXCHANGE_RATE_DIRECTION` and shown on the Setup list page; the scale and precision are exported as `EXCHANGE_RATE_SCALE` and `EXCHANGE_RATE_PRECISION`.
+  - **One rate per currency per day.** `(currency, effective_date)` is unique within an organization; two organizations may each hold their own EUR rate for the same day.
+  - **Who.** Per organization (its `organization_id` is injected and the tenant wall scopes it). Organization administrators read and write it; rank-and-file members do not see it. Every change is captured in the audit log and shown on the record's History tab.
+  - **Where.** Setup → Configuration → Exchange Rates, directly under Localization. `PlatformObjectsPlugin` registers the object with the other platform-infrastructure objects. `PLATFORM_OBJECTS_BY_PACKAGE` (`@objectstack/spec`) lists it under `platform-objects`, so a reference to `sys_exchange_rate` resolves as a real platform object.
+  - **Upgrade ceremony.** The organization-ownership inventory (`@objectstack/cli`) lists `sys_exchange_rate`, so `os migrate organization-ownership` plans it instead of refusing it as an uninventoried platform table.
+  
+  Nothing reads the table yet: the write-time home-currency conversion that uses it ships in the same release.
+- 6d7634a: fix(cli)!: `docs/nav-target` judges the apps a package body carries on a multi-package artifact
+  
+  Clause-②: yes (narrowing) — on a multi-package `composeStacks(…, { manifest: 'preserve' })` artifact, a `type: 'doc'` navigation item inside an app a package body carries, whose `doc` or `book` names nothing the artifact carries, built clean before and is now refused by `os build`, `os validate` and `os lint` (`docs/nav-target`).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package's public surface changes: the build-time docs lint now reaches the apps a package body carries, judging them by the rule it already applies to a stack's own apps. A refused nav item is fixed in the app's navigation; there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing in the build-time docs lint (`os build`, `os validate`, `os lint`).
+  
+  - **Before.** The `docs/nav-target` check walked only the artifact's top-level `apps`. A multi-package `preserve` artifact keeps its apps inside the package bodies and has none at its top level, so a nav item in a package's app was never judged: a dead `doc` or `book` target built clean and degraded at runtime.
+  - **Now.** The check walks the top level's apps when the stack carries the key, otherwise each package body's, the same rule `resolveStackCollection` applies. A package app's `doc` item resolves against every doc the artifact carries, and its `book` item against the declared books and package ids, as a single-package app's always did.
+  - **Unchanged.** A stack with no `packages[]`, and any stack whose top level carries `apps`, is judged exactly as before.
+  
+  **The remedy.** For a refused item, name a doc in `src/docs/*.md` or a declared book (a package id is its own implicit book), or remove the item. The refusal message names the nearest match.
+- 7735d1d: fix(cli): the organization-ownership inventory has a row for `sys_connector_credential`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ADR-0131 D10 inventory now has a row for the new environment-level connector credential store (`systemFields.tenant: false`). Its fate is `column-drop`, the same fate the flow credential store has: the upgrade plan treats the table as deployment-level state with no organization column, so a database carrying it is not refused as an uninventoried platform table.
+- 6e0e7d7: fix(cli): `os package publish` names the `objectstack.manifest.json` keys it does not send (`tags`, `publisher`, `isStarter`, `preview`, `visibility`) instead of dropping them silently
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The listing file's schema accepts these keys, but publish never carried them to the control plane, so an author's tags, starter flag or preview simply never reached the catalog and nothing said why. Publish now prints a warning naming each declared catalog key: it is declared but not yet carried by the hosted catalog, with a link to the issue tracking that (#27348). A declared `visibility` gets its own warning pointing at `--visibility`, which does carry it. The publish still succeeds: the bundled blank template ships `isStarter: true`. A test classifies every key of the listing-file schema as sent, warned about, or scaffold-only, so a key the schema gains later fails until publish handles it.
+- 882d4e4: fix(cli): `os package publish` sends the manifest's listing `tags`, says `publisher` and `isStarter` are decided by the platform, and uses a top-level `tagline` only as a missing description
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The hosted publish route validates and stores a package's listing tags, so `os package publish` now carries them:
+  
+  - **`tags`.** When `objectstack.manifest.json` declares `tags`, publish sends them as written. The hosted route owns the shape and the bounds and refuses a bad list with a 400, which publish prints as the server wrote it; the CLI applies no limit of its own. A file with no `tags` leaves the stored tags alone, and `"tags": []` clears them. The warning no longer names `tags`.
+  - **`publisher` and `isStarter`.** The warning now says the platform decides them and an author's value has no effect. Publish still never sends either.
+  - **Top-level `tagline`.** The hosted catalog has no tagline column; `description` is the short listing text. When neither `--description` nor the manifest's `description` is given, publish sends the tagline as the description. Otherwise it no longer sends the tagline, and a warning says so. A per-locale `translations.<locale>.tagline` is sent as before.
+  - **`preview` and `visibility`.** Unchanged: `preview` is still named as not carried by the hosted catalog yet, and `visibility` is still set only by `--visibility`.
+- a3d24c9: feat(objectql,cli,metadata-protocol): backfill the currency code of rows stored before an amount field was switched to `currencyMode: 'record'`, and acknowledge the switch at the metadata save
+  
+  Clause-②: yes (widening) — a new `@objectstack/objectql` export (`backfillRecordCurrencyCodes` and its report helpers), a new command `os migrate record-currency-codes`, and a new finding `currency_mode_to_record` registered in the existing 409 `destructive_change` face, lifted by its existing `force`
+  Metadata-protocol: none
+  
+  An existing `dynamic` or `fixed` amount switched to `record` names a code field, and the rows already stored hold an amount beside a blank code. Such a row is not refused for resting, but until it holds a code it displays as a plain number, falls into the `null` group of a grouped aggregate, and sits outside every currency-paired filter.
+  
+  - **The backfill.** `os migrate record-currency-codes --object <object> --field <amount> --code <ISO 4217>` writes the code you give into every row whose amount is not blank and whose code is blank. ⛔ The code is never derived: not from a former `defaultCurrency`, not from the organization's `localization.currency`. A row that holds a code is never touched; a row with a blank amount is left alone. Dry run by default; `--apply` writes (with `--yes` when not interactive). The report counts the rows written, the rows skipped because they hold a code, and the rows skipped because their amount is blank. Running it again finds nothing, so a clean second report is the verification. A code that is not an ISO 4217 code, or a field that is not a `record`-mode currency field, is refused before any row is read (`INVALID_FIELD`, 400). Each row is written through the engine's update, so the write is judged and audited like any other. No `sys_migration` flag is recorded.
+  - **The engine function.** `backfillRecordCurrencyCodes(engine, logger, { object, field, code, apply })` from `@objectstack/objectql`, with `formatRecordCurrencyBackfillReport` and `recordCurrencyBackfillComplete`; `isRecordCurrencyBlank` is the one blank predicate the write guard and the backfill share.
+  - **The save.** Saving an object (REST `PUT /meta`, Studio, a package publish) whose stored amount field moves to `currencyMode: 'record'` from any other mode now answers the existing 409 `DESTRUCTIVE_CHANGE` with the finding `currency_mode_to_record`, whose message names the three consequences and the command. Re-submit with `force` to save. It reads no row, and fires only where a previous version exists: a code-declared package registered at boot is not refused.
+- e063a87: feat(service-datasource): a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`
+  
+  Clause-②: yes (widening) — `@objectstack/service-datasource` exports `datasourceEnvCredentialVar`, `resolveDatasourceEnvCredentialsSwitch`, `DATASOURCE_ENV_CREDENTIALS_SWITCH` and the `DatasourceEnvCredentialSource` type, and `DatasourceConnectionServiceConfig` gains the optional `envCredentials`; `@objectstack/spec/data` exports `CODE_DEFINED_CREDENTIAL_ROUTE`. Nothing an author writes is added or refused.
+  Metadata-protocol: none
+  
+  A datasource declared in code (`defineDatasource`, or a package's `*.datasource.ts`) had no way to get its password: the driver contracts refuse `config.password` and a `user:password@` URL, the Setup → Datasources form cannot edit a code datasource, and nothing mints a `sys_secret:` handle for one. Now the credential stays out of the declaration and is read at connect from a variable derived from the datasource name: `warehouse` reads `OS_DATASOURCE_WAREHOUSE_PASSWORD` (upper-cased; every character outside `A-Z0-9` becomes `_`). The value is the connection's secret: the password for postgres, mysql and mongodb, the `authToken` for turso.
+  
+  - **A host switch.** `OS_DATASOURCE_ENV_CREDENTIALS` takes `on` or `off`; any other value refuses the boot with a sentence. `os serve` (and so `os start` and `os dev`) turns it on unless the operator set it. Every other composition leaves it off, so a host that loads several tenants' artifacts into one process never reads the variable.
+  - **Code datasources only, by provenance.** The variable is read on the boot's declared connect, for a name in the host's code-datasource set: the booted artifact's datasources and those of a package installed locally. A datasource created through Setup or the API under the same name never reads it, and neither does the `default` datasource, which keeps `OS_DATABASE_URL`. A record's own `origin` is never consulted.
+  - **A declared credential wins.** With `external.credentialsRef` or `external.connector` declared the variable is not read, and a reference that fails to resolve stays fail-closed.
+  - **Unset.** The connect goes ahead without a secret as before; when the database then refuses, the reason names the variable to set.
+  - **Two names deriving one variable** are refused at their connect.
+  - **Who can read it.** Any code datasource the host registers under a name reads that name's variable, including one in an installed package. Install only packages you trust with the credentials in the process environment.
+  
+  The credential refusals (`config.password`, a URL userinfo password, a credential query parameter, the mongo `options` passthrough) and the two `password` guidance entries on `DatasourceSchema` / `ExternalDatasourceSettingsSchema` end with one shared sentence naming this route, after the Setup and `external.credentialsRef` routes they already name. `planCredentialMigration`'s remedy for a code-defined row names the row's variable.
+- cb074ec: feat(cli): `os secret orphans` also reports the `sys_secret` handles more than one holder names, and the ones a column other than their own holds
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The orphan report answered which `sys_secret` rows nothing names. Its report mode now also lists, from the same cross-producer reference union, the rows something does name in a way no producer writes:
+  
+  - **`shared`** — a handle more than one holder record names. A producer seals one handle per value it writes.
+  - **`misplaced`** — a handle held by a column other than the one its `(namespace, key)` names: the settings row's own pair, or the object and field name for a `secret` field. A datasource holder is not judged for placement, because the datasource binder records the pair its caller passes.
+  - **`sharedInOwnColumn`**, listed apart — a handle every holder of which is a row of its own minting column. That is what a predicate update writes (one sealed value onto every row it matched), and stored rows cannot tell it from a reference copied between rows of the same column, so it is listed and not judged.
+  
+  Each entry carries the handle id, its `(namespace, key)`, the holder count and every holder's object, field and record. Never a secret and never cipher material. Under `--json` the section is a new top-level `holders` key beside `plan`. Report mode only: it changes nothing `--delete` removes, and it repairs nothing.
+- 0a52b7d: feat: `os serve` publishes its datasource secret store's `resolve` as the kernel service `datasource-secret-resolver`, and `driver-odata` reads it when it is passed no secret store
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A stack served by `os serve` that mounts `createODataDriverPlugin` could not resolve its datasource's `external.credentialsRef`: the server's `sys_secret` store was handed only to the datasource admin, so a `sys_secret:` handle stored through Setup → Datasources did not resolve for the plugin, and the stack had to pass a `resolve` of its own. It now resolves with no code:
+  
+  ```ts
+  plugins: [createODataDriverPlugin({ name: 'erp', serviceRoot: 'https://erp.example.com/odata/', auth: { scheme: 'bearer' } })],
+  datasources: [{ name: 'erp', driver: 'erp', config: {}, schemaMode: 'external',
+    external: { credentialsRef: 'sys_secret:…' } }],
+  // no `secrets` option: under os serve the handle resolves through the server's own store
+  ```
+  
+  - **`@objectstack/cli`**: `os serve` registers the read half of the datasource secret binder it builds as the kernel service `datasource-secret-resolver` (plugin `com.objectstack.cli.datasource-secret-resolver`). Only `resolve` is published; storing and removing a credential stays the datasource admin's. It decrypts datasource credentials only: a settings secret or a secret field's row in `sys_secret` does not open through it. When `os serve` builds no binder (no crypto provider), the service is not registered.
+  - **`@objectstack/driver-odata`**: when `options.secrets` is absent, the plugin reads the `datasource-secret-resolver` service at the first request. An explicit `options.secrets` still wins. With neither, the request is refused as before, sent to nobody, and the message now names the service.
+  - **`@objectstack/types`**: `DATASOURCE_SECRET_RESOLVER_SERVICE` and `IDatasourceSecretResolver`, the contract a host publishes the resolver under and every plugin driver that dereferences a `credentialsRef` reads it by: an explicit store first, the service looked up at the first request (never at `init`), fail-closed when neither resolves.
+- c4390f7: fix(cli): `os plugin publish` decodes the artifact's compiled manifest once, through `readCompiledPluginManifest` (#27914)
+  
+  Clause-②: yes (widening: the `ok` arm of `@objectstack/runtime`'s exported `CompiledPluginManifestRead` gains `document`, the manifest entry as decoded before the `ManifestSchema` parse; every existing key keeps its value)
+  Metadata-protocol: none
+  
+  - **Before.** `os plugin publish` validated the compiled manifest through `readCompiledPluginManifest`, then decoded the same archive entry a second time to build the verbatim `plugin_manifest` upload, finding it by the CLI's own spelling of the filename. That lookup held only while the CLI's `MANIFEST_FILENAME` and the runtime's `COMPILED_PLUGIN_MANIFEST_FILE` spelled the same string.
+  - **Now.** `readCompiledPluginManifest` answers the decoded `document` beside the parsed `manifest`, and publish uploads that document. The upload is unchanged: the artifact's own manifest, key for key, without the defaults the parse stamps (`scope`, `defaultDatasource`).
+- fc5d509: feat(plugin-auth): opt-in Cloudflare Turnstile on email sign-up — off unless both `OS_TURNSTILE_SITE_KEY` and `OS_TURNSTILE_SECRET_KEY` are set
+  
+  Clause-②: yes (widening: the public auth config gains `features.turnstileSiteKey`, served only while the challenge is on; `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` and `AuthFeaturesConfigSchema` gain `turnstileSiteKey`; with the challenge on, `/sign-up/email` answers better-auth's `captcha` refusals `400 MISSING_RESPONSE`, `403 VERIFICATION_FAILED` and `500 UNKNOWN_ERROR`; two new env vars; `@object-ui/auth` gains `TurnstileWidget`, `TURNSTILE_SCRIPT_URL`, `RegisterForm`'s `turnstileSiteKey` prop and `captchaFailed`/`captchaRetry` labels, `SignUpData.captchaToken` and a fifth `signUp` argument; `@object-ui/app-shell` gains `signUpCaptchaFailedMessage`)
+  Metadata-protocol: added
+  
+  A deployment can now ask for a human check before an email/password account is created. Set both variables and:
+  
+  - **The server** mounts better-auth's `captcha` plugin with the `cloudflare-turnstile` provider on `/sign-up/email` only. A sign-up without a token in the `x-captcha-response` header is refused before anything is read or written, a token is verified with Cloudflare using the secret, and a verification that cannot complete fails closed. Sign-in and password reset are not challenged (better-auth's default list would have included them; it is overridden). The per-address rate limit still runs first. Server-side registrations through `auth.api.signUpEmail` (the development admin seed, demo staff) are unaffected.
+  - **The public auth config** (`GET /api/v1/auth/config`) serves `features.turnstileSiteKey`, the public site key, and never the secret.
+  - **The Console** renders the challenge on `/register` and on the first-run `/setup` wizard, holds submit until it is solved, and sends the token. A failed, expired or refused challenge shows one retry message, never Cloudflare's code or the plugin's text. The Console document's content-security-policy admits `https://challenges.cloudflare.com` in `script-src` and `frame-src` only while both variables are set.
+  
+  With either variable unset or blank nothing changes: no plugin, no config key, no widget, the same policy. A deployment that sets only one gets one boot `warn` naming the missing variable.
+- bed8306: feat(console): an action's param dialog names its own submit verb — `submitText` is drawn on the submit button in place of "Confirm"
+  
+  Clause-②: yes (widening) — `@object-ui/types` `UIActionSchema` and `@object-ui/core` `ActionDef` gain the optional member `submitText`, typed by derivation from the spec's `ActionSchema`; `@object-ui/i18n` `useObjectLabel()` gains the resolver `actionSubmitText`. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **The console.** The dialog an action opens to collect its `params` draws the action's `submitText` on its submit button ("Send", "Log Call"). Both param-collection handlers resolve it the way they resolve `description`: the translation bundle's `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action) first, then the authored inline locale map collapsed to the active language, then the authored string. An action that names no verb keeps "Confirm", and the button still says "Uploading…" while a file param uploads. `action:button`, `action:icon`, `action:group` and `action:menu` forward the key to the runner.
+  - **Studio.** The action form offers the key ("Submit button label"), translated in every shipped locale.
+  - **`os i18n extract`.** Scaffolds `objects.OBJECT._actions.ACTION.submitText` (or `globalActions.ACTION.submitText`) for an action with a non-empty `params` — the only action `translateAction` overlays it onto — and no slot for any other action.
+  - **Spec.** The liveness ledger row for `ActionSchema.submitText` is `live`, with its author warning dropped; the key's description no longer says no renderer shows it.
+- 3fd4d6b: fix(cli)!: `os validate` and `os build` refuse a composed stack's top-level picklist that the boot refuses (#28248)
+  
+  Clause-②: no (narrowing) — `os validate` and `os build` refuse a composed stack whose top level declares a picklist that no package body declares and no object field the engine registers names, which they accepted before; the boot already refuses every such stack, so nothing that boots is newly refused, and nothing is widened
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and the stack schema accepts what it accepted. The two authoring doors now give, ahead of the boot, a refusal the boot already gives, with the same remedy; there is no metadata for a migration to rewrite. -->
+  
+  **BREAKING** for `os validate` / `os build` on a composed stack only (one that carries `packages[]`), and only for a stack the boot already refuses.
+  
+  A composed stack (one that carries `packages[]`) whose top level declares a picklist that no package body declares, and that no object field the engine registers names, is refused at boot (`INVALID_METADATA`). `os validate` and `os build` used to pass the same stack, so the author learned of it only at boot.
+  
+  - **Now.** Both doors refuse it as `picklist-residual-unreferenced`, located at the picklist's top-level index. The message and prescription are the boot's own words: declare it inside the `packages[]` entry of the package whose objects use it; or name it from a field of the object meant to use it; or remove it from the top level.
+  - **What counts as naming it** is the boot's set: a field of a body's objects or `objectExtensions`, or of a top-level object no body declares. A top-level `objectExtensions` entry, a top-level copy of an object a body declares, and a top-level `plugins[]` entry name nothing, because no door registers them in a composed stack.
+  - **Unchanged.** A residual picklist that a top-level object's field names is not refused (the boot lists that object and does not serve it). A body field naming a list only the top level declares is `picklist-reference-unknown`, as before. A body-declared picklist and a stack without `packages[]` are not affected.
+  - **Prose.** The residual-rule header in `@objectstack/metadata` and the permission-set owner gate's docblock in `@objectstack/spec` now state the picklist exception. No schema changes.
+  
+  No stack that boots is newly refused: every stack this refuses, the boot already refuses.
+- Updated dependencies [2282aa8]
+- Updated dependencies [af1e1e0]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [1c5fe3c]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [c3fb185]
+- Updated dependencies [1c63231]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [f515124]
+- Updated dependencies [a98693d]
+- Updated dependencies [8c0306f]
+- Updated dependencies [a3009cb]
+- Updated dependencies [416d9dd]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [898703f]
+- Updated dependencies [179598e]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [fb91e97]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6328a07]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [cee4b16]
+- Updated dependencies [cb8988e]
+- Updated dependencies [e744244]
+- Updated dependencies [6279efe]
+- Updated dependencies [0f0b9f5]
+- Updated dependencies [4702c46]
+- Updated dependencies [ae7f49e]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [dabe771]
+- Updated dependencies [dabe771]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [652da20]
+- Updated dependencies [1f1eda4]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [5782008]
+- Updated dependencies [4f93696]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [96e7a43]
+- Updated dependencies [31a6ca7]
+- Updated dependencies [20457f6]
+- Updated dependencies [1539aad]
+- Updated dependencies [57e00f5]
+- Updated dependencies [c90b5b1]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [b29a88c]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [1d7816d]
+- Updated dependencies [d887aa9]
+- Updated dependencies [2a40f98]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [216a39e]
+- Updated dependencies [e1ab32e]
+- Updated dependencies [e6e4199]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [b2b3124]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [14ab711]
+- Updated dependencies [67cf0b1]
+- Updated dependencies [e46e25c]
+- Updated dependencies [81b4599]
+- Updated dependencies [7bb8084]
+- Updated dependencies [6845035]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [0eb2d21]
+- Updated dependencies [49d652e]
+- Updated dependencies [045cfa4]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [693a729]
+- Updated dependencies [9fa70b4]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [58d4ee6]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [a315560]
+- Updated dependencies [3beb224]
+- Updated dependencies [835b2d1]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [ee9a8d6]
+- Updated dependencies [385aa12]
+- Updated dependencies [5b5cff1]
+- Updated dependencies [79d5dac]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [6762dd9]
+- Updated dependencies [291bf44]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [99aeee6]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [a0cc51f]
+- Updated dependencies [9229738]
+- Updated dependencies [da7bcc8]
+- Updated dependencies [8d66cbe]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [a1d8bf6]
+- Updated dependencies [308f826]
+- Updated dependencies [aef631b]
+- Updated dependencies [2dc69d7]
+- Updated dependencies [a0413fc]
+- Updated dependencies [e5c5035]
+- Updated dependencies [85663a5]
+- Updated dependencies [33ab543]
+- Updated dependencies [21e5979]
+- Updated dependencies [f57eddc]
+- Updated dependencies [a2f434d]
+- Updated dependencies [eac6d96]
+- Updated dependencies [e00374a]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [a3014cb]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [b8b3208]
+- Updated dependencies [1346052]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [86f2afe]
+- Updated dependencies [e29a1b1]
+- Updated dependencies [72c0152]
+- Updated dependencies [524befb]
+- Updated dependencies [81d00a4]
+- Updated dependencies [b2b4972]
+- Updated dependencies [e0aed00]
+- Updated dependencies [481ade6]
+- Updated dependencies [a75ddba]
+- Updated dependencies [e270dab]
+- Updated dependencies [af52253]
+- Updated dependencies [875d007]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [475d428]
+- Updated dependencies [ca167f6]
+- Updated dependencies [4a5396b]
+- Updated dependencies [3de484d]
+- Updated dependencies [a3d24c9]
+- Updated dependencies [6dc06b2]
+- Updated dependencies [a7de844]
+- Updated dependencies [ecd944f]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [79d78b4]
+- Updated dependencies [04141a6]
+- Updated dependencies [2efd903]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a7c2595]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [9cd54fa]
+- Updated dependencies [e793e9d]
+- Updated dependencies [684f2f6]
+- Updated dependencies [64599ec]
+- Updated dependencies [869fa76]
+- Updated dependencies [dd9921e]
+- Updated dependencies [2fc3861]
+- Updated dependencies [d5151a7]
+- Updated dependencies [bc496bf]
+- Updated dependencies [01eab23]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [47c3e12]
+- Updated dependencies [e063a87]
+- Updated dependencies [ca54eac]
+- Updated dependencies [6d9419b]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [9ae6384]
+- Updated dependencies [92493e3]
+- Updated dependencies [8f25cee]
+- Updated dependencies [07585bf]
+- Updated dependencies [fdf844c]
+- Updated dependencies [6a648ac]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [e8cdf4e]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [e320e36]
+- Updated dependencies [d8de26d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [3e039e0]
+- Updated dependencies [b13a1ed]
+- Updated dependencies [2a3dec2]
+- Updated dependencies [642dd4f]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [7591c60]
+- Updated dependencies [11137d4]
+- Updated dependencies [3efccfd]
+- Updated dependencies [6caca51]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [5448585]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [b339465]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [d5951c8]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [bacb3e6]
+- Updated dependencies [4793aa4]
+- Updated dependencies [be16c6a]
+- Updated dependencies [95f545e]
+- Updated dependencies [5f6dc96]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [c4390f7]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [b6db369]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [d6c0a75]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [066ff51]
+- Updated dependencies [ec7e15a]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [cc5586d]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [b59bf60]
+- Updated dependencies [3739d8d]
+- Updated dependencies [ba4ecf1]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [5f31470]
+- Updated dependencies [d70e94a]
+- Updated dependencies [c48cd2c]
+- Updated dependencies [11a7f96]
+- Updated dependencies [ae64120]
+- Updated dependencies [96367f1]
+- Updated dependencies [139bc18]
+- Updated dependencies [86c6955]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [57faf5d]
+- Updated dependencies [57faf5d]
+- Updated dependencies [cbb6df1]
+- Updated dependencies [f9a1363]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [7abe151]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [8882857]
+- Updated dependencies [2db3281]
+- Updated dependencies [3238750]
+- Updated dependencies [01178c0]
+- Updated dependencies [bed8306]
+- Updated dependencies [35ffb77]
+- Updated dependencies [04c8930]
+- Updated dependencies [8a33dff]
+- Updated dependencies [001c04b]
+- Updated dependencies [a426d36]
+- Updated dependencies [d35db2c]
+- Updated dependencies [4159c70]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [744ad0a]
+- Updated dependencies [57f8ca2]
+- Updated dependencies [898e439]
+- Updated dependencies [5055b10]
+- Updated dependencies [488b3ed]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [6212fdc]
+- Updated dependencies [700ec85]
+- Updated dependencies [f64724a]
+- Updated dependencies [00a350f]
+- Updated dependencies [125ad06]
+- Updated dependencies [a0f8654]
+- Updated dependencies [f048e42]
+- Updated dependencies [28c274f]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [4a7b99f]
+- Updated dependencies [b9b22b9]
+- Updated dependencies [e2d0dab]
+- Updated dependencies [1fd68ea]
+- Updated dependencies [99a6a78]
+- Updated dependencies [54c2496]
+- Updated dependencies [6bc7643]
+- Updated dependencies [04b1402]
+- Updated dependencies [79bf748]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [6cc5374]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/trigger-schedule@18.3.0
+  - @objectstack/service-automation@18.3.0
+  - @objectstack/service-job@18.3.0
+  - @objectstack/objectql@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/lint@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/metadata@18.3.0
+  - @objectstack/plugin-security@18.3.0
+  - @objectstack/plugin-sharing@18.3.0
+  - @objectstack/plugin-approvals@18.3.0
+  - @objectstack/runtime@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/rest@18.3.0
+  - @objectstack/metadata-protocol@18.3.0
+  - @objectstack/driver-memory@18.3.0
+  - @objectstack/plugin-audit@18.3.0
+  - @objectstack/service-messaging@18.3.0
+  - @objectstack/mcp@18.3.0
+  - @objectstack/service-settings@18.3.0
+  - @objectstack/service-storage@18.3.0
+  - @objectstack/client@18.3.0
+  - @objectstack/service-analytics@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/plugin-auth@18.3.0
+  - create-objectstack@18.3.0
+  - @objectstack/plugin-email@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/service-datasource@18.3.0
+  - @objectstack/cloud-connection@18.3.0
+  - @objectstack/plugin-hono-server@18.3.0
+  - @objectstack/plugin-webhooks@18.3.0
+  - @objectstack/driver-sql@18.3.0
+  - @objectstack/trigger-record-change@18.3.0
+  - @objectstack/verify@18.3.0
+  - @objectstack/driver-mongodb@18.3.0
+  - @objectstack/plugin-pinyin-search@18.3.0
+  - @objectstack/service-mailbox@18.3.0
+  - @objectstack/service-package@18.3.0
+  - @objectstack/service-queue@18.3.0
+  - @objectstack/driver-sqlite-wasm@18.3.0
+  - @objectstack/driver-turso@18.3.0
+  - @objectstack/service-cache@18.3.0
+  - @objectstack/service-realtime@18.3.0
+  - @objectstack/service-sms@18.3.0
+  - @objectstack/trigger-api@18.3.0
+  - @objectstack/account@18.3.0
+  - @objectstack/setup@18.3.0
+  - @objectstack/observability@18.3.0
+  - @objectstack/console@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

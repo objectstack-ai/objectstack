@@ -1,5 +1,330 @@
 # @objectstack/plugin-sharing
 
+## 18.3.0
+
+### Minor Changes
+
+- a9f654e: feat!: ownership queues: records wait in a queue until a member claims them, and assignment rules route new records (ADR-0142)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-queue-field-reserved -->
+  
+  **BREAKING** for one shape only: an object whose records have a user owner (`ownership: 'user'`, the default) can no longer declare its own field named `queue`. The platform now injects a `queue` column on every such object, and `registerObject` refuses the declaration with `422 INVALID_METADATA` (`ObjectQueueColumnRefusedError`), naming the object. An `objectExtensions` entry that declares `queue` on such an object is not refused, because an extension is folded over its object at read time: its `queue` is ignored, the platform's column stands, and a warning names the extension. The remedy: rename the business field (for example `support_queue`) and copy its data across, or, when the object's records have no user owner, declare `ownership: 'business_unit'`, `'org'` or `'none'`. The upgrade guide entry is `object-queue-field-reserved`.
+  
+  Beside that, two enum additions: `ShareRecipientType` gains `queue` (a sharing rule can now name a queue as its recipient), and the `queue` approver type is authorable again (it leaves `NON_AUTHORABLE_APPROVER_TYPES`, so it is no longer marked deprecated). Two metadata types are new: `queue` and `assignment_rule`.
+  
+  - **`@objectstack/spec`**: new `queue` and `assignment_rule` metadata types (`QueueSchema`, `AssignmentRuleSchema`) and the stack keys `queues` and `assignmentRules`. A declared queue's members are positions. New `IOwnershipQueueService` contract, registered under `ownership-queue`. `queue` joins the injected system columns of `ownership: 'user'` objects and `PUBLIC_FORM_SERVER_MANAGED_FIELDS`. `APPROVER_VALUE_BINDINGS.queue` reads both a declared queue and an organization's `sys_queue` row, and `APPROVER_ORG_SCOPED.queue` is `true`. The explain rule kinds `queue_membership` and `queue_claim` are new. `QUEUE_NOT_FOUND` (422) is registered under plugin-security.
+  - **`@objectstack/objectql`**: objects with `ownership: 'user'` get a system-managed `queue` column beside `owner_id`. Declaring your own `queue` field on one is refused at registration (`INVALID_METADATA`), and an extension's own `queue` field on one is ignored with a warning. An update can carry a write precondition: when it no longer matches, the update answers `409 CONCURRENT_UPDATE`. Declared assignment rules run once for each inserted row that has no owner and no queue after the `beforeInsert` hooks. A rule can park the row in a queue, or pick a member by `round_robin` or `least_loaded`. Assignment never refuses an insert. `kernel:ready` refuses to boot a stack that declares queues or assignment rules when no `ownership-queue` service is registered.
+  - **`@objectstack/metadata-core`**: `queue` is classified as an injected system column.
+  - **`@objectstack/metadata`**: the artifact door registers a stack's `queues` and `assignmentRules`, so an artifact-only runtime serves them.
+  - **`@objectstack/plugin-sharing`**: three new objects, `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, and the `ownership-queue` service. The service resolves a queue name from the registry first, then from the organization's own rows, and has one member expander. A record with no owner that sits in a queue can be read and edited by the queue's members, never deleted. The `queue` sharing recipient grants matched records to the queue's members, and its grants are recomputed when membership changes or the queue is switched on or off.
+  - **`@objectstack/plugin-security`**: the owner gate handles `queue`. A **claim** sets `owner_id` from empty to yourself, by id. It is admitted when the sharing model allows you the record, and only one claimant wins: the loser gets `409`. A **release** gives your own record back to its home queue. A **move** to another queue needs the transfer grant, and a queue name that does not resolve is refused with `422 QUEUE_NOT_FOUND`. An insert that names a queue needs the transfer grant or membership of that queue. A guest can supply neither. Explain reports the queue reasons on the sharing layer.
+  - **`@objectstack/plugin-approvals`**: a `queue` approver resolves to the queue's members when the step opens. An empty queue adds nobody and logs a warning. The `queue:<name>` placeholder is never written again.
+  - **`@objectstack/lint`**: a queue-only approval node is reported `approval-approvers-may-resolve-empty`, and the org-axis red line admits the queue recipient. Two new advisory rules come with `os explain` entries: `assignment-rule-user-target` (warning) and `assignment-rule-queue-unstaffed` (info).
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, so `os migrate organization-ownership` plans them instead of refusing.
+  - **`@objectstack/runtime`**: `POST /security/_activation/:type/:name` also switches a declared `queue` or `assignment_rule` on and off.
+  - **`@objectstack/platform-objects`**: the two new metadata types' labels, and the queue recipient option, are translated in zh-CN, ja-JP and es-ES.
+  - **`@object-ui/app-shell`**: the flow designer no longer warns that a queue approver resolves to nobody.
+  - **`@objectstack/skills`**: the platform skill lists `queues` and `assignmentRules` among the stack's top-level keys.
+  
+  What to do: rename any `queue` field on a user-owned object, or in an extension of one, as above. Every other existing stack behaves as before. To use queues, declare `queues` and `assignmentRules` in your stack, and make sure plugin-sharing is installed: it registers the `ownership-queue` service.
+- 8bb2c31: feat(plugin-sharing): `SharingService.admitsByIdWrite` — the by-id write gate the middleware refuses on
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The sharing middleware's by-id `update` / `delete` gate is now one service method, `admitsByIdWrite(object, recordId, verb, context)`, and the middleware refuses exactly when it answers `false`. The same calls run in the same order: `canEdit` / `canDelete`, the delegator's gate for an on-behalf-of write, then the authored-row-write deferral. `byIdWriteGateInstalled` says whether the middleware is installed (`false` under `enforce: false`). `plugin-security` asks the method for the record field-access answer's `writable`, so that verdict is the sharing gate's own. Refusals, their messages and their log lines are unchanged.
+
+### Patch Changes
+
+- 685d9f3: fix(runtime, plugin-sharing): a share link's resolve answer describes the fields it returns — authored label, type, picklist option labels, currency and lookup display bits — so the shared-record page no longer has only the field keys to show (#26991)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/share-links/TOKEN/resolve` answered `{ record, link, redactFields }` on both of its mounts (the `plugin-sharing` routes and the runtime dispatcher's `/share-links` domain). Its visitor is usually anonymous, and `GET /api/v1/meta/object/NAME` refuses an anonymous caller, so a page rendering the shared record could only humanize each key. The answer now also carries `fields`, keyed by field name:
+  
+  - **What an entry holds.** The field's authored `label` and `type`; a picklist's `options` (`value`, `label`, `color`); `multiple` when it is `true`; a currency field's `currencyConfig` (`currencyMode`, `defaultCurrency`); and a lookup's `reference` (the target object) and authored `displayField`. Labels are the authored ones the object schema holds, untranslated. A lookup's value in `record` is unchanged: the stored id.
+  - **Which fields.** Exactly the keys `record` carries that the shared object declares. A field the link redacts is absent from both `record` and `fields`; a field the record read never returns (`internal`) is absent from both; no other field of the object is described. The meta door's anonymous refusal is unchanged.
+  - **One builder.** Both mounts build the whole answer through `buildShareLinkResolveAnswer` (new in `@objectstack/types`, beside `redactSharedRecord` and `projectSharedRecordFields`), so they answer the same shape. Redaction is unchanged.
+  
+  The existing keys are unchanged, so a reader of the old answer reads the new one as before.
+- f57eddc: fix(plugin-sharing)!: on a federated object whose `owner_id` is the platform's injected anchor, the read and bulk-write scopes narrow below `org` instead of going unscoped (#27425)
+  
+  Clause-②: yes (narrowing) — `SharingService.buildReadFilter` and `buildWriteFilter` answer a deny-all scope, where they answered `null` (no scope), for a caller below `org` depth on an ADR-0015 federated object that neither declares `owner_id` in `fields` nor maps a remote column onto it; on `private` such an object's refused edit answers 404 where it answered 403. One accept set widens: `SharingService.grant()` on a federated object that maps a remote column onto `owner_id` through `external.columnMap` (without declaring it) is no longer refused as inert, because that object's share rows are now read. No key is added, removed or renamed.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the record-sharing scope of one class of federated object fails closed where it went unscoped. The remedy is a metadata choice the author already has (declare the owner column, or choose the sharing model on purpose), so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** read-scope narrowing in record sharing (`@objectstack/plugin-sharing`).
+  
+  - **Before.** On a federated object (`external` binding) with an owner-keyed sharing model, the sharing service decided whether `owner_id` was real from the declared `fields` alone. When the author had not declared it, the registry's injected anchor was taken to mean "no owner column", and the read filter applied no scope. A driver can still serve `owner_id` (the SQL driver through `external.columnMap`, a remote column of that name, a plugin driver on its own), so a `private` object answered its rows to members it was meant to hide them from. Bulk updates and deletes went unscoped the same way, while single-record writes were refused with 403.
+  - **Now.** The owner column counts as proven when `fields` declares `owner_id` or an `external.columnMap` entry maps a remote column onto it; such an object keeps ordinary owner scoping (a driver that does not apply the map serves no `owner_id`, so the owner predicate admits nothing there). Otherwise an unproven owner narrows the scope: below `org` read depth the read filter admits no row by ownership, no owner predicate and no share rows (a grant on such an object is already refused as inert), and a pending approval step still opens the record it waits on. The bulk write filter admits no row below `org` write depth. Because an edit reads its record through the same scope first, a member's PATCH on a `private` object of this shape now answers 404 `RECORD_NOT_FOUND` where it answered 403 `PERMISSION_DENIED`; on `public_read` it stays 403. `org` depth, the Modify All bypass, system callers and local objects are unchanged.
+  - **Who sees it.** An app with a federated object on `private` (including no `sharingModel`, which the runtime treats as `private`), or `public_read` for bulk writes, that neither declares nor maps `owner_id`: members below `org` depth now read no row there, and their refused edits answer 404. An external principal on a `public_read` object meets the same closed scope. `os validate`'s `security-external-owner-unmapped` warning (`@objectstack/lint`) now names the 404 on `private`, and its explanation says reads are refused too.
+  
+  **The remedy.** Choose on purpose. Declare `owner_id` in `fields` and have the driver return the remote owner under that name (a built-in SQL driver through `external.columnMap`; a plugin driver must return it itself), and the object scopes to the owner. Or choose `sharingModel: 'public_read'` (everyone reads) or `'public_read_write'` (everyone reads and edits, a `beforeUpdate` hook decides who may).
+- 684f2f6: fix(spec): one reader decides whether an external object's owner is provable, and record sharing and lint both read it
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  An external object (ADR-0015) gets the platform's `owner_id` injected but no storage for it. Record sharing narrows such an object's member reads and bulk writes to no row by ownership unless the author declares where the owner comes from: a declared `owner_id` field, or an `external.columnMap` entry that maps a remote column onto `owner_id`. That question was answered in three places. The spec's provenance helper did not know the `columnMap` arm, while plugin-sharing and lint each read `columnMap` with their own copy.
+  
+  - **`isOwnerAnchorUnprovable(def)`** (`@objectstack/spec/data`) is now the one answer: `true` when `resolveInjectedColumnProvenance(def, 'owner_id')` is `injected-unprovisioned` and no `external.columnMap` value is `owner_id`. Plugin-sharing's `hasPhantomOwnerAnchor` and lint's `hasUnprovableOwnerAnchor` return it.
+  - **`externalColumnMapTargets(def, field)`** reads whether `external.columnMap` maps a remote column onto `field`. Lint's `security-external-owner-unmapped` uses it for its "mapped but not declared" wording.
+  - **Public surface.** `@objectstack/spec/data` gains the two exports above; no existing export changes its answer.
+  - **`resolveInjectedColumnProvenance` is unchanged.** A `columnMap` entry does not change who wrote the `owner_id` field, and the lint write rule depends on that: on a plugin driver the map is not applied, so only a declared field lets a member write.
+  
+  Read scopes, write scopes, share-grant refusals and lint findings are unchanged for registered objects. On hand-built documents, two readings move: an object with no `owner_id` key that would be injected one now reads as unprovable, which every sharing caller already guards by checking for the field first; and an object whose tier withholds `owner_id` but which declares a field identical to the platform's now reads as the author's, the spec's existing rule. Both still match no remote row the author did not vouch for.
+- 64599ec: fix(plugin-sharing): a refused write on a federated object whose mapped owner column the driver did not serve is logged again
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A federated object that maps a remote column onto `owner_id` through `external.columnMap`, served by a plugin driver that does not apply the map, returns rows with no `owner_id`, so every member edit or delete is refused. The refusal is unchanged. Since the mapped class stopped counting as a phantom owner anchor, the one-line server warning that tells the operator why had stopped firing. It fires again, at most once per object, as the new `UNSERVED_OWNER_WRITE_DENY_NOTICE`, which names the driver returning no value for the mapped or declared owner column. A driver that serves the column, including a row whose owner is NULL, stays silent.
+- Updated dependencies [af1e1e0]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [1f1eda4]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [31a6ca7]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [b2b3124]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [0eb2d21]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [693a729]
+- Updated dependencies [9fa70b4]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [ee9a8d6]
+- Updated dependencies [385aa12]
+- Updated dependencies [79d5dac]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [99aeee6]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [8d66cbe]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [a1d8bf6]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [b8b3208]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e29a1b1]
+- Updated dependencies [72c0152]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [a3d24c9]
+- Updated dependencies [a7de844]
+- Updated dependencies [ecd944f]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [6a648ac]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d8de26d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [5f31470]
+- Updated dependencies [11a7f96]
+- Updated dependencies [ae64120]
+- Updated dependencies [139bc18]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [f9a1363]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [7abe151]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [2db3281]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [35ffb77]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [e2d0dab]
+- Updated dependencies [99a6a78]
+- Updated dependencies [54c2496]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/objectql@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes
