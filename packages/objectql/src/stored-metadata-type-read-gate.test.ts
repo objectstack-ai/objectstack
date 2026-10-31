@@ -65,7 +65,10 @@ function makeDriver() {
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(o: string, ast: any) { return rows(o, ast); },
+    async find(o: string, ast: any) {
+      const matched = rows(o, ast);
+      return typeof ast?.limit === 'number' ? matched.slice(0, ast.limit) : matched;
+    },
     findStream() { throw new Error('ns'); },
     async findOne(o: string, ast: any) { return rows(o, ast)[0] ?? null; },
     async count(o: string, ast: any) { return rows(o, ast).length; },
