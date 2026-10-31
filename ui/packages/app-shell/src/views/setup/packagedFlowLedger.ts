@@ -1,16 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The packaged-flow doors the console offers in two places (ADR-0146 D4):
- * Setup › Packaged automation, the deployment-wide overview, and Studio's
- * Automations pillar, on a read-only package's open flow.
+ * The packaged-flow ledger switch the console offers in two places (ADR-0146
+ * D4): Setup › Packaged automation, the deployment-wide overview, and Studio's
+ * Automations pillar, on a read-only package's open flow. It is
+ * `POST /api/v1/automation/<name>/toggle`, the ADR-0126 §7.2 activation
+ * ledger's switch, the bit `GET /automation/_status` reports as `enabled`.
  *
- *   - `POST /api/v1/automation/<name>/toggle` — the ADR-0126 §7.2 activation
- *     ledger's switch, the bit `GET /automation/_status` reports as `enabled`;
- *   - `POST /api/v1/automation/<name>/clone` — the ADR-0126 §7.1 copy under a
- *     mandatory new machine name and label.
- *
- * One copy of each request, so the two surfaces cannot drift on the body they
+ * One copy of the request, so the two surfaces cannot drift on the body they
  * send or on how a refusal reaches the operator: VERBATIM, through
  * `actionErrorDetail`, the one reader of an ADR-0112 envelope's message. A
  * fallback string is used only when the response carried no message at all,
@@ -39,9 +36,6 @@ export interface FlowDoorFallbacks {
 
 /** The toggle's answer: the flag the server reports, or its refusal verbatim. */
 export type FlowToggleOutcome = { ok: true; enabled: boolean } | { ok: false; message: string };
-
-/** The clone's answer: the name it created and the server's notice, or its refusal verbatim. */
-export type FlowCloneOutcome = { ok: true; name: string; notice: string } | { ok: false; message: string };
 
 async function readJson(res: Response): Promise<unknown> {
   return res.json().catch(() => null);
@@ -81,56 +75,21 @@ export async function requestFlowToggle(
 }
 
 /**
- * `POST …/clone`. Never throws: a refusal (a taken name answers 409 with a
- * free name suggested) comes back as the server's sentence.
+ * Does the toggle door refuse this caller on this deployment?
  *
- * ⛔ EXACTLY the two keys the clone body declares. The carried-over definition
- * is not offered as editable fields: a clone copies the whole definition and
- * the copy is edited in Studio afterwards. The copy lands where the door puts
- * it; no target package is sent while the door declares none.
- */
-export async function requestFlowClone(
-  source: string,
-  target: { name: string; label: string },
-  fallbacks: FlowDoorFallbacks,
-): Promise<FlowCloneOutcome> {
-  const name = target.name.trim();
-  try {
-    const res = await fetch(`${apiBase()}/automation/${encodeURIComponent(source)}/clone`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ name, label: target.label.trim() }),
-    });
-    const json = await readJson(res);
-    if (!res.ok || envelopeRefused(json)) {
-      return { ok: false, message: actionErrorDetail(json, fallbacks.http(res.status)) };
-    }
-    const data = envelopeData(json);
-    const created = (data.flow as { name?: unknown } | undefined)?.name;
-    return {
-      ok: true,
-      name: typeof created === 'string' && created ? created : name,
-      notice: typeof data.notice === 'string' ? data.notice : '',
-    };
-  } catch (e) {
-    return { ok: false, message: thrownMessage(e, fallbacks.network) };
-  }
-}
-
-/**
- * Do the toggle and clone doors refuse this caller on this deployment?
- *
- * ADR-0126 §5 and ADR-0131 D12 items 7–8: under the walled `group` /
- * `isolated` postures the activation row is install-wide and a clone is
- * environment authoring, so both doors admit only the `PLATFORM_ADMIN` posture
- * rung; under `single`, or with no posture served, they admit the
- * `manage_metadata` holder Studio already requires. These are the two facts
- * `walledCatalogReadOnly` (`metadata-admin/catalog-scope.ts`) reads for the
- * catalog doors — the posture, `features.tenancyPosture`, and the session's
- * `user.isPlatformAdmin` — and the server stays the judge: a refusal after an
- * attempt is still shown as sent. An unknown posture fails toward a live
- * control; a session that never published the flag reads as no operator.
+ * ADR-0126 §5: under the walled `group` / `isolated` postures the activation
+ * row is install-wide, so the door
+ * (`activation-gate.ts#refuseUngrantedActivationWrite`) admits only the
+ * `PLATFORM_ADMIN` posture rung; under `single`, or with no posture served, it
+ * admits the `manage_metadata` holder Studio already requires. The verdict is
+ * read from the two facts `walledCatalogReadOnly`
+ * (`metadata-admin/catalog-scope.ts`) reads for the catalog doors, the posture
+ * (`features.tenancyPosture`) and the session's `user.isPlatformAdmin`, without
+ * that function's catalog-type filter: the ledger gate has no type input, so
+ * the function itself answers `false` for a flow. The server stays the judge:
+ * a refusal after an attempt is still shown as sent. An unknown posture fails
+ * toward a live control; a session that never published the flag reads as no
+ * operator.
  */
 export function flowLedgerWalledReadOnly(input: {
   posture: TenancyPosture | undefined;

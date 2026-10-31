@@ -3,24 +3,25 @@
 /**
  * ADR-0146 D4 — on a read-only package's open flow the Automations pillar
  * offers the activation-ledger switch ("off for this deployment", bound to
- * `GET /automation/_status` + `POST /automation/<name>/toggle`) and Clone
- * (`POST /automation/<name>/clone`, with the server's notice and the "switch
- * the original off" offer, objectui#13270). Both are pre-judged from the two
- * served posture facts (`features.tenancyPosture`, `user.isPlatformAdmin`),
- * and every server refusal is shown as sent.
+ * `GET /automation/_status` + `POST /automation/<name>/toggle`), in
+ * `activationReading`'s three readings. It is pre-judged from the two served
+ * posture facts (`features.tenancyPosture`, `user.isPlatformAdmin`), and a
+ * server refusal is shown as sent.
  *
  * The pins, each against a control that discriminates it:
- *  - the switch reads the LEDGER row, not the definition: the flow's draft is
- *    `obsolete` (definition off) while `_status` reports it enabled, and the
- *    switch reads on; a flip posts the toggle and saves no draft;
- *  - under a wall a non-operator gets a disabled switch and a disabled Clone,
- *    each with the console's sentence, and nothing is sent; `single` and the
- *    operator under the same wall (CONTROLS) get live controls;
+ *  - the switch reads the LEDGER row, not the definition, in both directions:
+ *    a definition `obsolete` (off) with the ledger on reads on, and the
+ *    measured disagreement, a definition `active` (on) with the ledger off,
+ *    reads off, with no "switch to a writable package" hint on it; a flip
+ *    posts the toggle and saves no draft;
+ *  - an enabled flow the engine did not arm reads "not running here" with the
+ *    platform's sentence as sent;
+ *  - under a wall a non-operator gets a disabled switch with the console's
+ *    sentence, and nothing is sent; `single` and the operator under the same
+ *    wall (CONTROLS) get a live switch;
  *  - a refusal is the server's sentence, verbatim;
- *  - the clone sends exactly the two keys, keeps the notice verbatim, and its
- *    switch-off offer sends the same toggle, then reads the source as off;
  *  - a writable package's flow (CONTROL) keeps its definition switch and its
- *    Delete, with no ledger switch and no Clone.
+ *    Delete, with no ledger switch.
  *
  * The harness is `AutomationsPillar.deleteFlow-27356`'s: the metadata server
  * doubled at the client, the `/automation` doors doubled at `fetch`.
@@ -29,19 +30,19 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
 import { MemoryRouter } from 'react-router-dom';
 
 const PKG = 'com.acme.crm';
 
-// The definition says OFF; the ledger (below) says ON. A switch bound to the
-// definition would read off.
+// The definition says OFF by default; the ledger (below) says ON. A switch
+// bound to the definition would read off. `definition.status` flips it.
+const definition = { status: 'obsolete' };
 const FLOW = {
   name: 'approval',
   label: 'Approval',
   type: 'autolaunched',
-  status: 'obsolete',
   nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
   edges: [{ id: 'e1', source: 'start', target: 'end' }],
 };
@@ -74,7 +75,7 @@ const mockClient = vi.hoisted(() => ({
   listTypes: vi.fn(async () => ({ entries: [] })),
   get: vi.fn(async () => null),
   references: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ code: null, overlay: null, effective: { ...FLOW }, lock: 'none' })),
+  layered: vi.fn(async () => ({ code: null, overlay: null, effective: { ...FLOW, status: definition.status }, lock: 'none' })),
   getDraft: vi.fn(async (type: string, name: string) => {
     throw Object.assign(new Error(`No pending draft exists for ${type}/${name}.`), { code: 'NO_DRAFT', status: 404 });
   }),
@@ -108,28 +109,23 @@ const dataSource = createEmptyDataSource();
 
 const doors = {
   enabled: true,
+  unbound: null as null | { unboundCause: string; reason: string },
   toggle: null as null | { status: number; body: unknown },
-  clone: null as null | { status: number; body: unknown },
 };
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
   if (url.endsWith('/automation/_status')) {
-    return json(200, { success: true, data: { flows: [{ name: 'approval', enabled: doors.enabled, bound: true }] } });
+    const row = doors.unbound
+      ? { name: 'approval', enabled: doors.enabled, bound: false, triggerType: 'schedule', ...doors.unbound }
+      : { name: 'approval', enabled: doors.enabled, bound: true };
+    return json(200, { success: true, data: { flows: [row] } });
   }
   if (url.endsWith('/automation/approval/toggle')) {
     if (doors.toggle) return json(doors.toggle.status, doors.toggle.body);
     doors.enabled = (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled;
     return json(200, { success: true, data: { name: 'approval', enabled: doors.enabled } });
-  }
-  if (url.endsWith('/automation/approval/clone')) {
-    if (doors.clone) return json(doors.clone.status, doors.clone.body);
-    const sent = JSON.parse(String(init?.body)) as { name: string };
-    return json(201, {
-      success: true,
-      data: { flow: { name: sent.name }, notice: 'The copy is a draft and runs beside the flow it was copied from.' },
-    });
   }
   return json(404, null);
 });
@@ -140,9 +136,10 @@ const calls = (suffix: string) => fetchMock.mock.calls.filter(([u]) => String(u)
 beforeEach(() => {
   posture = 'single';
   operator = false;
+  definition.status = 'obsolete';
   doors.enabled = true;
+  doors.unbound = null;
   doors.toggle = null;
-  doors.clone = null;
   fetchMock.mockClear();
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   vi.mocked(toast.success).mockClear();
@@ -160,11 +157,7 @@ function mount(readOnly = true) {
 
 const ledgerSwitch = () => screen.findByTestId('auto-ledger-switch', undefined, { timeout: 8000 });
 
-async function openMenu(): Promise<void> {
-  fireEvent.pointerDown(await screen.findByTestId('auto-item-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
-}
-
-describe('Automations — the ledger switch and Clone on a read-only package (ADR-0146 D4)', () => {
+describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)', () => {
   it('binds the switch to the ledger, not the definition, and a flip posts the toggle and saves no draft', async () => {
     mount();
     const sw = await ledgerSwitch();
@@ -187,37 +180,55 @@ describe('Automations — the ledger switch and Clone on a read-only package (AD
     expect(toast.success).toHaveBeenCalledWith('"Approval" is switched off for this deployment.');
   });
 
-  it('under a wall a tenant administrator gets a disabled switch and Clone with the console\'s sentence, and nothing is sent', async () => {
+  it('reads the measured disagreement as off: the definition is on, the ledger is off', async () => {
+    definition.status = 'active';
+    doors.enabled = false;
+    mount();
+    const sw = await ledgerSwitch();
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    expect(sw).toHaveAttribute('data-reading', 'off');
+    expect(sw).toHaveTextContent('Off for this deployment');
+    // One switch, and not the definition's: no "Enabled" word, no read-only hint.
+    expect(screen.getAllByRole('switch')).toHaveLength(1);
+    expect(sw).not.toHaveTextContent('Enabled');
+    expect(document.body).not.toHaveTextContent('switch to or create a writable package');
+  });
+
+  it('reads an enabled flow the engine did not arm as not running here, with the platform\'s sentence as sent', async () => {
+    const reason = 'This deployment does not run scheduled work that a package authored.';
+    doors.unbound = { unboundCause: 'deployment_policy', reason };
+    mount();
+    const sw = await ledgerSwitch();
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    expect(sw).toHaveAttribute('data-reading', 'not-running');
+    expect(sw).toHaveTextContent('On for this deployment, not running here');
+    expect(screen.getByTestId('auto-ledger-not-running-reason')).toHaveTextContent(reason);
+    expect(sw.getAttribute('aria-describedby')).toContain(screen.getByTestId('auto-ledger-not-running-reason').id);
+  });
+
+  it('under a wall a tenant administrator gets a disabled switch with the console\'s sentence, and nothing is sent', async () => {
     posture = 'group';
     operator = false;
     mount();
     const sw = await ledgerSwitch();
     expect(sw).toBeDisabled();
-    const reason = 'On this deployment, only the platform operator can switch or clone a packaged flow.';
-    expect(screen.getByTestId('auto-ledger-walled-reason')).toHaveTextContent(reason);
+    expect(screen.getByTestId('auto-ledger-walled-reason')).toHaveTextContent(
+      'On this deployment, only the platform operator can switch a packaged flow on or off.',
+    );
     fireEvent.click(sw);
-    await openMenu();
-    const clone = await screen.findByTestId('auto-item-clone');
-    expect(clone).toHaveAttribute('data-disabled');
-    expect(screen.getByTestId('auto-item-clone-reason')).toHaveTextContent(reason);
-    fireEvent.click(clone);
-    expect(screen.queryByTestId('auto-clone-dialog')).toBeNull();
+    await new Promise((r) => setTimeout(r, 50));
     expect(calls('/toggle')).toHaveLength(0);
-    expect(calls('/clone')).toHaveLength(0);
   });
 
   it.each([
     ['single', false],
     ['isolated', true],
-  ])('under %s (operator: %s) the switch and Clone are live', async (p, op) => {
+  ])('under %s (operator: %s) the switch is live', async (p, op) => {
     posture = p;
     operator = op;
     mount();
     expect(await ledgerSwitch()).toBeEnabled();
     expect(screen.queryByTestId('auto-ledger-walled-reason')).toBeNull();
-    await openMenu();
-    expect(await screen.findByTestId('auto-item-clone')).not.toHaveAttribute('data-disabled');
-    expect(screen.queryByTestId('auto-item-clone-reason')).toBeNull();
   });
 
   it('shows the toggle\'s refusal verbatim and keeps the switch as the ledger reads it', async () => {
@@ -231,56 +242,7 @@ describe('Automations — the ledger switch and Clone on a read-only package (AD
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it('clones with the two keys, keeps the notice verbatim, and offers to switch the original off through the same toggle', async () => {
-    mount();
-    await ledgerSwitch();
-    await openMenu();
-    fireEvent.click(await screen.findByTestId('auto-item-clone'));
-    const dialog = await screen.findByTestId('auto-clone-dialog');
-    expect(within(dialog).getByTestId('auto-clone-name')).toHaveValue('approval_copy');
-    expect(within(dialog).getByTestId('auto-clone-label')).toHaveValue('Approval (copy)');
-    fireEvent.change(within(dialog).getByTestId('auto-clone-name'), { target: { value: 'approval_mine' } });
-    fireEvent.click(within(dialog).getByTestId('auto-clone-confirm'));
-
-    await waitFor(() => expect(calls('/automation/approval/clone')).toHaveLength(1));
-    const [, init] = calls('/automation/approval/clone')[0];
-    expect(JSON.parse(String(init?.body))).toEqual({ name: 'approval_mine', label: 'Approval (copy)' });
-    const result = await screen.findByTestId('auto-clone-result');
-    expect(screen.queryByTestId('auto-clone-dialog')).toBeNull();
-    expect(result).toHaveTextContent('Created flow "approval_mine".');
-    expect(screen.getByTestId('auto-clone-notice')).toHaveTextContent(
-      'The copy is a draft and runs beside the flow it was copied from.',
-    );
-    expect(screen.getByTestId('auto-clone-open')).toHaveAttribute(
-      'href',
-      expect.stringContaining(encodeURIComponent('flow:approval_mine')),
-    );
-    // Nothing was switched by the clone itself.
-    expect(calls('/toggle')).toHaveLength(0);
-
-    fireEvent.click(screen.getByTestId('auto-clone-switch-source-off'));
-    await waitFor(() => expect(calls('/automation/approval/toggle')).toHaveLength(1));
-    expect(JSON.parse(String(calls('/automation/approval/toggle')[0][1]?.body))).toEqual({ enabled: false });
-    expect(await screen.findByTestId('auto-clone-source-off')).toHaveTextContent(
-      'The packaged flow "Approval" is switched off for this deployment.',
-    );
-    expect(screen.getByTestId('auto-ledger-switch')).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('a refused clone keeps the dialog open with the server\'s sentence', async () => {
-    const sentence = 'A flow named "approval_copy" already exists. Flows are keyed by bare name; try "approval_copy_2".';
-    doors.clone = { status: 409, body: { success: false, error: { code: 'RESOURCE_CONFLICT', message: sentence } } };
-    mount();
-    await ledgerSwitch();
-    await openMenu();
-    fireEvent.click(await screen.findByTestId('auto-item-clone'));
-    fireEvent.click(within(await screen.findByTestId('auto-clone-dialog')).getByTestId('auto-clone-confirm'));
-    expect(await screen.findByTestId('auto-clone-refusal')).toHaveTextContent(sentence);
-    expect(screen.getByTestId('auto-clone-dialog')).toBeInTheDocument();
-    expect(screen.queryByTestId('auto-clone-result')).toBeNull();
-  });
-
-  it('a writable package\'s flow keeps its definition switch and Delete, with no ledger switch and no Clone', async () => {
+  it('a writable package\'s flow keeps its definition switch and Delete, with no ledger switch', async () => {
     mount(false);
     expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
     const sw = await screen.findByRole('switch');
@@ -290,8 +252,7 @@ describe('Automations — the ledger switch and Clone on a read-only package (AD
     fireEvent.click(sw);
     await new Promise((r) => setTimeout(r, 50));
     expect(calls('/toggle')).toHaveLength(0);
-    await openMenu();
+    fireEvent.pointerDown(await screen.findByTestId('auto-item-more'), { button: 0, ctrlKey: false });
     expect(await screen.findByTestId('auto-item-delete')).toBeInTheDocument();
-    expect(screen.queryByTestId('auto-item-clone')).toBeNull();
   });
 });
