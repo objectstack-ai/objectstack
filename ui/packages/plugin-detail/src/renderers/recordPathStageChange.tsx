@@ -99,6 +99,12 @@ export function stageRefusalLines(
   return [extractWriteErrorMessage(err) ?? t('detail.pathStageChangeFailed')];
 }
 
+/** The members of an object definition's field entry this module reads. */
+type FieldDef = { type?: unknown; readonly?: unknown; label?: unknown };
+
+const fieldDefOf = (objectSchema: unknown, field: string): FieldDef | undefined =>
+  (objectSchema as { fields?: Record<string, FieldDef | undefined> } | null | undefined)?.fields?.[field];
+
 const canUpdate = (ds: unknown): boolean => {
   const d = ds as Record<string, unknown> | null | undefined;
   return typeof d?.update === 'function' || typeof d?.updateOne === 'function' || typeof d?.patch === 'function';
@@ -131,7 +137,7 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
   const objectName = ctx?.objectName;
   const recordId = ctx?.recordId;
   const dataSource = ctx?.dataSource;
-  const fieldDef = statusField ? (ctx?.objectSchema as any)?.fields?.[statusField] : undefined;
+  const fieldDef = statusField ? fieldDefOf(ctx?.objectSchema, statusField) : undefined;
   const pressable =
     allowStageChange
     && !!statusField
@@ -152,8 +158,8 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
   }, []);
 
   const labelOf = (field: string): string => {
-    const declared = (ctx?.objectSchema as any)?.fields?.[field]?.label;
-    const fallback = declared == null ? field : String(pickLocalized(declared, language) ?? field);
+    const declared = fieldDefOf(ctx?.objectSchema, field)?.label;
+    const fallback = declared == null ? field : String(pickLocalized(declared as Parameters<typeof pickLocalized>[0], language) ?? field);
     return objectName ? fieldLabel(objectName, field, fallback) : fallback;
   };
 
