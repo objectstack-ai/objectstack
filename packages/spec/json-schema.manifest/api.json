@@ -30,6 +30,7 @@
     "api/ApiTestCollection",
     "api/ApiTestRequest",
     "api/AppDefinitionResponse",
+    "api/AppMetadataBundleResponse",
     "api/ApproveAiPendingActionResponse",
     "api/AssembledInstalledPackage",
     "api/AuditMetaItemRequest",

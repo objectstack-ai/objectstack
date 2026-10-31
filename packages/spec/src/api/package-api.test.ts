@@ -640,9 +640,9 @@ describe('package-rollback-response retirement (ruled: it described the wrong op
  * stage, so a failure below can only be about the stage.
  */
 // `source` is the record's origin (every row carries one, #23972); `writable`
-// is the served row's verdict, which the record schemas do not declare and
-// strip, so one fixture serves both.
-const LIFECYCLE = { source: 'code', status: 'installed', enabled: true, writable: false } as const;
+// and `disableable` are the served row's verdicts, which the record schemas do
+// not declare and strip, so one fixture serves both.
+const LIFECYCLE = { source: 'code', status: 'installed', enabled: true, writable: false, disableable: false } as const;
 const MANIFEST_BASE = {
   id: 'com.acme.stage', namespace: 'stage', version: '1.0.0', type: 'app', scope: 'project',
   name: 'Stage Fixture',
@@ -709,6 +709,41 @@ describe('the served installed-package row declares `writable`', () => {
   it('is not part of the registry RECORD: the record schemas strip it', () => {
     expect(InstalledPackageSchema.parse(GLOB_ROW)).not.toHaveProperty('writable');
     expect(AssembledInstalledPackageSchema.parse(ASSEMBLED_ROW)).not.toHaveProperty('writable');
+  });
+});
+
+// [#28318] The disable door's verdict, served beside `writable` and declared the
+// same way: on both stage branches of the served row, on neither record schema.
+// The two verdicts are independent statements — a module of an installed app is
+// `disableable: true` while `writable: false` — so neither is required to follow
+// the other.
+describe('the served installed-package row declares `disableable`', () => {
+  it('requires a boolean `disableable` on either stage', () => {
+    for (const row of [GLOB_ROW, ASSEMBLED_ROW]) {
+      expect(InstalledPackageAtEitherStageSchema.safeParse(row).success).toBe(true);
+      const { disableable: _omitted, ...bare } = row;
+      const verdict = InstalledPackageAtEitherStageSchema.safeParse(bare);
+      expect(verdict.success).toBe(false);
+      expect(InstalledPackageAtEitherStageSchema.safeParse({ ...row, disableable: 'yes' }).success).toBe(false);
+    }
+  });
+
+  it('declares it on BOTH stage branches, beside `writable`', () => {
+    const branches = InstalledPackageAtEitherStageSchema.options;
+    expect(branches).toHaveLength(2);
+    for (const branch of branches) {
+      expect(Object.keys(branch.shape)).toEqual(expect.arrayContaining(['writable', 'disableable']));
+    }
+  });
+
+  it('keeps `disableable: true` beside `writable: false` — neither verdict is derived from the other', () => {
+    const parsed = InstalledPackageAtEitherStageSchema.parse({ ...GLOB_ROW, writable: false, disableable: true });
+    expect(parsed).toMatchObject({ writable: false, disableable: true });
+  });
+
+  it('is not part of the registry RECORD: the record schemas strip it', () => {
+    expect(InstalledPackageSchema.parse(GLOB_ROW)).not.toHaveProperty('disableable');
+    expect(AssembledInstalledPackageSchema.parse(ASSEMBLED_ROW)).not.toHaveProperty('disableable');
   });
 });
 

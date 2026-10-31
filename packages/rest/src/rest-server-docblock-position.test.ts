@@ -249,6 +249,7 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'meta-item-history-routes.ts': 5,
     'meta-object-state-routes.ts': 3,
     'record-page-routes.ts': 10,
+    'meta-app-bundle-routes.ts': 15,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -301,8 +302,13 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // than a moved slice, carries ten (the module header, the closed
         // parameter set, the relationship types, the host interface and its
         // member, five module-level helpers' blocks and the function's).
+        // [#27627] 80 + 15 = 95: `meta-app-bundle-routes.ts`, a new `/meta` group,
+        // carries fifteen (the module header, the closed parameter set, the
+        // relationship types, the read policy, the host interface, the reach
+        // interface, six module-level helpers' blocks, the function's, and the
+        // two inner helpers' inside it).
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(80);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(95);
     });
 });
