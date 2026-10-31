@@ -6,6 +6,7 @@ import fs from 'fs';
 import net from 'net';
 import chalk, { chalkStderr } from 'chalk';
 import { bundleRequire } from 'bundle-require';
+import { stampDatasourceEnvCredentialsDefault } from '../utils/datasource-env-credentials-default.js';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
@@ -5278,6 +5279,14 @@ export default class Serve extends Command {
           createDatasourceSecretBinder,
           registerDatasourceAdminRoutes,
         } = adminMod;
+
+        // [#27687] This host boots one operator's artifact, so a code-defined
+        // datasource may read its credential from OS_DATASOURCE_{NAME}_PASSWORD
+        // at connect. Stamped before the admin plugin's `init()` reads the
+        // switch; an explicit operator value (`off` included) wins.
+        if (typeof adminMod.DATASOURCE_ENV_CREDENTIALS_SWITCH === 'string') {
+          stampDatasourceEnvCredentialsDefault(process.env, adminMod.DATASOURCE_ENV_CREDENTIALS_SWITCH);
+        }
 
         if (
           DatasourceAdminServicePlugin &&

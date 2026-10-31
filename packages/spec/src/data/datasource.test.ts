@@ -836,13 +836,14 @@ describe('datasource `password` guidance — following it parses', () => {
     if (followed.success) expect(followed.data.external?.credentialsRef).toBe(example);
   });
 
-  it('the drivers page read-only sample (managed, credential-free config, bound secret) parses', () => {
+  it('the drivers page read-only sample (managed, credential-free config, password read from the environment) parses', () => {
+    // A `defineDatasource` sample: the password is not declared at all — it is
+    // read at connect from OS_DATASOURCE_ANALYTICS_PASSWORD (#27687).
     const result = DatasourceSchema.safeParse({
       name: 'analytics',
       label: 'Analytics (read-only account)',
       driver: 'postgres',
       config: { host: 'db.internal', database: 'analytics', username: 'analytics_ro' },
-      external: { credentialsRef: 'sys_secret:9f2c…' },
       active: true,
     });
     expect(result.success).toBe(true);

@@ -48,6 +48,7 @@ import type { Logger } from './logger.js';
 import type { IDataDriver, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { ConnectorCredentialHandle, IConnectorCredentialSource } from '@objectstack/types';
 import { borrowConnectorCredential, borrowedConnectorOf } from './datasource-connector-credential.js';
+import { datasourceEnvCredentialVar, type DatasourceEnvCredentialSource } from './datasource-env-credential.js';
 
 /** A datasource definition this service can connect (code- or runtime-origin). */
 export interface ConnectableDatasource {
@@ -162,6 +163,12 @@ export interface DatasourceConnectionServiceConfig {
    * at connect: nothing else can supply its credential.
    */
   connectorCredentials?: () => IConnectorCredentialSource | undefined;
+  /**
+   * [#27687] The runtime-environment credential slot a code-defined datasource
+   * reads at connect (`datasource-env-credential.ts`). Absent ⇒ off: the slot
+   * is read only when the host opted in.
+   */
+  envCredentials?: DatasourceEnvCredentialSource;
   /** Injectable connect policy. Defaults to {@link allowAllConnectPolicy}. */
   policy?: DatasourceConnectPolicy;
   logger?: Logger;
@@ -347,6 +354,12 @@ export class DatasourceConnectionService {
 
   /** The lenders whose `onLent` this service subscribed to, one subscription each, with their unsubscribes. */
   private readonly lendSubscriptions = new Map<IConnectorCredentialSource, () => void>();
+  /**
+   * [#27687] Which datasource each derived env-credential variable was read
+   * for. Two code datasources deriving one variable would read one password
+   * for two connections; the second is refused instead.
+   */
+  private readonly envCredentialOwners = new Map<string, string>();
 
   constructor(cfg: DatasourceConnectionServiceConfig) {
     this.cfg = cfg;
@@ -743,6 +756,34 @@ export class DatasourceConnectionService {
       credential = borrow.handle;
     }
 
+    // [#27687] The code author's route, after both declared channels and only
+    // when neither is declared: a declared reference keeps precedence and its
+    // failure above never falls through to here. `envCredentialVar` stays set
+    // when the slot applied but the variable was empty, so a failed connect
+    // can name the variable to set.
+    let envCredentialVar: string | undefined;
+    if (!credentialsRef && connector === undefined && !opts.asDefault) {
+      const variable = this.envCredentialVarFor(name, opts.context);
+      if (variable !== undefined) {
+        const owner = this.envCredentialOwners.get(variable);
+        if (owner !== undefined && owner !== name) {
+          return this.handleFailure(
+            record,
+            'failed-credentials',
+            `datasource '${name}' and datasource '${owner}' both derive the credential variable ${variable}, `
+              + 'so one password would be read for two connections. Rename one of them.',
+            opts.context,
+            opts.objects,
+            opts.mappedObjects,
+          );
+        }
+        this.envCredentialOwners.set(variable, name);
+        const value = this.cfg.envCredentials?.read(variable);
+        if (value) secret = value;
+        else envCredentialVar = variable;
+      }
+    }
+
     // #13578 — set to the registry key ONLY when this attempt is the thing that
     // put it there, so the rollback below can never evict a driver someone else
     // owns. `registerDriver` is a no-op on a name it already holds (it keeps the
@@ -861,8 +902,26 @@ export class DatasourceConnectionService {
       // build output being absent is reported as `err.code ===
       // 'ERR_MODULE_NOT_FOUND'`, and that structured signal is gone the moment
       // the error is stringified (#5794).
-      return this.handleFailure(record, 'failed-degraded', errMsg(err), opts.context, opts.objects, opts.mappedObjects, err);
+      const reason = envCredentialVar === undefined
+        ? errMsg(err)
+        : `${errMsg(err)} — datasource '${name}' is defined in code and reads its credential from `
+          + `${envCredentialVar} at connect, which is not set on this host`;
+      return this.handleFailure(record, 'failed-degraded', reason, opts.context, opts.objects, opts.mappedObjects, err);
     }
+  }
+
+  /**
+   * [#27687] The env-credential variable this connect may read, or `undefined`
+   * when the slot does not apply: the host did not opt in, the connect is not
+   * the boot's declared-auto one, or the name is not one the host registers
+   * from code. Provenance only — `context.origin` and `record.origin` are the
+   * caller's to set and are never consulted.
+   */
+  private envCredentialVarFor(name: string, context: DatasourceConnectContext | undefined): string | undefined {
+    const slot = this.cfg.envCredentials;
+    if (!slot || context?.trigger !== 'declared-auto') return undefined;
+    if (!slot.isCodeDatasource(name)) return undefined;
+    return datasourceEnvCredentialVar(name);
   }
 
   /**
@@ -898,6 +957,9 @@ export class DatasourceConnectionService {
     // datasource that no longer exists in that state.
     this.states.delete(name);
     this.awaitingLend.delete(name);
+    for (const [variable, owner] of this.envCredentialOwners) {
+      if (owner === name) this.envCredentialOwners.delete(variable);
+    }
     engine?.clearDatasourceUnavailable?.(name);
 
     // #13578 — the eviction this method never did. Closing the pool above only

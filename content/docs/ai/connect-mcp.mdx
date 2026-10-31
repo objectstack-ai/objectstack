@@ -261,6 +261,20 @@ can reach is the **default exposure policy (v1)**:
   The stored-metadata tables (`sys_metadata`, `sys_metadata_history`) stay
   refused even when flagged. Each action `list_actions` returns carries
   `aiExposed: true`, the server's attestation of that opt-in.
+- **The platform's own identity actions declare it by risk.** Additive acts
+  (inviting someone, adding a member to a team, creating or renaming a team or
+  an organization, re-enabling an OAuth application) are exposed. Destructive
+  lifecycle acts (banning a user, revoking a session or an API key, removing a
+  member, deleting a team, leaving an organization) are exposed with
+  `ai.requiresConfirmation: true`, so `run_action` refuses them until the call
+  carries `confirm: true`. Acts that mint a credential or a session, change
+  ownership or a sign-in factor, or destroy an account or an organization
+  (impersonating a user, setting a password, creating an API key, transferring
+  ownership, deleting an organization) declare nothing and are not listed. The
+  full list is ADR-0011's 2026-10-30 addendum. These actions forward to
+  identity routes that accept a signed-in session only, so an agent connected
+  over OAuth sees them listed, but a call that reaches the identity route is
+  refused there (`401`) and changes nothing.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure

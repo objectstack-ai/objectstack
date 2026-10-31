@@ -172,9 +172,14 @@ Stored as JSON on the parent row — no separate table / FK:
 `$`); `'record'`, each record's code in the `text` field `currencyField`
 names (by convention `currency_code`), with `valueDomain: 'iso_4217_currency'`. A
 dataset measure's own `currency` wins over a `'dynamic'` field; over a `'fixed'` one
-it may only restate the code, else `DATASET_INVALID` (delete it), as is a derived
-measure over two different `'fixed'` codes (derive from one currency or drop an
-operand). A `'fixed'` code is not judged against the tenant's.
+it may only restate the code, else `DATASET_INVALID` (objectstack-ui →
+Dashboards). A `'fixed'` code is not judged against the tenant's. Switched a
+stored field to `'record'`? Backfill: `os migrate record-currency-codes`.
+
+`homeAmount` (`'record'` only, all three required): the engine stores the
+home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
+(`date`) rate, and that rate in `rateField` (`number`), both `readonly: true`.
+Cross-currency totals sum `field`.
 
 `homeAmount` (`'record'` only, all three required): the engine stores the
 home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
