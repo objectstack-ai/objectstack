@@ -15,6 +15,13 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  * registered action forward the same three keys to the one runner the console
  * dispatches through, so they are one family with one dialect.
  *
+ * The param dialog's copy and the per-outcome toast joined the family
+ * (#27948, ruling A, step 2): `ActionSchema.description`, each
+ * `params[].helpText` (`ActionParamSchema`) and each `outcomeMessages` entry.
+ * The same runner fills them, over the same roots as the key they stand
+ * beside — the dialog copy over `confirmText`'s, an outcome over
+ * `successMessage`'s — so one action speaks one hole syntax in all five keys.
+ *
  * ## The roots are what the runner binds
  *
  * Each key's holes read a CLOSED scope, measured at the console's action
@@ -29,7 +36,13 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  *  - `successMessage` — `result`, the payload the handler answered, and
  *    `record` ({@link ACTION_SUCCESS_TEMPLATE_ROOTS});
  *  - `errorMessage` — nothing: the runner shows the text as written
- *    ({@link ACTION_ERROR_TEMPLATE_ROOTS}), so a hole there is literal text.
+ *    ({@link ACTION_ERROR_TEMPLATE_ROOTS}), so a hole there is literal text;
+ *  - `description` and a param's `helpText` — `confirmText`'s roots: the
+ *    param dialog opens before the run, over the record the action runs
+ *    against, and a registered action's `params` is the input list the dialog
+ *    collects, so it binds nothing ({@link actionConfirmTemplateRoots});
+ *  - an `outcomeMessages` entry — `successMessage`'s roots, since it is the
+ *    success toast for one `outcome` ({@link ACTION_SUCCESS_TEMPLATE_ROOTS}).
  *
  * The doors (`objectstack validate`, `objectstack compile`, the publish gate)
  * judge every sentence through the one template judge's closed-scope entry,
@@ -38,7 +51,8 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  *
  * ## The doors refuse; the parse keeps the blank arm
  *
- * Each key was a plain string (`ActionSchema`'s an `I18nLabel`), so a blank
+ * Each key was a plain string (`ActionSchema`'s an `I18nLabel`, a param's
+ * `helpText` a plain string), so a blank
  * sentence and a sentence carrying a `${…}` or `{x}` token parsed. They still
  * parse: the slot keeps a blank-string arm, because the boot load and the read
  * path judge a stored row with this parse, and dropping the arm would make a
@@ -61,6 +75,12 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  * every key, and the doors refuse it wherever it stands (#25709). The judge
  * reads a `${…}` token with its `$` and prescribes the `{{ }}` hole in its
  * place.
+ *
+ * `description`, `helpText` and `outcomeMessages` took the same road one step
+ * later (#27948): the runner filled `${…}` in them until they were typed, and
+ * still fills it in a sentence with no `{{ }}` hole, so copy stored before the
+ * migration (`os migrate meta`) keeps reading. The doors refuse a `${…}`
+ * token there as in the other keys, so new copy is written with `{{ }}`.
  */
 
 /** The root a `confirmText` / `successMessage` hole names for the record the action runs against. */
@@ -101,19 +121,41 @@ export const ACTION_SUCCESS_TEMPLATE_ROOTS: readonly string[] = Object.freeze([
  */
 export const ACTION_ERROR_TEMPLATE_ROOTS: readonly string[] = Object.freeze([]);
 
-/** The three copy keys, as the doors name them. */
-export type ActionCopyKey = 'confirmText' | 'successMessage' | 'errorMessage';
+/** The copy keys, as the doors name them. */
+export type ActionCopyKey =
+  | 'confirmText'
+  | 'successMessage'
+  | 'errorMessage'
+  | 'description'
+  | 'helpText'
+  | 'outcomeMessages';
+
+/** The copy keys a page action row carries (`ui/component.zod.ts`): the first three, the runner's own toast and dialog copy. */
+export type ActionRowCopyKey = Extract<ActionCopyKey, 'confirmText' | 'successMessage' | 'errorMessage'>;
 
 /** The sentence an example in a refusal shows for each key. */
 const EXAMPLE: Record<ActionCopyKey, string> = {
   confirmText: 'Delete {{ record.name }}?',
   successMessage: 'Invitation sent to {{ result.email }}',
   errorMessage: 'The invitation could not be sent.',
+  description: 'Choose the new role for {{ record.name }}.',
+  helpText: 'Why {{ record.name }} is paused',
+  outcomeMessages: 'Invitation resent to {{ result.email }}',
+};
+
+/** How a refusal names the slot: an `outcomeMessages` value is one entry, a `helpText` a param's. */
+const SLOT_NAME: Record<ActionCopyKey, string> = {
+  confirmText: "An action's `confirmText`",
+  successMessage: "An action's `successMessage`",
+  errorMessage: "An action's `errorMessage`",
+  description: "An action's `description`",
+  helpText: "An action param's `helpText`",
+  outcomeMessages: "An action's `outcomeMessages` entry",
 };
 
 /** The refusal of a value that is neither a template string nor a template envelope (nor, where taken, a locale map). */
 function dialectOnly(key: ActionCopyKey, localeMap: boolean): string {
-  return `An action's \`${key}\` is a template-typed slot: it accepts a bare template string, an envelope `
+  return `${SLOT_NAME[key]} is a template-typed slot: it accepts a bare template string, an envelope `
     + `declaring \`dialect: 'template'\`${localeMap ? ', or an inline locale map ({ en, "zh-CN" })' : ''} only. `
     + `Write \`'${EXAMPLE[key]}'\` or \`{ dialect: 'template', source: '${EXAMPLE[key]}' }\`.`;
 }
@@ -184,6 +226,32 @@ export const ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE =
   + `\`record\`, the record the action ran against. ${GRAMMAR} Example: 'Invitation sent to {{ result.email }}'. A `
   + 'hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole '
   + `holding logic or an unknown formatter, and a blank sentence are named ${DOORS}`;
+
+/** `description`'s describe: the param dialog's line, over `confirmText`'s roots (#27948). */
+export const ACTION_DESCRIPTION_TEMPLATE_DESCRIBE =
+  "a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no "
+  + 'hole is shown as written. Holes are `{{ path }}` or `{{ path | formatter[:arg] }}` over `record`, the record the '
+  + 'action runs against (the clicked row on a list, else the page\'s record); the values the dialog collects are not '
+  + `bound, since the line shows before they exist. ${GRAMMAR} Example: 'Choose the new role for {{ record.name }}.'. A `
+  + 'hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole '
+  + `holding logic or an unknown formatter, and a blank sentence are named ${DOORS}`;
+
+/** A param's `helpText` describe: the hint under one dialog input, over `confirmText`'s roots (#27948). */
+export const ACTION_PARAM_HELP_TEXT_TEMPLATE_DESCRIBE =
+  "a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no "
+  + 'hole is shown as written. Holes are `{{ path }}` or `{{ path | formatter[:arg] }}` over `record`, the record the '
+  + `action runs against; the dialog's own values are not bound. ${GRAMMAR} Example: 'Why {{ record.name }} is `
+  + 'paused\'. A hole over any other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` '
+  + `spelling), a hole holding logic or an unknown formatter, and a blank sentence are named ${DOORS}`;
+
+/** An `outcomeMessages` entry's describe: the success toast for one outcome, over `successMessage`'s roots (#27948). */
+export const ACTION_OUTCOME_MESSAGE_TEMPLATE_DESCRIBE =
+  "a `template` slot (ADR-0032): a bare string is shorthand for `{ dialect: 'template', source }`, and text with no "
+  + 'hole is shown as written. Holes are `{{ path }}` or `{{ path | formatter[:arg] }}` over `result`, the payload '
+  + 'the action\'s handler answered (`{{ result.email }}`), and `record`, the record the action ran against — the '
+  + `roots \`successMessage\` reads. ${GRAMMAR} Example: 'Invitation resent to {{ result.email }}'. A hole over any `
+  + 'other root, a `${…}` or single-brace `{x}` token (each named with its `{{ }}` spelling), a hole holding logic or '
+  + `an unknown formatter, and a blank sentence are named ${DOORS}`;
 
 /** `errorMessage`'s describe: a slot that fills no hole. */
 export const ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE =
