@@ -62,7 +62,6 @@ const extRule = () => ({
     name: 'ext_blocked_needs_reason',
     message: 'Say what is blocking the duty.',
     condition: BLOCKED,
-    fields: ['note'],
 });
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -140,9 +139,13 @@ async function seeded() {
     return host;
 }
 
-/** The served object, as Studio holds it before the PUT. */
+/**
+ * The served object, as Studio holds it before the PUT: a copy, as the wire
+ * gives it. An in-process read hands back the registry's own rule objects, so
+ * editing it in place would edit the extension's rule too.
+ */
 async function served(host: { protocol: ObjectStackProtocolImplementation }) {
-    return (await host.protocol.getMetaItem({ type: 'object', name: OBJ } as never)).item as any;
+    return clone((await host.protocol.getMetaItem({ type: 'object', name: OBJ } as never)).item) as any;
 }
 
 /** The served object with the extension's rule copy edited by `edit`. */
@@ -185,7 +188,9 @@ describe('[#28448] the save door judges a tenant copy of a packaged validation r
 
     it('a copy that changes the type is refused, `type` named', async () => {
         const host = await seeded();
-        const item = await withCopy(host, (rule) => { rule.type = 'cross_field'; });
+        // `cross_field` shares `script`'s condition and requires `fields`, so the
+        // copy parses: what refuses it is the package owning the type.
+        const item = await withCopy(host, (rule) => { rule.type = 'cross_field'; rule.fields = ['note']; });
         const err = await thrownBy(host.protocol.saveMetaItem({ type: 'object', name: OBJ, item } as never));
         expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
         expect(err.issues).toEqual([expect.objectContaining({ rule: 'validation-rule-copy-changed' })]);
