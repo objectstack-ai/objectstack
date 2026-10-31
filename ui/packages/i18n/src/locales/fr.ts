@@ -4329,6 +4329,7 @@ const fr = {
     approveOneTitle: 'Approuver « {{title}} » ?',
     approveOneBody: 'Cette action approuve la demande en votre nom. Pour ajouter un commentaire ou une pièce jointe, ouvrez la demande.',
     flowOrigin: 'Initiée par un flux',
+    submittedByYou: 'Soumis par vous',
     sortBy: 'Trier',
     sortRecent: 'Plus récentes d’abord',
     sortOldest: 'Plus anciennes d’abord',

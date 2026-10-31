@@ -4333,6 +4333,7 @@ const es = {
     approveOneTitle: '¿Aprobar «{{title}}»?',
     approveOneBody: 'Esto aprueba la solicitud con tu identidad. Para añadir un comentario o un adjunto, abre la solicitud.',
     flowOrigin: 'Iniciada por flujo',
+    submittedByYou: 'Enviado por ti',
     sortBy: 'Ordenar',
     sortRecent: 'Más recientes primero',
     sortOldest: 'Más antiguas primero',

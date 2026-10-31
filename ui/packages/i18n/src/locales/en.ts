@@ -5041,6 +5041,7 @@ const en = {
     approveOneTitle: 'Approve "{{title}}"?',
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
+    submittedByYou: 'You submitted this',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',

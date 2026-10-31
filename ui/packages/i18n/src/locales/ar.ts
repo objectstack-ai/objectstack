@@ -4594,6 +4594,7 @@ const ar = {
     approveOneTitle: 'الموافقة على "{{title}}"؟',
     approveOneBody: 'ستتم الموافقة على الطلب بهويتك. لإضافة تعليق أو مرفق، افتح الطلب.',
     flowOrigin: 'بدأها التدفق',
+    submittedByYou: 'مقدَّم منك',
     sortBy: 'ترتيب',
     sortRecent: 'الأحدث أولاً',
     sortOldest: 'الأقدم أولاً',
