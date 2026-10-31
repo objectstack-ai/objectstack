@@ -95,6 +95,9 @@ import type { ResolvedAuthzContext } from './resolve-authz-context.js';
  *   `skipStateMachine`, `preserveAudit`, `keptOptionValues` — per-write
  *   behaviour flags, server-constructed at the call site (`keptOptionValues`
  *   by the import runner, from the cells one import kept).
+ * - `surface` — the door an ACTION INVOCATION came through (#27908), set by
+ *   the action doors themselves on the invocation's envelope, never by
+ *   identity resolution: the same credential reaches both doors.
  */
 type NonEntryExecutionContextField =
   | 'actor'
@@ -108,7 +111,8 @@ type NonEntryExecutionContextField =
   | 'seedReplay'
   | 'skipStateMachine'
   | 'preserveAudit'
-  | 'keptOptionValues';
+  | 'keptOptionValues'
+  | 'surface';
 
 /**
  * The CLOSED field set every transport entry point must decide. Derived from

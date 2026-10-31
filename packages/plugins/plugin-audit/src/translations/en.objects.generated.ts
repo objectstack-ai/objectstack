@@ -37,7 +37,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Account Locked",
           config_change: "Config Change",
           import: "Import",
-          platform_admin_standing_change: "Platform Admin Standing Change"
+          platform_admin_standing_change: "Platform Admin Standing Change",
+          action_invocation: "Action Invocation"
         }
       },
       user_id: {

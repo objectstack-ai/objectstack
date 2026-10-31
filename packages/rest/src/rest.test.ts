@@ -3859,9 +3859,11 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
     const dashRes = await readMeta(rest, 'dashboard', 'system_overview');
     expect(protocol.getMetaItemCached).not.toHaveBeenCalled();
     expect(protocol.getMetaItem).toHaveBeenCalledTimes(1);
-    // The observable price of the bypass, pinned rather than hidden: a
-    // dashboard read carries no ETag validator now.
-    expect(dashRes.header.mock.calls.map((c: any[]) => c[0])).not.toContain('ETag');
+    // The bypass used to cost the dashboard read its validator. Since #27627
+    // the uncached exit validates its own served body (`representationEtag`,
+    // a weak tag), never the shared cache's validator of the unfiltered one.
+    const dashEtag = dashRes.header.mock.calls.find((c: any[]) => c[0] === 'ETag')?.[1];
+    expect(dashEtag).toMatch(/^W\/"[0-9a-f]{16}"$/);
 
     const viewRes = await readMeta(rest, 'view', 'account_list');
     expect(protocol.getMetaItemCached).toHaveBeenCalledTimes(1);
