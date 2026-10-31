@@ -24,10 +24,10 @@
     {
       "id": 3,
       "prompt": "Expose the `customers` table of our Postgres reporting database as a read-only `legacy_customer` object.",
-      "expected_output": "A `defineDatasource` entry (`credentialsRef`, never inline credentials); the object sets `datasource: '<id>'`, `remoteName` for the table, `columnMap` for columns; `schemaMode` leaves the remote schema unaltered; the external write gate stays closed.",
+      "expected_output": "A `defineDatasource` entry (say `reporting`) with `schemaMode: 'external'` (the remote schema stays unaltered) and no credential in the declaration: the password is read at connect from `OS_DATASOURCE_REPORTING_PASSWORD` (the name upper-cased) while the host switch `OS_DATASOURCE_ENV_CREDENTIALS` is `on` (`os serve`/`start`/`dev` default it on); the object sets `datasource: 'reporting'` and `external: { remoteName: 'customers', columnMap }`; the write gate stays closed (no `allowWrites`, no `writable`).",
       "files": [],
       "assertions": {
-        "must_contain": ["defineDatasource", "datasource", "remoteName", "columnMap", "schemaMode"],
+        "must_contain": ["defineDatasource", "datasource", "remoteName", "columnMap", "schemaMode", "OS_DATASOURCE_ENV_CREDENTIALS", "_PASSWORD"],
         "must_not_contain": ["columnName:"]
       }
     },
