@@ -68,6 +68,7 @@ import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
 import {
     buildAuthorizationUrl,
+    createAppCredentialHandle,
     createAuthorizationState,
     createOAuth2GrantHandle,
     createPkcePair,
@@ -79,6 +80,7 @@ import {
     PENDING_AUTHORIZATION_TTL_SECONDS,
     reconnectRequiredReason,
     requestOAuth2Token,
+    retryOnVendorTokenRefusal,
     type OAuth2GrantHandle,
     type PendingAuthorizationStore,
 } from './oauth2-grant/index.js';
@@ -440,16 +442,17 @@ type GrantBearingInstanceAuth = Extract<ConnectorInstanceAuth, { type: 'oauth2' 
 type OAuth2InstanceAuth = Extract<ConnectorInstanceAuth, { type: 'oauth2' }>;
 
 /**
- * ADR-0143 D2.2 — why an `app-credential` instance is not served yet. Its
- * vendor exchanges (Feishu, DingTalk, WeCom) belong to the providers slice's
- * shared transport, so the reconcile holds it degraded with this reason
- * rather than materializing it with no credential: it is never called
- * upstream unauthenticated.
+ * ADR-0143 D4 — why a grant-bearing instance cannot be served through
+ * `provider`: the provider was not registered as asking the per-dispatch
+ * credential handle on every request (`registerConnectorProvider(…, {
+ * credentialHandle: true })` — the built-in `rest` and `openapi` providers
+ * are), so its calls would go out without the token. The instance is held
+ * degraded with this reason, never called unauthenticated.
  */
-function appCredentialNotServedReason(name: string, auth: Extract<ConnectorInstanceAuth, { type: 'app-credential' }>): string {
-    return `connector instance '${name}' declares auth type 'app-credential' (vendor '${auth.vendor}'), whose token exchange `
-        + 'this server does not run yet (ADR-0143 D2.2), so the instance is not served and is never called without its '
-        + 'credential. Declare a static kind (bearer, api-key or basic), or oauth2, to dispatch it now.';
+function credentialHandleNotAppliedReason(name: string, provider: string, kind: GrantBearingInstanceAuth['type']): string {
+    return `connector instance '${name}' declares auth type '${kind}', but provider '${provider}' does not yet ask the `
+        + 'per-dispatch credential handle a grant-bearing instance is served through (ADR-0143 D4), so its calls would go '
+        + 'out without the token. The instance is not served and is never called without its credential.';
 }
 
 /**
@@ -465,11 +468,7 @@ function appCredentialNotServedReason(name: string, auth: Extract<ConnectorInsta
  * token would cross the network in the clear.
  */
 function oauth2NotServableReason(name: string, provider: string, auth: OAuth2InstanceAuth, providerApplies: boolean): string | undefined {
-    if (!providerApplies) {
-        return `connector instance '${name}' declares auth type 'oauth2', but provider '${provider}' does not yet ask the `
-            + 'per-dispatch credential handle a grant-bearing instance is served through (ADR-0143 D4), so its calls would go '
-            + 'out without the token. The instance is not served and is never called without its credential.';
-    }
+    if (!providerApplies) return credentialHandleNotAppliedReason(name, provider, 'oauth2');
     const missing = [
         auth.tokenUrl === undefined ? 'tokenUrl' : undefined,
         auth.clientId === undefined ? 'clientId' : undefined,
@@ -518,8 +517,8 @@ function requestSignerNotAppliedReason(name: string, provider: string, auth: Sig
  * resolved to (ADR-0097 §3). `secret` is present whenever `auth` names a
  * reference — an unresolved one never reaches here: the reconcile degrades
  * the instance first (#27237). A grant-bearing kind never reaches here either:
- * `oauth2` is served through its credential handle, `app-credential` is held
- * degraded ({@link appCredentialNotServedReason}); nor
+ * `oauth2` and `app-credential` are served through their credential handle
+ * (ADR-0143 D4); nor
  * does `signed`, whose key is bound to a request signer instead
  * (`./request-signing/index.ts`).
  */
@@ -2444,13 +2443,14 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
 
-            // ADR-0143 D2.2 — `app-credential` is held degraded with a named
-            // reason until its vendor exchanges land, never materialized
-            // without its credential. ADR-0143 D4 — an `oauth2` instance is
-            // served only through a provider that asks its credential handle,
-            // and only with the endpoints the handle sends a token request to.
+            // ADR-0143 D4 — a grant-bearing instance (`oauth2`,
+            // `app-credential`) is served only through a provider that asks
+            // its credential handle, and an `oauth2` one only with the
+            // endpoints the handle sends a token request to.
             const grantRefusal = entry.auth?.type === 'app-credential'
-                ? appCredentialNotServedReason(name, entry.auth)
+                ? engine.providerAppliesCredentialHandle(provider)
+                    ? undefined
+                    : credentialHandleNotAppliedReason(name, provider, 'app-credential')
                 : entry.auth?.type === 'oauth2'
                     ? oauth2NotServableReason(name, provider, entry.auth, engine.providerAppliesCredentialHandle(provider))
                     : undefined;
@@ -2555,7 +2555,18 @@ export class AutomationServicePlugin implements Plugin {
                     }
                 }
                 credentialHandle = this.createGrantHandle(ctx, name, entry, entry.auth, credential?.value);
-            } else if (entry.auth?.type !== 'app-credential') {
+            } else if (entry.auth?.type === 'app-credential') {
+                // ADR-0143 D2.2 — the vendor exchange the closed `vendor` names,
+                // run from the app secret its `credentialRef` resolved to; the
+                // token lives in the handle's memory only (D3).
+                credentialHandle = createAppCredentialHandle({
+                    connector: name,
+                    vendor: entry.auth.vendor,
+                    appId: entry.auth.appId,
+                    appSecret: credential?.value ?? '',
+                    ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
+                });
+            } else {
                 auth = resolveInstanceAuth(entry.auth, credential?.value);
             }
 
@@ -2717,11 +2728,16 @@ export class AutomationServicePlugin implements Plugin {
             // access token the handle answered, never the client secret its
             // `credentialRef` names, so its calls are not watched for it: the
             // provider refreshes once and retries (`callWithBorrowedCredential`).
+            // ADR-0143 D4 — a vendor that refuses an early-invalidated token
+            // inside an ordinary answer (WeCom) gets the refresh-once rule on
+            // that answer too; the provider's own covers a `401`.
             const handlers = credential && ref !== undefined && credentialHandle === undefined
                 ? this.watchForCredentialRejection(engine, ctx, {
                     name, entry, provider, signature, ref, credential, tracked, proven,
                 }, materialization.handlers)
-                : materialization.handlers;
+                : credentialHandle && entry.auth?.type === 'app-credential'
+                    ? retryOnVendorTokenRefusal(name, entry.auth.vendor, credentialHandle, materialization.handlers)
+                    : materialization.handlers;
             engine.registerConnector(def, handlers, 'declarative');
             this.materializedConnectors.set(name, tracked);
             if (credentialHandle) this.grantHandles.set(name, credentialHandle);

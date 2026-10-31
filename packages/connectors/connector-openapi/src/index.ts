@@ -5,14 +5,14 @@
  *
  * Generate an ObjectStack {@link Connector} from a declarative OpenAPI 3.x
  * document (ADR-0023). One operation becomes one connector action; a single
- * generic handler drives a self-contained static-auth HTTP transport (mirroring
+ * generic handler drives a self-contained HTTP transport (mirroring
  * `@objectstack/connector-rest`). The generated connector is an ordinary
  * `type: 'api'` connector — registered via `engine.registerConnector` with no
  * new engine surface.
  *
- * Open-source scope: static auth only (`none` / `api-key` / `basic` / `bearer`),
- * credentials supplied by the caller. Managed OAuth2, credential vaulting, and
- * per-tenant lifecycle are the enterprise tier (ADR-0015 / 0022).
+ * Static auth (`none` / `api-key` / `basic` / `bearer`), a request signer
+ * (ADR-0143 D2.3), or a per-dispatch credential handle for the grant-bearing
+ * kinds `oauth2` and `app-credential` (ADR-0143 D4, open tier per D1).
  */
 
 export {
