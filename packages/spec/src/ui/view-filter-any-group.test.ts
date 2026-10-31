@@ -92,7 +92,7 @@ describe('a group is accepted on every carrier of the filter list', () => {
     walk(SPEC_SRC);
     const bare: string[] = [];
     for (const file of files) {
-      readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+      readFileSync(file, 'utf8').split('\n').forEach((line) => {
         const code = line.trim();
         if (code.startsWith('*') || code.startsWith('//')) return;
         if (code.includes('z.array(ViewFilterRuleSchema')) bare.push(`${file.slice(SPEC_SRC.length + 1)}:${code.split(':')[0]}`);

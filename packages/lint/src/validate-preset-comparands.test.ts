@@ -55,6 +55,26 @@ describe('validatePresetComparands (#8793 — the ruled C half of #8690)', () =>
     expect(f.hint).toContain('{date-macro}');
   });
 
+  // [#28020] A rule inside an any-of group element of a view filter list is
+  // judged exactly as a top-level rule — the group is stepped into, not read as
+  // a field-keyed condition whose one "field" is `any`.
+  it('judges the rules inside an any-of group of a view filter list', () => {
+    const findings = validatePresetComparands({
+      views: [{
+        name: 'recent',
+        filter: [
+          { any: [
+            { field: 'status', operator: 'equals', value: 'open' },
+            { field: 'created_at', operator: 'after', value: 'last_7_days' },
+          ] },
+        ],
+      }],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['views[0].filter[0].any[1].value']);
+    expect(findings[0]!.rule).toBe(FILTER_PRESET_COMPARAND);
+    expect(findings[0]!.message).toContain('last_7_days');
+  });
+
   it('judges all three authored filter shapes', () => {
     const findings = validatePresetComparands({
       views: [{
