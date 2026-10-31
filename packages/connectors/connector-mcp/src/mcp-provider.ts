@@ -353,9 +353,11 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
             403,
           );
         }
-        // No instance credential reached the server, so its list is not one
-        // filtered for a credential: a configuration fault, thrown plain —
-        // fatal at boot, a skipped entry on reload.
+        // The instance's `auth` did not reach the server, so its list was not
+        // filtered for a credential the administrator supplies; one written
+        // into `providerConfig.transport.headers` is part of the declaration,
+        // fixed by editing it. A configuration fault, thrown plain — fatal at
+        // boot, a skipped entry on reload.
         throw new Error(
           `connector-mcp provider: connector '${ctx.name}' providerConfig.include names ` +
             `${named}, which the MCP server does not list. ` +

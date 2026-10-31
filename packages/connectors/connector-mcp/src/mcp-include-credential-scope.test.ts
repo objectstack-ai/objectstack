@@ -135,6 +135,25 @@ describe('mcp provider: an include the server does not list for the credential i
         expect(server.state.closed).toBe(1);
     });
 
+    it('control: a credential written into transport.headers is part of the declaration — the plain fault, even when it filtered the list', async () => {
+        const server = scopedServer({ [NARROW_TOKEN]: ['whoami'] });
+        const factory = createMcpProviderFactory({ clientFactory: server.clientFactory });
+        const err = await thrownBy(() =>
+            factory(ctx({
+                providerConfig: {
+                    transport: { kind: 'http', url: URL, headers: { Authorization: `Bearer ${NARROW_TOKEN}` } },
+                    include: INCLUDE,
+                },
+            })),
+        );
+        expect(isConnectorCredentialRejected(err)).toBe(false);
+        expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        expect((err as Error).message).toContain(
+            "providerConfig.include names 'search_invoices', 'read_invoice', which the MCP server does not list. Each entry",
+        );
+        expect((err as Error).message).toContain("the server lists 1 tool(s): 'whoami'.");
+    });
+
     it('control: a stdio instance with resolved auth keeps the plain fault — auth is not sent to a stdio server', async () => {
         const server = scopedServer({});
         const factory = createMcpProviderFactory({ clientFactory: server.clientFactory, declarativeStdio: true });
