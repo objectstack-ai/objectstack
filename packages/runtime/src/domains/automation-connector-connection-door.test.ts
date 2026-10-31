@@ -18,6 +18,9 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS } from './automation.js';
 
+/** An authorization code as a callback carries it — a dummy. */
+const AUTH_CODE = 'dummy-authorization-code';
+
 const STATE = { connector: 'crm', organizationId: 'org_a', status: 'connected', scopes: 'crm.read' };
 const BEGUN = { connector: 'crm', organizationId: 'org_a', authorizationUrl: 'https://idp.example.com/authorize?state=s', expiresAt: '2026-10-31T00:10:00.000Z' };
 
@@ -73,7 +76,7 @@ const callback = (h: Harness, ctx: HttpProtocolContext, query?: unknown) =>
 describe('ADR-0143 D5 — connector connection door: who may reach it', () => {
     it('answers an anonymous caller 401 before anything else', async () => {
         const h = boot();
-        for (const call of [() => connection(h, 'GET', ANONYMOUS()), () => callback(h, ANONYMOUS(), { code: 'c', state: 's' })]) {
+        for (const call of [() => connection(h, 'GET', ANONYMOUS()), () => callback(h, ANONYMOUS(), { code: AUTH_CODE, state: 's' })]) {
             expect(statusOf((await call()).response)).toBe(401);
         }
         expect(h.get).not.toHaveBeenCalled();
@@ -84,7 +87,7 @@ describe('ADR-0143 D5 — connector connection door: who may reach it', () => {
         ['GET', (h: Harness) => connection(h, 'GET', MEMBER())],
         ['POST', (h: Harness) => connection(h, 'POST', MEMBER())],
         ['DELETE', (h: Harness) => connection(h, 'DELETE', MEMBER())],
-        ['GET callback', (h: Harness) => callback(h, MEMBER(), { code: 'c', state: 's' })],
+        ['GET callback', (h: Harness) => callback(h, MEMBER(), { code: AUTH_CODE, state: 's' })],
     ] as const)('%s without `manage_metadata` is refused 403 and never reaches the service', async (_verb, call) => {
         const h = boot();
         const { response } = await call(h);
@@ -142,10 +145,10 @@ describe('ADR-0143 D5 — connector connection door: what it accepts', () => {
 
     it('the callback refuses an unknown parameter (a redirect_uri above all) and a repeated one, before the service', async () => {
         const h = boot();
-        const unknown = await callback(h, ADMIN(), { code: 'c', state: 's', redirect_uri: 'https://evil.example.com' });
+        const unknown = await callback(h, ADMIN(), { code: AUTH_CODE, state: 's', redirect_uri: 'https://evil.example.com' });
         expect(statusOf(unknown.response)).toBe(400);
         expect(messageOf(unknown.response)).toContain('redirect_uri');
-        const repeated = await callback(h, ADMIN(), { code: 'c', state: ['s1', 's2'] });
+        const repeated = await callback(h, ADMIN(), { code: AUTH_CODE, state: ['s1', 's2'] });
         expect(statusOf(repeated.response)).toBe(400);
         expect(codeOf(repeated.response)).toBe('VALIDATION_ERROR');
         expect(messageOf(repeated.response)).toContain('`state` is repeated');
@@ -170,7 +173,7 @@ describe('ADR-0143 D5 — connector connection door: what it accepts', () => {
             () => connection(h, 'GET', ADMIN()),
             () => connection(h, 'POST', ADMIN()),
             () => connection(h, 'DELETE', ADMIN()),
-            () => callback(h, ADMIN(), { code: 'c', state: 's' }),
+            () => callback(h, ADMIN(), { code: AUTH_CODE, state: 's' }),
         ]) {
             const { response } = await call();
             expect(statusOf(response)).toBe(501);
