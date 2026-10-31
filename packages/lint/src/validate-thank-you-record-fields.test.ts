@@ -167,10 +167,9 @@ describe('the admitted set is RUNTIME_OWNED_FIELD_TYPES, the one source', () => 
 
   it('the rule source spells no field type of its own', () => {
     const source = readFileSync(new URL('./validate-thank-you-record-fields.ts', import.meta.url), 'utf8');
-    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-    expect(code).toMatch(/RUNTIME_OWNED_FIELD_TYPES/);
-    expect(code).not.toMatch(/'autonumber'|"autonumber"/);
-    expect(code).toMatch(/thankYouRecordFieldNames/);
+    expect(source).toContain("import { RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';");
+    expect(source).toMatch(/thankYouRecordFieldNames \} from '@objectstack\/spec\/ui'/);
+    expect(source).not.toMatch(/'autonumber'|"autonumber"/);
   });
 });
 
