@@ -821,7 +821,7 @@ function dependentLookupParents(f: FormFieldConfig | undefined): string[] {
   if (typeof widget !== 'string' || !EXPANDABLE_FIELD_TYPES.has(normalizeFieldType(widget))) {
     return [];
   }
-  const carrier: Record<string, unknown> = f.field || (f as Record<string, unknown>);
+  const carrier: Record<string, unknown> | FormFieldConfig = f.field || f;
   const inner = carrier.field;
   const meta =
     inner !== null && typeof inner === 'object' && ('reference' in inner || 'type' in inner)
@@ -4369,7 +4369,7 @@ interface RenderFieldProps {
   /** react-hook-form's ref binding, handed to the built-in control by name. */
   ref?: RefCallBack;
   /** The field's raw metadata object (`field.field`, else the field config). */
-  field?: Record<string, unknown>;
+  field?: Record<string, unknown> | FormFieldConfig;
   /** A dependent select's gate hint while its controlling field is unset (#2284). */
   emptyHint?: string;
   [key: string]: unknown;
@@ -4729,7 +4729,7 @@ const BuiltinSelectControl = React.forwardRef<HTMLButtonElement, BuiltinSelectCo
  * wrote it until objectui#12130; `objectFormNumericStep-9574.test.tsx` pins
  * both of its routes.
  */
-function nativeNumberStep(carrier: Record<string, unknown> | undefined): number | 'any' {
+function nativeNumberStep(carrier: RenderFieldProps['field']): number | 'any' {
   const step = carrier?.step;
   if (typeof step === 'number') return step;
   const scale = carrier?.scale;
