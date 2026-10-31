@@ -397,3 +397,57 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
 };
 
 export default RecordActivityRenderer;
+
+/** The first `record:activity` node among `nodes`, or inside their children. */
+function firstActivityNode(nodes: readonly unknown[]): Record<string, any> | undefined {
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue;
+    const n = node as Record<string, any>;
+    if (n.type === BLOCK_NAME) return n;
+    const children = Array.isArray(n.children) ? n.children : Array.isArray(n.items) ? n.items : undefined;
+    const inner = children ? firstActivityNode(children) : undefined;
+    if (inner) return inner;
+  }
+  return undefined;
+}
+
+/**
+ * The 动态 stream's size while no face of it is drawn (objectstack#27524, the
+ * ride-along ruled at ③'s preview gate): a link that opens the record on
+ * another tab draws neither the 动态 panel nor the 动态 tab's stream, and the
+ * tab row still names the stream's count. It counts what the stream drawn by
+ * {@link RecordActivityRenderer} would hold — the same sources, the same merge
+ * with the field changes, the same `types` / `showCompleted` /
+ * `unifiedTimeline` — reports it through `onCount` (`null` while the feed
+ * loads, while a read is refused, or with no feed held by the host), and
+ * draws nothing. It reads only what the host already holds: it never fetches.
+ */
+export function RecordTimelineCountProbe({
+  nodes,
+  onCount,
+}: {
+  nodes: readonly unknown[];
+  onCount: (count: number | null) => void;
+}) {
+  const node = firstActivityNode(nodes);
+  const discussion = useDiscussionContext();
+  const fieldChanges = React.useContext(RecordFieldChangesContext);
+  const bag = (node?.properties ?? {}) as Record<string, any>;
+  const read = (key: string) => node?.[key] ?? bag[key];
+  const hostItems = Array.isArray(read('items')) ? (read('items') as FeedItem[]) : undefined;
+  const loading: boolean = read('loading') ?? discussion?.loading ?? false;
+  const denied = hostItems !== undefined ? false : !!discussion?.activityDenied || !!discussion?.commentsDenied;
+  const sourceItems = hostItems ?? (discussion?.items as FeedItem[] | undefined);
+  const types = read('types');
+  const showCompleted = read('showCompleted');
+  const unifiedTimeline = read('unifiedTimeline');
+  const count = React.useMemo(() => {
+    if (!node || !sourceItems || loading || denied) return null;
+    const stream = mergeTimelineStream(sourceItems, fieldChanges);
+    return applyFeedConfig(stream, { types, showCompleted, unifiedTimeline }, Number.MAX_SAFE_INTEGER, BLOCK_NAME).items.length;
+  }, [node, sourceItems, loading, denied, fieldChanges, types, showCompleted, unifiedTimeline]);
+  React.useEffect(() => {
+    onCount(count);
+  }, [onCount, count]);
+  return null;
+}

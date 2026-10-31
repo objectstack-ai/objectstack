@@ -1161,6 +1161,18 @@ const ja = {
     maximize: "最大化",
     restoreSize: "元のサイズに戻す",
     recordOf: "{{current}} / {{total}}",
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: "{{scope}}：{{current}} / {{total}}",
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: "{{title}}を絞り込み…",
+    relatedChips: "表示",
+    relatedChipAll: "すべて",
+    relatedChipMine: "自分",
+    relatedChipOverdue: "期限超過",
+    relatedExport: "エクスポート",
+    relatedRows: "{{count}} 件",
+    relatedRows_one: "{{count}} 件",
+    relatedRows_other: "{{count}} 件",
     recordNotFound: "レコードが見つかりません",
     recordNotFoundDescription: "お探しのレコードは存在しないか、削除されたか、アクセス権がない可能性があります。",
     goBack: "戻る",
