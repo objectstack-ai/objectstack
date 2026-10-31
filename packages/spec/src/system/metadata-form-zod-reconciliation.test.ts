@@ -385,6 +385,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'percentDisplay',
     why: "planned, not yet rendered — a percent field's read-only face (`bar` or `plain`) parses, but the console's percent face draws the progress bar for every value until it reads the key, after the spec publishes. A form control offered today would let an author pick `plain` and still see the bar; the field form gains the row with the renderer half, as `useGrouping` did once it was enforced",
   },
+  // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
+  // in the liveness ledger, read by no form or grid until the ui card's lookup
+  // widget writes the declared targets on pick.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'lookupAutofill',
+    why: "planned, not yet read — a lookup's pick autofill pairs (`[{ target, source, overwrite? }]`) are validated at parse (a single-value relationship; each target a writable field of the same object, named once) and their sources at `os validate` / `os build`, but no form or grid fills a field from them until the ui card's lookup widget writes the declared targets on pick. A form control offered today would let an author declare a fill nothing performs",
+  },
   {
     kind: 'omit',
     type: 'view',

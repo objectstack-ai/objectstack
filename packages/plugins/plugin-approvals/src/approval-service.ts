@@ -289,6 +289,20 @@ export interface ApprovalResumeSurface {
    */
   listSuspendedRunsDurable?(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>>;
   /**
+   * [#28230] The run parked at a `map` node on the item run `itemRunId`, or
+   * `undefined` when there is none. Read by
+   * {@link ApprovalService.recall}'s revise-window branch BEFORE it cancels
+   * the item, so it can wake the batch above it afterwards: the engine
+   * answers from the item's own `$parentRunId` linkage with keyed reads,
+   * where {@link listSuspendedRunsDurable} reads one capped page of a
+   * DB-backed store and can miss the batch.
+   *
+   * ⚠️ Declares the method `AutomationEngine` implements publicly
+   * (`suspendedMapParentOf`). Read-only; rejects when the store cannot be
+   * read. Optional: without it no batch is woken, as before #28183.
+   */
+  suspendedMapParentOf?(itemRunId: string): Promise<BatchParent | undefined>;
+  /**
    * [#15358] Whether the consumed suspension behind a `failed` run SURVIVES —
    * i.e. whether the engine's `restoreConsumedSuspension` would re-arm it.
    * Read by {@link ApprovalService.inspectStrandedRequests}, for `failed` rows
@@ -351,6 +365,12 @@ export interface ApprovalResumeSurface {
    */
   takeSubflowParentStrand?(childRunId: string): { runId: string; repairable: boolean; error: string } | undefined;
 }
+
+/** A run parked at a `map` node on one item, as {@link ApprovalResumeSurface.suspendedMapParentOf} answers it. */
+type BatchParent = { runId: string; flowName: string; nodeId: string; correlation?: string };
+
+/** What the revise-window recall read about the batch above its item before cancelling it. */
+type BatchLookup = { parent?: BatchParent } | { lookupFailure: unknown };
 
 /** What {@link ApprovalResumeSurface.inspectConsumedSuspension} answers. */
 type ConsumedSuspensionVerdict =
@@ -5277,6 +5297,9 @@ export class ApprovalService implements IApprovalService {
       if (runId) {
         resumeError = this.missingRunCapability(runId, requestId, 'the recall', 'cancelRun');
         if (!resumeError) {
+          // [#28230] Read the batch above the item while the item's
+          // suspension still carries the linkage: `cancelRun` removes it.
+          const batch = await this.batchAboveItem(runId);
           let cancelled: unknown;
           try {
             cancelled = await this.automation!.cancelRun!(runId, `approval request ${requestId} recalled during revision`);
@@ -5288,7 +5311,7 @@ export class ApprovalService implements IApprovalService {
           }
           // [#28183] `cancelRun` never touches a parent, so a batch whose
           // `map` item this was would stay parked with nothing to wake it.
-          if (cancelled === true) ({ resumeError, resumeFailure } = await this.resumeBatchOfRecalledItem(runId, requestId));
+          if (cancelled === true) ({ resumeError, resumeFailure } = await this.resumeBatchOfRecalledItem(runId, requestId, batch));
         }
       }
     } else if (runId) {
@@ -5371,6 +5394,29 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#28230] The batch run parked on the revise-window item `itemRunId`, read
+   * before the recall cancels the item — {@link ApprovalResumeSurface.suspendedMapParentOf}
+   * reads the item's own `$parentRunId`, which `cancelRun` removes with the
+   * item's suspension. Never throws: a failed read is carried to
+   * {@link resumeBatchOfRecalledItem}, which tells it once the cancel is done,
+   * as it always told a failed lookup.
+   *
+   * It used to be the entry of `listSuspendedRunsDurable()` parked on
+   * `map:<itemRunId>`, read after the cancel. That listing reads one capped
+   * page of a DB-backed store, and a process adds only what it parked itself,
+   * so a batch another process parked behind more than 1000 runs was not
+   * found and stayed parked with nothing said.
+   */
+  private async batchAboveItem(itemRunId: string): Promise<BatchLookup> {
+    if (typeof this.automation?.suspendedMapParentOf !== 'function') return {};
+    try {
+      return { parent: await this.automation.suspendedMapParentOf(itemRunId) };
+    } catch (err) {
+      return { lookupFailure: err };
+    }
+  }
+
+  /**
    * [#28183] Wake the batch above a run a revise-window recall just cancelled.
    *
    * On a batch sign-off the cancelled run is a `map` item, and its batch run is
@@ -5386,21 +5432,22 @@ export class ApprovalService implements IApprovalService {
    * Only a run parked at the built-in `map` node on that item is woken: the
    * engine records the marker for no other node, and re-running any other
    * node would advance it past the item with nothing recorded. Whatever is
-   * missing to prove that — no `listSuspendedRunsDurable`, no `getFlow`, no
+   * missing to prove that — no `suspendedMapParentOf`, no `getFlow`, no
    * such parent — leaves things exactly as they were before, which for a
-   * recall with no batch above it is the whole answer.
+   * recall with no batch above it is the whole answer. The parent is the one
+   * {@link batchAboveItem} read before the cancel.
    */
   private async resumeBatchOfRecalledItem(
     itemRunId: string,
     requestId: string,
+    batch: BatchLookup,
   ): Promise<{ resumeError?: string; resumeFailure?: ResumeFailureReport }> {
-    if (typeof this.automation?.listSuspendedRunsDurable !== 'function') return {};
-    if (typeof this.automation.getFlow !== 'function') return {};
     let batchRunId: string | undefined;
     try {
-      const parent = (await this.automation.listSuspendedRunsDurable())
-        .find(r => r.correlation === `map:${itemRunId}`);
+      if ('lookupFailure' in batch) throw batch.lookupFailure;
+      const parent = batch.parent;
       if (!parent) return {};
+      if (typeof this.automation?.getFlow !== 'function') return {};
       const flow: any = await this.automation.getFlow(parent.flowName);
       const node = Array.isArray(flow?.nodes) ? flow.nodes.find((n: any) => n?.id === parent.nodeId) : undefined;
       if (node?.type !== 'map') return {};

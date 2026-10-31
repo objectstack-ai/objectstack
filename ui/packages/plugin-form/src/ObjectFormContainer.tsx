@@ -31,12 +31,17 @@
  * (`recordSaveMessage`, `Task "Quarterly review" updated`), before the author's
  * `onSuccess` runs. A host that mounts `DrawerForm` / `ModalForm` itself owns
  * its own feedback, so it never passes through here and is never toasted twice.
+ * It is the save's ONE toast (objectstack-ai/objectstack#28216): while the
+ * container is open it claims the answer warnings of the write it makes, as
+ * the record page and the console's record dialogs do, and the record-named
+ * toast carries them instead of the write-warning channel raising a second.
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import type { ObjectFormSchema } from '@object-ui/types';
 import { toast } from '@object-ui/components';
 import { createSafeTranslation, recordSaveMessage, useObjectLabel } from '@object-ui/i18n';
+import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
 import { usePreparedFormSchema, ObjectForm, type ObjectFormComponentProps } from './ObjectForm';
 import { DrawerForm } from './DrawerForm';
 import { ModalForm } from './ModalForm';
@@ -83,6 +88,11 @@ const useSaveFeedbackTranslation = createSafeTranslation(
  * author's `onSuccess`. Only a write the container made is toasted — a
  * `submitHandler` owns its own persistence and feedback, and an adapter-less
  * inline-fields collector wrote nothing (its `onSuccess` IS the write).
+ *
+ * The toast carries the write's advisory warnings: while the container is
+ * open, the write-warning channel parks the answer warnings of the write it
+ * makes (this record's update, or a create of this object) on the claim below
+ * instead of toasting them. Keyed on primitives (ui/AGENTS.md #10).
  */
 function useContainerSaveFeedback(
   schema: ReturnType<typeof usePreparedFormSchema>['schema'],
@@ -90,9 +100,28 @@ function useContainerSaveFeedback(
 ): (saved: unknown) => Promise<void> {
   const { t } = useSaveFeedbackTranslation();
   const { objectLabel } = useObjectLabel();
-  const { onSuccess, submitHandler, objectName, mode, successMessage } = schema;
+  const { onSuccess, submitHandler, objectName, mode, recordId, successMessage } = schema;
+  const isOpen = schema.open !== false;
+  const writes = !!dataSource && !submitHandler && (mode === 'create' || mode === 'edit');
+  const answerWarningClaim = useRef<AnswerWarningClaim | null>(null);
+  useEffect(() => {
+    if (!dataSource || !writes || !isOpen || !objectName) return;
+    if (mode === 'edit' && !recordId) return;
+    const claim = claimAnswerWarnings(dataSource, mode === 'edit'
+      ? { operation: 'update', resource: objectName, id: recordId }
+      : { operation: 'create', resource: objectName });
+    answerWarningClaim.current = claim;
+    return () => {
+      if (answerWarningClaim.current === claim) answerWarningClaim.current = null;
+      claim.release();
+    };
+  }, [dataSource, writes, isOpen, mode, objectName, recordId]);
+
   return useCallback(async (saved: unknown) => {
-    if (dataSource && !submitHandler && (mode === 'create' || mode === 'edit')) {
+    if (dataSource && writes) {
+      // Taken first, so nothing the label lookup below awaits can come
+      // between the write and its claim.
+      const warnings = answerWarningClaim.current?.take(saved) ?? [];
       let message = successMessage;
       if (!message) {
         // The adapter caches the definition the form body already read.
@@ -104,10 +133,10 @@ function useContainerSaveFeedback(
           mode,
         });
       }
-      toast.success(message);
+      toastRecordSave(toast, message, warnings);
     }
     await onSuccess?.(saved);
-  }, [dataSource, submitHandler, mode, successMessage, objectName, onSuccess, objectLabel, t]);
+  }, [writes, dataSource, mode, successMessage, objectName, onSuccess, objectLabel, t]);
 }
 
 const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({

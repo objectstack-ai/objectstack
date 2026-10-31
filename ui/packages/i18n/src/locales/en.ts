@@ -153,6 +153,13 @@ const en = {
       defaultTitle: 'Save this value now',
       acknowledge: 'I have saved this',
       copyAll: 'Copy all',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: 'Copy {{label}}',
+      copyValue: 'Copy value',
+      copyFieldItem: 'Copy {{label}}, item {{index}}',
+      copyItem: 'Copy item {{index}}',
+      copied: 'Copied to clipboard',
     },
     // The refusal notice for an action whose `autoTrigger` its own declared
     // `visible` gate outranks (objectui#4191) — the deep link or host asked

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import type { ResultDialogSpec } from '@object-ui/core';
 import { ActionResultDialog } from '../ActionResultDialog';
 
@@ -17,7 +17,15 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   // `language` is the source every other `resolveI18nLabel` caller in this
   // package threads (`UnifiedSidebar`, `resolveActionParams`, and
   // metadata-admin's `useMetadataLocale`), so the stub carries it too.
-  useObjectTranslation: () => ({ t: (key: string) => key, language: i18nState.language }),
+  // Interpolation params are echoed after the key, so a name built from a
+  // field label shows which label reached it.
+  useObjectTranslation: () => ({
+    t: (key: string, params?: Record<string, unknown>) =>
+      params
+        ? `${key}(${Object.entries(params).map(([k, v]) => `${k}=${String(v)}`).join(', ')})`
+        : key,
+    language: i18nState.language,
+  }),
 }));
 // jsdom has no canvas; the qrcode path is not under test.
 vi.mock('qrcode', () => ({ toCanvas: vi.fn() }));
@@ -129,5 +137,105 @@ describe('ActionResultDialog — an inline per-locale map resolves against the d
     open({ title: {}, fields: [{ path: 'secret', format: 'text' }] }, { secret: 's3cr3t' });
 
     expect(screen.getByText('actions.resultDialog.defaultTitle')).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#28186 — the copy buttons are icon-only, so each one carries an
+ * accessible name built from its field's label, and the copied state is
+ * announced through a polite live region. The names are read the way a
+ * screen-reader or voice-control user reaches the buttons: by role and name.
+ */
+describe('ActionResultDialog — every copy button has an accessible name', () => {
+  it('names each field\'s copy button after the field label', () => {
+    i18nState.language = 'en';
+    open(
+      {
+        title: 'User Created',
+        fields: [
+          { path: 'user.email', label: 'Email', format: 'text' },
+          { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
+          { path: 'link', label: 'Invite link', format: 'qrcode' },
+          { path: 'meta', label: 'Response', format: 'json' },
+        ],
+      },
+      { user: { email: 'a@example.com' }, temporaryPassword: 'p@ss', link: 'https://x.test/i/1', meta: { id: 1 } },
+    );
+
+    for (const label of ['Email', 'Temporary Password', 'Invite link', 'Response']) {
+      expect(
+        screen.getByRole('button', { name: `actions.resultDialog.copyField(label=${label})` }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('names an unlabelled value\'s copy button generically', () => {
+    i18nState.language = 'en';
+    open({ title: 'Done' }, { anything: 1 });
+
+    expect(screen.getByRole('button', { name: 'actions.resultDialog.copyValue' })).toBeInTheDocument();
+  });
+
+  it('names each code of a code list by its position, and keeps the visible name of Copy all', () => {
+    i18nState.language = 'en';
+    open(
+      { title: 'Backup codes', fields: [{ path: 'codes', label: 'Backup codes', format: 'code-list' }] },
+      { codes: ['aaaa-1111', 'bbbb-2222'] },
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'actions.resultDialog.copyFieldItem(label=Backup codes, index=1)' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'actions.resultDialog.copyFieldItem(label=Backup codes, index=2)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'actions.resultDialog.copyAll' })).toBeInTheDocument();
+  });
+
+  it('names the codes of an unlabelled code list by position alone', () => {
+    i18nState.language = 'en';
+    open({ title: 'Codes', fields: [{ path: 'codes', format: 'code-list' }] }, { codes: ['a', 'b'] });
+
+    expect(screen.getByRole('button', { name: 'actions.resultDialog.copyItem(index=2)' })).toBeInTheDocument();
+  });
+
+  it('leaves no button in the dialog without a name', () => {
+    i18nState.language = 'en';
+    open(
+      {
+        title: 'Everything',
+        fields: [
+          { path: 'a', label: 'A', format: 'text' },
+          { path: 'b', format: 'secret' },
+          { path: 'c', format: 'code-list' },
+          { path: 'd', format: 'json' },
+        ],
+      },
+      { a: 'x', b: 'y', c: ['z'], d: { k: 1 } },
+    );
+
+    const dialog = screen.getByRole('dialog');
+    const all = within(dialog).getAllByRole('button');
+    const named = within(dialog).getAllByRole('button', { name: /\S/ });
+    expect(named).toHaveLength(all.length);
+  });
+
+  it('announces the copied state in a live region that is mounted before it fills', async () => {
+    i18nState.language = 'en';
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    open({ title: 'Secret', fields: [{ path: 'secret', label: 'Secret', format: 'text' }] }, { secret: 's3cr3t' });
+
+    const region = screen.getByRole('status');
+    expect(region).toHaveTextContent('');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'actions.resultDialog.copyField(label=Secret)' }));
+    });
+
+    expect(writeText).toHaveBeenCalledWith('s3cr3t');
+    // The same node, so assistive technology already watching it reads the change.
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region).toHaveTextContent('actions.resultDialog.copied');
   });
 });

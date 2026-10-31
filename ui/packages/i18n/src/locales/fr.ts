@@ -138,6 +138,13 @@ const fr = {
       defaultTitle: 'Enregistrez cette valeur maintenant',
       acknowledge: 'Je l\'ai enregistrée',
       copyAll: 'Tout copier',
+      // Accessible names of the icon-only copy buttons, and the polite
+      // announcement once a value reaches the clipboard.
+      copyField: 'Copier {{label}}',
+      copyValue: 'Copier la valeur',
+      copyFieldItem: 'Copier {{label}}, élément {{index}}',
+      copyItem: 'Copier l\'élément {{index}}',
+      copied: 'Copié dans le presse-papiers',
     },
     notAvailableHere: '« {{action}} » n\'est pas disponible sur la page actuelle.',
     notAvailableForRecord: 'Non disponible pour cet enregistrement',
