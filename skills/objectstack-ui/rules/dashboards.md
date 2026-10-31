@@ -362,7 +362,7 @@ behind it; **drill-to-record** opens one record.
   object's *full* list page (sort / bulk-select / export / shareable URL),
   scoped by the same drill filter. The in-place drawer is the default (peek
   without losing the dashboard); the escape hatch escalates when the user wants
-  the full surface — the Looker / Power BI "see records → open page" model.
+  the full surface.
 * **`metric` / `chart` widgets are not click-drillable** in the dataset form
   (they render the aggregate only; `compareTo` still applies). Surface the detail
   through a `table` / `pivot` widget instead.
@@ -370,7 +370,6 @@ behind it; **drill-to-record** opens one record.
 **Reports drill the same way.** A `summary` / `matrix` report (`drilldown`
 defaults `true`) opens the identical in-place drawer on row/cell click — peek the
 records, click a row to open one, or "Open in list →" for the full list page.
-Dashboard and report drill are unified.
 
 ---
 
@@ -418,8 +417,9 @@ export const PipelineCoverageReport = defineReport({
 > base object's permission-set `allowExport`; a `joined` report takes neither
 > `dateRange` nor `exportOptions`.
 > **`seriesBy`** splits the one `yAxis` measure into a series per value of a second
-> dataset dimension — not a `matrix` workaround. It must name a declared dimension
-> (publish refuses an unknown name) other than `xAxis`, and is refused on the
+> dataset dimension: the chart's own split, where a second `columns` dimension
+> only pivots the table. It must name a declared dimension (publish refuses an
+> unknown name) other than `xAxis`, and is refused on the
 > single-series types `pie` / `donut` / `funnel` / `treemap` / `sankey`; with it,
 > `series[].name` names one of its values.
 

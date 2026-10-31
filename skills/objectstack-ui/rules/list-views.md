@@ -279,7 +279,7 @@ top-level `groupBy`**. The top-level `columns` is required on every list view
 > `lanes` chooses the lanes and their order, not the records: a record whose
 > value is unlisted lands in `Uncategorized`, so filter the view to keep records
 > off the board. Omit it to draw every option in its own order; a value that is
-> not an option, or listed twice, fails `os validate`.
+> not one of the field's inline options, or listed twice, fails `os validate`.
 
 ---
 

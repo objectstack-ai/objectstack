@@ -19,7 +19,7 @@
 - `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. Use this (not `visible`) when the action should stay discoverable but locked in the current state.
 - `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate and never a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
 - `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
-- `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action, refused beside a non-empty `params` (put the question on `description`).
+- `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
 - `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
 - `successMessage` / `errorMessage` — toast copy on success / failure. Set `successMessage` for non-obvious outcomes; without it the UI shows a generic "Action completed" toast.
 - Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` (`'Why {{ record.name }} is paused'`) read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
@@ -72,7 +72,7 @@ export const ConvertLeadAction = defineAction({
 });
 ```
 
-**Script-typed action** (collect params, then execute server body):
+**Script-typed action** (params, then a server body):
 
 <!-- os:check -->
 ```typescript
@@ -113,8 +113,8 @@ export const AddToCampaignAction = defineAction({
 A server-side `body` (or a registered `handler`) receives `ctx` with `input` (the dialog params), `record` (the target row, when a
 `recordId` is in scope), `api` (scoped cross-object CRUD) and the caller. Read
 the active organization as `ctx.user?.organizationId ?? ctx.session?.organizationId`
-— the blessed name, with the same isolation axes and `undefined` cases as hooks
-(objectstack-data hooks reference). Bodies execute **trusted** (`ctx.api` /
+— the blessed name (same axes and `undefined` cases as hooks, objectstack-data).
+Bodies execute **trusted** (`ctx.api` /
 `ctx.engine` bypass RLS/FLS), so a body that must scope by org reads it from
 `ctx` explicitly. `ctx.session.positions` (absent when the caller holds none) is
 **not an authorization input** — ask the security service for privilege (ADR-0095).
@@ -167,7 +167,7 @@ export const OpenInvoicePdfAction = defineAction({
 
 > ⚠️ **Never express new-tab behavior via `params`** — it is `ActionParam[]` for
 > **user input** only: `params: [{ name: 'newTab', type: 'checkbox' }]` builds and
-> draws a checkbox in the dialog. Use one of the two mechanisms above.
+> draws a checkbox in the dialog.
 
 ## Action Parameter Patterns
 
