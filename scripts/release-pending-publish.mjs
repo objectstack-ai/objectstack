@@ -188,6 +188,13 @@
  * review endpoint answers only a REQUIRED REVIEWER of the environment, and the
  * workflow token is not one -- nor should it be.
  *
+ * A read the Actions API answers with a 5xx or drops (a named connection
+ * failure) is retried under the shared policy (`retryingReads`); a read still
+ * failing that way after the retries ends the sweep with a `::warning::`, a
+ * NOT READ job-summary section and exit 0 (`deferredSweep`) -- nothing judged,
+ * nothing cancelled, and the next push sweeps again. A 4xx, any other error
+ * and a cancel that did not land still fail the job.
+ *
  * `--dry-run` reports what `sweep` would cancel and refuses any non-GET request
  * at the HTTP layer, so it is safe to point at the live repository.
  *
