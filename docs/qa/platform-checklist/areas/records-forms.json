@@ -141,7 +141,7 @@
     "qa-crm-import-console": {
       "title": "app-crm boot + the console dev server + env, so ui/e2e/import-console/import-console-undo.spec.ts runs UNMODIFIED on its own defaults (crm_app / crm_lead, console on port 5180)",
       "why": "records-forms.import-job-undo-cancel names two objectui specs as its automation, and neither runs on the stock showcase boot as written: the console spec defaults to LIVE_IMPORT_APP crm_app and LIVE_IMPORT_OBJECT crm_lead, and its goto path has no /_console mount, so a showcase run needed a scratch copy of the spec plus a scratch qa_lead object (fixtures.requires[2], runs #21845 and #23949) or was hand-driven instead (QA runs #24616 and #26450). crm_lead carries the spec's name, email and status columns, so on an app-crm boot behind the console dev server the spec runs as committed. The harness twin has no door at all (knownGaps[0])",
-      "provenance": "#26625: driven at main 1708115e2f on 2026-10-27 after a full `pnpm exec turbo run build`: step 3 passed (1 passed, 35.9 s) on the third run; the first two failed on Playwright's default 30 s test timeout (31.1 s) at different steps, both after the import had landed. The item's API half (steps[1]-[4]) was replayed on the same boot against crm_lead and passed every clause.",
+      "provenance": "#26625: driven at main 1708115e2f on 2026-10-27 after a full `pnpm exec turbo run build`: step 3 passed (1 passed, 35.9 s) on the third run; the first two failed on Playwright's default 30 s test timeout (31.1 s) at different steps, both after the import had landed. The item's API half (steps[1]-[4]) was replayed on the same boot against crm_lead and passed every clause. #27377 (wave-3 accuracy slice S1, from QA run #27438 at c4c515ad): the teardown gained the one-path-per-tree warning. The run met parallel runners clobbering ui/e2e/live/.auth/state.json, and suggested pointing storageState at a scratch path through a copied config; read at base a0f865491d that does not hold, because global-setup.ts writes the fixed path, so the warning prescribes one runner per tree instead.",
       "app": "app-crm (examples/app-crm) — its own boot, not the item's showcase boot",
       "requires": [
         "a fully built worktree: `pnpm dev` and `pnpm dev:crm` refuse an unbuilt workspace (check-dev-prereqs)",
@@ -174,7 +174,7 @@
           "source": "packages/rest/src/data-action-routes.ts (POST /data/:object/import/jobs and the /data/import/jobs/:jobId routes)"
         }
       ],
-      "teardown": "stop the boot and the console dev server by their recorded PIDs (--fresh discards the DB), then delete ui/e2e/live/.auth/ — its state.json holds a live bearer token — and ui/test-results/",
+      "teardown": "stop the boot and the console dev server by their recorded PIDs (--fresh discards the DB), then delete ui/e2e/live/.auth/ — its state.json holds a live bearer token — and ui/test-results/. ⚠️ That state file is one fixed path per tree: ui/e2e/live/global-setup.ts writes it at e2e/live/.auth/state.json, rooted on its own file and with no env override, and both live configs (playwright.live.config.ts, playwright.import-console.config.ts) read the same path, so a copied config that points storageState elsewhere reads a file the global setup never writes. Two runners in one tree overwrite each other's token, and one runner's teardown deletes the other's: run this recipe from a worktree of its own, or one runner at a time per tree (QA run #27438)",
       "knownGaps": [
         "The harness twin ui/e2e/import-harness/import-undo.spec.ts has NO door in this tree. ui/playwright.import-harness.config.ts says to serve the harness with packages/plugin-grid/demo/vite.live.config.ts at http://localhost:5200/live.html, and neither file exists (ui/packages/plugin-grid/demo holds index.html and bulk-actions.html only). Its CSV (first_name,last_name,email) also has no column for crm_lead's required name. It stays a self-skip, which is the control and never a result; tracked on #25921",
         "The spec counts rows with an unfiltered, page-bounded GET /api/v1/data/crm_lead and reads records.length (the item's automated.ref). On an accumulated DB whose leads overflow that page the count stops moving and the spec fails without a defect, so run it on a --fresh boot"
@@ -387,7 +387,7 @@
       "title": "Field-type matrix: every FieldTypeSchema member renders its widget, accepts a valid value, round-trips over HTTP, and rejects invalid input",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -458,7 +458,7 @@
       "steps": [
         "run the pinned HTTP round-trip matrix: pnpm --filter @objectstack/dogfood exec vitest run test/field-zoo-roundtrip.dogfood.test.ts (write vectors + expected read shapes live in test/field-zoo.matrix.ts)",
         "boot the showcase on its own port and DB; open Field Zoo (/_console/apps/com.example.showcase/showcase_field_zoo) and open 'Specimen — Full' in edit mode; screenshot the form before reading DOM",
-        "enumerate the rendered control for every f_* field and build a variant→widget table (date→date input, color→color input, richtext / markdown / html / code→their dedicated field widgets, select/multiselect→pickers, image/file→upload, location/address→structured inputs, rating/slider/progress→their own controls, formula→read-only). f_autonumber is NOT on the form at all: the field is readonly by construction (Field.autonumber sets readonly: true, packages/spec/src/data/field.zod.ts) and objectui's auto-form drops schema-readonly fields in create AND edit mode (plugin-form autoLayout.ts filterSystemFields) — read it on the record detail page instead. At the console pin the richtext, markdown, html and code widgets are textarea-based BY DESIGN (objectui packages/fields/src/widgets/RichTextField.tsx / CodeField.tsx: a Textarea inside the dedicated widget, with its own label and controls): record that as the dedicated widget, not as a generic text input",
+        "enumerate the rendered control for every f_* field and build a variant→widget table (date→date input, color→color input, richtext / markdown / html / code→their dedicated field widgets, select/multiselect→pickers, image/file→upload, location→its single 'latitude, longitude' text input (LocationField), address→structured inputs, rating/slider/progress→their own controls, formula→read-only). f_autonumber is NOT on the form at all: the field is readonly by construction (Field.autonumber sets readonly: true, packages/spec/src/data/field.zod.ts) and objectui's auto-form drops schema-readonly fields in create AND edit mode (plugin-form autoLayout.ts filterSystemFields) — read it on the record detail page instead. At the console pin the richtext, markdown, html and code widgets are textarea-based BY DESIGN (objectui packages/fields/src/widgets/RichTextField.tsx / CodeField.tsx: a Textarea inside the dedicated widget, with its own label and controls): record that as the dedicated widget, not as a generic text input",
         "through the form, change one representative value per family (a select, an array type, a temporal, a structured JSON), Save, and capture the PATCH",
         "re-read the record via GET /api/v1/data/showcase_field_zoo/<id> and diff against the submitted values (arrays compared as sets)",
         "POST an out-of-set select value (f_select: 'not-a-value') directly to /api/v1/data/showcase_field_zoo and capture the refusal",
@@ -473,7 +473,7 @@
           "evidence": "test run output"
         },
         {
-          "clause": "PER-VARIANT: each FieldTypeSchema member renders its real widget where the console draws it — 47 on the Specimen — Full edit form, autonumber read-only on that record's detail page (the auto-form drops readonly fields in create and edit, plugin-form autoLayout.ts), and summary on its real carriers (no zoo field — knownGaps[0]) (its dedicated field widget, not the generic text input), with per-variant evidence recorded in the variant→widget table. For richtext, markdown, html and code the dedicated widget is textarea-based by design (RichTextField / CodeField) — that counts; the generic text input rendered for one of them does not",
+          "clause": "PER-VARIANT: each FieldTypeSchema member renders its real widget where the console draws it — 47 TYPES on the Specimen — Full edit form (drawn by its 49 f_* fields plus `name`, the text carrier; f_lookups, f_users and f_owner repeat the lookup and user types), autonumber read-only on that record's detail page (the auto-form drops readonly fields in create and edit, plugin-form autoLayout.ts), and summary on its real carriers (no zoo field — knownGaps[0]) (its dedicated field widget, not the generic text input), with per-variant evidence recorded in the variant→widget table. For richtext, markdown, html and code the dedicated widget is textarea-based by design (RichTextField / CodeField) — that counts; the generic text input rendered for one of them does not",
           "oracle": "dom",
           "verify": "after the screenshot confirms render, match each f_* control against its declared type; every variant row in the table carries its own observed control + screenshot crop",
           "evidence": "form screenshot + detail-page screenshot + the 49-row variant→widget table (each row naming the surface it was read on)"
@@ -572,6 +572,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[2], acceptance[5]'s refusal half, acceptance[6] and negative[0]–[1] at the REST data door (#26573 slice 3), and drops the limit sentence those clauses retire. The f_autonumber limit stays. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "acceptance[1]'s count and steps[2]'s location widget corrected. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The form's 47 is a count of TYPES, not fields: it draws 49 f_* fields (every zoo field but f_autonumber) plus `name`, and f_lookups, f_users and f_owner repeat the lookup and user types. A location field renders one 'latitude, longitude' text input (ui/packages/fields/src/widgets/LocationField.tsx), not structured inputs; address keeps its structured ones. Counted at base a0f865491d: field-zoo.object.ts declares 50 f_* fields of 47 distinct types, autonumber among them, so the form's 47 are its 46 drawn f_* types plus name's text. No clause's contract changed",
+          "ref": "#27438"
         }
       ],
       "enumSource": {
@@ -585,7 +591,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -594,7 +600,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task with 10 seeded tasks (2 in_progress) and the saved views in examples/app-showcase/src/ui/views/task.view.ts (in_progress/urgent/done, tabular with string sort, grid with inlineEdit, bulk_actions, legacy_row_actions)",
+          "showcase_task with 10 seeded tasks (2 in_progress) and the saved views in examples/app-showcase/src/ui/views/task.view.ts (in_progress/urgent/done, tabular with an array sort, grid with inlineEdit, bulk_actions, legacy_row_actions)",
           "showcase_field_zoo views for conditional formatting + bulk-action gating (examples/app-showcase/src/ui/views/field-zoo.view.ts)",
           "CJK seeds for search recall (account 华宁科技, contact 张伟)",
           "an EXPORT GRANT for the exporting principal, which no stock set carries: allowExport is opt-in (packages/plugins/plugin-security/src/permission-evaluator.ts#resolveUserExportAllowed, export = read ∧ a set saying allowExport: true), and no stock permission set grants it, the admin wildcard included (#3544). Without it the seeded admin sees no Export control and GET /api/v1/data/showcase_task/export answers 403 EXPORT_NOT_PERMITTED. Provision one before step 6: author a runtime set through the metadata door, PUT /api/v1/meta/permission/qa_task_export with {name:'qa_task_export', label, objects:{showcase_task:{allowRead:true, allowExport:true}}} (published; a ?mode=draft save also needs its POST …/publish), then bind it with POST /api/v1/data/sys_user_permission_set {user_id: <admin id>, permission_set: 'qa_task_export'} — the grant names its set by NAME (ADR-0131 D4) — and reload so /me/permissions carries the merged map"
@@ -617,12 +623,12 @@
         "open /_console/apps/com.example.showcase/showcase_task and screenshot the default All Tasks grid",
         "switch to the in_progress saved view; capture the data request — expect `filter` carrying the stored rule as an ObjectQL AST ([[\"status\",\"equals\",\"in_progress\"]]) and a 200; the count bar must read 2. The console spells its list params WITHOUT a `$` — filter, top, skip, search, sort — the same AST under the bare name, so a literal grep for $filter finds nothing",
         "quick-search 'huaning' on Accounts (or '张' on Contacts); capture the `search` request and the hits (pinyin + CJK recall, ADR-0061)",
-        "open the tabular saved view (string-form sort 'estimate_hours desc' — the objectui#2601 fixture); confirm it renders and the request carries the sort",
+        "open the tabular saved view (sort [{field: 'estimate_hours', order: 'desc'}] — the array form: #17053 retired the bare string clause 'estimate_hours desc' platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock); confirm it renders and the request carries the sort as sort=-estimate_hours",
         "page a list past page 1. No stock list holds more rows than the 50-row page (the largest seeded task and contact lists are under it), so stage one first: POST /api/v1/data/showcase_inquiry/createMany with a bare JSON array of 55 rows (name + email + message each — showcase_inquiry requires `message` too, and a name + email body answers 400 \"Message is required\", QA run #24616), then page the Inquiries list; capture `top`/`skip` on every data request; confirm no unpaged full fetch",
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
         "on in_progress, with the export grant from fixtures.requires[3] bound, open the toolbar's Display popover — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
-        "on bulk_actions, select rows and run showcase_mark_done (per-record) and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, it POSTs to its own endpoint /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the bulk bar, or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, it POSTs to its own endpoint /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
       ],
       "acceptance": [
@@ -651,9 +657,9 @@
           "evidence": "the request URLs + the id-union check"
         },
         {
-          "clause": "string-form sort ('estimate_hours desc') renders without error and the rows come back server-ordered (the objectui#2601 crash fixture stays green)",
+          "clause": "the tabular view's array sort ([{field: 'estimate_hours', order: 'desc'}]) renders without error and reaches the request as sort=-estimate_hours, and the rows come back server-ordered",
           "oracle": "network",
-          "verify": "the tabular view request succeeds; response row order is by estimate_hours descending",
+          "verify": "the tabular view request succeeds and carries sort=-estimate_hours (the adapter's `-field` spelling of a descending order, ui/packages/data-objectstack/src/index.ts); response row order is by estimate_hours descending",
           "evidence": "trace + first-page rows"
         },
         {
@@ -677,7 +683,7 @@
         {
           "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate', an api-type action) issues ONE request — POST /api/v1/apps/showcase/recalc — carrying every selected id in `_selectedIds` at the body's top level",
           "oracle": "network",
-          "verify": "count the captured POSTs against the selection size for each mode",
+          "verify": "count the captured POSTs against the selection size for each mode (the per-record selection holds not-done rows only, steps[8])",
           "evidence": "network trace of both runs"
         },
         {
@@ -702,7 +708,7 @@
         "ref": "objectui: e2e/live/saved-view-filter.spec.ts (acceptance[1]'s 200 half ONLY: it asserts that no showcase_task data response answered 400 or above and that the count bar starts '2 '; it captures neither the AST filter param nor the response total, so the param read and the count-against-total match are driven by hand), e2e/live/user-filters.spec.ts (acceptance[7]'s whitelist half ONLY: its visualization-switcher case reads exactly Grid, Kanban, Gallery, Calendar, Timeline and Gantt in the All Tasks Display popover, then switches to Kanban and reads only the trigger's label, so 'each re-renders the SAME task records' is driven by hand. Its lookup quick-filter case, which this item's stale record named, is retired: objectui 0b36ffa deleted it because the shipped showcase declares no lookup user filter, so no ref here cites it), e2e/live/inline-edit-polish-2572.spec.ts (acceptance[5]'s PATCH half ONLY, carrier-neutrally on a Project record page's inline edit, not this item's grid cell: the PATCH carries the edited budget and not the untouched spent. It never re-reads the row, so the re-read half is driven by hand)"
       },
       "source": [
-        "examples/app-showcase/src/ui/views/task.view.ts#inlineEdit (saved views, sort string form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
+        "examples/app-showcase/src/ui/views/task.view.ts#inlineEdit (saved views, sort array form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
         "examples/app-showcase/src/ui/views/field-zoo.view.ts#conditionalFormatting (conditionalFormatting, gated bulk actions)",
         "packages/spec/src/ui/view.zod.ts#UserActionsConfigSchema (UserActionsConfigSchema, AppearanceConfigSchema/VisualizationTypeSchema)",
         "packages/spec/src/data/pagination-conformance.ts (deterministic paging property)",
@@ -750,6 +756,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/saved-view-filter.spec.ts on main cc378e93. (1) saved-view-filter.spec.ts asserts only that no showcase_task data response was 400 or above and the count bar starts '2 '; the ref now scopes it to acceptance[1]'s 200 half. (2) showcase-search.dogfood.test.ts leaves the ref, since by the ref's own words it scores no clause of this item; acceptance[2].verify keeps the note. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "steps[3], acceptance[4] (clause and verify), steps[8], acceptance[8].verify, fixtures.requires[0] and source[0] corrected. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The tabular view's sort has been the array [{field:'estimate_hours', order:'desc'}] since #17053 retired the bare string clause platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock. The clause now scores the array sort reaching the request as sort=-estimate_hours (the adapter's `-field` spelling, ui/packages/data-objectstack/src/index.ts). steps[8] says to select rows that are not done: Mark Done's per-row visible gate either drops the button or skips done rows as not eligible, and either breaks the one-dispatch-per-selected-row count. Read at base a0f865491d: task.view.ts (tabular, bulk_actions), ui/packages/plugin-grid/src/components/BulkActionDialog.tsx. The sort clause's contract (renders, server-ordered) is unchanged; a prior verdict scored on the string form does not carry",
+          "ref": "#27438"
         }
       ]
     },
@@ -879,7 +891,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -888,19 +900,18 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick (drawer) — examples/app-showcase/src/ui/views/task.view.ts. The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage, resolveFormViewLayout), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe: PUT /api/v1/meta/view/showcase_task.form?mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}}, then POST /api/v1/meta/view/showcase_task.form/publish. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
+          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is now a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage through selectRecordFormView), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe: PUT /api/v1/meta/view/showcase_task.form?mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}}, then POST /api/v1/meta/view/showcase_task.form/publish. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
           "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list"
         ],
         "knownGaps": [
-          "no form view in the showcase authors the spec's 6th form type, 'modal' (coverage.ts FORM_VIEW_TYPES deliberately lists 5). A modal-PRESENTED form exists on task-desk.page.ts (ObjectForm formType=\"modal\", create), which is where the modal variant is scored; if that page cannot be reached, record the modal variant blocked(fixture) rather than ticking or silently skipping it",
-          "drawer and modal are presentation modes, not page layouts (ADR-0050, Proposed): the metadata record-form page renders an authored type drawer/modal as simple BY DESIGN (RecordFormPage — the form-layout-vs-presentation note on objectstack#1890), and the New/Edit modal maps only tabbed (resolveFormViewLayout — wizard/split degrade to a stacked section list there). So the page-level layouts are walked on the page routes (/new and /record/:id/edit, both RecordFormPage), and the presentations on task-desk.page.ts"
+          "the drawer and modal PRESENTATIONS have one stock surface, task-desk.page.ts (ObjectForm formType=\"drawer\" to edit a task, formType=\"modal\" to create one). No form view can declare either any more: ADR-0050 took drawer and modal out of FormView.type in spec 18.3.0, and examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES lists the three layouts. If that page cannot be reached, record the presentation variant blocked(fixture) rather than ticking or silently skipping it",
+          "drawer and modal are presentation modes and split a list-beside-record mode, not page layouts (ADR-0050). Since spec 18.3.0 FormViewSchema refuses all three type values at parse, each with its prescription (packages/spec/src/ui/view.zod.ts FORM_VIEW_TYPE_RETIRED), so a default-form overlay carrying one is refused at the metadata door instead of rendering anything (QA run #27441 measured 422). The New/Edit modal maps only tabbed (resolveFormViewLayout — a wizard degrades to a stacked section list there). So the page-level layouts are walked on the page routes (/new and /record/:id/edit, both RecordFormPage), the presentations on task-desk.page.ts, and the three retired values are scored as the refusal (steps[3], acceptance[5])"
         ]
       },
       "variants": [
         "simple",
         "tabbed",
         "wizard",
-        "split",
         "drawer",
         "modal"
       ],
@@ -908,17 +919,17 @@
         "open a task record's full-page edit form (…/showcase_task/record/<id>/edit — RecordFormPage) on the stock default form (type simple); screenshot; verify the declared section ('Task', 2 columns) and its field order",
         "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed, through the fixtures.requires[0] recipe with item-level isDefault:true); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
         "overlay the default form with the wizard variant; open the PAGE form (…/showcase_task/new, or the record's /edit route — RecordFormPage passes the type in both modes); walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end. The New/Edit MODAL renders a wizard as a stacked section list by design (resolveFormViewLayout), so the steps are walked on the page route",
-        "overlay the default form with the split variant; open the page form; verify primary/secondary panes render their assigned sections side-by-side",
-        "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. An overlay of the default form with type drawer/modal renders the page form as simple, which is the designed fallback, not a fail",
+        "RETIRED-TYPE refusal: put the default-form overlay of fixtures.requires[0] with type 'split', then 'drawer', then 'modal' (any sections), and capture each refusal: a 422 whose message names the retired value with its prescription (FORM_VIEW_TYPE_RETIRED). Record whether the draft PUT or its publish answered it. Then re-read GET /api/v1/meta/view/showcase_task.form and confirm none of the three landed. There is no split pane to look for: the showcase's formViews.split is now a two-tab tabbed form",
+        "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
         "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
         "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. Reach a page form's /new or /edit route by in-app navigation (the row's Edit, or New), not by a fresh page load: the page form's save goes back one history entry (RecordFormPage navigate(-1)), so on a deep-linked load it leaves the document and the toast goes with it — a driver artifact, not a lost save",
         "revert the default-form overlay so the stock simple form is back — DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm it with a re-read of the view"
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: each authored page-level form layout (simple / tabbed / wizard / split) renders its own layout mechanics, with a screenshot per variant; drawer and modal are presentation modes, not layouts (ADR-0050) — a drawer-presented form is proven on a surface that opens it as a side panel (task-desk.page.ts, a JSX ObjectForm formType=\"drawer\"), and the metadata record-form page falling back to simple for type drawer/modal is by design (#1890); no form view authors type 'modal', so the modal presentation is proven on the same page's formType=\"modal\" dialog, or recorded blocked(fixture) if that page cannot be reached.",
+          "clause": "PER-VARIANT: each page-level form layout the spec declares (simple / tabbed / wizard) renders its own layout mechanics, with a screenshot per variant; drawer and modal are presentation modes, not layouts (ADR-0050) — a drawer-presented form is proven on a surface that opens it as a side panel (task-desk.page.ts, a JSX ObjectForm formType=\"drawer\"), and the modal presentation on the same page's formType=\"modal\" dialog, or recorded blocked(fixture) if that page cannot be reached. split is no variant: spec 18.3.0 retired it, with drawer and modal, as a form type (acceptance[5]).",
           "oracle": "screenshot",
-          "verify": "one screenshot per page-level variant, each reached by overlaying the default form: tabbed shows tabs, wizard shows step chrome on the page route, split shows two panes; then the task-desk drawer (side panel over the list) and modal (dialog) screenshots. A page form rendering simple for an overlaid drawer/modal type is the designed fallback, not a fail",
+          "verify": "one screenshot per page-level variant, each reached by overlaying the default form: tabbed shows tabs, wizard shows step chrome on the page route; then the task-desk drawer (side panel over the list) and modal (dialog) screenshots",
           "evidence": "per-variant screenshots + the task-desk drawer and modal screenshots"
         },
         {
@@ -944,22 +955,28 @@
           "oracle": "dom",
           "verify": "enter a distinctive value, navigate away and back within the form, read the control value",
           "evidence": "screenshots at each hop"
+        },
+        {
+          "clause": "the retired form types are refused at authoring, never rendered: a default-form overlay with type 'split', 'drawer' or 'modal' answers 422 with that value's prescription (ADR-0050, packages/spec/src/ui/view.zod.ts FORM_VIEW_TYPE_RETIRED), and the served default form is unchanged",
+          "oracle": "api",
+          "verify": "the three refusal bodies of steps[3], each naming its retired value and its prescription; GET /api/v1/meta/view/showcase_task.form after them reads the form as it was. A 2xx that stores one of the three, or a page form that renders one, is a FAIL",
+          "evidence": "the three refusal bodies + the re-read"
         }
       ],
       "negative": [
         "a wizard that lets Next past a required title with no named field error — or that silently writes per step — is a FAIL",
-        "counting the drawer or modal variant as passed off the record-form page is a FAIL — that page renders simple for both by design; each presentation is scored only on a surface that opens it as a side panel / dialog (task-desk.page.ts), or recorded blocked(fixture) with this item cited"
+        "counting the drawer or modal variant as passed off the record-form page or a form-view overlay is a FAIL — a form view can no longer declare either (acceptance[5]); each presentation is scored only on a surface that opens the form as a side panel / dialog (task-desk.page.ts), or recorded blocked(fixture) with this item cited"
       ],
       "traps": [
         "hydration-race",
         "automation-input"
       ],
       "source": [
-        "packages/spec/src/ui/view.zod.ts#FormViewSchema (FormViewSchema type enum: simple|tabbed|wizard|split|drawer|modal)",
-        "examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES (FORM_VIEW_TYPES — the 5 authored)",
+        "packages/spec/src/ui/view.zod.ts#FormViewSchema (FormViewSchema type enum: simple|tabbed|wizard; split, drawer and modal refused by name since 18.3.0, FORM_VIEW_TYPE_RETIRED)",
+        "examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES (FORM_VIEW_TYPES — the 3 layouts)",
         "examples/app-showcase/src/ui/views/task.view.ts#formViews (formViews incl. visibleWhen on notes)",
-        "objectui packages/app-shell/src/views/RecordFormPage.tsx (reads objectDef.form ?? formViews.default; page-level layouts only — drawer/modal fall back to simple, objectstack#1890) + packages/app-shell/src/utils/recordFormNavigation.ts (resolveFormViewLayout — the New/Edit modal maps only tabbed)",
-        "docs/adr/0050-form-layout-vs-presentation.md (Proposed — drawer/modal leave FormView.type; presentation belongs to NavigationMode / addRecord.mode / action type modal) + examples/app-showcase/src/ui/pages/task-desk.page.ts (ObjectForm formType drawer + modal)"
+        "objectui packages/app-shell/src/views/RecordFormPage.tsx (reads objectDef.form ?? formViews.default through selectRecordFormView; page-level layouts only) + packages/app-shell/src/utils/recordFormNavigation.ts (resolveFormViewLayout — the New/Edit modal maps only tabbed)",
+        "docs/adr/0050-form-layout-vs-presentation.md (drawer/modal leave FormView.type and split is removed, enacted in spec 18.3.0; where a form opens is the caller's open mode) + examples/app-showcase/src/ui/pages/task-desk.page.ts (ObjectForm formType drawer + modal)"
       ],
       "history": [
         {
@@ -991,6 +1008,12 @@
           "date": "2026-10-28",
           "change": "steps[6] says how to reach the page form. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): deep-linking /new or /edit with a page load made save's navigate(-1) leave the document and drop the toast. Re-read at base fd246c22: ui/packages/app-shell/src/views/RecordFormPage.tsx (navigate(-1) after save). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "variants, steps[3], steps[4], acceptance[0] (clause and verify), negative[1], fixtures.requires[0], knownGaps[0] and [1], and source[0], [1], [3] and [4] follow spec 18.3.0's form view `type`, and acceptance[5] is new. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). ADR-0050 made `type` the layout only, simple | tabbed | wizard (#27305): split, drawer and modal are refused by name (view.zod.ts FORM_VIEW_TYPE_RETIRED), and the run measured a default-form overlay carrying one answer 422. The split variant is dropped, and steps[3] scores the three retired values as that refusal in acceptance[5], appended so that no clause index moves. The text no longer says the record-form page renders an overlaid drawer/modal as simple, because no form view can declare either. The drawer and modal presentations stay on task-desk.page.ts, whose React ObjectForm keeps both containers. Re-read at base a0f865491d: view.zod.ts, task.view.ts (formViews.split is now tabbed, quick simple), coverage.ts FORM_VIEW_TYPES (3), RecordFormPage.tsx (selectRecordFormView). steps[0] and steps[6] are untouched: the run's 'in-app navigation only' finding waits on a re-measure after #28066. A prior verdict on the split variant does not carry",
+          "ref": "#27441"
         }
       ]
     },
@@ -999,7 +1022,7 @@
       "title": "Header-level conditional rules: visibleWhen / requiredWhen / readonlyWhen on invoice fields, enforced on BOTH ends",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1020,7 +1043,7 @@
         "flip status draft → sent; observe issued_on gain a required marker; attempt save with issued_on empty; capture the block",
         "set issued_on; save; re-read via GET /api/v1/data/showcase_invoice/<id>",
         "direct API negative: POST /api/v1/data/showcase_invoice with status 'sent' and no issued_on; capture the refusal",
-        "open INV-1003 (paid): verify paid_on is visible and required, tax_rate renders read-only",
+        "read the client lock on an edit form whose Status is Paid: open INV-1001 (sent) in its edit form and set Status to Paid without saving — verify paid_on appears and is required, and tax_rate renders read-only — then cancel. A stored-paid invoice offers no edit surface to read the lock on: its row Edit and its record page's Edit are disabled (userActions.edit.disabledWhen record.status == 'paid') and its record page has no inline editor, so on INV-1003 record that disabled Edit (clause 4's evidence) instead of looking for a form",
         "direct API: PATCH /api/v1/data/showcase_invoice/<INV-1003 id> with tax_rate: 99; then GET the row and compare tax_rate to its pre-PATCH value",
         "on the invoice LIST, inspect INV-1003's row actions: Edit visible but disabled, Delete absent; compare a draft row's untouched menu",
         "on INV-1002 (draft), verify paid_on is NOT rendered at all"
@@ -1039,13 +1062,13 @@
           "evidence": "refusal response + count check"
         },
         {
-          "clause": "readonlyWhen locks the client AND the server drops the change: tax_rate on a paid invoice renders read-only, and a direct PATCH to it is silently DISCARDED — the persisted value must be unchanged on re-read (stripReadonlyWhenFields semantics: keep, not reject)",
+          "clause": "readonlyWhen locks the client AND the server drops the change: tax_rate renders read-only on an edit form whose Status is Paid (steps[4]: a stored-paid invoice has no edit form), and a direct PATCH to it is silently DISCARDED — the persisted value must be unchanged on re-read (stripReadonlyWhenFields semantics: keep, not reject)",
           "oracle": "api",
           "verify": "GET before, PATCH tax_rate 99, GET after — before == after; note: a 200 on the PATCH is expected, the ORACLE is the unchanged re-read",
           "evidence": "the two reads + the PATCH"
         },
         {
-          "clause": "visibleWhen is honored: paid_on is absent from the draft form and present (and required) on the paid form",
+          "clause": "visibleWhen is honored: paid_on is absent from the draft form and present (and required) on a form whose Status is set to Paid (steps[4])",
           "oracle": "dom",
           "verify": "after screenshots of both forms, assert paid_on mounted only on paid",
           "evidence": "both screenshots"
@@ -1065,7 +1088,7 @@
       ],
       "negative": [
         "a direct API POST of a 'sent' invoice without issued_on that succeeds is a FAIL (client-only enforcement)",
-        "a PATCH to tax_rate on a paid invoice whose new value PERSISTS is a FAIL — silent acceptance of a locked field is the defect this rule exists to stop",
+        "a PATCH to tax_rate on a paid invoice that leaves its status paid, whose new value PERSISTS, is a FAIL — silent acceptance of a locked field is the defect this rule exists to stop. A write that also moves status off paid is not this case: readonlyWhen is judged on the record the write lands on (the stored row merged with the change, packages/objectql/src/validation/rule-validator.ts#stripReadonlyWhenFields), so {status: 'sent', tax_rate: X} persists X by design (QA run #27438)",
         "a Delete affordance on a paid invoice row is a FAIL even if clicking it would error later"
       ],
       "traps": [
@@ -1124,6 +1147,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says acceptance[2]'s client lock, acceptance[4] and negative[2] stay live browser legs, and why (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "steps[4], acceptance[2] and [3] (clauses) and negative[1] corrected. From QA run #27438 (W3-C2b, at c4c515ad; the steps[4] finding line is truncated in the record, so its tail was read from source; wave anchor #27377, wave-3 accuracy slice S1). A stored-paid invoice has no edit surface: userActions.edit.disabledWhen disables its row Edit and record-page Edit, so 'open INV-1003 (paid) … tax_rate renders read-only' cannot be driven. The client lock and paid_on's mount are read on INV-1001's edit form with Status set to Paid, unsaved. negative[1] is scoped to a PATCH that leaves status paid: the strip judges the merged record, so a same-write status change unlocks tax_rate by design. Read at base a0f865491d: invoice.object.ts (userActions, the tax_rate and paid_on rules), rule-validator.ts (stripReadonlyWhenFields; isReadonlyWhenLocked binds the merged record). The server half of clause 2 and every other clause are unchanged",
+          "ref": "#27438"
         }
       ]
     },
@@ -1132,7 +1161,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1142,7 +1171,7 @@
         "app": "showcase",
         "requires": [
           "showcase_invoice_line rules (examples/app-showcase/src/data/objects/invoice.object.ts): description requiredWhen record.quantity >= 100 (ROW-scoped); product/quantity/unit_price readonlyWhen parent.status == 'paid' (PARENT-scoped); receipt Field.file upload cell (objectui#2360)",
-          "a draft invoice with editable lines (INV-1002) and a paid one (INV-1003); for clause 5, INV-1002 must carry a SECOND line with a DISTINCT stored position. The stock INV-1002 ships one line, and a line added through the data API with no position defaults to 0, which collides with the first; seed it with position 1, or any value the first line does not hold — AND with its `amount` (quantity × unit_price): amount is computed in the client and stored as sent (examples/app-showcase/src/data/objects/invoice.object.ts, the amount field's comment), so a line staged over the data API without it carries amount null and the invoice total ignores it (QA run #24616). Or add the line through the grid, which computes it. On an invoice whose lines share a stored position the grid legitimately re-emits the sibling's position on save: it stamps row[sortField] = index on every change (GridField), with the sort field deriveDetail picks from the child (position)"
+          "a draft invoice with editable lines (INV-1002) and a paid one (INV-1003); for clause 5, INV-1002 must carry a SECOND line with a DISTINCT stored position. The stock INV-1002 ships one line, and a line added through the data API with no position defaults to 0, which collides with the first; seed it with position 1, or any value the first line does not hold. The line needs no amount: amount is SERVER-computed, a stored field whose expression (quantity × unit_price) the engine evaluates on every insert and update, so a client-sent amount never stands (examples/app-showcase/src/data/objects/invoice.object.ts, the amount field's comment; QA run #27438 measured a line POSTed with quantity 1, unit_price 29.99 and no amount storing amount 29.99). Or add the line through the grid. On an invoice whose lines share a stored position the grid legitimately re-emits the sibling's position on save: it stamps row[sortField] = index on every change (GridField), with the sort field deriveDetail picks from the child (position)"
         ],
         "knownGaps": [
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
@@ -1151,10 +1180,10 @@
       "steps": [
         "open INV-1002 (draft) — the inline Line Items grid renders via inlineEdit: 'grid'",
         "on one line, raise quantity to 120 with description empty; observe the description cell flag required ON THAT ROW; screenshot",
-        "confirm a second line with quantity 1 stays unflagged and editable (per-row evaluation). On INV-1002 this is the seeded second line with a distinct stored position (fixtures.requires); if it is not there, add it over the data API with position 1 and its amount (fixtures.requires[1]) before opening the invoice",
+        "confirm a second line with quantity 1 stays unflagged and editable (per-row evaluation). On INV-1002 this is the seeded second line with a distinct stored position (fixtures.requires); if it is not there, add it over the data API with its invoice, product, quantity, unit_price and position 1 — no amount, which the server computes (fixtures.requires[1]) — before opening the invoice",
         "attempt to save the batch with the flagged description still empty; capture the block; then fill it and save; capture the batch request",
         "server-side negative: submit the same shape directly to the API (line with quantity 120, no description) and capture the refusal",
-        "flip the header status to paid and save; observe product/quantity/unit_price cells lock; flip back to sent/draft and observe them unlock (live parent-scope re-evaluation)",
+        "in INV-1002's open edit form, set the header Status to Paid WITHOUT saving; observe the product/quantity/unit_price cells lock; set it back to Draft and observe them unlock (live parent-scope re-evaluation against the form's header values); then leave the form without saving a paid status. Do not save it paid: once an invoice is stored paid its Edit is disabled (userActions.edit.disabledWhen record.status == 'paid', invoice.object.ts), so the unlock half could no longer be driven and INV-1002 would stop being the draft fixture",
         "on a draft line, upload a file into the receipt cell; save the batch; re-read the line via API and confirm the stored managed-file reference"
       ],
       "acceptance": [
@@ -1171,9 +1200,9 @@
           "evidence": "refusal + before/after line reads"
         },
         {
-          "clause": "parent-scoped readonlyWhen re-evaluates live against the header record: setting status to paid locks the three cells, reverting unlocks them — without a page reload",
+          "clause": "parent-scoped readonlyWhen re-evaluates live against the header record: setting the header status to paid in the open edit form locks the three cells and setting it back unlocks them, with no save and no page reload",
           "oracle": "dom",
-          "verify": "after screenshots at each state, assert the editability of all three cells. objectui e2e/live/grid-parent-rules.spec.ts pins Qty and Unit Price only (disabled at paid, enabled at draft, on the New Invoice dialog's first line); the Product cell carries the same readonlyWhen and no pin asserts it, so read it by hand",
+          "verify": "after screenshots at each state of the unsaved header Status (steps[5]), assert the editability of all three cells. objectui e2e/live/grid-parent-rules.spec.ts pins Qty and Unit Price only (disabled at paid, enabled at draft, on the New Invoice dialog's first line); the Product cell carries the same readonlyWhen and no pin asserts it, so read it by hand",
           "evidence": "lock/unlock screenshots"
         },
         {
@@ -1266,6 +1295,12 @@
           "date": "2026-10-27",
           "change": "acceptance[0].verify: the live spec is named by its ui/ path and no longer called the objectui pin (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[1], steps[2], steps[5] and acceptance[2] (clause and verify) corrected. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). A line's amount is server-computed: the stored field's expression runs on every insert and update, so a line staged over the data API with no amount stores quantity × unit_price (the run measured 29.99), and the old 'computed in the client and stored as sent' note was wrong. A stored-paid invoice has Edit disabled (userActions.edit.disabledWhen), so 'flip to paid and save, then flip back' cannot be driven: the lock and unlock are now driven on the unsaved header Status in the open edit form. Read at base a0f865491d: invoice.object.ts (the amount expression and its comment, userActions). The clauses' contracts are unchanged, and clause 2 now also rules out a save between the states",
+          "ref": "#27438"
         }
       ]
     },
@@ -1543,7 +1578,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1565,13 +1600,13 @@
       },
       "steps": [
         "open the Northwind account detail page (/_console/apps/com.example.showcase/showcase_account → Northwind)",
-        "screenshot; enumerate the related lists: the declared Invoices list (relatedList: 'primary') has its own tab, and the non-primary children — Contacts among them — stack under ONE shared 'Related' tab (?tab=related; packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown (stacked under the shared \"Related\" tab)')",
-        "open the Related tab's Contacts section; capture the page-1 data request (page size 5 — the pager reads 'Page 1 of 6' for Northwind's 26 contacts, QA run #24616)",
-        "click next-page; capture the page-2 request; note the pager text",
+        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. Record page v3 draws no tab strip there. The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the details column, and the non-primary children — Contacts among them — are compact cards in the related column, each naming at most 3 rows with no pager (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Only below 760 px is the page tabbed, with those cards under one 'Related' tab (?tab=related)",
+        "open Contacts' whole list: its card's header or count chip enlarges it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
+        "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
         "diff page-1 and page-2 row ids for overlap",
-        "open the Invoices related tab; verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
+        "read the Invoices body table in the details column (on the tabbed page it sits inside the Details tab); verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
         "capture every data request issued by the detail page and check each child query for a `top` bound (the console spells its list params without a `$` — top, skip, filter, sort — objectui data-objectstack's adapter; the server's own spelling $top is the same bound)",
-        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts related section/tab is ABSENT; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
+        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts card (or, on the tabbed page, its section of the Related tab) is ABSENT; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
         "repeat as showcase_manager (has showcase_contact read): confirm the Contacts section renders AND the same child query answers 200 with rows"
       ],
       "acceptance": [
@@ -1584,19 +1619,19 @@
         {
           "clause": "the pager reflects the server total (26 Northwind contacts), and pages partition the set — no row repeated or skipped across pages",
           "oracle": "network",
-          "verify": "pager reads 'page 2 of M' consistent with total 26; id sets of page 1 and 2 are disjoint",
+          "verify": "the enlarged list's pager reads 'Page 2 of 2' at its 25-row page, consistent with total 26; id sets of page 1 and 2 are disjoint",
           "evidence": "pager screenshot + the id diff"
         },
         {
           "clause": "related lists are DERIVED from the relationship declaration with no hand-built page: the Account detail auto-renders them (Projects is the pinned example)",
           "oracle": "dom",
-          "verify": "after screenshot, the related tabs exist on the stock detail page",
+          "verify": "after screenshot, the relationship-derived lists exist on the stock detail page: the Projects and Invoices body tables and the Contacts card at a column-tier width (under the Details and Related tabs below 760 px)",
           "evidence": "detail screenshot"
         },
         {
-          "clause": "the declared relatedList config is honored: the Invoices tab carries the authored title and exactly the authored columns",
+          "clause": "the declared relatedList config is honored: the Invoices body table carries the authored title and exactly the authored columns",
           "oracle": "dom",
-          "verify": "after screenshot, read the tab label and column headers; compare to relatedListTitle/relatedListColumns on the lookup field",
+          "verify": "after screenshot, read the table's title and column headers; compare to relatedListTitle/relatedListColumns on the lookup field",
           "evidence": "tab screenshot + declaration excerpt"
         },
         {
@@ -1608,7 +1643,7 @@
         {
           "clause": "related lists are READ-gated on BOTH ends: a persona WITHOUT read on the child object (showcase_contributor lacks showcase_contact read) sees NO Contacts section on the account detail (UI courtesy — deriveRelatedLists drops children the user cannot read, objectui#2359) AND a direct child query is refused server-side (403); a persona WITH child read (showcase_manager) sees the section AND the query 200s",
           "oracle": "api",
-          "verify": "as showcase_contributor: screenshot confirms the Contacts tab is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the tab renders and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
+          "verify": "as showcase_contributor: screenshot confirms the Contacts card is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the card renders and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
           "evidence": "both personas' detail screenshots + the 403 and the 200 child queries"
         }
       ],
@@ -1622,7 +1657,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/related-list-server-paging-and-gate.dogfood.test.ts, at the REST data door the related list reads through (GET /api/v1/data/showcase_contact scoped by the Northwind filter) on the showcase as shipped, pins the server halves: acceptance[1] and negative[1] (the filtered read holds the 26 seeded contacts; $top=10 pages at $skip 0, 10 and 20 each answer total 26 and return 10, 10 and 6 rows with no id repeated or skipped), acceptance[4] (each served child re-reads by its own id with the same row) and acceptance[5] with negative[2] (a member staffed contributor is refused the identical query 403 with no rows; a member staffed manager reads it 200 with rows). acceptance[0] and negative[0] (the console's own top/skip on every child request), the pager text, acceptance[2] (the relationship-derived Projects tab on Northwind's detail page and its status labels), acceptance[3] (the Invoices tab's authored title and columns) and the Contacts tab's absence for the contributor stay live browser legs: they are judged on the console's requests and rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
+        "ref": "packages/qa/dogfood/test/related-list-server-paging-and-gate.dogfood.test.ts, at the REST data door the related list reads through (GET /api/v1/data/showcase_contact scoped by the Northwind filter) on the showcase as shipped, pins the server halves: acceptance[1] and negative[1] (the filtered read holds the 26 seeded contacts; $top=10 pages at $skip 0, 10 and 20 each answer total 26 and return 10, 10 and 6 rows with no id repeated or skipped), acceptance[4] (each served child re-reads by its own id with the same row) and acceptance[5] with negative[2] (a member staffed contributor is refused the identical query 403 with no rows; a member staffed manager reads it 200 with rows). acceptance[0] and negative[0] (the console's own top/skip on every child request), the pager text, acceptance[2] (the relationship-derived Projects list on Northwind's detail page and its status labels), acceptance[3] (the Invoices list's authored title and columns) and the Contacts list's absence for the contributor stay live browser legs: they are judged on the console's requests and rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "#3358 §4 (evidence run captured exactly this trace)",
@@ -1686,7 +1721,13 @@
           "change": "automated.ref names the dogfood pin for the server halves of acceptance[1], [4], [5] and negative[1], [2] (#26573 slice 4), and says why acceptance[0], [3], negative[0] and the rendered halves stay live browser legs. No clause changed",
           "ref": "#26573"
         },
-        { "revision": 10, "date": "2026-10-28", "change": "automated.ref and acceptance[2].verify drop ui/e2e/live/detail-related-list.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a row's name link now opens the record drawer (the record-open preference, #26681) and the spec waited for the /record/ID route it no longer navigates to. acceptance[2] joins the live browser legs the ref lists; its derivation, own-tab promotion and option-label cells stay unit-pinned in objectui (deriveRelatedLists.test.ts, buildDefaultPageSchema.test.ts, RelatedList.columnIdentityAccessor.test.tsx). The dogfood pin is unchanged. No clause changed", "ref": "#25914" }
+        { "revision": 10, "date": "2026-10-28", "change": "automated.ref and acceptance[2].verify drop ui/e2e/live/detail-related-list.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a row's name link now opens the record drawer (the record-open preference, #26681) and the spec waited for the /record/ID route it no longer navigates to. acceptance[2] joins the live browser legs the ref lists; its derivation, own-tab promotion and option-label cells stay unit-pinned in objectui (deriveRelatedLists.test.ts, buildDefaultPageSchema.test.ts, RelatedList.columnIdentityAccessor.test.tsx). The dogfood pin is unchanged. No clause changed", "ref": "#25914" },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "steps[1], [2], [3], [5] and [7], acceptance[1]–[3] and [5] (verify, plus clause [3]) and automated.ref re-pointed from the related tabs to record page v3's layout. From QA run #27438 (W3-C2b, at c4c515ad; the finding line is truncated in the record, so its tail was read from source; wave anchor #27377, wave-3 accuracy slice S1). At a column-tier width the account page has no tabs. The primary lists, Invoices and Projects, are body tables in the details column, and Contacts is a compact card in the related column naming at most 3 rows (5 at the run's c4c515ad) with no pager. Paging lives in the card's enlarged view (?related=showcase_contact.account), 25 rows a page, so Northwind's 26 contacts read 'Page 1 of 2' then 'Page 2 of 2', not the old Related tab's 'Page 1 of 6'. The tabbed page, below 760 px, keeps a Related tab. Read at base a0f865491d: buildDefaultPageSchema.ts (body tables vs side cards), relatedListCompact.ts (COMPACT_RELATED_ROWS 3), RelatedList.tsx (a compact card reads $top 3), RecordPageColumns.tsx (ENLARGED_PAGE_SIZE 25), the field.zod.ts relatedList describe. The paging, partition and read-gate contracts are unchanged; a prior pager reading of 'Page 1 of 6' does not carry",
+          "ref": "#27438"
+        }
       ]
     },
     {
@@ -1694,7 +1735,7 @@
       "title": "Action params render their real widgets, and the param contract is enforced at dispatch",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1729,7 +1770,7 @@
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: each declared param renders its real widget (date→date input, color→color input, richtext→editor, select→picker, lookup→record picker, file/image→input[type=file], autonumber→read-only server-assigned) — recorded per variant in the table",
+          "clause": "PER-VARIANT: each declared param renders its real widget (date→the date-picker widget (a text input showing the locale's date pattern, MM/DD/YYYY in an en-US session, plus its date-picker-trigger button; not input[type=date]), color→color input, richtext→RichTextField, whose editing surface is a textarea (its 'Enter text…' placeholder, fields.richText.placeholder) — a DOM reader sees a textarea, which is correct, select→picker, lookup→record picker, file/image→input[type=file], autonumber→read-only server-assigned) — recorded per variant in the table",
           "oracle": "dom",
           "verify": "after the screenshot confirms render, match each control against the declared param type; every variant row carries its own observed control",
           "evidence": "screenshot + the 10-row param→control table"
@@ -1801,6 +1842,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin that reads whether the action body ran (#26573 slice 2): acceptance[2] and negative[1] now assert the refusal carries no received echo, and acceptance[3]'s server half is pinned by a bag whose only fault is the missing p_text. The dialog half and the dom clauses stay unpinned. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "acceptance[0]'s clause names the date and richtext widgets as the console draws them. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). An action param renders through the field widget registry (ActionParamDialog, getLazyFieldWidget): date → DatePickerField, a text input with the locale's date pattern and a date-picker-trigger button, not input[type=date]; richtext → RichTextField, whose editing surface is a textarea with its 'Enter text…' placeholder. The run read both as working; the old 'date input' and 'editor' wording invited a false FAIL. Read at base a0f865491d: ui/packages/fields/src/index.tsx (the lazy widget map), DatePickerField.tsx, RichTextField.tsx. No other variant changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -2009,7 +2056,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 16,
+      "revision": 17,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2018,7 +2065,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, script, visible '!record.done'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — declares record_more ONLY, which is what keeps it off the toolbar; objectui#3142), showcase_new_task (locations: [] — the fleet's headless specimen, read by the empty-locations probe)",
+          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, a declarative write on the default script route — operation 'update', patch {done: true, progress: 100} — visible 'has(record.done) && record.done != true'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — declares record_more ONLY, which is what keeps it off the toolbar; objectui#3142), showcase_new_task (locations: [] — the fleet's headless specimen, read by the empty-locations probe), showcase_reopen_task (list_item only, operation 'update' patch {done: false}, visible 'has(record.done) && record.done == true' — Mark Done's mirror, so a done task's row menu offers Reopen where a not-done one offers Mark Done; a click on it is refused by the showcase_guard_task_reopen hook by design, which records-forms.script-action-hook-refusal-toast drives)",
           "seeded tasks in both done and not-done states for the CEL visibility both-sides check"
         ],
         "provisioning": {
@@ -2046,7 +2093,7 @@
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
         "dispatch one action per location with a ref-targeted click: bulk_reassign from the list toolbar — select a row FIRST: with none selected it toasts 'This action runs on a single record — select a row first' and dispatches nothing — (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (a `form` action opens its FormView as a ROUTED PAGE, not a dialog: /_console/forms/showcase_task.form?recordId=…&recordObject=showcase_task — objectui core ActionRunner.ts, \"open a FormView as a routed page (/forms/:name)\"; QA run #24616), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
-        "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
+        "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done. The done task's row menu offers showcase_reopen_task (Reopen) instead: it is not Mark Done, and does not count as a show",
         "empty-locations probe, both halves: (a) on the qaact-placement-specimen recipe's qaact_no_locations, a PACKAGED action with NO locations key (none ships on stock), sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY. A surface counts only where the recipe's qaact_control renders: the list row menu and the Project Detail Related-tab row menus. Task Detail's header, ⋯ overflow and quick-actions bar list their action ids, so they host no packaged action (the recipe's knownGaps[0]). Without the recipe record half (a) blocked(fixture). ⛔ Do not author the probe at runtime: a runtime-authored action is not served at all, so its empty sweep is no evidence; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
       ],
       "acceptance": [
@@ -2069,7 +2116,7 @@
           "evidence": "the six traces + the two re-reads"
         },
         {
-          "clause": "row-level CEL visibility gates per record, both sides: showcase_mark_done ('visible: !record.done') renders on the not-done task's row/header and is ABSENT on the done task's — and the evaluation is fail-closed (a throwing expression hides, never shows)",
+          "clause": "row-level CEL visibility gates per record, both sides: showcase_mark_done (visible 'has(record.done) && record.done != true') renders on the not-done task's row/header and is ABSENT on the done task's — and the evaluation is fail-closed (a throwing expression hides, never shows)",
           "oracle": "dom",
           "verify": "side-by-side DOM reads of the two rows and the two record headers",
           "evidence": "the four reads + screenshots"
@@ -2194,6 +2241,12 @@
           "date": "2026-10-27",
           "change": "fixtures.provisioning opts into the new area recipe qaact-placement-specimen and knownGaps[2] says it closes the gap (#26625, maintainer-directed 「补测试数据配方。立卡」). The recipe installs, through POST /api/v1/marketplace/install-local, a package whose three url actions bind to showcase_task: a control and an action whose `visible` throws at evaluation, both on list_item and record_header, and one with no `locations` key. Re-driven once at main 1708115e2f on a fresh stock boot, console from ui/ on port 5180. acceptance[3] fail-closed half PASS: the throwing action was absent from the list row menus (3 rows) and the Project Detail Related-tab row menus (2 rows) where QA Control rendered, and the console warned that its predicate failed to evaluate (Unknown variable) and was treated as its safe default. acceptance[4] half (a) PASS: QA No Locations rendered on none of the list toolbar, the list row menus, the Task Detail header and its ⋯ overflow, or the Related-tab rows. Task Detail's header, overflow and quick-actions bar list their action ids, so QA Control was absent there too and those reads carry no weight. steps[6] and acceptance[4].verify now name the recipe and the surfaces that count (folded at the seat's request). No clause changed",
           "ref": "#26625"
+        },
+        {
+          "revision": 17,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[0], steps[5] and acceptance[3]'s clause name Mark Done's real predicate and list showcase_reopen_task. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). showcase_mark_done's `visible` has been 'has(record.done) && record.done != true' since #8990 (has() guards the sparse list_item face, and != true never faults on a projected null), not '!record.done', and it is a declarative operation 'update' write on the default script route. showcase_reopen_task, the hook-refusal specimen, is its list_item-only mirror ('has(record.done) && record.done == true'), so a done task's row menu shows Reopen where the not-done one shows Mark Done; steps[5] says not to count it. Read at base a0f865491d: examples/app-showcase/src/ui/actions/index.ts. The both-sides contract is unchanged",
+          "ref": "#27441"
         }
       ],
       "enumSource": {
@@ -2346,7 +2399,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2358,7 +2411,7 @@
           "the task gantt view (task.view.ts 'Schedule (Gantt)': startDateField/endDateField/titleField/progressField)"
         ],
         "knownGaps": [
-          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It is reachable live on a view overlay, run-proven by QA run #27438 (G4a, at c4c515ad): PUT /api/v1/meta/view/showcase_task.gantt with the stock view plus lockField: 'done' in its gantt config (view is org-overridable, ADR-0005); drag a done bar → no PATCH, and the row re-reads unchanged; the control, a drag of a not-done bar on the same overlay → PATCH 200; then DELETE /api/v1/meta/view/showcase_task.gantt restores the stock view. So the sub-leg is scored live on that overlay, and acceptance[2] stays blocked(fixture) only on its auto-schedule half, which, like acceptance[1], needs a dependenciesField. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
@@ -2372,7 +2425,7 @@
         "open the task Schedule (Gantt) view; wait for bars to render (screenshot first)",
         "drag one task bar to new dates; capture the PATCH and re-read the record over the API",
         "reload and confirm the bar re-renders from the persisted dates",
-        "on an extended fixture (per knownGaps): configure dependencies + a locked row; run toolbar auto-schedule; capture the confirm dialog, cancel once (verify zero writes), run again and apply",
+        "on an extended fixture (per knownGaps): configure dependencies + a locked row (the direct drag on a locked leaf needs only knownGaps[0]'s lockField overlay); run toolbar auto-schedule; capture the confirm dialog, cancel once (verify zero writes), run again and apply",
         "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
       ],
       "acceptance": [
@@ -2460,6 +2513,12 @@
           "date": "2026-10-27",
           "change": "fixtures.knownGaps[0]: the per-clause unit pins are located under ui/packages/plugin-gantt/src instead of called objectui pins (#26626, maintainer-directed). Measured objectui revisions kept. No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "fixtures.knownGaps[0] and steps[3]: the direct drag on a locked leaf is run-proven. From QA run #27438 (W3-C2b, G4a, at c4c515ad; the finding line is truncated in the record, and its tail is in the run's own per-clause table; wave anchor #27377, wave-3 accuracy slice S1). The run overlaid showcase_task.gantt with lockField 'done', dragged a done bar (no PATCH, row unchanged, updated_at identical), dragged an unlocked bar on the same overlay as the control (PATCH 200), and reverted with DELETE. So the sub-leg is scored live on that overlay instead of blocked(fixture). acceptance[2] stays blocked(fixture) only on its auto-schedule half, which still needs a dependenciesField no stock view declares. Read at base a0f865491d: view.zod.ts (GanttConfigSchema lockField), task.view.ts (the gantt view). No clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -2531,7 +2590,7 @@
       "title": "Dirty forms guard ACCIDENTAL closes: the X / Escape / backdrop prompt on a dirty form, the footer Cancel discards without a prompt by design, save proceeds, nothing is lost silently",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2567,7 +2626,7 @@
         {
           "clause": "the guard's behavior is pinned by the existing unit suite",
           "oracle": "test",
-          "verify": "with cwd ui/, the objectui tree's root in this checkout (the console builds from ui/ at the framework commit): pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx. The file holds 11 it() cases on main at cc378e93: the X close, the footer Cancel and the pristine paths for ModalForm and DrawerForm, plus the beforeunload guard. QA run #23163's 14/14 was counted on another tree, so cite the count the run's own tree reports. No case drives Escape or a backdrop click, so acceptance[0]'s and negative[0]'s Escape and backdrop legs are driven by hand. ⛔ Not `pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a run whose cwd is inside a package, because the root config's project globs resolve against the cwd and such a run would silently execute the wrong suite (objectui#3378)",
+          "verify": "with cwd ui/, the objectui tree's root in this checkout (the console builds from ui/ at the framework commit): pnpm exec vitest run packages/plugin-form/src/discardGuard.test.tsx. The file holds 11 it() literals and reports 14 tests: its beforeunload describe is a describe.each over ModalForm and DrawerForm, so those 3 cases run twice (8 + 3 × 2 = 14); the other 8 are the X close, the footer Cancel and the pristine paths of each form. QA run #27438 reported 14/14 at c4c515ad, as QA run #23163 did. Cite the count the run's own tree reports, and read 11 literals beside 14 tests as that describe.each, not a discrepancy. No case drives Escape or a backdrop click, so acceptance[0]'s and negative[0]'s Escape and backdrop legs are driven by hand. ⛔ Not `pnpm --filter @object-ui/plugin-form exec vitest run src/discardGuard.test.tsx`: the vitest invocation guard (ui/scripts/vitest-invocation-guard.mjs) refuses a run whose cwd is inside a package, because the root config's project globs resolve against the cwd and such a run would silently execute the wrong suite (objectui#3378)",
           "evidence": "test output"
         }
       ],
@@ -2621,6 +2680,12 @@
           "date": "2026-10-27",
           "change": "acceptance[2].verify: the retired pin-file aside dropped; the verify already runs the suite from ui/ at the framework commit (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-31",
+          "change": "acceptance[2].verify counts tests, not it() literals. From QA run #27438 (W3-C2b, at c4c515ad, 14/14; wave anchor #27377, wave-3 accuracy slice S1). discardGuard.test.tsx holds 11 it() literals, and the beforeunload describe is a describe.each over the two overlay forms, so vitest reports 14. The old text read the 11 as the count and called #23163's 14/14 another tree's. Counted from source at base a0f865491d: 8 literals in the ModalForm and DrawerForm describes, 3 in the describe.each. No clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -3054,7 +3119,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3066,7 +3131,7 @@
         "requires": [
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
           "a record to comment on (e.g. a seeded showcase_task or showcase_account)",
-          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. That user must hold read on sys_comment: no showcase permission set grants it, so a minted member's GET /api/v1/data/sys_comment answers 403 PERMISSION_DENIED and every mention of them is withheld `cannot_read_thread` whatever the record (measured, #26625); the walled sequence binds a scratch set that grants it"
+          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. The mentioned user must hold read on sys_comment on BOTH boots, the stock `single` one included: no showcase permission set grants it, so a minted member's GET /api/v1/data/sys_comment answers 403 PERMISSION_DENIED and every mention of them on a record they can read is withheld `cannot_read_thread` (measured, #26625; met again on the single boot by QA run #27441). Both sequences in steps[13] bind a scratch set that grants it (the walled sequence's item (4))"
         ],
         "provisioning": {
           "use": "qa-feeds-disabled",
@@ -3084,15 +3149,15 @@
         "observe the OPTIMISTIC comment row appear immediately; capture the sys_comment create",
         "reload the record page (no sys_comment refetch follows a post within ~6 s, QA run #24616), then confirm the optimistic row reconciles with the server row (same id → union-by-id merge, no duplicate, no phantom)",
         "read sys_comment over the API: GET /api/v1/data/sys_comment?$filter for the record's thread_id, ordered by created_at asc — the posted comment is present",
-        "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, oldest-first",
+        "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, in time order. The direction depends on the surface: the default record page's timeline stream is newest-first (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts mergeTimelineStream), while an authored record:discussion panel — e.g. the footer of the Project Detail page on a showcase_project record (examples/app-showcase/src/ui/pages/project-detail.page.ts) — lists oldest-first (RecordDetailView mergeFeedRows). Record which surface you read. On an object with enable.trackHistory (showcase_account) the stream drops the activity's own `updated` row in favour of the audit's field-change line (mergeTimelineStream), so read this on a showcase_task, or on the panel",
         "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it. The bell is SERVER-backed: plugin-audit writes one sys_notification (topic collab.mention) per mentioned user (packages/plugins/plugin-audit/src/audit-writers.ts), and the console's bell reads the inbox feed over GET /api/v1/notifications (objectui app-shell useInboxBell.ts) — read unreadCount there",
         "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)",
         "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qafeeds_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qafeeds_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qafeeds_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
         "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qafeeds_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
-        "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
+        "FEED FILTER — the four FeedFilterMode values are offered by an authored record:discussion panel, not by the default record page, whose timeline stream has its own chips All / Activity / Discussion / Changes (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts TIMELINE_STREAM_FILTERS). Drive it on a showcase_project record, whose Project Detail page ends in a record:discussion panel (examples/app-showcase/src/ui/pages/project-detail.page.ts): post one comment there and make one attributable edit, then cycle the panel's filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
         "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the unit pin ui/packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts and record the substitution",
-        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) grant the user read on sys_comment: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
+        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. Grant the member read on sys_comment exactly as the walled leg's item (4) below does (the scratch package, the qamention_comment_reader set, the sys_user_permission_set row) and prove it as the member: GET /api/v1/data/sys_comment answers 200. Without the grant every mention below is withheld (fixtures.requires[2]), the account comment's included, and the leg measures nothing. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) grant the user read on sys_comment: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
       ],
       "acceptance": [
         {
@@ -3108,9 +3173,9 @@
           "evidence": "post + post-refetch feed screenshots"
         },
         {
-          "clause": "sys_activity rows INTERLEAVE into the same discussion feed, oldest-first, alongside the comments (one feed, two tables)",
+          "clause": "sys_activity rows INTERLEAVE into the same discussion feed, in time order, alongside the comments (one feed, two tables) — newest-first on the default record page's timeline stream, oldest-first on an authored record:discussion panel",
           "oracle": "dom",
-          "verify": "after an attributable change, its sys_activity row appears in time order among the comment rows (mergeFeedRows sorts by createdAt; recordActivityFeed.ts maps sys_activity.type → FeedItemType)",
+          "verify": "after an attributable change, its sys_activity row appears in time order among the comment rows, in the direction of the surface read (the stream: recordTimelineStream.ts mergeTimelineStream sorts newest first; the panel: RecordDetailView's mergeFeedRows sorts by createdAt ascending); recordActivityFeed.ts maps sys_activity.type → FeedItemType. On a trackHistory object the stream shows the update as the audit's field-change line instead of the activity row (steps[5])",
           "evidence": "the interleaved feed screenshot + the sys_activity read"
         },
         {
@@ -3140,7 +3205,7 @@
         {
           "clause": "PER-VARIANT: each of the four FeedFilterMode values shows exactly its subset — 'all' the full merged feed, 'comments_only' rows of feed type comment, 'changes_only' rows of feed type field_change, 'tasks_only' rows of feed type task (an EMPTY subset is a correct rendering when the record has no rows of that type — record it, don't fail it) — and switching back to 'all' restores every row",
           "oracle": "dom",
-          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx filterItems; the four options offered are getFilterOptions). The mode TYPE is imported from @objectstack/spec/data, so the control cannot offer a mode the spec does not declare",
+          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx filterItems; the four options offered are getFilterOptions). The mode TYPE is imported from @objectstack/spec/data, so the control cannot offer a mode the spec does not declare. Read it on the record:discussion panel of steps[11]: the default record page's stream chips (TIMELINE_STREAM_FILTERS) are a different control and score nothing here",
           "evidence": "four screenshots + the per-mode row census against the API-read feed"
         },
         {
@@ -3269,6 +3334,12 @@
           "date": "2026-10-27",
           "change": "steps[12]: the substitute unit pin is named by its ui/ path instead of as the objectui pin (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 13,
+          "date": "2026-10-31",
+          "change": "steps[5], steps[11], steps[13], acceptance[2] (clause and verify), acceptance[7].verify and fixtures.requires[2] corrected. From QA run #27441 (W3-C3b, at c4c515ad); QA run #27438 (W3-C2b) made the same two feed findings. Wave anchor #27377, wave-3 accuracy slice S1. Record page v3 (#27310) draws the record's feed as one timeline stream, newest first, with chips All / Activity / Discussion / Changes. The four FeedFilterMode values and the oldest-first order belong to an authored record:discussion panel, such as the Project Detail page's. So steps[5] and acceptance[2] say 'in time order' and name both directions, plus the trackHistory case where the stream swaps the activity's updated row for the audit line; steps[11] drives the filter on a showcase_project record. The single-boot recipient leg also needs the sys_comment read grant: without it the account comment's mention is withheld cannot_read_thread like every other. So steps[13] binds the walled leg's scratch set on the single boot too, and fixtures.requires[2] says both boots need it. Read at base a0f865491d: recordTimelineStream.ts (mergeTimelineStream, TIMELINE_STREAM_FILTERS), RecordActivityTimeline.tsx (the FeedFilterMode select renders only off the stream variant), RecordDetailView.tsx (mergeFeedRows, ascending), mention-recipient-gate.ts (the source read is judged before the comment read). acceptance[9]'s contract is unchanged",
+          "ref": "#27441"
         }
       ]
     },
@@ -4167,7 +4238,7 @@
       "title": "Per-type CONSTRAINT enforcement on the write path (not just widget render): length/range/option/reference/computed limits, and where the platform deliberately does NOT enforce",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4177,12 +4248,12 @@
         "app": "showcase",
         "requires": [
           "showcase_field_zoo (examples/app-showcase/src/data/objects/field-zoo.object.ts): name text maxLength 200; f_number min 0 max 1000; f_currency min 0 currencyConfig{currencyMode fixed, defaultCurrency USD}, no scale and no precision (`scale` is retired from currency); f_percent min 0 max 100; f_select {low,medium,high}; f_multiselect {red,green,blue}; f_lookup→showcase_account; f_master_detail→showcase_project; f_tree→showcase_field_zoo (self-reference); f_autonumber (default counter, NO autonumberFormat); f_formula = f_number*f_percent/100",
-          "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
+          "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned (also guarded by the script validation no_invoice_for_churned_account); contact lookup with dependsOn ['account']; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
         ],
         "knownGaps": [
           "RETIRED gap, superseded: `scale` and `precision` ARE enforced on the write path, by rejection and never by rounding — more decimals than a number / percent / rating / slider field's declared scale answers max_scale (#7501), more digits than a declared precision answers max_precision (#19992), on number / currency / percent / rating / slider (packages/objectql/src/validation/record-validator.ts; unit pins record-validator.test.ts and record-validator.precision.test.ts). `currency` takes no `scale` at all: a field declaring one is refused at save (packages/spec/src/data/field.zod.ts, ruling 5791803339), so a currency value is stored as written. No stock zoo field declares a scale, so the scale probe authors a scratch number field (steps[3]). The column is still table.float (packages/drivers/driver-sql/src/sql-driver.ts#createColumn); the refusal is the validator's, not the column's.",
           "autonumberFormat TOKEN expansion ({0000}/{YYYY}/{MM}/{DD}/{YYYYMMDD}/{field}, per-rendered-prefix scope+reset) has NO showcase fixture — no showcase object declares autonumberFormat (f_autonumber uses the default bare 4-width global counter). Token expansion is pinned instead by packages/spec/src/data/autonumber-format.test.ts + packages/drivers/driver-sql/src/sql-driver-autonumber.test.ts; only server-assignment + client-value-ignored is driveable on the zoo.",
-          "the #4441 reference gate is EXISTENCE-only and deliberately unscoped (engine.ts assertReferencesResolve) — an id that exists but lies outside the field's lookupFilters/dependsOn scope is accepted; scope enforcement is client-only (drilled in records-forms.cascading-multilevel-and-clear).",
+          "the #4441 reference gate is EXISTENCE-only and deliberately unscoped (engine.ts assertReferencesResolve) — an id that exists but lies outside the field's lookupFilters/dependsOn scope is accepted; scope enforcement is client-only (drilled in records-forms.cascading-multilevel-and-clear). Show it on the dependsOn carrier (showcase_invoice.contact from another account → 201): the one lookupFilters carrier, showcase_invoice.account (status != churned), is also guarded server-side by the app's script validation no_invoice_for_churned_account, so its churned-account refusal is the rule's, not the reference gate's.",
           "summary is a runtime-MAINTAINED cache, not a write-rejected readonly field — a caller-supplied initial total is a SUPPORTED import path and is kept, then self-heals to the child aggregate on the next child write (rule-validator.ts RUNTIME_OWNED_FIELD_TYPES note, #6014). Only `formula` is strictly read-only-on-write; do NOT assert 'summary rejects direct writes'."
         ]
       },
@@ -4217,14 +4288,14 @@
         "SCALE: in a writable package (the metadata-authoring-roundtrip fixture), author a scratch object with a number field declaring scale 2; POST 1234.567 → 400 with a max_scale field error and no row, POST 1234.56 → 201 read back verbatim. Then try to save a currency field declaring scale 2 → refused at save (422). Control: POST f_currency = 1234.567 on the zoo → 201 and read back 1234.567, because currency carries no scale",
         "SELECT server boundary: POST f_select = 'not-a-value' AND (second carrier) POST showcase_invoice status = 'archived'; capture both invalid_option refusals with their options[] echo; confirm neither row count grew",
         "MULTISELECT shape: POST f_multiselect = 'red' (a scalar) and re-read as ['red'] (coerced to array); POST f_multiselect = {x:1} (a non-array object) → capture invalid_type; POST f_multiselect = ['red','purple'] → capture the per-element invalid_option naming 'purple'; POST ['red','blue'] → re-read as a set",
-        "REFERENCE: POST f_lookup = a fabricated account id → capture reference_not_found; POST f_lookup = a real seeded account id → re-read verbatim (note: an EXISTING but out-of-scope id is accepted — see cascading-multilevel-and-clear)",
+        "REFERENCE: POST f_lookup = a fabricated account id → capture reference_not_found; POST f_lookup = a real seeded account id → re-read verbatim; then show the existence-only boundary: POST a showcase_invoice {name, account: A, contact: a contact of a DIFFERENT account B} — contact is the dependsOn: ['account'] carrier (invoice.object.ts) — → 201, the out-of-scope existing id accepted (cascading-multilevel-and-clear drills the client side). ⛔ Not the lookupFilters carrier: an invoice on a churned account is refused 400 rule_violation by the app's script validation no_invoice_for_churned_account, not by the reference gate, so it shows nothing about scope",
         "AUTONUMBER server-assigned: POST a row with f_autonumber = 'HACK-9999'; GET it and confirm the stored value is the engine's sequence number (client value dropped, #5503); PATCH f_autonumber on an existing row and confirm the change is dropped while the call returns success",
         "FORMULA read-only: POST a row writing f_formula = 999 directly; GET and confirm f_formula equals f_number*f_percent/100 (the write was ignored); with f_number=42, f_percent=75 the read is 31.5",
         "SUMMARY (nuance): create a showcase_invoice + lines; GET total and confirm it equals the line sum server-side; separately confirm a caller-supplied initial total on import is retained (maintained cache, not rejected) — do not treat summary as write-rejected"
       ],
       "acceptance": [
         {
-          "clause": "text/textarea/email/url/phone length is a REJECT, not a truncation: a value longer than the field's maxLength returns 400 VALIDATION_FAILED with fields[] {field, code:'max_length', constraint:{maxLength, actual}} and stores NOTHING — the over-length value is never silently truncated to fit",
+          "clause": "string length is a REJECT, not a truncation, scored on the zoo's one bounded string field, `name` (text, maxLength 200; f_textarea, f_email, f_url and f_phone declare no maxLength, so the other string types carry no bound to probe): a value longer than the field's maxLength returns 400 VALIDATION_FAILED with fields[] {field, code:'max_length', constraint:{maxLength, actual}} and stores NOTHING — the over-length value is never silently truncated to fit",
           "oracle": "api",
           "verify": "the 201-char name POST returns max_length naming maxLength 200 & actual 201; the row count does not grow; a 200-char name succeeds. Codes are the ADR-0114 FieldErrorCode catalog (packages/spec/src/api/errors.zod.ts); enforcement in packages/objectql/src/validation/record-validator.ts validateOne string branch",
           "evidence": "both refusal/success responses + before/after row counts"
@@ -4256,8 +4327,8 @@
         {
           "clause": "reference types (lookup/master_detail/tree/user) store the id verbatim and reject a DANGLING id with code 'reference_not_found' {target} for a non-system caller (#4441) — with the boundary that the gate is EXISTENCE-only: an id that exists but is out of lookupFilters/dependsOn scope is accepted (unscoped by design)",
           "oracle": "api",
-          "verify": "a fabricated f_lookup id → reference_not_found; a real seeded account id → verbatim re-read; engine.ts assertReferencesResolve + referenceExists (isSystem/readonly/caller-supplied narrowing). Engine-layer evidence, never this clause's pass (RUNNER rule 6): packages/objectql/src/engine-lookup-referential-integrity.test.ts drives ObjectQL in-process, not the /data door",
-          "evidence": "the dangling refusal + the verbatim re-read + a note that an out-of-scope existing id is accepted"
+          "verify": "a fabricated f_lookup id → reference_not_found; a real seeded account id → verbatim re-read; an invoice whose contact belongs to another account than its own → 201 (the dependsOn carrier, steps[6]); engine.ts assertReferencesResolve + referenceExists (isSystem/readonly/caller-supplied narrowing). Engine-layer evidence, never this clause's pass (RUNNER rule 6): packages/objectql/src/engine-lookup-referential-integrity.test.ts drives ObjectQL in-process, not the /data door",
+          "evidence": "the dangling refusal + the verbatim re-read + the dependsOn carrier's 201 with an out-of-scope contact"
         },
         {
           "clause": "autonumber is server-assigned and a client value is IGNORED on both write paths: a POSTed f_autonumber is replaced by the engine sequence value (stripRuntimeOwnedFields, #5503) and a PATCH of it is dropped — the call returns success while the column holds the generated number, never the forged one",
@@ -4328,6 +4399,12 @@
           "date": "2026-10-28",
           "change": "acceptance[2], negative[3], steps[3], fixtures.requires[0], knownGaps[0] and one source line follow the enforced scale contract. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, Tier 1 half B, at 756220c4; wave anchor #25807, slice B): the item recorded scale/precision as declared-but-unenforced on a currency field declared scale 2, but the served f_currency declares no scale, a currency field declaring scale is refused at save (the run's PUT of a scale-2 currency field answered 422), and number scale is enforced on write. Re-read at base fd246c22: packages/objectql/src/validation/record-validator.ts (scale → max_scale on number/percent/rating/slider, NOT currency; precision → max_precision, rejection never rounding), packages/spec/src/data/field.zod.ts (the currency scale refusal, ruling 5791803339), examples/app-showcase/src/data/objects/field-zoo.object.ts (f_currency: min 0, currencyConfig only). acceptance[2] changed meaning with the product (from a recorded gap to an enforced refusal), so a verdict for revision 4 does not carry to it",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "acceptance[0]'s clause, acceptance[5] (verify and evidence), steps[6], fixtures.requires[1] and knownGaps[2] corrected. From QA run #27438 (W3-C2b, at c4c515ad; the A5 finding line is truncated in the record, so its tail was read from source; wave anchor #27377, wave-3 accuracy slice S1). acceptance[0] named text/textarea/email/url/phone length, but on the zoo only `name` declares a maxLength (200); the clause now names that carrier and says the other string types carry no bound. The existence-only reference boundary is shown on the dependsOn carrier (showcase_invoice.contact from another account → 201): the lookupFilters carrier's churned-account case is refused by the app's no_invoice_for_churned_account script rule, not by the reference gate. Read at base a0f865491d: field-zoo.object.ts, invoice.object.ts (contact dependsOn, account lookupFilters, the script validation). The reject-not-truncate and existence-only contracts are unchanged",
+          "ref": "#27438"
         }
       ]
     },
@@ -4486,7 +4563,7 @@
       "title": "Secret/encrypted field: ciphertext at rest, masked on every read, no-op mask re-submit, and fail-CLOSED without an ICryptoProvider (ADR-0100)",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4505,7 +4582,7 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB, on a provider-wired boot (`os serve`, LocalCryptoProvider); sign in as the seeded admin; keep an API token",
+        "boot the showcase on its own port and DB — every stock boot is provider-wired: the canonical `os dev` (which spawns `serve --dev`, packages/cli/src/commands/dev.ts) wires LocalCryptoProvider exactly as `os serve` does (QA run #27438's os dev boot wrote aes-256-gcm ciphertext; fixtures.knownGaps[1]); sign in as the seeded admin; keep an API token",
         "WRITE ciphertext: POST /api/v1/data/showcase_field_zoo {name:'sec-1', f_secret:'topsecret-value'}; GET the row over the API and confirm f_secret reads back as the SECRET_MASK, never 'topsecret-value'; where DB access exists, confirm the business-row column holds a 'secret:<handle>' ref and the plaintext lives only (encrypted) in sys_secret",
         "MASK on read for f_password too: POST f_password='p@ssw0rd!'; GET and confirm f_password reads back as the mask (generic password: plaintext-at-rest but masked-on-read)",
         "ECHOED-MASK no-op: PATCH the row's f_secret back as the SECRET_MASK sentinel; GET and confirm the stored secret is UNCHANGED (a form round-trip re-submitting the mask does not wipe it)",
@@ -4604,6 +4681,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin for acceptance[2]–[4] and negative[1]–[3] at the REST data door (#26573 slice 1). acceptance[3] is now pinned on an engine left unwired in-process; on a stock live boot it stays blocked(fixture) as fixtures.knownGaps[1] says, and that note's 'NO live leg' now reads only for a live boot. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-31",
+          "change": "steps[0] no longer implies `os serve` is needed for the crypto provider. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). `os dev` spawns `serve --dev`, so the canonical dev boot wires LocalCryptoProvider too, and the run's os dev boot wrote aes-256-gcm ciphertext. Read at base a0f865491d: packages/cli/src/commands/dev.ts (the serve --dev spawn), serve.ts (the LocalCryptoProvider wiring). Not touched here: whether the in-process HTTP pin scores acceptance[3] / negative[1], which waits on a ruling. No clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -4612,7 +4695,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4635,7 +4718,7 @@
         "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
         "run the spec pins: vitest run over packages/spec/src/data/object-strictness-batch20.test.ts and field-group-layout.test.ts",
-        "console leg: open a qagroup_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
+        "console leg: first PATCH one pro_details member of the record to a value over the API. The detail page hides a section whose fields are ALL empty from a reader (record:details resolves hideEmpty ?? true on each section, ui/packages/plugin-detail/src/renderers/record-details.tsx), so with no member value the section stays absent with kind=pro too, and the detail half measures nothing. Then open a qagroup_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
         "display-tier probe: with kind=basic (predicate FALSE), pre-fill a pro_details member value via API, open the form, save an unrelated edit, then re-read the member field over the API"
       ],
       "acceptance": [
@@ -4748,6 +4831,12 @@
           "date": "2026-10-28",
           "change": "acceptance[3] says when the detail page re-gates. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): on the detail page the gate applied on save, not on an unsaved inline flip, while the clause said 'LIVE … on form and detail alike'. The run scored the clause PASS; the clause now names the moment each page re-gates. The run's other line (the scratch object needs its namespace prefix) is already closed: steps[1] declares namespace qagroup and names qagroup_group_gate. Re-read at base fd246c22: the clause's detail pin, ui/packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx, evaluates the group per record",
           "ref": "#25807"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "steps[5] pre-fills a member value before the console leg. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The record page's details sections default hideEmpty to true (record-details.tsx resolves `s.hideEmpty ?? true`, and DetailSection hides an all-empty section from a reader), so an empty Pro details section is absent on the detail page whatever kind says, and a run could score the gate from an absence the gate did not cause. Read at base a0f865491d. No clause changed",
+          "ref": "#27441"
         }
       ]
     },
@@ -4756,7 +4845,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4766,18 +4855,18 @@
         "app": "showcase",
         "requires": [
           "a dev boot on its own port and DB, on the stock SQLite store (no boot door accepts the in-memory engine any more — every one refuses it and names SQLite, 9a4182a75) + a manage_metadata session — the item authors its own scratch object",
-          "scratch qa_unique object authored inline: sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
+          "scratch qauniq_item object authored inline under a package that declares the namespace 'qauniq' (steps[0]): sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
         ],
         "knownGaps": [
-          "NO showcase object declares `unique` on any field — the write vectors run against the inline-authored qa_unique object; landing a unique field on the field zoo would retire this gap",
+          "NO showcase object declares `unique` on any field — the write vectors run against the inline-authored qauniq_item object; landing a unique field on the field zoo would retire this gap",
           "[INVERTED, rev 2 — this gap used to say the SQL-family live leg needed a SQL-datasource boot] the live legs now run on the SQL family (stock SQLite); it is the MEMORY-driver half that is no longer live-drivable, since no boot door accepts the in-memory engine (9a4182a75). Score the memory driver's own refusal wording (`object.field` named in backticks, the scope suffix) and its scope/converge legs from the pinned memory-unique-constraint.test.ts, and record which of the two each verdict rests on",
           "the per-organization scope leg needs TWO organizations with a colliding value in each — runtime-creatable via the better-auth org endpoints but not stock; record blocked(fixture) live and fall back to the unit pin (memory-unique-constraint.test.ts)",
           "the autonumber-collision converge leg is not drivable over plain HTTP (it needs a stale counter planted mid-flight) — unit-pin verdict (memory-unique-constraint.test.ts), plus the engine's 'Autonumber collided — re-seeding' warn line if one occurs naturally"
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB, on the stock SQLite store (the default — do not try to select the in-memory engine, every boot door refuses it); author qa_unique via the package-install + PUT /api/v1/meta/object/qa_unique pattern",
-        "POST /api/v1/data/qa_unique {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
+        "boot the showcase on its own port and DB, on the stock SQLite store (the default — do not try to select the in-memory engine, every boot door refuses it); author qauniq_item the way the area's qa-feeds-disabled recipe authors its object: POST /api/v1/packages {manifest: {id: 'com.objectstack.qa.unique', name: 'QA unique fixture', version: '1.0.0', type: 'app', namespace: 'qauniq'}, enableOnInstall: true}, then PUT /api/v1/meta/object/qauniq_item?package=com.objectstack.qa.unique. Every object a package defines must carry the package's namespace prefix: an unprefixed name such as qa_unique answers 422 NAMESPACE_PREFIX (QA run #27438), a manifest with no namespace gets one derived from the id's last segment, and 'qa' belongs to attachments-storage's qa-scratch-authz (packages/spec/src/kernel/namespace-prefix.ts)",
+        "POST /api/v1/data/qauniq_item {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
         "POST two rows with sku absent → both land (NULL-distinct)",
         "PATCH r2 to sku:'A-1' → capture the refusal and re-read r2; PATCH r1 touching only `nick` → 2xx (no self-collision)",
         "predicate update stamping ONE value onto BOTH rows (the updateMany path — client data.updateMany / the batch door where exposed; otherwise record clause 4 blocked(fixture) naming the missing door — its unit pin is driver-level evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives)) → capture the refusal and prove neither row changed",
@@ -4785,7 +4874,7 @@
       ],
       "acceptance": [
         {
-          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qa_unique') only where the object declares no label, and states 'No record was written.', while the user-facing `error` names the field by its label ('A record with this LABEL already exists') where a single offending column is reported and the field has a label, and is otherwise generic ('A record with this value already exists') — never by its API key, which stays on `field`; NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
+          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qauniq_item') only where the object declares no label, and states 'No record was written.', while the user-facing `error` names the field by its label ('A record with this LABEL already exists') where a single offending column is reported and the field has a label, and is otherwise generic ('A record with this value already exists') — never by its API key, which stays on `field`; NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
           "oracle": "api",
           "verify": "the refusal body — status, code, and the developerMessage naming the object, read from developerMessage, not from the user-facing `error` — + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
           "evidence": "refusal response + before/after counts"
@@ -4914,6 +5003,12 @@
           "date": "2026-10-27",
           "change": "acceptance[0].clause: the user-facing `error` NAMES THE FIELD BY ITS LABEL ('A record with this LABEL already exists') where the driver reports a single offending column and the field has a label, and is generic otherwise, where it named the field by its API key ('A record with this gsku already exists') while developerMessage named it by label. The engine's DuplicateRecordError carries the label it resolves for its sentence as fieldLabel (packages/objectql/src/duplicate-record-error.ts, in the writer's locale), and the REST classification names the field by it (packages/types/src/data-error-classification.ts); `field` keeps the API key. automated.ref's sentence follows it, and the dogfood pin's exact body reads 'A record with this Global SKU already exists'. Status 409, code UNIQUE_VIOLATION, developerMessage and the composite-index generic sentence are unchanged",
           "ref": "#26867"
+        },
+        {
+          "revision": 13,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[1], steps[0], steps[1], acceptance[0] and knownGaps[0] rename the scratch object qa_unique → qauniq_item under a declared namespace, and steps[0] spells the install. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). A package's objects must carry its namespace prefix, so the old 'PUT /api/v1/meta/object/qa_unique' answers 422 NAMESPACE_PREFIX under any package that does not own 'qa', and 'qa' belongs to attachments-storage's qa-scratch-authz. steps[0] now spells the package install and the PUT the way the area's qa-feeds-disabled recipe does. Read at base a0f865491d against that recipe and packages/spec/src/kernel/namespace-prefix.ts. Only the object's name and the authoring call changed; no clause's contract changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -4922,7 +5017,7 @@
       "title": "deleteBehavior matrix: set_null clears / member-removes, master_detail cascades, restrict answers 409 DELETE_RESTRICTED with the cascade remedy, required-FK set_null escalates to restrict",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4933,7 +5028,7 @@
         "requires": [
           "cascade: showcase_invoice_line.invoice (master_detail, explicit deleteBehavior:'cascade', invoice.object.ts) and expense-report lines (expense-report.object.ts)",
           "set_null scalar: showcase_contact.account (optional lookup, default set_null — contact.object.ts)",
-          "multi-value: showcase_field_zoo.f_lookups (lookup multiple:true → showcase_account, field-zoo.object.ts)",
+          "multi-value: showcase_field_zoo.f_lookups (lookup multiple:true → showcase_account, field-zoo.object.ts); a zoo row also needs its required f_master_detail → showcase_project, and a showcase_project its required account (project.object.ts)",
           "required-FK escalation: showcase_invoice.account (lookup required:true with DEFAULT deleteBehavior — invoice.object.ts): deleting an account that invoices reference escalates set_null→restrict on stock seeds"
         ],
         "knownGaps": [
@@ -4953,7 +5048,7 @@
       "steps": [
         "boot the showcase on its own port and DB; admin API token; work on rows created BY THIS RUN, not the seeds (the cascade probes destroy their parents)",
         "set_null scalar: create an account + a contact pointing at it; DELETE the account; re-read the contact",
-        "multi-value: create two accounts + a field-zoo row with f_lookups = [both]; DELETE one account; re-read the row",
+        "multi-value: create three accounts — A and B for the probe, and C to parent the zoo row's project — then a showcase_project {name, account: C}, then a field-zoo row {name, f_master_detail: that project, f_lookups: [A, B]}. f_master_detail is required:true on the zoo, so a row without it is refused before the probe starts. DELETE A; re-read the row. C and the project are never deleted, so no cascade reaches the row",
         "cascade: create an invoice with two lines; DELETE the invoice; list the lines",
         "escalation/restrict: create an account + an invoice referencing it (account is required); DELETE the account; capture the refusal envelope",
         "author-restrict arm (scratch, per knownGaps): scratch child with deleteBehavior:'restrict' → same DELETE probe",
@@ -5040,6 +5135,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) Every pin is engine-level (ObjectQL over a test driver). A precedent scored acceptance[0]–[4] and negative[0]–[3] pass from them before RUNNER rule 6; at their api oracle they now score nothing until a REST pin exists, which the ref says. (2) packages/spec/src/data/field.test.ts pins acceptance[5]'s #9689 parse seam at schema level and was not in the ref; it is added, and the verify's PUT refusal is recorded as unpinned. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "steps[2] and fixtures.requires[2] add the zoo row's required parent. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). showcase_field_zoo.f_master_detail is Field.masterDetail('showcase_project', required: true), and a showcase_project requires an account, so the step creates a third account and a project first and deletes neither. Read at base a0f865491d: field-zoo.object.ts, project.object.ts. No clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -5388,7 +5489,7 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5403,7 +5504,7 @@
           "at least one churned account and one non-churned account to invoice against"
         ],
         "knownGaps": [
-          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be provisioned. showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored from the ENGINE pin in `automated`, which proves the mechanism the clause rests on: the related row is read under SYSTEM authority with the acting identity carried, and the write path accepts and refuses by the parent field. A run that wants the live leg builds the scratch substitute #21720 measured: a scratch package with a parent object the member holds no grant on, and a child object (member create/edit) carrying a one-hop script validation over the lookup. Then it writes, as that member, against a tripping and a non-tripping parent"
+          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be made from the stock showcase objects: showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored from the ENGINE pin in `automated`, which proves the mechanism the clause rests on: the related row is read under SYSTEM authority with the acting identity carried, and the write path accepts and refuses by the parent field. Or it is scored live on the scratch substitute #21720 measured, which is runtime-only on a stock boot (QA run #27438 built and drove it at c4c515ad): POST /api/v1/packages with a declared namespace; PUT /api/v1/meta/object for a parent object, and for a child object carrying a one-hop script validation over its lookup to the parent; PUT /api/v1/meta/permission for a set granting the member the CHILD only, bound with POST /api/v1/data/sys_user_permission_set; then, as that member, write against a tripping and a non-tripping parent. The control is the member's GET of a parent row, which must answer 403: without it the leg proves nothing about an unreadable parent"
         ]
       },
       "steps": [
@@ -5485,6 +5586,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin that scores every clause at the api layer (#26573 slice 1): the showcase invoice rule over REST for acceptance[0]–[2] and negative[0]–[1], and the scratch substitute fixtures.knownGaps describes for acceptance[3] and negative[2], so acceptance[3] no longer rests on the engine layer alone. kind test → dogfood. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "fixtures.knownGaps[0] no longer says the restricted persona cannot be provisioned. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). It still holds that no STOCK persona has invoice CRUD without account read. But the scratch substitute is runtime-only on a stock boot: the run installed a package, authored a parent and a child (a one-hop script validation on the child), granted the member the child alone and bound the set, with the member's 403 on a parent read as the control. The gap now spells that sequence and the control. acceptance[3] keeps both of its routes (the engine pin, or the live substitute); no clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -5889,7 +5996,7 @@
       "title": "Discussion on v18: reactions are their own records (sys_comment_reaction — 201 with user_id forced, duplicate 409, unreadable comment 403, no update, no deleting another member's), the retired sys_comment.reactions column is refused, a comment edit is platform-stamped, and milestone activity is withheld whole from a reader missing a watched field",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -5901,7 +6008,7 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a showcase record both personas can read, with one comment by the admin",
-          "object grants for the member on sys_comment and sys_comment_reaction: no stock set gives a plain org member either (/api/v1/auth/me/permissions lists neither; the member's POST /api/v1/data/sys_comment_reaction and GET /api/v1/data/sys_comment answer 403 PERMISSION_DENIED — QA run #24558). Author a runtime permission set granting what the steps drive (read the comment; create, edit and delete reactions) through the metadata door and bind it with POST /api/v1/data/sys_user_permission_set {user_id, permission_set} — the run used one named qa_comment_set"
+          "object grants for the member on sys_comment and sys_comment_reaction: no stock set gives a plain org member either (/api/v1/auth/me/permissions lists neither; the member's POST /api/v1/data/sys_comment_reaction and GET /api/v1/data/sys_comment answer 403 PERMISSION_DENIED — QA run #24558). Author a runtime permission set granting what the steps drive (read the comment; read, create, edit and delete reactions) through the metadata door, PUT /api/v1/meta/permission/NAME {name, label, objects: {sys_comment: {allowRead: true}, sys_comment_reaction: {allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true}}} (200), and bind it with POST /api/v1/data/sys_user_permission_set {user_id, permission_set: NAME}. QA run #24558 used a set named qa_comment_set; QA run #27438 measured this sequence working at c4c515ad"
         ]
       },
       "steps": [
@@ -5973,6 +6080,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin that scores acceptance[1]–[3] at the REST data door (#26573 slice 1), with the measured refusals: an update is refused 405 OBJECT_API_METHOD_NOT_ALLOWED (the object offers no update) and a foreign delete 403 PERMISSION_DENIED (the own-record floor). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[2] names the door. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1): the runtime permission set is a PUT /api/v1/meta/permission/NAME carrying sys_comment allowRead and the four sys_comment_reaction grants (200), bound by a sys_user_permission_set row, and the run measured that sequence working. Read at base a0f865491d: permission is a runtime-creatable metadata type (packages/spec/src/kernel/metadata-plugin.zod.ts, allowRuntimeCreate). No clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -5981,7 +6094,7 @@
       "title": "Defaults that changed meaning on v18 (ADR-0087 D3 18.* entries): an omitted list-view page size is 50 (was 25), an omitted editInline means editable in place, an autonumber with no `unique` is unique per organization, and a field-heavy form opens as a bounded modal on desktop",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -5991,9 +6104,9 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "any boot of the showcase on its own port and DB: nothing here needs a fresh database, because the run seeds its own rows (requires[2]). `pnpm dev -- --fresh -p PORT --seed-admin` works (ephemeral DB; the seeded admin is printed), but it compiles dist/objectstack.json into the shared tree, so when runners share one tree boot `objectstack dev --fresh --no-compile -p PORT` from examples/app-showcase instead (QA run #27481)",
           "a showcase list view with no pagination.pageSize and no userActions.editInline (GET /api/v1/meta/view lists them)",
-          "a showcase object with more than 50 rows (or seed scratch rows)",
+          "a showcase object with more than 50 rows: none has one on a fresh boot (showcase_task holds 11), so seed scratch rows before steps[0]'s count. QA run #27438 POSTed 50 showcase_task rows; list-view-capabilities' showcase_inquiry createMany recipe also works",
           "the console bundle for the browser legs — see knownGaps"
         ],
         "knownGaps": [
@@ -6001,7 +6114,7 @@
         ]
       },
       "steps": [
-        "GET /api/v1/meta/view/VIEW to confirm the view declares no pagination and no userActions block — the meta read serves the authored view, so nothing resolved can be read there; the defaults show only in the renderer (the list request's top=50, the Edit inline switch). Open the list in the console and count the first page",
+        "GET /api/v1/meta/view/VIEW to confirm the view declares no pagination and no userActions block — the meta read serves the authored view, so nothing resolved can be read there; the defaults show only in the renderer (the list request's top=50, the Edit inline switch). Seed more than 50 rows on the object whose list you count first (fixtures.requires[2]: no stock object holds that many), then open the list in the console and count the first page",
         "as a member who may update, open the list and confirm the inline-edit affordance — the 'Edit inline' switch in the list's Display / view-settings popover at desktop width; as a read-only member confirm it is absent. The edit mode itself is session state that starts OFF (objectui app-shell ObjectView.tsx: 'The edit mode is now session state'), so cells are not editable on load until the switch is turned on — a click on a cell opens the record before then",
         "create two rows of an autonumber object in the same org and read their numbers",
         "open New on a field-heavy object on a desktop viewport, then on a mobile viewport"
@@ -6076,6 +6189,12 @@
           "date": "2026-10-27",
           "change": "fixtures.knownGaps[0]: the retired pin-file name dropped; the measured objectui revision 4016370af3c9 kept (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[0] and [2] and steps[0] corrected. From QA run #27438 (W3-C2b, at c4c515ad), with QA run #27481's shared-tree boot note (W3-C1); wave anchor #27377, wave-3 accuracy slice S1. No stock showcase object holds more than 50 rows on a fresh boot (showcase_task has 11), so the 50-row check needs seeded rows, which the run supplied with 50 showcase_task POSTs; the item now says to seed before counting. A fresh database is not needed, so requires[0] takes any own-port boot, and it names `objectstack dev --fresh --no-compile -p PORT` for runners sharing one tree, because `pnpm dev -- --fresh` compiles dist/objectstack.json into it (packages/cli/src/commands/dev.ts, --no-compile). Read at base a0f865491d. No clause changed",
+          "ref": "#27438"
         }
       ]
     }
