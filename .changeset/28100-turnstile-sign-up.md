@@ -1,6 +1,6 @@
 ---
 '@objectstack/plugin-auth': patch
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/cli': patch
 '@object-ui/auth': patch
 '@object-ui/app-shell': patch
@@ -11,7 +11,7 @@
 feat(plugin-auth): opt-in Cloudflare Turnstile on email sign-up — off unless both `OS_TURNSTILE_SITE_KEY` and `OS_TURNSTILE_SECRET_KEY` are set
 
 Clause-②: yes (widening: the public auth config gains `features.turnstileSiteKey`, served only while the challenge is on; `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` and `AuthFeaturesConfigSchema` gain `turnstileSiteKey`; with the challenge on, `/sign-up/email` answers better-auth's `captcha` refusals `400 MISSING_RESPONSE`, `403 VERIFICATION_FAILED` and `500 UNKNOWN_ERROR`; two new env vars; `@object-ui/auth` gains `TurnstileWidget`, `TURNSTILE_SCRIPT_URL`, `RegisterForm`'s `turnstileSiteKey` prop and `captchaFailed`/`captchaRetry` labels, `SignUpData.captchaToken` and a fifth `signUp` argument; `@object-ui/app-shell` gains `signUpCaptchaFailedMessage`)
-Metadata-protocol: none
+Metadata-protocol: added
 
 A deployment can now ask for a human check before an email/password account is created. Set both variables and:
 
