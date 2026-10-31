@@ -185,6 +185,7 @@ const de = {
     dialogDescriptionFallback: "Füllen Sie die Formularfelder aus und senden Sie ab oder brechen Sie ab.",
     deniedDescription: "Sie haben keinen Bearbeitungszugriff auf dieses Feld.",
     serverDefaultHint: "Wird beim Speichern automatisch gesetzt.",
+    requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",
     maxFileSize: "Maximale Größe: {{size}}",
     masterDetail: {
       loadingColumns: "Spalten werden geladen…",
@@ -1161,6 +1162,18 @@ const de = {
     maximize: "Maximieren",
     restoreSize: "Größe wiederherstellen",
     recordOf: "{{current}} von {{total}}",
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: "{{current}} von {{total}} in {{scope}}",
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: "{{title}} filtern…",
+    relatedChips: "Anzeigen",
+    relatedChipAll: "Alle",
+    relatedChipMine: "Meine",
+    relatedChipOverdue: "Überfällig",
+    relatedExport: "Exportieren",
+    relatedRows: "{{count}} Einträge",
+    relatedRows_one: "{{count}} Eintrag",
+    relatedRows_other: "{{count}} Einträge",
     recordNotFound: "Datensatz nicht gefunden",
     recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht, wurde möglicherweise gelöscht, oder Sie haben keinen Zugriff darauf.",
     goBack: "Zurück",

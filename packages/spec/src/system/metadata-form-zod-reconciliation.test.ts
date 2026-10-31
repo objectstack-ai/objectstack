@@ -354,6 +354,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'record',
     why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
   },
+  // #28022 — an app's per-audience landing list lands spec-first the same way:
+  // `planned` in the liveness ledger, read by no console until the landing
+  // redirect card. Offering it in the app form first would be the UI half of
+  // declared-not-enforced.
+  {
+    kind: 'omit',
+    type: 'app',
+    path: ROOT_PATH,
+    key: 'landing',
+    why: "planned, not yet rendered — each entry's `item` is refused at parse unless it names an openable entry of the app's own navigation, and its audience predicate is shape-checked, but no console opens an app on it until the landing redirect lands. A form control offered today would let an author set a landing nobody is sent to",
+  },
   // #22228 — a field's cell formatting rules land spec-first the same way:
   // `planned` in the liveness ledger, read by no renderer until objectui's cell
   // card. Offering the key in the field form first would be the UI half of

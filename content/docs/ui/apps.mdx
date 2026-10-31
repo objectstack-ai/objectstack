@@ -49,6 +49,7 @@ const crmApp = defineApp({
 | `navigation` | `NavigationItem[]` | optional | Navigation tree |
 | `areas` | `NavigationArea[]` | optional | Partition navigation by business domain — see [Areas](#areas) |
 | `contextSelectors` | `AppContextSelector[]` | optional | Sidebar scope dropdowns whose value is injected into navigation items — see [Context Selectors](#context-selectors) |
+| `landing` | `AppLandingEntry[]` | optional | **Planned.** Per-audience landing: which navigation entry each audience opens on — see [Landing per audience](#landing-per-audience) |
 | `branding` | `AppBranding` | optional | Visual customization |
 | `requiredPermissions` | `string[]` | optional | Required permissions to access |
 | `defaultAgent` | `string` | optional | Platform agent bound to this app's ambient AI chat — see [Default Agent](#default-agent) |
@@ -283,7 +284,8 @@ label — the only keys it accepts are `type`, an optional `id`, and an optional
 All navigation items **except `separator`** share these base properties. Every
 item **must** declare a unique `id` (lowercase `snake_case`) — it is required by
 the schema, and it is what `order` sorts and what the landing page resolves to
-(the first item, since `homePageId` was removed in 17.0.0 — see below).
+(the first item, since `homePageId` was removed in 17.0.0 — see below — unless a
+[`landing`](#landing-per-audience) entry matches the reader).
 (On a `separator`, `id` is optional and the remaining properties below are
 rejected — a divider has nothing to label, gate, or badge.)
 
@@ -713,6 +715,63 @@ const studioApp = defineApp({
   requiredPermissions: ['studio.access'],
 });
 ```
+
+## Landing per audience
+
+An app opens on its first navigation item (by `order`). When one app serves
+several audiences, that is one landing for all of them: moving Sales above
+Service to suit the sales team moves service staff's landing to Leads.
+`landing` lets the app name, per audience, which of its own navigation entries
+a reader opens on.
+
+```typescript
+defineApp({
+  name: 'crm',
+  label: 'CRM',
+  navigation: [
+    { id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'lead' },
+    { id: 'grp_service', type: 'group', label: 'Service', children: [
+      { id: 'nav_service_console', type: 'page', label: 'Service console', pageName: 'service_console' },
+    ]},
+  ],
+  landing: [
+    { item: 'nav_service_console', visible: "'service_agent' in current_user.positions" },
+    { item: 'nav_leads', visible: "'sales_rep' in current_user.positions" },
+  ],
+});
+```
+
+The entries are asked **in order**, and the first whose `visible` holds for the
+reader wins. When no entry matches, or the key is absent, the app opens where it
+always has: its first navigation item.
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `item` | `string` | ✅ | The `id` of a navigation entry of **this app** — its own `navigation` or any `areas[].navigation`, at any depth |
+| `visible` | `string` (CEL) | ✅ | Who lands there — the same dialect and reader roots (`current_user`, `features`) as a navigation entry's `visible` |
+
+Refused at parse, at the entry's own path:
+
+- an `item` that names no navigation entry of this app (the error lists the ones
+  that exist). Items another package contributes through
+  `navigationContributions` are not part of the app being parsed and cannot be
+  named;
+- an `item` that names a `group`, `separator` or `action` entry — none of them
+  opens a page;
+- an entry without `visible`. A landing for everyone is still "put that entry
+  first in `navigation`"; `landing` is for different audiences;
+- a `visible` that reads `data` — a landing entry has no `dataSource`.
+
+`landing` only decides where a reader **opens**. It grants nothing: the entry
+keeps its own `visible` / `requiredPermissions` / `requiresObject` gates, and an
+entry the reader cannot see is passed over.
+
+<Callout type="warn">
+  **Planned — not yet applied.** The key is declared and validated, but no
+  console reads it yet, so every reader still opens on the app's first
+  navigation item until the console's landing redirect ships. `os validate`
+  says so for any app that declares it.
+</Callout>
 
 ## Default Agent
 

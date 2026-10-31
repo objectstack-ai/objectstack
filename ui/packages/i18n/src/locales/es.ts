@@ -192,6 +192,7 @@ const es = {
     dialogDescriptionFallback: "Complete los campos del formulario y luego envíe o cancele.",
     deniedDescription: "No tienes permiso para editar este campo.",
     serverDefaultHint: "Se establece automáticamente al guardar.",
+    requiredForAction: "Obligatorio para ejecutar «{{action}}».",
     maxFileSize: "Tamaño máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Cargando columnas…",
@@ -1195,6 +1196,19 @@ const es = {
     maximize: "Maximizar",
     restoreSize: "Restaurar tamaño",
     recordOf: "{{current}} de {{total}}",
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: "{{current}} de {{total}} en {{scope}}",
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: "Filtrar {{title}}…",
+    relatedChips: "Mostrar",
+    relatedChipAll: "Todos",
+    relatedChipMine: "Míos",
+    relatedChipOverdue: "Vencidos",
+    relatedExport: "Exportar",
+    relatedRows: "{{count}} registros",
+    relatedRows_one: "{{count}} registro",
+    relatedRows_many: "{{count}} de registros",
+    relatedRows_other: "{{count}} registros",
     recordNotFound: "Registro no encontrado",
     recordNotFoundDescription: "El registro que busca no existe, puede haber sido eliminado o es posible que no tenga acceso a él.",
     goBack: "Volver",

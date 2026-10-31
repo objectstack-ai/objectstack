@@ -187,6 +187,7 @@ const pt = {
     dialogDescriptionFallback: "Preencha os campos do formulário e depois envie ou cancele.",
     deniedDescription: "Você não tem permissão para editar este campo.",
     serverDefaultHint: "Definido automaticamente ao salvar.",
+    requiredForAction: "Obrigatório para executar «{{action}}».",
     maxFileSize: "Tamanho máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Carregando colunas…",
@@ -1192,6 +1193,19 @@ const pt = {
     maximize: "Maximizar",
     restoreSize: "Restaurar tamanho",
     recordOf: "{{current}} de {{total}}",
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: "{{current}} de {{total}} em {{scope}}",
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: "Filtrar {{title}}…",
+    relatedChips: "Mostrar",
+    relatedChipAll: "Todos",
+    relatedChipMine: "Meus",
+    relatedChipOverdue: "Atrasados",
+    relatedExport: "Exportar",
+    relatedRows: "{{count}} registros",
+    relatedRows_one: "{{count}} registro",
+    relatedRows_many: "{{count}} de registros",
+    relatedRows_other: "{{count}} registros",
     recordNotFound: "Registro não encontrado",
     recordNotFoundDescription: "O registro que você está procurando não existe, pode ter sido excluído ou você pode não ter acesso a ele.",
     goBack: "Voltar",

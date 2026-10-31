@@ -127,6 +127,16 @@ export function useObjectViewRecordNavigation({
     // (objectstack#27545) — and the location changes with it.
     const locationRef = useRef(location);
     locationRef.current = location;
+    // The rows the list shows (`handleListRowsChange` below), read when a
+    // handler runs: a page this list opens steps through them
+    // (objectstack#27524, Target 7).
+    const listRowIdsRef = useRef<readonly string[]>([]);
+    // The list's name — its view's tab label: what the page's way back says,
+    // and the set the pane's counter names (objectstack#27524, Target 7).
+    const listLabel = useMemo(
+        () => viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
+        [activeView?.id, activeView?.name, activeView?.label, objectDef.name, servedViews, viewLabel, unlabelledViewText, language],
+    );
     // Memoize onNavigate to prevent stale closure in useNavigationOverlay's handleClick
     const handleNavOverlayNavigate = useCallback(
         (recordId: string | number, action?: string, extraState?: Record<string, unknown>) => {
@@ -152,11 +162,16 @@ export function useObjectViewRecordNavigation({
             // already treated the name and the token identically, which is
             // exactly what made the substitution inaudible on this surface.
             const { pathname, search } = locationRef.current;
+            // The rows the list shows go along when the record is one of
+            // them: the page's top bar counts and steps through them
+            // (objectstack#27524, Target 7).
+            const siblings = listRowIdsRef.current;
             const originState = {
               ...extraState,
               from: {
                 pathname: pathname + (search || ''),
-                label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
+                label: listLabel,
+                ...(siblings.includes(String(recordId)) ? { siblings } : {}),
               },
             };
             if (viewId) {
@@ -165,7 +180,7 @@ export function useObjectViewRecordNavigation({
                 navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState });
             }
         },
-        [navigate, viewId, objectDef, activeView?.id, activeView?.name, activeView?.label, viewLabel, unlabelledViewText, servedViews, language]
+        [navigate, viewId, listLabel]
     );
     /**
      * The list surface's half of the record-link mechanism (objectui#4490):
@@ -274,15 +289,22 @@ export function useObjectViewRecordNavigation({
      * The row's `↗` (objectstack#26681): the record's page, handed the way back
      * to this list with that record open — the page's 「Collapse to drawer」
      * (`recordDrawerReturnState`), drawn only for a reader who arrived this
-     * way (objectstack#27545).
+     * way (objectstack#27545) — and the rows the list shows, which that page's
+     * top bar steps through with its counter and ↓ ↑ (objectstack#27524,
+     * Target 7). Read at click time: the handler never changes with the rows.
      */
     const handleOpenRowAsPage = useCallback((recordId: string | number) => {
         const { pathname, search, state } = locationRef.current;
         const back = new URLSearchParams(search);
         back.set(RECORD_DRAWER_PARAM, String(recordId));
+        const siblings = listRowIdsRef.current;
         const returnState = recordDrawerReturnState(
             { pathname, search: `?${back.toString()}`, state },
-            [{ objectName: objectDef.name, recordId: String(recordId) }],
+            [{
+                objectName: objectDef.name,
+                recordId: String(recordId),
+                ...(siblings.includes(String(recordId)) ? { siblings } : {}),
+            }],
         );
         handleNavOverlayNavigate(recordId, undefined, returnState);
     }, [objectDef.name, handleNavOverlayNavigate]);
@@ -293,6 +315,7 @@ export function useObjectViewRecordNavigation({
      * changes nothing.
      */
     const [listRowIds, setListRowIds] = useState<{ key: string; ids: readonly string[] }>({ key: '', ids: [] });
+    listRowIdsRef.current = listRowIds.ids;
     const handleListRowsChange = useCallback((rows: ReadonlyArray<Record<string, unknown>>) => {
         const ids = rows
             .map((row) => (row?.id ?? row?._id) as string | number | undefined)
@@ -331,5 +354,5 @@ export function useObjectViewRecordNavigation({
             navOverlay.close();
         }
     }, [drawerRecordId]);
-    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep };
+    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel };
 }

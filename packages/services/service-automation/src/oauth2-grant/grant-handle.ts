@@ -49,13 +49,20 @@ import {
 import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import type { ILock } from '@objectstack/spec/contracts';
 import type { ConnectorConnectionRecord, ConnectorConnectionStore } from '../connector-connections.js';
-import { OAuth2GrantRefusedError, requestOAuth2Token, type OAuth2TokenResponse } from './token-endpoint.js';
+import { OAuth2GrantRefusedError, requestOAuth2Token, type OAuth2Client, type OAuth2TokenResponse } from './token-endpoint.js';
+import { parseMcpAuthorizationClient } from './mcp-authorization.js';
 
-/** What an `oauth2` instance's handle needs from its declaration, already judged servable. */
+/**
+ * What an `oauth2` instance's handle needs from its declaration, already
+ * judged servable. An `authorization_code` instance whose endpoints or client
+ * the MCP authorization flow discovers (ADR-0143 D2.1) declares neither
+ * `tokenUrl` nor `clientId`: each connection then keeps its own client
+ * (`registered_client`), which its refreshes use.
+ */
 export interface OAuth2GrantConfig {
     readonly grant: 'authorization_code' | 'client_credentials';
-    readonly tokenUrl: string;
-    readonly clientId: string;
+    readonly tokenUrl?: string;
+    readonly clientId?: string;
     /** The resolved client secret; absent for a public `authorization_code` client. */
     readonly clientSecret?: string;
     readonly scopes?: readonly string[];
@@ -125,11 +132,13 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
     const now = deps.now ?? Date.now;
     const fresh = (token: CachedToken | undefined): token is CachedToken =>
         token !== undefined && (token.expiresAt === undefined || token.expiresAt - BORROWED_CREDENTIAL_SKEW_MS > now());
-    const client = { clientId: config.clientId, ...(config.clientSecret === undefined ? {} : { clientSecret: config.clientSecret }) };
-    const tokenRequest = (params: Record<string, string>) => requestOAuth2Token({
+    const declaredClient = config.clientId === undefined
+        ? undefined
+        : { clientId: config.clientId, ...(config.clientSecret === undefined ? {} : { clientSecret: config.clientSecret }) };
+    const tokenRequest = (params: Record<string, string>, endpoint: { tokenUrl: string; client: OAuth2Client }) => requestOAuth2Token({
         connector,
-        tokenUrl: config.tokenUrl,
-        client,
+        tokenUrl: endpoint.tokenUrl,
+        client: endpoint.client,
         params,
         ...(deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }),
         ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
@@ -137,6 +146,10 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
     });
 
     if (config.grant === 'client_credentials') {
+        if (config.tokenUrl === undefined || declaredClient === undefined) {
+            throw new Error(`connector instance '${connector}': a client_credentials grant needs its declared tokenUrl and clientId`);
+        }
+        const endpoint = { tokenUrl: config.tokenUrl, client: declaredClient };
         let held: CachedToken | undefined;
         let inflight: Promise<CachedToken> | undefined;
         const fill = (): Promise<CachedToken> => {
@@ -144,7 +157,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
                 const params: Record<string, string> = { grant_type: 'client_credentials' };
                 if (config.scopes && config.scopes.length > 0) params.scope = config.scopes.join(' ');
                 if (config.resource) params.resource = config.resource;
-                const token = await tokenRequest(params);
+                const token = await tokenRequest(params, endpoint);
                 held = { revision: 0, accessToken: token.accessToken, ...(token.expiresAt === undefined ? {} : { expiresAt: token.expiresAt }) };
                 return held;
             })().finally(() => { inflight = undefined; });
@@ -213,6 +226,33 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
         return unavailable(reason);
     };
 
+    /**
+     * Where `record`'s refresh is sent, and as which client: the declared ones,
+     * else the client the connection keeps (an MCP instance's discovered or
+     * registered one); `undefined` when it keeps none it can be read back as.
+     */
+    const endpointOf = async (
+        record: ConnectorConnectionRecord,
+    ): Promise<{ tokenUrl: string; client: OAuth2Client; resource?: string } | undefined> => {
+        if (config.tokenUrl !== undefined && declaredClient !== undefined) {
+            return { tokenUrl: config.tokenUrl, client: declaredClient, ...(config.resource ? { resource: config.resource } : {}) };
+        }
+        let text: string | undefined;
+        try {
+            text = await deps.connections.resolveRegisteredClient(record);
+        } catch {
+            throw unavailable(`the connection of connector instance '${connector}' for organization '${record.organizationId}' could `
+                + 'not be read back now; the next dispatch retries');
+        }
+        const kept = parseMcpAuthorizationClient(text);
+        if (!kept) return undefined;
+        return {
+            tokenUrl: config.tokenUrl ?? kept.tokenUrl,
+            client: declaredClient ?? { clientId: kept.clientId, ...(kept.clientSecret === undefined ? {} : { clientSecret: kept.clientSecret }) },
+            resource: config.resource ?? kept.resource,
+        };
+    };
+
     /** One refresh of `organizationId`'s connection, read again under the lock. */
     const refreshOnce = async (organizationId: string): Promise<CachedToken> => {
         const current = await deps.connections.read(organizationId, connector);
@@ -229,11 +269,16 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
             throw await grantRefused(current, reconnectRequiredReason(connector, organizationId)
                 + '. Its authorization server issued no refresh token, so an expired access token cannot be renewed');
         }
+        const endpoint = await endpointOf(current);
+        if (endpoint === undefined) {
+            throw await grantRefused(current, reconnectRequiredReason(connector, organizationId)
+                + '. Its connection keeps no client to refresh it with');
+        }
         const params: Record<string, string> = { grant_type: 'refresh_token', refresh_token: refreshToken };
-        if (config.resource) params.resource = config.resource;
+        if (endpoint.resource) params.resource = endpoint.resource;
         let token: OAuth2TokenResponse;
         try {
-            token = await tokenRequest(params);
+            token = await tokenRequest(params, endpoint);
         } catch (err) {
             if (err instanceof OAuth2GrantRefusedError) throw await grantRefused(current, reconnectRequiredReason(connector, organizationId));
             throw err;

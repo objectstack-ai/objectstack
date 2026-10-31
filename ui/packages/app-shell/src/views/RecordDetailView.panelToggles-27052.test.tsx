@@ -23,9 +23,11 @@
  *    for an event that carries no `code`, by the character it typed
  *    (objectstack#27241), and does nothing while a text field has focus;
  *    `⌘⇧.` (the timeline column's) is no longer the page's;
- *  - ⊟ is ONE icon, named by its label, at the end of the record header's
- *    action row (objectstack#27241) — not on the crumb row, which keeps only
- *    the ways back and has no child without one;
+ *  - ⊟ is ONE icon, named by its label, in the record's top bar
+ *    (objectstack#27524, Target 7: after the step group, before ⤢ / ⤡) — not
+ *    in the header's action row, which keeps the business actions, and the
+ *    crumb row is gone; a record drawn with no top bar of its own (a host's
+ *    plain overlay) keeps it at the end of that row (objectstack#27241);
  *  - it is drawn only where the tier has a right column: both two-column
  *    tiers, the embedded record at those widths too, never the one column;
  *  - the chord is the topmost record view's: a drawer wide enough for its
@@ -218,16 +220,19 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
   it('one ⊟ icon at the end of the header\'s action row, on; off draws the details alone; on restores', async () => {
     const { container } = renderPage();
     const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    // objectstack#27241 — the end of the header's action row, after ⋯ and a
-    // hairline; the crumb row keeps only the ways back (none on a direct open).
-    expect(group.closest('[data-record-crumb-row]')).toBeNull();
-    const toolbar = group.closest('[role="toolbar"]')!;
-    expect(toolbar).not.toBeNull();
-    expect(toolbar.closest('[data-record-column]')).toBeNull();
-    const trailing = group.closest('[data-page-header-trailing]')!;
-    expect(trailing.querySelector('[role="separator"][aria-orientation="vertical"]')).not.toBeNull();
-    expect(toolbar.lastElementChild).toBe(trailing);
-    expect(container.querySelector('[data-record-crumb-row]')?.childElementCount ?? 0).toBe(0);
+    // objectstack#27524, Target 7 — in the page's top bar, among its frame
+    // controls: no list context on a direct open, so no step group before it.
+    const bar = group.closest('[data-record-top-bar]')!;
+    expect(bar).not.toBeNull();
+    expect(group.closest('[data-record-top-bar-controls]')).not.toBeNull();
+    expect(bar.querySelector('[data-record-top-bar-step]')).toBeNull();
+    // Not in the header's action row any more, and the crumb row is gone.
+    expect(group.closest('[role="toolbar"]')).toBeNull();
+    expect(container.querySelector('[data-page-header-trailing]')).toBeNull();
+    expect(container.querySelector('[data-record-crumb-row]')).toBeNull();
+    // The bar sits above the record header.
+    const header = container.querySelector('[role="toolbar"]')!;
+    expect(bar.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // ONE switch, an icon named by its label: the segmented text control and
     // the timeline segment are gone.
     expect(group.querySelectorAll('button')).toHaveLength(1);
@@ -315,7 +320,7 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
     const { container } = renderPage({ width: 900 });
     const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     expect(container.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('two-column');
-    expect(group.closest('[role="toolbar"]')).not.toBeNull();
+    expect(group.closest('[data-record-top-bar]')).not.toBeNull();
     expect(shown(container)).toBe('details right');
     fireEvent.click(rightColumnSwitch());
     await waitFor(() => expect(shown(container)).toBe('details'));

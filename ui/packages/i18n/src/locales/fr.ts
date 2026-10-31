@@ -187,6 +187,7 @@ const fr = {
     dialogDescriptionFallback: "Remplissez les champs du formulaire, puis envoyez ou annulez.",
     deniedDescription: "Vous n'avez pas l'autorisation de modifier ce champ.",
     serverDefaultHint: "Défini automatiquement lors de l'enregistrement.",
+    requiredForAction: "Requis pour exécuter « {{action}} ».",
     maxFileSize: "Taille maximale : {{size}}",
     masterDetail: {
       loadingColumns: "Chargement des colonnes…",
@@ -1192,6 +1193,19 @@ const fr = {
     maximize: "Agrandir",
     restoreSize: "Restaurer la taille",
     recordOf: "{{current}} sur {{total}}",
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: "{{current}} sur {{total}} dans {{scope}}",
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: "Filtrer {{title}}…",
+    relatedChips: "Afficher",
+    relatedChipAll: "Tous",
+    relatedChipMine: "Les miens",
+    relatedChipOverdue: "En retard",
+    relatedExport: "Exporter",
+    relatedRows: "{{count}} enregistrements",
+    relatedRows_one: "{{count}} enregistrement",
+    relatedRows_many: "{{count}} d'enregistrements",
+    relatedRows_other: "{{count}} enregistrements",
     recordNotFound: "Enregistrement introuvable",
     recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas, a peut-être été supprimé, ou vous n'y avez peut-être pas accès.",
     goBack: "Retour",

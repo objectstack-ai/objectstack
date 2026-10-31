@@ -437,7 +437,15 @@ const baseDefaultPermissionSets: PermissionSet[] = [
     // `manage_mailboxes` (ruling 6116489638, Q4 → A): an organization
     // administrator reads its organization's mailboxes and their unassociated
     // pool; the organization wall bounds it to its own organization's rows.
-    systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'],
+    //
+    // `manage_connector_connections` ([ADR-0143] D5, ruling B on the
+    // capability's card, record 6545223261): the organization administrator is
+    // who connects their organization's OAuth2 vendors, so the shipped set holds
+    // it from day one instead of waiting on a hand-bound permission set. The
+    // capability is `org`-scoped and this set is granted per organization, so
+    // the holder connects their own organization's instances only. The no-bypass
+    // variant inherits it through `deriveWallLessOrgAdmin`: never copy it there.
+    systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes', 'manage_connector_connections'],
     // [#21237] Keeps the identity object's `Admin` group for an org admin, who
     // resolves `member_default` too; the derived no-bypass variant carries it
     // over. See `identityAdminFieldSecurity`.
