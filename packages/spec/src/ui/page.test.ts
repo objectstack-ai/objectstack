@@ -726,7 +726,9 @@ describe('ElementDataSourceSchema `filter` — one filter orthography platform-w
       filter: [{ field: 'status', operator: 'ne', value: 'done' }],
     });
     expect(legacy.success).toBe(true);
-    expect(legacy.data!.filter![0].operator).toBe('not_equals');
+    // [#28020] An element is a rule OR an any-of group, so the folded rule is
+    // asserted whole rather than read off the element union.
+    expect(legacy.data!.filter![0]).toEqual({ field: 'status', operator: 'not_equals', value: 'done' });
     // `in` takes an array; a scalar is refused at `filter.0.value` by the rule's
     // own superRefine — the value-shape check rides in with the schema.
     const scalarIn = ElementDataSourceSchema.safeParse({

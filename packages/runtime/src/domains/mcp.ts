@@ -860,7 +860,16 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                         flow = undefined; // a registry that cannot answer is not a listing failure
                     }
                 }
-                out.push(actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined));
+                // [#28178] An api action whose target cannot read the caller's
+                // credential (an OAuth-connected agent, an identity target for
+                // an API key) is LISTED, marked with the refusal `run_action`
+                // would answer — the same table, the same sentence — so an
+                // agent can explain the gap instead of discovering it.
+                const refusal = actionExec.apiForwardCredentialRefusal(context, action);
+                out.push({
+                    ...actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined),
+                    ...(refusal ? { unavailable: { code: refusal.code, reason: refusal.message } } : {}),
+                });
             }
             return out;
         },

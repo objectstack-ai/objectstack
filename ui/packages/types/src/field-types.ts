@@ -926,6 +926,16 @@ export interface LookupFieldMetadata extends BaseFieldMetadata {
    */
   displayField?: string;
 
+  /**
+   * Fields of the record being edited a pick fills, each from a field of the
+   * picked record — `@objectstack/spec`'s `FieldSchema.lookupAutofill`, typed
+   * BY REFERENCE. `LookupField` applies it in a record form (through the form
+   * renderer's `onAutofill` writer), and `GridField` in a line-item grid
+   * (handed the pairs by its host); the spec's describe states the overwrite
+   * rule both follow.
+   */
+  lookupAutofill?: SpecField['lookupAutofill'];
+
   /*
    * There is deliberately no `idField` here (objectui#12242, ruling A). The
    * record field a picker commits as the lookup's VALUE (default `id`; a

@@ -53,7 +53,7 @@ A `slotted` record page has no `tabs` slot: shape the strip with `relatedList` /
 | `record:path`        | Stage progress bar — `statusField` + `stages: [{ value, label }]` |
 | `record:related_list` | Related-list (child records via lookup) |
 | `nav:menu`           | Quick-create / nav menu bound to current context |
-| `object-metric`      | Single KPI widget (count/sum/avg) |
+| `object-metric`      | Single KPI widget (count/sum/avg); trend colour = `polarity`, see [compareTo](dashboards.md#period-over-period--compareto) |
 | `object-chart`       | Embedded chart |
 
 > **Variable substitution** — `{first_name}`, `{current_user.first_name}`,
@@ -228,7 +228,7 @@ function Page() {
 by the host capability `react-pages` — **OFF by default**: a react page's source is code
 every viewer runs. A deployment that trusts its authors turns it on server-side
 with `OS_PAGE_REACT_ENABLED=true`; while off, the page shows a "disabled" notice instead.
-`os build` does NOT lint react source (it is real JS, not constrained JSX) — errors surface
+`os build` does NOT lint react source — errors surface
 at render behind an error boundary, so always test a react page in the browser.
 
 ### Styling a page (ADR-0065) — `responsiveStyles`, NOT `className`
@@ -242,7 +242,7 @@ arbitrary classes (`text-[27px]`, `grid-cols-7`) silently do nothing.
 Rules:
 - **`responsiveStyles` and `id` are top-level** envelope fields; **child nodes go
   in `properties.children`** (the renderer hoists `properties` to schema level).
-- Every styled node **needs a stable `id`** (the CSS is scoped to it).
+- Every styled node **needs a stable `id`**.
 - **Values should be design tokens** for consistency: spacing `var(--space-1..12)`,
   radius `var(--radius)` / `var(--radius-xl)`, shadow `var(--shadow-sm|md|lg)`,
   colors `var(--surface)` / `var(--surface-sunken)` / `var(--text-strong)` /
@@ -266,7 +266,7 @@ Rules:
       backgroundColor: 'var(--surface)', border: '1px solid hsl(var(--primary))',
       boxShadow: '0 0 0 3px hsl(var(--primary) / 0.25), var(--shadow-lg)',
     },
-    small: { padding: 'var(--space-4)', gap: 'var(--space-3)' },  // responsive via the model
+    small: { padding: 'var(--space-4)', gap: 'var(--space-3)' },
   },
   properties: {
     children: [
