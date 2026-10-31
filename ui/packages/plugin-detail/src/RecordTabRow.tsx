@@ -125,8 +125,10 @@ export const RecordTabRow: React.FC<RecordTabRowProps> = ({ tabs, hiddenTabs = [
     0,
     tabs.findIndex((tab) => tab.id === activeId),
   );
+  // Until the row has a width (unmeasured, laid out nowhere, no layout
+  // engine) every tab is listed, as it is for a row that fits them all.
   const layout =
-    measure && measure.widths.length === tabs.length
+    measure && measure.available > 0 && measure.widths.length === tabs.length
       ? layoutRecordTabRow({
           widths: measure.widths,
           available: measure.available,
