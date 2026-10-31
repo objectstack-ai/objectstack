@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { strictObject } from '../shared/strict-object';
 
 /**
- * # The override declaration (ADR-0146 D2)
+ * ## The override declaration (ADR-0146 D2)
  *
  * A customization of an installed base package (HotCRM) is an item of the
  * base's paired writable package `<base>.custom` (ADR-0146 D3). An item of that
@@ -22,7 +22,7 @@ import { strictObject } from '../shared/strict-object';
  * ruling recorded on #28390, ruling A); the pairing helpers in
  * `customization-package.ts` are what a door asks.
  *
- * ## Why a leaf module
+ * ### Why a leaf module
  *
  * It imports nothing but zod and `strictObject`, on purpose. Every overridable
  * type's schema spreads {@link OverrideDeclarationFields}, and some of those
@@ -32,7 +32,7 @@ import { strictObject } from '../shared/strict-object';
  * The helpers that need the manifest grammar live in `customization-package.ts`,
  * which no schema imports.
  *
- * ## What this module does NOT do
+ * ### What this module does NOT do
  *
  * It declares the shape. Admitting a declared override, refusing an undeclared
  * same-named item, refusing a declaration from a package that is not the pair,
