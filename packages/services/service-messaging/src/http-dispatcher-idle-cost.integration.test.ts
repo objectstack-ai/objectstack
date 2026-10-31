@@ -61,7 +61,7 @@ import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.
 import { HttpDispatcher } from './http-dispatcher.js';
 import { hashPartition } from './backoff.js';
 import type { FetchImpl } from './http-sender.js';
-import type { EnqueueHttpInput, IHttpOutbox } from './http-outbox.js';
+import type { EnqueueHttpInput, HttpClaimCredential, IHttpOutbox } from './http-outbox.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 /** The production default. */
@@ -176,7 +176,7 @@ describe('#17623 #28383 HttpDispatcher — idle tick cost', () => {
         // One failed attempt deferred the row a minute: claim it and ack the
         // failure with a retry time, as a dispatcher whose POST failed does.
         const [row] = await outbox.claim({ nodeId: 'node-other', limit: 10, claimTtlMs: TTL, now: t0 });
-        await outbox.ack(row.id, { success: false, error: 'boom', durationMs: 1, nextRetryAt: t0 + 60_000 }, row);
+        await outbox.ack(row.id, { success: false, error: 'boom', durationMs: 1, nextRetryAt: t0 + 60_000 }, row as HttpClaimCredential);
         statements = [];
 
         await d.tick();
