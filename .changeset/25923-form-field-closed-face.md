@@ -21,16 +21,4 @@ Metadata-protocol: none
 
 **Fix (`@object-ui/plugin-form`).** A form-view field declaring `immutable: true` (spec `FormField.immutable`, "editable on create, locked once the record exists") is now drawn disabled when the form edits an existing record, and stays editable on a create form. It used to be copied onto the runtime field as `immutable`, which no renderer reads, so an edit form left the control editable.
 
-**Migration.** A `FormField` literal carrying a key `FormField` does not declare:
-
-```ts
-// FROM — compiled, because every key was `any`
-const f: FormField = { name: 'title', lable: 'Title', group: 'contact_info' };
-
-// TO — spell the declared key; type a key only your host writes on your own type
-const f: FormField = { name: 'title', label: 'Title' };
-type GroupedField = FormField & { group?: string };
-const g: GroupedField = { name: 'title', label: 'Title', group: 'contact_info' };
-```
-
-What to do: nothing if your `FormField` literals use only declared keys. Otherwise fix the spelling, or declare the key your host writes on a local type (`FormField & { … }`) where its producer and reader live.
+What to do: nothing if your `FormField` literals use only declared keys. Otherwise the compiler names each undeclared key on the literal that carries it (an excess-property error): correct a misspelling to the declared member, or, for a key only your host writes and reads, type it on a local intersection such as `FormField & { group?: string }` where its producer and reader live.
