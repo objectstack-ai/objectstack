@@ -773,6 +773,8 @@
     "PresignedUrlResponseSchema": "src/api/storage.zod.ts#PresignedUrlResponseSchema (const)",
     "ProvenanceWaiver": "src/api/error-code-ledger.zod.ts#ProvenanceWaiver (type)",
     "ProvenanceWaiverSchema": "src/api/error-code-ledger.zod.ts#ProvenanceWaiverSchema (const)",
+    "PublicFormSubmitResponse": "src/api/protocol.zod.ts#PublicFormSubmitResponse (type)",
+    "PublicFormSubmitResponseSchema": "src/api/protocol.zod.ts#PublicFormSubmitResponseSchema (const)",
     "PublishMetaItemRequest": "src/api/protocol.zod.ts#PublishMetaItemRequest (type)",
     "PublishMetaItemRequestSchema": "src/api/protocol.zod.ts#PublishMetaItemRequestSchema (const)",
     "PublishMetaItemResponse": "src/api/protocol.zod.ts#PublishMetaItemResponse (type)",

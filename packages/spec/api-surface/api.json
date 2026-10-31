@@ -802,6 +802,8 @@
     "PresignedUrlResponseSchema (const)",
     "ProvenanceWaiver (type)",
     "ProvenanceWaiverSchema (const)",
+    "PublicFormSubmitResponse (type)",
+    "PublicFormSubmitResponseSchema (const)",
     "PublishMetaItemRequest (type)",
     "PublishMetaItemRequestSchema (const)",
     "PublishMetaItemResponse (type)",

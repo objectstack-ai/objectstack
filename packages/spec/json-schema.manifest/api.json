@@ -320,6 +320,7 @@
     "api/PresenceUpdate",
     "api/PresignedUrlResponse",
     "api/ProvenanceWaiver",
+    "api/PublicFormSubmitResponse",
     "api/PublishMetaItemRequest",
     "api/PublishMetaItemResponse",
     "api/PublishPackageDraftsResponse",
