@@ -80,9 +80,9 @@ describe('the vendor exchanges, each as its vendor documents it (ADR-0143 D2.2)'
         ['wecom', json({ errcode: 40001, errmsg: `invalid secret ${SECRET}` }), '40001'],
     ] as const)('⛔ %s — a refused exchange is the seam\'s 503 naming the vendor code, never the vendor\'s text', async (vendor, answer, code) => {
         const { impl } = fetchAnswering(() => answer);
-        const err = await requestAppCredentialToken({
+        const err = (await requestAppCredentialToken({
             connector: 'inst', exchange: APP_CREDENTIAL_EXCHANGES[vendor], appId: 'id', appSecret: SECRET, fetch: impl,
-        }).catch((e: unknown) => e as Error & { code?: string; status?: number });
+        }).catch((e: unknown) => e)) as Error & { code?: string; status?: number };
         expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
         expect(err.message).toContain(`(${code})`);
         expect(err.message).toContain("connector instance 'inst'");
@@ -106,9 +106,9 @@ describe('the vendor exchanges, each as its vendor documents it (ADR-0143 D2.2)'
 
     it('⛔ no answer is operational, and the refusal carries neither the URL nor the transport\'s error (WeCom\'s URL holds the secret)', async () => {
         const impl = (async (url: string) => { throw new Error(`getaddrinfo failed for ${url}`); }) as unknown as typeof fetch;
-        const err = await requestAppCredentialToken({
+        const err = (await requestAppCredentialToken({
             connector: 'inst', exchange: APP_CREDENTIAL_EXCHANGES.wecom, appId: 'id', appSecret: SECRET, fetch: impl,
-        }).catch((e: unknown) => e as Error);
+        }).catch((e: unknown) => e)) as Error;
         expect(isConnectorUpstreamUnavailable(err)).toBe(true);
         expect(err.message).not.toContain(SECRET);
         expect((err as { cause?: unknown }).cause).toBeUndefined();
