@@ -879,7 +879,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -888,19 +888,18 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick (drawer) — examples/app-showcase/src/ui/views/task.view.ts. The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage, resolveFormViewLayout), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe: PUT /api/v1/meta/view/showcase_task.form?mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}}, then POST /api/v1/meta/view/showcase_task.form/publish. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
+          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is now a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage through selectRecordFormView), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe: PUT /api/v1/meta/view/showcase_task.form?mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}}, then POST /api/v1/meta/view/showcase_task.form/publish. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
           "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list"
         ],
         "knownGaps": [
-          "no form view in the showcase authors the spec's 6th form type, 'modal' (coverage.ts FORM_VIEW_TYPES deliberately lists 5). A modal-PRESENTED form exists on task-desk.page.ts (ObjectForm formType=\"modal\", create), which is where the modal variant is scored; if that page cannot be reached, record the modal variant blocked(fixture) rather than ticking or silently skipping it",
-          "drawer and modal are presentation modes, not page layouts (ADR-0050, Proposed): the metadata record-form page renders an authored type drawer/modal as simple BY DESIGN (RecordFormPage — the form-layout-vs-presentation note on objectstack#1890), and the New/Edit modal maps only tabbed (resolveFormViewLayout — wizard/split degrade to a stacked section list there). So the page-level layouts are walked on the page routes (/new and /record/:id/edit, both RecordFormPage), and the presentations on task-desk.page.ts"
+          "the drawer and modal PRESENTATIONS have one stock surface, task-desk.page.ts (ObjectForm formType=\"drawer\" to edit a task, formType=\"modal\" to create one). No form view can declare either any more: ADR-0050 took drawer and modal out of FormView.type in spec 18.3.0, and examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES lists the three layouts. If that page cannot be reached, record the presentation variant blocked(fixture) rather than ticking or silently skipping it",
+          "drawer and modal are presentation modes and split a list-beside-record mode, not page layouts (ADR-0050). Since spec 18.3.0 FormViewSchema refuses all three type values at parse, each with its prescription (packages/spec/src/ui/view.zod.ts FORM_VIEW_TYPE_RETIRED), so a default-form overlay carrying one is refused at the metadata door instead of rendering anything (QA run #27441 measured 422). The New/Edit modal maps only tabbed (resolveFormViewLayout — a wizard degrades to a stacked section list there). So the page-level layouts are walked on the page routes (/new and /record/:id/edit, both RecordFormPage), the presentations on task-desk.page.ts, and the three retired values are scored as the refusal (steps[3], acceptance[5])"
         ]
       },
       "variants": [
         "simple",
         "tabbed",
         "wizard",
-        "split",
         "drawer",
         "modal"
       ],
@@ -908,17 +907,17 @@
         "open a task record's full-page edit form (…/showcase_task/record/<id>/edit — RecordFormPage) on the stock default form (type simple); screenshot; verify the declared section ('Task', 2 columns) and its field order",
         "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed, through the fixtures.requires[0] recipe with item-level isDefault:true); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
         "overlay the default form with the wizard variant; open the PAGE form (…/showcase_task/new, or the record's /edit route — RecordFormPage passes the type in both modes); walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end. The New/Edit MODAL renders a wizard as a stacked section list by design (resolveFormViewLayout), so the steps are walked on the page route",
-        "overlay the default form with the split variant; open the page form; verify primary/secondary panes render their assigned sections side-by-side",
-        "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. An overlay of the default form with type drawer/modal renders the page form as simple, which is the designed fallback, not a fail",
+        "RETIRED-TYPE refusal: put the default-form overlay of fixtures.requires[0] with type 'split', then 'drawer', then 'modal' (any sections), and capture each refusal: a 422 whose message names the retired value with its prescription (FORM_VIEW_TYPE_RETIRED). Record whether the draft PUT or its publish answered it. Then re-read GET /api/v1/meta/view/showcase_task.form and confirm none of the three landed. There is no split pane to look for: the showcase's formViews.split is now a two-tab tabbed form",
+        "drawer and modal: open task-desk.page.ts; click a task row — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
         "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
         "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. Reach a page form's /new or /edit route by in-app navigation (the row's Edit, or New), not by a fresh page load: the page form's save goes back one history entry (RecordFormPage navigate(-1)), so on a deep-linked load it leaves the document and the toast goes with it — a driver artifact, not a lost save",
         "revert the default-form overlay so the stock simple form is back — DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm it with a re-read of the view"
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: each authored page-level form layout (simple / tabbed / wizard / split) renders its own layout mechanics, with a screenshot per variant; drawer and modal are presentation modes, not layouts (ADR-0050) — a drawer-presented form is proven on a surface that opens it as a side panel (task-desk.page.ts, a JSX ObjectForm formType=\"drawer\"), and the metadata record-form page falling back to simple for type drawer/modal is by design (#1890); no form view authors type 'modal', so the modal presentation is proven on the same page's formType=\"modal\" dialog, or recorded blocked(fixture) if that page cannot be reached.",
+          "clause": "PER-VARIANT: each page-level form layout the spec declares (simple / tabbed / wizard) renders its own layout mechanics, with a screenshot per variant; drawer and modal are presentation modes, not layouts (ADR-0050) — a drawer-presented form is proven on a surface that opens it as a side panel (task-desk.page.ts, a JSX ObjectForm formType=\"drawer\"), and the modal presentation on the same page's formType=\"modal\" dialog, or recorded blocked(fixture) if that page cannot be reached. split is no variant: spec 18.3.0 retired it, with drawer and modal, as a form type (acceptance[5]).",
           "oracle": "screenshot",
-          "verify": "one screenshot per page-level variant, each reached by overlaying the default form: tabbed shows tabs, wizard shows step chrome on the page route, split shows two panes; then the task-desk drawer (side panel over the list) and modal (dialog) screenshots. A page form rendering simple for an overlaid drawer/modal type is the designed fallback, not a fail",
+          "verify": "one screenshot per page-level variant, each reached by overlaying the default form: tabbed shows tabs, wizard shows step chrome on the page route; then the task-desk drawer (side panel over the list) and modal (dialog) screenshots",
           "evidence": "per-variant screenshots + the task-desk drawer and modal screenshots"
         },
         {
@@ -944,22 +943,28 @@
           "oracle": "dom",
           "verify": "enter a distinctive value, navigate away and back within the form, read the control value",
           "evidence": "screenshots at each hop"
+        },
+        {
+          "clause": "the retired form types are refused at authoring, never rendered: a default-form overlay with type 'split', 'drawer' or 'modal' answers 422 with that value's prescription (ADR-0050, packages/spec/src/ui/view.zod.ts FORM_VIEW_TYPE_RETIRED), and the served default form is unchanged",
+          "oracle": "api",
+          "verify": "the three refusal bodies of steps[3], each naming its retired value and its prescription; GET /api/v1/meta/view/showcase_task.form after them reads the form as it was. A 2xx that stores one of the three, or a page form that renders one, is a FAIL",
+          "evidence": "the three refusal bodies + the re-read"
         }
       ],
       "negative": [
         "a wizard that lets Next past a required title with no named field error — or that silently writes per step — is a FAIL",
-        "counting the drawer or modal variant as passed off the record-form page is a FAIL — that page renders simple for both by design; each presentation is scored only on a surface that opens it as a side panel / dialog (task-desk.page.ts), or recorded blocked(fixture) with this item cited"
+        "counting the drawer or modal variant as passed off the record-form page or a form-view overlay is a FAIL — a form view can no longer declare either (acceptance[5]); each presentation is scored only on a surface that opens the form as a side panel / dialog (task-desk.page.ts), or recorded blocked(fixture) with this item cited"
       ],
       "traps": [
         "hydration-race",
         "automation-input"
       ],
       "source": [
-        "packages/spec/src/ui/view.zod.ts#FormViewSchema (FormViewSchema type enum: simple|tabbed|wizard|split|drawer|modal)",
-        "examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES (FORM_VIEW_TYPES — the 5 authored)",
+        "packages/spec/src/ui/view.zod.ts#FormViewSchema (FormViewSchema type enum: simple|tabbed|wizard; split, drawer and modal refused by name since 18.3.0, FORM_VIEW_TYPE_RETIRED)",
+        "examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES (FORM_VIEW_TYPES — the 3 layouts)",
         "examples/app-showcase/src/ui/views/task.view.ts#formViews (formViews incl. visibleWhen on notes)",
-        "objectui packages/app-shell/src/views/RecordFormPage.tsx (reads objectDef.form ?? formViews.default; page-level layouts only — drawer/modal fall back to simple, objectstack#1890) + packages/app-shell/src/utils/recordFormNavigation.ts (resolveFormViewLayout — the New/Edit modal maps only tabbed)",
-        "docs/adr/0050-form-layout-vs-presentation.md (Proposed — drawer/modal leave FormView.type; presentation belongs to NavigationMode / addRecord.mode / action type modal) + examples/app-showcase/src/ui/pages/task-desk.page.ts (ObjectForm formType drawer + modal)"
+        "objectui packages/app-shell/src/views/RecordFormPage.tsx (reads objectDef.form ?? formViews.default through selectRecordFormView; page-level layouts only) + packages/app-shell/src/utils/recordFormNavigation.ts (resolveFormViewLayout — the New/Edit modal maps only tabbed)",
+        "docs/adr/0050-form-layout-vs-presentation.md (drawer/modal leave FormView.type and split is removed, enacted in spec 18.3.0; where a form opens is the caller's open mode) + examples/app-showcase/src/ui/pages/task-desk.page.ts (ObjectForm formType drawer + modal)"
       ],
       "history": [
         {
@@ -991,6 +996,12 @@
           "date": "2026-10-28",
           "change": "steps[6] says how to reach the page form. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): deep-linking /new or /edit with a page load made save's navigate(-1) leave the document and drop the toast. Re-read at base fd246c22: ui/packages/app-shell/src/views/RecordFormPage.tsx (navigate(-1) after save). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "variants, steps[3], steps[4], acceptance[0] (clause and verify), negative[1], fixtures.requires[0], knownGaps[0] and [1], and source[0], [1], [3] and [4] follow spec 18.3.0's form view `type`, and acceptance[5] is new. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). ADR-0050 made `type` the layout only, simple | tabbed | wizard (#27305): split, drawer and modal are refused by name (view.zod.ts FORM_VIEW_TYPE_RETIRED), and the run measured a default-form overlay carrying one answer 422. The split variant is dropped, and steps[3] scores the three retired values as that refusal in acceptance[5], appended so that no clause index moves. The text no longer says the record-form page renders an overlaid drawer/modal as simple, because no form view can declare either. The drawer and modal presentations stay on task-desk.page.ts, whose React ObjectForm keeps both containers. Re-read at base a0f865491d: view.zod.ts, task.view.ts (formViews.split is now tabbed, quick simple), coverage.ts FORM_VIEW_TYPES (3), RecordFormPage.tsx (selectRecordFormView). steps[0] and steps[6] are untouched: the run's 'in-app navigation only' finding waits on a re-measure after #28066. A prior verdict on the split variant does not carry",
+          "ref": "#27441"
         }
       ]
     },
@@ -2009,7 +2020,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 16,
+      "revision": 17,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2018,7 +2029,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, script, visible '!record.done'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — declares record_more ONLY, which is what keeps it off the toolbar; objectui#3142), showcase_new_task (locations: [] — the fleet's headless specimen, read by the empty-locations probe)",
+          "the per-location action fleet on showcase_task (examples/app-showcase/src/ui/actions/index.ts): showcase_bulk_reassign (list_item+list_toolbar, flow), showcase_quick_view (list_item, modal), showcase_mark_done (list_item+record_header+record_section, a declarative write on the default script route — operation 'update', patch {done: true, progress: 100} — visible 'has(record.done) && record.done != true'), showcase_log_time (record_header+record_related+record_section, form), showcase_open_docs (record_more, url), showcase_recalc_selection (record_more, api — declares record_more ONLY, which is what keeps it off the toolbar; objectui#3142), showcase_new_task (locations: [] — the fleet's headless specimen, read by the empty-locations probe), showcase_reopen_task (list_item only, operation 'update' patch {done: false}, visible 'has(record.done) && record.done == true' — Mark Done's mirror, so a done task's row menu offers Reopen where a not-done one offers Mark Done; a click on it is refused by the showcase_guard_task_reopen hook by design, which records-forms.script-action-hook-refusal-toast drives)",
           "seeded tasks in both done and not-done states for the CEL visibility both-sides check"
         ],
         "provisioning": {
@@ -2046,7 +2057,7 @@
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
         "dispatch one action per location with a ref-targeted click: bulk_reassign from the list toolbar — select a row FIRST: with none selected it toasts 'This action runs on a single record — select a row first' and dispatches nothing — (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (a `form` action opens its FormView as a ROUTED PAGE, not a dialog: /_console/forms/showcase_task.form?recordId=…&recordObject=showcase_task — objectui core ActionRunner.ts, \"open a FormView as a routed page (/forms/:name)\"; QA run #24616), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
-        "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
+        "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done. The done task's row menu offers showcase_reopen_task (Reopen) instead: it is not Mark Done, and does not count as a show",
         "empty-locations probe, both halves: (a) on the qaact-placement-specimen recipe's qaact_no_locations, a PACKAGED action with NO locations key (none ships on stock), sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY. A surface counts only where the recipe's qaact_control renders: the list row menu and the Project Detail Related-tab row menus. Task Detail's header, ⋯ overflow and quick-actions bar list their action ids, so they host no packaged action (the recipe's knownGaps[0]). Without the recipe record half (a) blocked(fixture). ⛔ Do not author the probe at runtime: a runtime-authored action is not served at all, so its empty sweep is no evidence; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
       ],
       "acceptance": [
@@ -2069,7 +2080,7 @@
           "evidence": "the six traces + the two re-reads"
         },
         {
-          "clause": "row-level CEL visibility gates per record, both sides: showcase_mark_done ('visible: !record.done') renders on the not-done task's row/header and is ABSENT on the done task's — and the evaluation is fail-closed (a throwing expression hides, never shows)",
+          "clause": "row-level CEL visibility gates per record, both sides: showcase_mark_done (visible 'has(record.done) && record.done != true') renders on the not-done task's row/header and is ABSENT on the done task's — and the evaluation is fail-closed (a throwing expression hides, never shows)",
           "oracle": "dom",
           "verify": "side-by-side DOM reads of the two rows and the two record headers",
           "evidence": "the four reads + screenshots"
@@ -2194,6 +2205,12 @@
           "date": "2026-10-27",
           "change": "fixtures.provisioning opts into the new area recipe qaact-placement-specimen and knownGaps[2] says it closes the gap (#26625, maintainer-directed 「补测试数据配方。立卡」). The recipe installs, through POST /api/v1/marketplace/install-local, a package whose three url actions bind to showcase_task: a control and an action whose `visible` throws at evaluation, both on list_item and record_header, and one with no `locations` key. Re-driven once at main 1708115e2f on a fresh stock boot, console from ui/ on port 5180. acceptance[3] fail-closed half PASS: the throwing action was absent from the list row menus (3 rows) and the Project Detail Related-tab row menus (2 rows) where QA Control rendered, and the console warned that its predicate failed to evaluate (Unknown variable) and was treated as its safe default. acceptance[4] half (a) PASS: QA No Locations rendered on none of the list toolbar, the list row menus, the Task Detail header and its ⋯ overflow, or the Related-tab rows. Task Detail's header, overflow and quick-actions bar list their action ids, so QA Control was absent there too and those reads carry no weight. steps[6] and acceptance[4].verify now name the recipe and the surfaces that count (folded at the seat's request). No clause changed",
           "ref": "#26625"
+        },
+        {
+          "revision": 17,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[0], steps[5] and acceptance[3]'s clause name Mark Done's real predicate and list showcase_reopen_task. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). showcase_mark_done's `visible` has been 'has(record.done) && record.done != true' since #8990 (has() guards the sparse list_item face, and != true never faults on a projected null), not '!record.done', and it is a declarative operation 'update' write on the default script route. showcase_reopen_task, the hook-refusal specimen, is its list_item-only mirror ('has(record.done) && record.done == true'), so a done task's row menu shows Reopen where the not-done one shows Mark Done; steps[5] says not to count it. Read at base a0f865491d: examples/app-showcase/src/ui/actions/index.ts. The both-sides contract is unchanged",
+          "ref": "#27441"
         }
       ],
       "enumSource": {
@@ -3054,7 +3071,7 @@
       "title": "Record discussion: an @mention comment reconciles optimistically, persists to sys_comment, interleaves with activity, pings the mentioned user's bell — and the feed filter shows exactly each mode's subset without dropping author-extended activity",
       "since": "v16",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3066,7 +3083,7 @@
         "requires": [
           "a showcase object with feeds enabled (default — enable.feeds !== false) so the discussion panel mounts and sys_comment writes are accepted (packages/spec/src/data/object.zod.ts feeds default true; plugin-audit enforceFeedsCapability)",
           "a record to comment on (e.g. a seeded showcase_task or showcase_account)",
-          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. That user must hold read on sys_comment: no showcase permission set grants it, so a minted member's GET /api/v1/data/sys_comment answers 403 PERMISSION_DENIED and every mention of them is withheld `cannot_read_thread` whatever the record (measured, #26625); the walled sequence binds a scratch set that grants it"
+          "for the recipient read-gate clause (acceptance[9]) on a stock `single` boot: the knownGaps[0] second user, a member of the same organization, and two admin-owned records — a showcase_private_note (sharingModel 'private', owner-only, examples/app-showcase/src/data/objects/private-note.object.ts), which the member cannot read, and a showcase_account (public_read_write), which the member can. The cross-organization leg needs its OWN boot under the group posture, separate from the stock `single` boot: `OS_TENANCY_POSTURE=group OS_PLATFORM_OWNER_EMAIL=admin@objectos.ai OS_AUTH_MEMBERSHIP_POLICY=invite-only pnpm dev -- --fresh -p PORT` (each variable answers a measured boot refusal: RUNNER.md 'A walled boot is a fixture of its own'), on which steps[13]'s walled sequence places the comment's record in organization A and the mentioned user in organization B only. The mentioned user must hold read on sys_comment on BOTH boots, the stock `single` one included: no showcase permission set grants it, so a minted member's GET /api/v1/data/sys_comment answers 403 PERMISSION_DENIED and every mention of them on a record they can read is withheld `cannot_read_thread` (measured, #26625; met again on the single boot by QA run #27441). Both sequences in steps[13] bind a scratch set that grants it (the walled sequence's item (4))"
         ],
         "provisioning": {
           "use": "qa-feeds-disabled",
@@ -3084,15 +3101,15 @@
         "observe the OPTIMISTIC comment row appear immediately; capture the sys_comment create",
         "reload the record page (no sys_comment refetch follows a post within ~6 s, QA run #24616), then confirm the optimistic row reconciles with the server row (same id → union-by-id merge, no duplicate, no phantom)",
         "read sys_comment over the API: GET /api/v1/data/sys_comment?$filter for the record's thread_id, ordered by created_at asc — the posted comment is present",
-        "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, oldest-first",
+        "perform an attributable change on the record (e.g. an edit) and confirm the resulting sys_activity row interleaves into the SAME feed, in time order. The direction depends on the surface: the default record page's timeline stream is newest-first (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts mergeTimelineStream), while an authored record:discussion panel — e.g. the footer of the Project Detail page on a showcase_project record (examples/app-showcase/src/ui/pages/project-detail.page.ts) — lists oldest-first (RecordDetailView mergeFeedRows). Record which surface you read. On an object with enable.trackHistory (showcase_account) the stream drops the activity's own `updated` row in favour of the audit's field-change line (mergeTimelineStream), so read this on a showcase_task, or on the panel",
         "as the mentioned second user, open the notification bell — it gains the mention notification with a deep link back to the record; unreadCount increments; mark-as-read drops it. The bell is SERVER-backed: plugin-audit writes one sys_notification (topic collab.mention) per mentioned user (packages/plugins/plugin-audit/src/audit-writers.ts), and the console's bell reads the inbox feed over GET /api/v1/notifications (objectui app-shell useInboxBell.ts) — read unreadCount there",
         "confirm a NON-mentioned user's bell does NOT gain the notification (recipient scoping)",
         "CREATE-SIDE FEEDS_DISABLED probe — as admin, POST one throwaway qafeeds_nofeeds record ({ name: 'qa-nofeeds-probe' }) for a real parent_id (qafeeds_nofeeds is a scratch OBJECT from the qa-feeds-disabled recipe with no standing rows), then POST /api/v1/data/sys_comment with { thread_id: 'qafeeds_nofeeds:<that record id>', body: 'should be refused by the feeds gate' } and capture the refusal. Admin can read AND edit that record (public_read_write), which is what isolates the refusal from the sibling RECORD_NOT_ACCESSIBLE code",
         "RE-THREAD (UPDATE-SIDE) FEEDS_DISABLED probe — take the sys_comment row posted earlier against the feeds-ENABLED record and PATCH /api/v1/data/sys_comment/<its id> with { thread_id: 'qafeeds_nofeeds:<the throwaway record id>' } as admin, capturing the refusal. This is the UPDATE half of the #10170 gate (enforceFeedsCapability registered on beforeUpdate as well as beforeInsert, packages/plugins/plugin-audit/src/audit-writers.ts): re-read the comment afterward and confirm its thread_id is UNCHANGED",
         "control for both probes — repeat the same two calls against a feeds-ENABLED parent (the seeded showcase record used above) and confirm they SUCCEED. A 403 that also fires on the enabled parent is measuring access, not the capability gate, and neither clause may be scored from it",
-        "FEED FILTER — on a record whose feed now holds at least one comment (posted above) and one field-change activity (the attributable edit above), cycle the filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
+        "FEED FILTER — the four FeedFilterMode values are offered by an authored record:discussion panel, not by the default record page, whose timeline stream has its own chips All / Activity / Discussion / Changes (record page v3, ui/packages/plugin-detail/src/recordTimelineStream.ts TIMELINE_STREAM_FILTERS). Drive it on a showcase_project record, whose Project Detail page ends in a record:discussion panel (examples/app-showcase/src/ui/pages/project-detail.page.ts): post one comment there and make one attributable edit, then cycle the panel's filter control through all four FeedFilterMode values, screenshotting each state before reading the rendered rows",
         "OPEN-VOCABULARY probe — plant an author-EXTENDED activity type: sys_activity narrows apiMethods to ['get','list'] (sys-activity.object.ts), so a direct POST is refused BY DESIGN — the sanctioned channel is a scratch object declaring activityMilestones[].type with a custom value (ADR-0052 §5b.2, forwarded verbatim) whose milestone the run then triggers; if that authoring is unavailable on the boot under test, score the clause from the unit pin ui/packages/plugin-detail/src/renderers/__tests__/recordActivityFeed.test.ts and record the substitution",
-        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) grant the user read on sys_comment: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
+        "RECIPIENT READ GATE (acceptance[9]) — on a stock `single` boot with fixtures.requires[2]. The stock boot's audience posture is invite_only, so POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: the admin mints the member with POST /api/v1/auth/admin/create-user (it lands in the default organization with mustChangePassword true), and the member signs in, calls POST /api/v1/auth/change-password and signs in again. Grant the member read on sys_comment exactly as the walled leg's item (4) below does (the scratch package, the qamention_comment_reader set, the sys_user_permission_set row) and prove it as the member: GET /api/v1/data/sys_comment answers 200. Without the grant every mention below is withheld (fixtures.requires[2]), the account comment's included, and the leg measures nothing. First prove the member's access as the member (GET /api/v1/data/showcase_private_note/ID answers 404, GET /api/v1/data/showcase_account/ID answers 200) and read the member's and the admin's GET /api/v1/notifications. As admin, POST /api/v1/data/sys_comment on the note's thread (thread_id 'showcase_private_note:ID') with mentions naming the member by user id, then a second comment there naming the member by email, then one on the account's thread naming the member by user id and the admin itself. Re-read both inboxes and count the rows of type collab.mention per comment (each row's body is the comment's preview). WALLED LEG, on the group-posture boot of fixtures.requires[2] (#26625), as the seeded admin, the platform owner: (1) POST /api/v1/auth/sign-in/email and keep the session's activeOrganizationId, organization A; (2) POST /api/v1/auth/organization/create {name: 'QA Mention Org B', slug: a fresh one per run} → organization B, then POST /api/v1/auth/organization/set-active {organizationId: B}; (3) POST /api/v1/auth/admin/create-user {email, password, name} → the user lands in B as member with mustChangePassword true; (4) grant the user read on sys_comment: POST /api/v1/packages {manifest: {id: 'com.objectstack.qamention.walled', name: 'QA walled mention fixture', version: '1.0.0', type: 'app', namespace: 'qamention'}, enableOnInstall: true} (201), PUT /api/v1/meta/permission/qamention_comment_reader?package=com.objectstack.qamention.walled {name: 'qamention_comment_reader', label: 'QA mention comment reader', objects: {sys_comment: {allowRead: true}}} (200, saved env-wide), POST /api/v1/data/sys_user_permission_set {user_id, permission_set: 'qamention_comment_reader'} (201); (5) the user signs in, calls POST /api/v1/auth/change-password, signs in again, and proves the grant: GET /api/v1/data/sys_comment answers 200; (6) CONTROL in B: as admin, POST /api/v1/data/showcase_account {name} (organization_id B), confirm the user reads it (200), then POST /api/v1/data/sys_comment on its thread with mentions naming the user by id: the user's inbox gains exactly one collab.mention whose actionUrl names that account. A control that gains nothing means the user cannot read comments and the leg below measures nothing; (7) set-active A, POST /api/v1/data/showcase_account {name} (organization_id A), confirm the user's read of it answers 404 RECORD_NOT_FOUND, then post one comment on its thread naming the user by id and one naming them by email; (8) re-read the user's and the admin's inboxes: no new collab.mention for either comment, and the boot log carries '[audit] mention notification withheld' with reason cannot_read_source, the user id and each comment's id. Teardown: stop the boot (--fresh discards its DB; no repo file is touched)"
       ],
       "acceptance": [
         {
@@ -3108,9 +3125,9 @@
           "evidence": "post + post-refetch feed screenshots"
         },
         {
-          "clause": "sys_activity rows INTERLEAVE into the same discussion feed, oldest-first, alongside the comments (one feed, two tables)",
+          "clause": "sys_activity rows INTERLEAVE into the same discussion feed, in time order, alongside the comments (one feed, two tables) — newest-first on the default record page's timeline stream, oldest-first on an authored record:discussion panel",
           "oracle": "dom",
-          "verify": "after an attributable change, its sys_activity row appears in time order among the comment rows (mergeFeedRows sorts by createdAt; recordActivityFeed.ts maps sys_activity.type → FeedItemType)",
+          "verify": "after an attributable change, its sys_activity row appears in time order among the comment rows, in the direction of the surface read (the stream: recordTimelineStream.ts mergeTimelineStream sorts newest first; the panel: RecordDetailView's mergeFeedRows sorts by createdAt ascending); recordActivityFeed.ts maps sys_activity.type → FeedItemType. On a trackHistory object the stream shows the update as the audit's field-change line instead of the activity row (steps[5])",
           "evidence": "the interleaved feed screenshot + the sys_activity read"
         },
         {
@@ -3140,7 +3157,7 @@
         {
           "clause": "PER-VARIANT: each of the four FeedFilterMode values shows exactly its subset — 'all' the full merged feed, 'comments_only' rows of feed type comment, 'changes_only' rows of feed type field_change, 'tasks_only' rows of feed type task (an EMPTY subset is a correct rendering when the record has no rows of that type — record it, don't fail it) — and switching back to 'all' restores every row",
           "oracle": "dom",
-          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx filterItems; the four options offered are getFilterOptions). The mode TYPE is imported from @objectstack/spec/data, so the control cannot offer a mode the spec does not declare",
+          "verify": "after each screenshot settles, the rendered rows against the mode's filter arm (objectui RecordActivityTimeline.tsx filterItems; the four options offered are getFilterOptions). The mode TYPE is imported from @objectstack/spec/data, so the control cannot offer a mode the spec does not declare. Read it on the record:discussion panel of steps[11]: the default record page's stream chips (TIMELINE_STREAM_FILTERS) are a different control and score nothing here",
           "evidence": "four screenshots + the per-mode row census against the API-read feed"
         },
         {
@@ -3269,6 +3286,12 @@
           "date": "2026-10-27",
           "change": "steps[12]: the substitute unit pin is named by its ui/ path instead of as the objectui pin (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 13,
+          "date": "2026-10-31",
+          "change": "steps[5], steps[11], steps[13], acceptance[2] (clause and verify), acceptance[7].verify and fixtures.requires[2] corrected. From QA run #27441 (W3-C3b, at c4c515ad); QA run #27438 (W3-C2b) made the same two feed findings. Wave anchor #27377, wave-3 accuracy slice S1. Record page v3 (#27310) draws the record's feed as one timeline stream, newest first, with chips All / Activity / Discussion / Changes. The four FeedFilterMode values and the oldest-first order belong to an authored record:discussion panel, such as the Project Detail page's. So steps[5] and acceptance[2] say 'in time order' and name both directions, plus the trackHistory case where the stream swaps the activity's updated row for the audit line; steps[11] drives the filter on a showcase_project record. The single-boot recipient leg also needs the sys_comment read grant: without it the account comment's mention is withheld cannot_read_thread like every other. So steps[13] binds the walled leg's scratch set on the single boot too, and fixtures.requires[2] says both boots need it. Read at base a0f865491d: recordTimelineStream.ts (mergeTimelineStream, TIMELINE_STREAM_FILTERS), RecordActivityTimeline.tsx (the FeedFilterMode select renders only off the stream variant), RecordDetailView.tsx (mergeFeedRows, ascending), mention-recipient-gate.ts (the source read is judged before the comment read). acceptance[9]'s contract is unchanged",
+          "ref": "#27441"
         }
       ]
     },
@@ -4612,7 +4635,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4635,7 +4658,7 @@
         "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
         "run the spec pins: vitest run over packages/spec/src/data/object-strictness-batch20.test.ts and field-group-layout.test.ts",
-        "console leg: open a qagroup_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
+        "console leg: first PATCH one pro_details member of the record to a value over the API. The detail page hides a section whose fields are ALL empty from a reader (record:details resolves hideEmpty ?? true on each section, ui/packages/plugin-detail/src/renderers/record-details.tsx), so with no member value the section stays absent with kind=pro too, and the detail half measures nothing. Then open a qagroup_group_gate record's form AND detail page; flip kind basic↔pro; watch the 'Pro details' section (header included) — screenshot each state before reading DOM",
         "display-tier probe: with kind=basic (predicate FALSE), pre-fill a pro_details member value via API, open the form, save an unrelated edit, then re-read the member field over the API"
       ],
       "acceptance": [
@@ -4748,6 +4771,12 @@
           "date": "2026-10-28",
           "change": "acceptance[3] says when the detail page re-gates. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): on the detail page the gate applied on save, not on an unsaved inline flip, while the clause said 'LIVE … on form and detail alike'. The run scored the clause PASS; the clause now names the moment each page re-gates. The run's other line (the scratch object needs its namespace prefix) is already closed: steps[1] declares namespace qagroup and names qagroup_group_gate. Re-read at base fd246c22: the clause's detail pin, ui/packages/plugin-detail/src/renderers/__tests__/record-details.groupVisibleWhen-11630.test.tsx, evaluates the group per record",
           "ref": "#25807"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "steps[5] pre-fills a member value before the console leg. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The record page's details sections default hideEmpty to true (record-details.tsx resolves `s.hideEmpty ?? true`, and DetailSection hides an all-empty section from a reader), so an empty Pro details section is absent on the detail page whatever kind says, and a run could score the gate from an absence the gate did not cause. Read at base a0f865491d. No clause changed",
+          "ref": "#27441"
         }
       ]
     },
