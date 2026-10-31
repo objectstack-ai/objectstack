@@ -190,6 +190,10 @@ its own. **动态** is one stream: the discussion, the activity and, with
 Its panel shows a one-line composer and the newest entries, and its header opens the whole
 stream (`?related=timeline`), filtered by All / Activity / Discussion / Changes. A related
 panel's header opens that list's whole table the same way (`?related=<object>.<field>`).
+Each of those faces is also a tab: a row of tabs closes the record header, **Overview** first,
+then **动态**, then one tab per related panel in the reader's order, each with its count. The
+row shows as many tabs as its width fits and folds the rest into a **+N** menu; the open tab
+is always on the row, and **Overview** or Esc returns to the page.
 Moving a child table into the record's body is therefore a one-word change on the
 relationship field, not a page-authoring task, and `relatedList: false` leaves a child off the
 page.

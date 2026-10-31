@@ -2631,10 +2631,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const enlargeRelated = React.useContext(RelatedEnlargeContext);
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
-  // In the tabbed tier's 关联 tab the reader's arrangement hands the full
-  // list its chrome (objectstack#27055): ⠿ moves it and ⋯ hides it. It does
-  // not collapse: a related list has no collapsed state (objectstack#27524).
-  const arrangedFull = !compact && !!cardChrome;
   const isCollapsible = collapsible || bodyTable;
 
   // The row click hands the host the rows on show beside the clicked one
@@ -3139,8 +3135,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
               </Button>
             )}
-            {arrangedFull && <RelatedPanelHandle chrome={cardChrome!} title={title} />}
-            {arrangedFull && <RelatedCardMenu chrome={cardChrome!} title={title} />}
             {bodyTable && enlargeRelated && ownRelationshipId && (
               <Button
                 variant="ghost"

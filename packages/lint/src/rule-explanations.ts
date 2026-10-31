@@ -3302,8 +3302,9 @@ const CHART_AXIS_NOT_SELECTED_EXPLANATION: RuleExplanation = {
       'chart drawn is unaffected. Advisory: the selection may legitimately be widened at runtime. A ' +
       'query position is never reported: it IS the selection, or the query itself.',
     'The selection is per surface. On a page chart it is `values`, the measure set the query asks ' +
-      'for. On a report it is the chart\'s own `chart.yAxis`: the embedded chart queries ' +
-      'exactly one dimension × one measure and derives ONE series, while `report.values` is the ' +
+      'for. On a report it is the chart\'s own `chart.yAxis`: the embedded chart queries its ' +
+      '`chart.xAxis` dimension (and its `chart.seriesBy` split, when set) × that one measure and, ' +
+      'without a split, derives ONE series, while `report.values` is the ' +
       'selection of the table beneath it. So a report\'s `chart.yAxis` is never reported — a chart ' +
       'cannot fail to select what it queries — and a `chart.series[].name` override lands only when ' +
       'it names `chart.yAxis`. With `chart.seriesBy` set the chart derives one series per value of ' +

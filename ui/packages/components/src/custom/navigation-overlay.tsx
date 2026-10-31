@@ -433,15 +433,17 @@ function useElementWidth(el: HTMLElement | null): number | null {
 
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
- * split pane: a text field, or an open menu, list box or dialog (which closes
- * itself first and marks the event handled).
+ * pane: a text field, or an open menu, list box or dialog (which closes itself
+ * first and marks the event handled). `pane` is the pane's own dialog — the
+ * drawer's sheet — which never owns the key it is asking about.
  */
-function escapeOwnedByTarget(target: EventTarget | null): boolean {
+function escapeOwnedByTarget(target: EventTarget | null, pane?: Element | null): boolean {
   if (!target || !(target instanceof Element)) return false;
   if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) {
     return true;
   }
-  return !!target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
+  const owner = target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
+  return !!owner && owner !== pane;
 }
 
 /**
@@ -647,6 +649,18 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     else close();
   };
   useSplitEscape(hasList && face === 'split' && shown, handleEscape);
+  // The drawer's dialog layer hears `Esc` on the document in the capture
+  // phase, before any field in the record does, so it asks the split pane's
+  // question itself: a key already handled, or pressed where a field or a
+  // menu owns it, is not the pane's. It still holds the sheet open — left
+  // unprevented, the layer would dismiss the whole drawer on it.
+  const sheetRef = React.useRef<HTMLDivElement>(null);
+  const handleDrawerEscape = (e: KeyboardEvent) => {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    if (escapeOwnedByTarget(e.target, sheetRef.current)) return;
+    handleEscape();
+  };
 
   // Non-overlay modes draw no record (the hook navigates); only the list.
   if (!paneMode && !hasList) {
@@ -801,8 +815,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         onOpenAutoFocus={(e) => e.preventDefault()}
         // objectstack#27545 — from maximized, `Esc` restores; objectstack#26679
         // — below the root of an in-place stack, `Esc` goes back one level.
-        // Only the root's `Esc` closes.
-        onEscapeKeyDown={maximized || onBack ? (e) => { e.preventDefault(); handleEscape(); } : undefined}
+        // Only the root's `Esc` closes. objectstack#28156 — a field's `Esc`
+        // stays the field's ({@link escapeOwnedByTarget}).
+        onEscapeKeyDown={maximized || onBack ? handleDrawerEscape : undefined}
+        ref={sheetRef}
         className={cn(
           // Mobile: full width (no inline cap, no max-w from base sheet).
           // sm+: honor the pane width via the `--ov-w` CSS var. The host's

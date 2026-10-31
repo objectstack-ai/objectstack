@@ -236,8 +236,6 @@ export { RecordBodyTablesContext } from './relatedListCompact';
 // the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn, relatedCountTargetOf } from './useRelatedCounts';
 export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts';
-// The tabbed tier's 关联 tab in the reader's arrangement (objectstack#27055).
-export { ArrangedRelatedTab } from './ArrangedRelatedTab';
 // objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
 // the record's field changes over through this context.
 export {
