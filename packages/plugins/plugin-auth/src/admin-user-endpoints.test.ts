@@ -267,6 +267,21 @@ describe('runAdminCreateUser', () => {
     expectNoPasswordLeak(m, (res.body.data as any).temporaryPassword);
   });
 
+  // #27857: the refusal names what the dialog shows. `phoneNumber` is a body
+  // key, and the dialog has a Phone Number field only where phone sign-in is
+  // on. The code and status are the endpoint's contract and do not move.
+  for (const phone of [false, true]) {
+    const expected = phone ? 'Email or phone number is required' : 'Email is required';
+    it(`phone sign-in ${phone ? 'on' : 'off'}: neither email nor phone answers 400 INVALID_REQUEST "${expected}"`, async () => {
+      const m = makeDeps({ phoneNumberEnabled: () => phone });
+      const res = await runAdminCreateUser(m.deps, makeRequest({ name: 'x', generatePassword: true }), ACTOR);
+      expect(res.status).toBe(400);
+      expect(res.body.error?.code).toBe('INVALID_REQUEST');
+      expect(res.body.error?.message).toBe(expected);
+      expect(m.createUser).not.toHaveBeenCalled();
+    });
+  }
+
   // ── #2766 V1.5: phone-only users ────────────────────────────────────────
 
   it('rejects phone-only creation when the phoneNumber plugin is off', async () => {

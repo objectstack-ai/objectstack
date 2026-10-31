@@ -320,6 +320,14 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    workload row M2-1 and #27191 is corrected to required. Workload row M2-1 drafts the names `rateDate` and
    `rateField`; in that draft, `rateDate` is "a `date`/`datetime` field on the same object (⛔ no default)". The design
    record §6 says the document date must not default to `created_at` (「⛔ 不默认 created_at」).
+   *Note (2026-10-31):* settled: the pointers are spelled `rateDate` (the document date) and `rateField` (the rate
+   used), the names workload row M2-1 drafts, landed in PR #28096 (`73b72709`). Beside them `homeAmount.field` names
+   the home field, and all three are required with no default
+   (`packages/spec/src/data/field.zod.ts#HomeAmountSchema`). `rateDate` names a `date` or `datetime` field on the
+   same object (`packages/spec/src/data/object.zod.ts#HOME_AMOUNT_RATE_DATE_TYPES`) and `rateField` a `number` field;
+   both the home and the rate field declare `readonly: true`, and the object judges what each pointer names
+   (`packages/spec/src/data/object.zod.ts#refuseDishonestHomeAmount`). Review: contract review
+   [`6526217217`](https://github.com/objectstack-ai/objectstack/pull/28096#issuecomment-6526217217) on PR #28096.
 2. **Which row counts as "the document date's rate"** (#27192). The ruling says "a platform rate table by effective
    date". Workload row M2-2 and the measurement round read this as the row with the latest `effective_date` on or before
    the document date. The measurement round also rules out a "nearest-future rate". The design record §5 says
@@ -353,6 +361,12 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     `packages/platform-objects/src`. ADR-0029 D1, D3 and D6 give a first-party capability ownership of its `sys_*`
     objects and decompose `platform-objects`, and ADR-0028 (Deferred) records the `sys` namespace design. #27185
     settles the owner against them.
+    *Note (2026-10-30):* settled: `@objectstack/platform-objects` owns it (D3's one owner per object), landed in PR
+    #27246 (`194e66c0`). The table's one reader is the ObjectQL engine's write path, present in every composition that
+    can write a record, so it has no on/off capability boundary of its own (ADR-0029 D2) and no service or plugin
+    package would own it; it registers with the engine-facing infrastructure objects `sys_migration` and `sys_secret`,
+    and workload row M1-1 names the same package. Settlement:
+    [`6511509227`](https://github.com/objectstack-ai/objectstack/issues/27185#issuecomment-6511509227) on #27185.
 12. **Whether today's cross-currency arithmetic between `fixed` fields of different codes is refused** (epic #8345).
     Two shapes: a measure `currency` that contradicts a `fixed` field's code, and a derived measure over two different
     `fixed` codes, which Context §1 counts among today's silently wrong numbers. The ruling on #27119 did not decide
@@ -362,6 +376,32 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     the tree evidence. The general `fixed`-versus-`fixed` guard stays undecided. The authority is the maintainer's, and
     epic #8345 carries the question
     ([`6485374827`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6485374827)).
+    *Note (2026-10-30):* settled: the maintainer ruled both shapes refused at dataset compile, letter A
+    ([`6486427200`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6486427200) on #8345).
+    Card #27579 landed it in PR #27991 (`6dc06b2e`): a measure `currency` that differs from its `fixed` field's code,
+    and a derived measure, whatever its op, over two different `fixed` codes answer `DATASET_INVALID`; a `count`
+    operand is not compared. A `fixed` code is not judged against `localization.currency`, and `currency` over a
+    `dynamic` field still wins.
+13. **An amount field switched to `currencyMode: 'record'` on an object that already holds rows** (#27577). A
+    `dynamic` or `fixed` field that turns `record` leaves its stored rows with an amount beside a blank code. No row is
+    refused for resting (ADR-0113 D1): the D8 rule 4 write guard refuses the next write that touches the pair
+    (`ERR_CURRENCY_CODE_REQUIRED`), and until the code is written the row shows a plain number, falls into the null
+    group of a grouped aggregate and sits outside every currency-paired filter. PR #27339's contract review
+    ([`6490309706`](https://github.com/objectstack-ai/objectstack/pull/27339#issuecomment-6490309706), item ③)
+    escalated whether the switch is refused while such rows exist or a backfill is owed; this record decided neither.
+    *Note (2026-10-30):* settled: the maintainer ruled letter B
+    ([`6492000994`](https://github.com/objectstack-ai/objectstack/issues/8345#issuecomment-6492000994) on #8345): the
+    switch is allowed and owes an explicit backfill, landed in PR #28128 (`a3d24c99`). The operator runs
+    `os migrate record-currency-codes --object <object> --field <amount> --code <ISO 4217>`, which writes the given
+    code into every row that holds an amount beside a blank code (dry run by default, `--apply` writes; the code is
+    never derived, D8 rule 4), and the metadata save that makes the switch answers the existing 409
+    `destructive_change` with the finding `currency_mode_to_record`, lifted by the existing `force`. The finding reads
+    no row and fires only where a previous version exists, so a package registered at boot is not refused. The ruling
+    left open how a cloud-managed tenant without a CLI reaches the backfill; open beside it: the run walks every
+    organization under the unscoped system context and writes the one `--code` into each one's codeless rows (no
+    organization-scope flag, no per-organization count), so on a multi-organization deployment, where `dynamic`
+    amounts displayed in each organization's own `localization.currency`, that code can be wrong for some of them
+    (PR #28128's review should-fix S1, escalated to the epic PM).
 
 ## Verification notes
 

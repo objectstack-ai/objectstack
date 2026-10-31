@@ -27,6 +27,7 @@ import { resolveTursoUrl } from './turso-driver-config.js';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE, type IConnectorCredentialSource } from '@objectstack/types';
 import { borrowConnectorCredential, borrowedConnectorOf } from './datasource-connector-credential.js';
+import { resolveDatasourceEnvCredentialsSwitch } from './datasource-env-credential.js';
 
 /**
  * Minimal metadata-service surface used for datasource persistence + the
@@ -411,6 +412,20 @@ export class DatasourceAdminServicePlugin implements Plugin {
       factory,
       engine: () => engineOf() as ConnectionEngineLike | undefined,
       secrets: { resolve: (ref) => this.options.secrets?.resolve?.(ref) ?? Promise.resolve(undefined) },
+      // [#27687] The code author's credential route, read only when the host
+      // opted in (`OS_DATASOURCE_ENV_CREDENTIALS=on`; the CLI host stamps that
+      // default, every other composition leaves it off). A value other than
+      // on/off throws here, so the boot refuses it with the sentence. Whether
+      // a name is code-defined is the host's provenance set — the same answer
+      // `servedOrigin` serves — read at connect, never at `init()`.
+      ...(resolveDatasourceEnvCredentialsSwitch()
+        ? {
+            envCredentials: {
+              isCodeDatasource: (name: string) => codeDatasourceNamesOf(ctx)?.has(name) === true,
+              read: (variable: string) => process.env[variable],
+            },
+          }
+        : {}),
       connectorCredentials,
       policy: this.options.connectPolicy,
       logger: this.options.logger,

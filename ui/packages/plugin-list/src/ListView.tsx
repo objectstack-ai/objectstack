@@ -29,10 +29,10 @@ import {
 import { SchemaRenderer, useNavigationOverlay, classifyLoadError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
 import type { LoadErrorKind } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
-import type { DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
+import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -1270,7 +1270,16 @@ export const DEFAULT_LIST_FETCH_BATCH_SIZE = 100;
  * built on and the lane its query is gated on are one answer.
  */
 function kanbanBlockOf(schema: ListViewSchema): Record<string, any> {
-  return { ...((schema as any).kanban || {}) };
+  return { ...(schema.kanban || {}) };
+}
+
+/**
+ * The host-composed `rowActionDefs` (objectui#8653): declared on no list
+ * mirror because the spec refuses it by name, so this is its one narrow cast,
+ * typed as the `object-grid` child that consumes it declares it.
+ */
+function hostRowActionDefsOf(schema: ListViewSchema): DataTableSchema['rowActionDefs'] {
+  return (schema as Pick<DataTableSchema, 'rowActionDefs'>).rowActionDefs;
 }
 
 /**
@@ -2587,11 +2596,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         if (typeof f === 'string' && f) collected.add(f);
       }
     };
-    collectViewFields((schema as any).kanban);
-    collectViewFields((schema as any).calendar);
-    collectViewFields((schema as any).gallery);
-    collectViewFields((schema as any).timeline);
-    collectViewFields((schema as any).gantt);
+    collectViewFields(schema.kanban);
+    collectViewFields(schema.calendar);
+    collectViewFields(schema.gallery);
+    collectViewFields(schema.timeline);
+    collectViewFields(schema.gantt);
     // [objectui#10370] The map, read through the resolver its render branch
     // and capability gate share — see the `$select` twin below for why the
     // resolver rather than the two blocks one at a time. A coordinate or title
@@ -2656,11 +2665,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     objectDef?.fields,
     groupingConfig,
     schema.columns,
-    (schema as any).kanban,
-    (schema as any).calendar,
-    (schema as any).gallery,
-    (schema as any).timeline,
-    (schema as any).gantt,
+    schema.kanban,
+    schema.calendar,
+    schema.gallery,
+    schema.timeline,
+    schema.gantt,
     schema.map,
     perms,
     schema.objectName,
@@ -2913,7 +2922,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // key. `__tests__/ListView.harvestInputsFetchKey-10689.test.tsx` pins each
   // input.
   const conditionalFormattingRaw = schema.conditionalFormatting as readonly unknown[] | undefined;
-  const rowActionDefsRaw = (schema as { rowActionDefs?: readonly unknown[] }).rowActionDefs;
+  const rowActionDefsRaw = hostRowActionDefsOf(schema);
   const bulkActionDefsRaw = (schema as { bulkActionDefs?: readonly unknown[] }).bulkActionDefs;
   const predicateProjectionKey = React.useMemo(
     () => JSON.stringify(collectPredicateFieldRefs(listViewPredicates({
@@ -3353,8 +3362,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
              * `__tests__/listViewNonAuthorKeys-8653.test.tsx` §4 SITE 2; the
              * declared sibling `bulkActionDefs` is that pin's control.
              */
-            rowActionDefs: (schema as any).rowActionDefs,
-            bulkActionDefs: (schema as any).bulkActionDefs,
+            rowActionDefs: hostRowActionDefsOf(schema),
+            bulkActionDefs: schema.bulkActionDefs,
             objectActions: (objectDef as any)?.actions,
             // KEY COLLISION — `userActions` names TWO different blocks, and
             // only the OBJECT's is interpretable here. This read is therefore
@@ -3645,7 +3654,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, (schema as any).kanban, (schema as any).calendar, (schema as any).gallery, (schema as any).timeline, (schema as any).gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -3723,7 +3732,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
 
     // Check for Tree capabilities — a self-referencing parent pointer.
-    if ((schema as any).tree?.parentField || schema.viewType === 'tree') {
+    if (schema.tree?.parentField || schema.viewType === 'tree') {
       resolvable.push('tree');
     }
 
@@ -3764,7 +3773,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
 
     return resolvable;
-  }, [schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, (schema as any).tree, (schema as any).chart, schema.appearance?.allowedVisualizations]);
+  }, [schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, schema.tree, schema.chart, schema.appearance?.allowedVisualizations]);
 
   /**
    * Whether the visualization switcher is actually WORTH drawing (objectui#7547).
@@ -4199,9 +4208,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
            * `__tests__/listViewNonAuthorKeys-8653.test.tsx` §4 SITE 1, with
            * the declared `bulkActionDefs` below as that pin's control.
            */
-          ...((schema as any).rowActionDefs ? { rowActionDefs: (schema as any).rowActionDefs } : {}),
+          ...(hostRowActionDefsOf(schema) ? { rowActionDefs: hostRowActionDefsOf(schema) } : {}),
           ...(schema.bulkActions ? { batchActions: schema.bulkActions } : {}),
-          ...((schema as any).bulkActionDefs ? { bulkActionDefs: (schema as any).bulkActionDefs } : {}),
+          ...(schema.bulkActionDefs ? { bulkActionDefs: schema.bulkActionDefs } : {}),
           // ⛔ No `options.grid` spread (objectui#6152 round 14). A grid has no
           // per-kind block: the spec refuses the whole `options` bag (#25923;
           // `options.grid` since round 12), and the raw spread that still put
@@ -4218,7 +4227,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // re-derives lanes once it does.
         const kanbanCfg = kanbanBlockOf(schema);
         // ⭐ THE BLOCK'S DECLARED KEYS ONLY (objectui#6152 round 14). The spec's
-        // kanban block is `groupByField` / `columns` / `titleField` /
+        // kanban block is `groupByField` / `columns` / `lanes` / `titleField` /
         // `summarizeField`, each read by name below. This branch used to read
         // the pre-#2231 `groupField` / `cardFields` aliases as well and to spread
         // the REST of the block onto the node after its own keys, so an undeclared
@@ -4229,9 +4238,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         //
         // `columns` is the spec's list of fields shown on each card.
         // ObjectKanban's own `columns` prop is its LANES, so it goes out as
-        // `cardFields` (mirrors plugin-view's adapter).
-        const { columns: kanbanCardColumns, titleField, summarizeField } = kanbanCfg as Record<string, any>;
+        // `cardFields` (mirrors plugin-view's adapter), and the block's `lanes`
+        // goes out as that `columns`.
+        const { columns: kanbanCardColumns, titleField, summarizeField, lanes } = kanbanCfg as Record<string, any>;
         const laneField = kanbanLaneFieldOf(schema, objectDef);
+        // objectstack#28211 — the block's `lanes`, the lanes the board draws
+        // in the author's order, go out as the node's `columns` (its lanes).
+        // A record whose value is not listed lands in `Uncategorized`.
+        const declaredLanes = kanbanDeclaredLanes(
+          lanes,
+          laneField ? objectDef?.fields?.[laneField]?.options : undefined,
+        );
         // objectui#12619 — the card fields: the block's own `columns` when
         // the author named some (the spec's card-field key, every one of
         // them), else the view's first columns past the title, the lane and
@@ -4265,6 +4282,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           type: 'object-kanban',
           ...baseProps,
           groupBy: laneField,
+          ...(declaredLanes ? { columns: declaredLanes } : {}),
           ...(titleField ? { titleField } : {}),
           cardFields,
           ...(groupingConfig ? { grouping: groupingConfig } : {}),
@@ -4621,7 +4639,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // Self-referencing tree-grid. Config lives under view.tree.* (the
         // `options.tree` bag retired in #25923). parentField auto-detects
         // from the object's tree/self-reference field when omitted.
-        const treeCfg = (schema as any).tree || {};
+        const treeCfg = schema.tree || {};
         return {
           type: 'object-tree',
           ...baseProps,

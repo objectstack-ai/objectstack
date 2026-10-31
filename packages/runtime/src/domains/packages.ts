@@ -56,7 +56,10 @@ import {
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
-import { isWritablePackage } from '@objectstack/metadata-protocol';
+import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+// [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
+// shared with the registry's co-owner gate.
+import { declaredDependencyIds } from '@objectstack/core';
 // [#9960] The uninstall seam's DECLARED shapes, from the same producer and for
 // the same reason as the predicate above: this door reached `deletePackage`
 // through `protocol` and routinely sent two keys — `organizationId`
@@ -588,6 +591,64 @@ function requireWritablePackage(
                 docs: 'docs/adr/0070-package-first-authoring.md',
             },
         ),
+    };
+}
+
+/**
+ * [#28117] Whether `id` is a **module of an installed app** — the one kind of
+ * read-only package an admin may DISABLE (and only disable) on this server.
+ *
+ * ## The ruling
+ *
+ * A suite ships one artifact: its `type: 'app'` package and several
+ * `type: 'module'` packages (ADR-0019 D3, ADR-0130 D2/D6). The maintainer
+ * ruled plan A for "enable modules in settings": the customer's own admin
+ * switches a module off, per environment, and "disabled" has exactly ONE
+ * meaning — hidden, refused on the data plane, data kept. Every package of a
+ * booted or installed artifact is read-only to {@link isWritablePackage}, so
+ * without this reading the disable door refused every suite module.
+ *
+ * ## The tie
+ *
+ * Read off the registry ROW, because the row is what both install paths leave
+ * behind: a code boot (`AppPlugin` → `manifest.register`) and a marketplace
+ * install (`manifest.register(…, { source: 'marketplace' })`) both record the
+ * module's `manifest.type` and `manifest.dependencies`, and neither keeps the
+ * artifact's own package list past the registration call. So a package is a
+ * module of an installed app when:
+ *
+ *   • its `manifest.type` is `'module'`;
+ *   • it DIRECTLY declares (`manifest.dependencies`, ADR-0141 D1) a package
+ *     that is installed here and whose `manifest.type` is `'app'`;
+ *   • its own `manifest.scope` is not a platform scope
+ *     ({@link READ_ONLY_PACKAGE_SCOPES}): a module the platform delivers stays
+ *     the platform's, as every platform package does.
+ *
+ * Everything else answers as before: the app itself, a plugin, a driver, a
+ * module that declares no app, or one whose app is not installed.
+ *
+ * ⛔ A reading at the disable door, never a change to {@link isWritablePackage}:
+ * `writable` keeps meaning "may author into", and stays `false` for a module,
+ * so edit, publish, revert, delete and overwrite still refuse it
+ * (`WRITABLE_PACKAGE_REQUIRED`, ADR-0070 D2). The served row does not carry
+ * this verdict yet: it needs a key in `package-api-assembled.zod.ts`'s
+ * `SERVED_ROW_VERDICTS`, a spec-lane edit.
+ */
+function isDisableableAppModule(engine: unknown, id: string): boolean {
+    const registry = (engine as PackageRowRegistryHost | null | undefined)?.registry;
+    if (typeof registry?.getPackage !== 'function') return false;
+    const manifest = registry.getPackage(id)?.manifest;
+    if (manifest?.type !== 'module') return false;
+    if (typeof manifest.scope === 'string' && READ_ONLY_PACKAGE_SCOPES.includes(manifest.scope)) return false;
+    return declaredDependencyIds(manifest).some(
+        (dependency) => dependency !== id && registry.getPackage!(dependency)?.manifest?.type === 'app',
+    );
+}
+
+/** The registry slice {@link isDisableableAppModule} reads: one row, by id. */
+interface PackageRowRegistryHost {
+    registry?: {
+        getPackage?(id: string): { manifest?: { type?: unknown; scope?: unknown; dependencies?: unknown } } | undefined;
     };
 }
 
@@ -1720,7 +1781,15 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // switch off. BEFORE `disablePackage`, and before
             // `setPackageDisabled` writes the choice to disk — a disable that
             // lands is not undone by a restart, it is REPLAYED by one.
-            const readOnly = requireWritablePackage(deps, qlService, id, 'disable'); if (readOnly) return readOnly;
+            // [#28117] One exemption, for THIS verb only: a module of an
+            // installed app is the customer admin's to switch off
+            // ({@link isDisableableAppModule}). Every other door below still
+            // asks `requireWritablePackage` alone, so the module stays
+            // read-only for authoring.
+            const readOnly = isDisableableAppModule(qlService, id)
+                ? null
+                : requireWritablePackage(deps, qlService, id, 'disable');
+            if (readOnly) return readOnly;
             const pkg = registry.disablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             try {

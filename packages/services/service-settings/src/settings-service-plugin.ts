@@ -34,6 +34,7 @@ import type { SettingsAuditWriter, SettingsEngine, SettingsSecretStore } from '.
 import type { CryptoAdapter } from './crypto-adapter.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
+import { registerLocalizationCurrencyLock, type CurrencyUsageEngine } from './localization-currency-lock.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { registerSettingsReadDoor } from './settings-read-door.js';
@@ -345,6 +346,11 @@ export class SettingsServicePlugin implements Plugin {
               resolveGuestOrganization(engine, await this.resolveAdmissionTenancyPosture(ctx)),
           },
         );
+        // [ADR-0144 D4] `localization.currency` is the home currency, locked
+        // once an exchange rate or a `homeAmount` declaration uses it: the
+        // key's write predicate and the page's statement both read this
+        // engine (see `localization-currency-lock.ts`).
+        registerLocalizationCurrencyLock(this.service!, engine as unknown as CurrencyUsageEngine);
         // Each namespace's `readPermission`, applied at the generic data
         // API's read of the settings stores too (see `settings-read-door.ts`).
         if (!registerSettingsReadDoor(engine, this.service!)) {

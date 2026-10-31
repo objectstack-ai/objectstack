@@ -285,7 +285,7 @@ import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 804 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 805 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1171,6 +1171,7 @@ export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthSchema = Assert
 export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2AuthorizationCodeAuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2AuthorizationCodeAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceOAuth2ClientCredentialsAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceOAuth2ClientCredentialsAuthSchema >, z.infer< typeof M109.ConnectorInstanceOAuth2ClientCredentialsAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceSignedAliyunAcs3AuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceSignedAliyunAcs3AuthSchema >, z.infer< typeof M109.ConnectorInstanceSignedAliyunAcs3AuthSchema > >>;
+export type Iso_shared_connectorAuth__ConnectorInstanceSignedTencentCloudTc3AuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceSignedTencentCloudTc3AuthSchema >, z.infer< typeof M109.ConnectorInstanceSignedTencentCloudTc3AuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorInstanceSignedAuthSchema = Assert<Eq< z.input< typeof M109.ConnectorInstanceSignedAuthSchema >, z.infer< typeof M109.ConnectorInstanceSignedAuthSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorOAuth2GrantSchema = Assert<Eq< z.input< typeof M109.ConnectorOAuth2GrantSchema >, z.infer< typeof M109.ConnectorOAuth2GrantSchema > >>;
 export type Iso_shared_connectorAuth__ConnectorSigningSchemeSchema = Assert<Eq< z.input< typeof M109.ConnectorSigningSchemeSchema >, z.infer< typeof M109.ConnectorSigningSchemeSchema > >>;
@@ -1738,7 +1739,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 804 isomorphic pins', () => {
+  it('still declares all 805 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2695,7 +2696,11 @@ describe('ADR-0122 type-alias convention', () => {
     // …ConnectorInstanceSignedAliyunAcs3AuthSchema,
     // …ConnectorSigningSchemeSchema) rather than given `…Parsed` synonyms.
     // +3 added.
-    expect(pins).toHaveLength(804);
+    // 804 -> 805 is #26710 (ADR-0143 S2): the `signed` union's
+    // `tencentcloud-tc3-hmac-sha256` shape, no default and no transform
+    // (Iso_shared_connectorAuth__ConnectorInstanceSignedTencentCloudTc3AuthSchema).
+    // +1 added.
+    expect(pins).toHaveLength(805);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

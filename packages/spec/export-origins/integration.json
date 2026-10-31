@@ -42,6 +42,8 @@
     "ConnectorInstanceSignedAliyunAcs3AuthSchema": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAliyunAcs3AuthSchema (const)",
     "ConnectorInstanceSignedAuth": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAuth (type)",
     "ConnectorInstanceSignedAuthSchema": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAuthSchema (const)",
+    "ConnectorInstanceSignedTencentCloudTc3Auth": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedTencentCloudTc3Auth (type)",
+    "ConnectorInstanceSignedTencentCloudTc3AuthSchema": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedTencentCloudTc3AuthSchema (const)",
     "ConnectorMaterialization": "src/integration/connector-provider.ts#ConnectorMaterialization (interface)",
     "ConnectorMaterializationHandler": "src/integration/connector-provider.ts#ConnectorMaterializationHandler (type)",
     "ConnectorOAuth2Grant": "src/shared/connector-auth.zod.ts#ConnectorOAuth2Grant (type)",

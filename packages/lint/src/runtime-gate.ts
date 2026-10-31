@@ -465,6 +465,50 @@ const PACKAGE_PROVENANCE_KEY = '_packageId';
 const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
 
 /**
+ * The package closure a write by `packageId` is judged against (#9612): the
+ * package and the transitive closure of the `dependencies` its manifest
+ * declares, read through `getPackage` — the host's package registry on the
+ * server (`resolveWritePackageScope` in `@objectstack/metadata-protocol`), the
+ * served package list in Studio, whose object pickers offer what this closure
+ * admits. ONE walk for both, so the picker and the publish gate cannot
+ * disagree about what a package may reference.
+ *
+ * Answers `undefined` — narrow nothing — for no package id, the
+ * `sys_metadata` sentinel (an overlay row, not a package), and a package
+ * `getPackage` cannot produce: its manifest is the only declaration of what it
+ * may reference, and narrowing without it would be narrowing on nothing.
+ *
+ * A declared dependency `getPackage` cannot produce is still IN the closure:
+ * the package declared it, so an object stamped with it is reachable by
+ * declaration. Only the transitive walk stops there.
+ *
+ * Pure. A `getPackage` that throws propagates; the caller decides what an
+ * unreadable registry means (the server answers `undefined`).
+ */
+export function resolvePackageClosure(
+  packageId: string | null | undefined,
+  getPackage: (id: string) => { manifest?: unknown } | undefined,
+): { packageId: string; dependencies: string[] } | undefined {
+  if (typeof packageId !== 'string' || packageId === '' || packageId === OVERLAY_PROVENANCE_SENTINEL) return undefined;
+  if (!getPackage(packageId)) return undefined;
+
+  const dependencies = new Set<string>();
+  const frontier = [packageId];
+  while (frontier.length > 0) {
+    const current = frontier.pop() as string;
+    const manifest = getPackage(current)?.manifest as { dependencies?: Record<string, unknown> } | undefined;
+    const declared = manifest?.dependencies;
+    if (!declared || typeof declared !== 'object') continue;
+    for (const dep of Object.keys(declared)) {
+      if (dep === packageId || dependencies.has(dep)) continue;
+      dependencies.add(dep);
+      frontier.push(dep);
+    }
+  }
+  return { packageId, dependencies: [...dependencies] };
+}
+
+/**
  * The context collections the snapshot carries, in stack-key order — DERIVED
  * from {@link RuntimeStackContext}, not listed (#13977).
  *

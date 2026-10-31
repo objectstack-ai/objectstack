@@ -184,8 +184,19 @@ match.
 ```bash
 pnpm --filter @objectstack/connector-openapi normalize-openapi \
   --in https://example.com/openapi.yaml --out ./specs/crm-openapi.json \
-  --include-pattern '^GET /v1/customers'
+  --include-pattern '^GET /v1/customers' --trim
 ```
+
+With `--trim` the document it writes holds **only** the operations the
+patterns match: every other operation, every path item left with none, and
+`webhooks` are dropped before inlining, so nothing reachable only from a
+dropped operation is written, and the printed sha256 is the hash of those
+trimmed bytes. Package that output — a large vendor document shrinks to the
+operations the app calls (Stripe's 612 operations, 63 MB at the default
+depth, become about 1.9 MB for six). Without `--trim` the whole document is
+written and the patterns only compute `include`, so `include` can be widened
+later by editing config alone; with it, widening means re-running the script.
+`--trim` without an `--include-pattern` is refused.
 
 Inlining is bounded: a recursive schema, or one more than `--max-depth`
 (default 2) named schemas deep, becomes a typed stub whose description names
@@ -527,12 +538,21 @@ auth: {
   keyId: 'YourAccessKeyId',               // the AccessKey ID: public, stays in metadata
   credentialRef: 'ALIYUN_ACCESS_KEY_SECRET',
 }
+
+// Tencent Cloud API 3.0, signature v3 (TC3-HMAC-SHA256):
+auth: {
+  type: 'signed',
+  scheme: 'tencentcloud-tc3-hmac-sha256',
+  keyId: 'YourSecretId',                  // the SecretId: public, stays in metadata
+  credentialRef: 'TENCENT_SECRET_KEY',
+}
 ```
 
 What the platform does with it:
 
 - **Every request is signed, each attempt fresh.** A retry is signed again with
-  a new nonce and date, so a scheme that refuses a replayed nonce accepts it.
+  a new nonce and date, so a scheme that refuses a replayed nonce or a stale
+  timestamp accepts it.
 - **The key never reaches the provider.** The automation service binds the
   resolved key to the scheme's signer at materialization and hands the
   provider the signer only. A datasource cannot borrow a `signed` instance
@@ -545,6 +565,14 @@ What the platform does with it:
   `x-acs-content-sha256` and `Authorization`. The API's own action and version
   are yours to send, as `x-acs-action` / `x-acs-version` in `defaultHeaders`
   (rest) or in each call's headers.
+- **`tencentcloud-tc3-hmac-sha256`** signs `content-type` and `host`, and sets
+  `X-TC-Timestamp` and `Authorization`. The service in the signature's scope is
+  the first label of the endpoint host (`cvm.tencentcloudapi.com`, or a
+  regional `cvm.ap-guangzhou.tencentcloudapi.com`, is `cvm`), so point
+  `baseUrl` at the product's own endpoint. `X-TC-Action`, `X-TC-Version` and
+  `X-TC-Region` are yours to send and are not signed. A request without a body
+  is sent with `Content-Type: application/x-www-form-urlencoded`, the type it
+  is signed with.
 
 What the publish door refuses:
 
@@ -553,7 +581,8 @@ What the publish door refuses:
   signer and its test vectors, so a scheme the server cannot run is never
   accepted.
 - **An inline key**: `secret`, `privateKey`, `secretKey` or `accessKeySecret`
-  is refused by name, pointing at `credentialRef`. An authored `signature` is
+  is refused by name, pointing at `credentialRef`. The vendors' words for the
+  key id (`accessKeyId`, `secretId`) are answered with `keyId`. An authored `signature` is
   refused too: it is computed for every request.
 - **`provider: 'mcp'`**, at `auth.type`: an MCP server is not signed per
   request. Declare `provider: 'rest'` or `provider: 'openapi'`.
@@ -625,6 +654,7 @@ retry):
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
 | A retry of a degraded instance reaches the upstream and meets a configuration fault (an `include` naming a tool or operation the upstream does not offer) | **Not fatal**: the instance stays **degraded**, now with the configuration reason, and is **not retried** — dispatches fail saying to edit its declaration; an edit of the entry (or a restart) re-attempts it |
 | Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
+| A `connector_action` input that, once evaluated, breaks the action's `inputSchema` (a missing `required` parameter, a wrong `type`) | **The step fails before dispatch** with `VALIDATION_ERROR`, naming each parameter path, and nothing is sent; a `fault` edge or `try_catch` can route it. Supply the parameter or send the declared type: text is never converted, so cast it in a CEL envelope (`int()`, `double()`, `bool()`). `GET /api/v1/automation/connectors` lists the schema; `os validate` does not judge the input against the `inputSchema` yet |
 | A bad entry arrives via **runtime reload** (a Studio publish, a direct active save through `PUT /api/v1/meta/connector/:name`, or a delete, made on any replica — peers reconcile on [cluster lane 2](/docs/kernel/cluster#62-the-cluster-invalidation-family); or a dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
 
 ## Catalog descriptors: entries without a `provider`

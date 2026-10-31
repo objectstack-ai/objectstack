@@ -1290,7 +1290,11 @@ describe('[#20408] an undetermined field visibility (ADR-0106 D6 tier 2) serves 
         for (const path of OBJECT_PATHS) {
             const undetermined = await bootRest('undetermined').read(path);
             expect({ status: undetermined.status, cacheControl: undetermined.cacheControl }, path).toEqual({ status: 200, cacheControl: 'private, no-store' });
-            expect((await bootRest('non-holder').read(path)).cacheControl, path).toBeUndefined();
+            // [#27627] A determined caller's list and plain read are served
+            // `private, no-cache` under the validator of their own body; the
+            // layered view still owes no header at all.
+            expect((await bootRest('non-holder').read(path)).cacheControl, path)
+                .toBe(path.endsWith('/layers') ? undefined : 'private, no-cache');
         }
     });
 

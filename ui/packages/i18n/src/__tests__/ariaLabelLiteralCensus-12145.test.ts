@@ -237,7 +237,7 @@ const BACKLOG_REASON =
  */
 const BACKLOG: Declared[] = (
   [
-    ['packages/app-shell/src/views/metadata-admin/JsonSourceEditor.tsx', ['JSON source']],
+    ['packages/app-shell/src/views/item-tools/JsonSourceEditor.tsx', ['JSON source']],
     ['packages/app-shell/src/views/metadata-admin/QuickFind.tsx', ['locked']],
     ['packages/auth/src/UserMenu.tsx', ['Profile', 'Settings', 'Sign out']],
     ['packages/components/src/custom/config-panel-renderer.tsx', ['breadcrumb']],

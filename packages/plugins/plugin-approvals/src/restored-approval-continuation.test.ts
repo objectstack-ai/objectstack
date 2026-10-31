@@ -39,7 +39,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AutomationEngine, InMemorySuspendedRunStore, resolveRunDataContext } from '@objectstack/service-automation';
+import { AutomationEngine, InMemorySuspendedRunStore, ObjectStoreSuspendedRunStore, resolveRunDataContext } from '@objectstack/service-automation';
 // [#4550] The engine double below routes its write verbs through ObjectQL's OWN
 // dispatch predicates rather than a hand-mirrored copy.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
@@ -1033,5 +1033,159 @@ describe('ruling A — a decision resumes the run as the person who decided', ()
     expect(out.resumed, JSON.stringify(out)).toBe(true);
     expect(out.source).toBe('journal');
     expect(seen.after_reject, 'the replay fell back to the trigger user').toEqual({ userId: 'u1', permissions: ['deal_manager'] });
+  });
+});
+
+/**
+ * GUARD 3 proves where the run is parked past the first page of parked runs
+ * (#28271).
+ *
+ * It used to find the run in `listSuspendedRunsDurable()`. A DB-backed store
+ * lists one 1000-row page of `paused` rows in driver order, and a process adds
+ * only what it parked itself. So when another process (a replica, or this one
+ * before a restart) parked the run behind more than 1000 others, the run was
+ * not on the listing, and every re-issue was refused with "parked at no node
+ * this engine can see" — the retry the refusal promises read the same page.
+ * Both replicas below share one store and one table set: `a` strands and
+ * restores the run, `b` re-issues it.
+ */
+describe('#28271 — GUARD 3 reads where the run is parked by its id, not from one page', () => {
+  let data: ReturnType<typeof makeFakeEngine>;
+  let marks: string[];
+  let rejectBranchThrows: string | undefined;
+  let a: ReturnType<typeof wire>;
+  let b: ReturnType<typeof wire>;
+
+  /** One process: a real engine over `store`, the approval node, and its own approvals service. */
+  function wire(store: ObjectStoreSuspendedRunStore) {
+    const service = new ApprovalService({ engine: data as any, logger: noopLogger });
+    const automation = new AutomationEngine(noopLogger as any, store);
+    registerApprovalNode(automation, service, noopLogger as any);
+    automation.registerNodeExecutor({
+      type: 'mark',
+      async execute(node: any) {
+        if (node.id === 'mark_rejected' && rejectBranchThrows) throw new Error(rejectBranchThrows);
+        marks.push(node.id);
+        return { success: true };
+      },
+    } as never);
+    automation.registerFlow('deal_approval', DEAL_APPROVAL as never);
+    automation.registerFlow('revise_flow', REVISE_FLOW as never);
+    service.attachAutomation(automation);
+    return { automation, service };
+  }
+
+  /** `count` parked runs of some other flow, stored ahead of everything this test parks. */
+  const parkOthers = (count: number) => {
+    const rows = data.tables.get('sys_automation_run') ?? (data.tables.set('sys_automation_run', []), data.tables.get('sys_automation_run')!);
+    for (let i = 0; i < count; i++) {
+      rows.push({ id: `other-${String(i).padStart(4, '0')}`, flow_name: 'other_flow', node_id: 'wait', status: 'paused' });
+    }
+  };
+
+  /** `b`'s engine with one member taken away, everything else delegated. */
+  const without = (member: string) => new Proxy(b.automation, {
+    get(target, prop) {
+      if (prop === member) return undefined;
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+
+  beforeEach(() => {
+    marks = []; rejectBranchThrows = undefined;
+    data = makeFakeEngine();
+    const store = new ObjectStoreSuspendedRunStore(data as any, noopLogger as any);
+    a = wire(store);
+    b = wire(store);
+  });
+
+  const rowOf = async (id: string) =>
+    (await data.find('sys_approval_request', { where: { id } }))[0];
+
+  /** On `a`: park, strand a reject decision, and (unless told not to) re-arm its pause. */
+  async function strandOnA({ restore = true } = {}) {
+    await a.automation.execute('deal_approval', {
+      object: 'crm_deal', record: { id: 'd1', amount: 100 }, userId: 'submitter',
+    } as never);
+    const req = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    rejectBranchThrows = DOWNSTREAM_FAILURE;
+    const err = await a.service
+      .decide(req.id, { decision: 'reject', actorId: 'u1', comment: 'no' }, SYSTEM_CTX)
+      .then(() => null, (e: Error) => e);
+    expect(err?.message).toMatch(/^RESUME_FAILED/);
+    if (restore) {
+      expect((await a.automation.restoreConsumedSuspension(req.flow_run_id, { requestedBy: 'ops' })).restored).toBe(true);
+    }
+    rejectBranchThrows = undefined;
+    return req;
+  }
+
+  it('past the first page, the pause another process re-armed is proved and the decision is re-issued', async () => {
+    parkOthers(1000);
+    const req = await strandOnA();
+    // The premise: `b` holds nothing in memory, and the run is not on the page.
+    expect(await b.automation.hasSuspendedRun(req.flow_run_id), 'the pause is back, in the store').toBe(true);
+    expect((await b.automation.listSuspendedRunsDurable()).some(r => r.runId === req.flow_run_id),
+      'and not on the listing\'s one page').toBe(false);
+
+    const out = await b.service.continueRestoredRun(req.id, { requestedBy: 'ops', reason: 'record recreated' });
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(out.decision).toBe('reject');
+    expect(out.source).toBe('journal');
+    expect(marks, 'the reject branch ran').toEqual(['mark_rejected']);
+    expect(await b.automation.hasSuspendedRun(req.flow_run_id), 'the continuation consumed the pause').toBe(false);
+  });
+
+  it('CONTROL: within the first page it is re-issued as before', async () => {
+    parkOthers(998);
+    const req = await strandOnA();
+    expect((await b.automation.listSuspendedRunsDurable()).some(r => r.runId === req.flow_run_id)).toBe(true);
+
+    const out = await b.service.continueRestoredRun(req.id, { requestedBy: 'ops' });
+    expect(out.resumed, JSON.stringify(out)).toBe(true);
+    expect(marks).toEqual(['mark_rejected']);
+  });
+
+  it('CONTROL: past the first page, a run parked at another node is still refused, and the refusal names that node', async () => {
+    parkOthers(1000);
+    await a.automation.execute('revise_flow', {
+      object: 'crm_deal', record: { id: 'd7', amount: 3 }, userId: 'submitter',
+    } as never);
+    const rev = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    await a.service.sendBack(rev.id, { actorId: 'u1', comment: 'fix it' } as any, SYSTEM_CTX);
+    expect((await rowOf(rev.id)).status).toBe('returned');
+
+    const refused = await b.service.continueRestoredRun(rev.id).then(() => null, (e: Error) => e);
+    expect(refused?.message).toMatch(
+      /^INVALID_STATE: run '.*' is parked at node 'wait_revision', but the send-back on request .* was issued from its own approval node 'review'/,
+    );
+    expect(await data.find('sys_approval_request', { where: { flow_run_id: rev.flow_run_id } }),
+      'no new pending round was opened').toHaveLength(1);
+  });
+
+  it('CONTROL: past the first page, a run that is not parked is still refused — by GUARD 3 too, where GUARD 2 cannot ask', async () => {
+    parkOthers(1000);
+    const req = await strandOnA({ restore: false });
+
+    const byGuard2 = await b.service.continueRestoredRun(req.id).then(() => null, (e: Error) => e);
+    expect(byGuard2?.message).toMatch(/is not suspended/);
+
+    // An engine that cannot answer `hasSuspendedRun` skips GUARD 2; GUARD 3's
+    // keyed read finds no pause and refuses.
+    b.service.attachAutomation(without('hasSuspendedRun') as any);
+    const byGuard3 = await b.service.continueRestoredRun(req.id).then(() => null, (e: Error) => e);
+    expect(byGuard3?.message).toMatch(/^INVALID_STATE: run '.*' is parked at no node this engine can see/);
+    expect(marks, 'nothing ran').toEqual([]);
+  });
+
+  it('CONTROL: an engine that cannot say where a run is parked is refused', async () => {
+    const req = await strandOnA();
+    b.service.attachAutomation(without('suspensionOf') as any);
+
+    const refused = await b.service.continueRestoredRun(req.id).then(() => null, (e: Error) => e);
+    expect(refused?.message).toMatch(/^INVALID_STATE: this automation engine cannot report WHERE run '.*' is parked \(no suspensionOf\)/);
+    expect(marks, 'nothing ran').toEqual([]);
+    expect(await b.automation.hasSuspendedRun(req.flow_run_id), 'the pause is left as it was').toBe(true);
   });
 });
