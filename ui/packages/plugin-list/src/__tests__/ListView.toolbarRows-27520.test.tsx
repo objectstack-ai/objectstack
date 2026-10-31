@@ -33,6 +33,7 @@ import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-li
 import '@testing-library/jest-dom';
 import React from 'react';
 import type { DataSource, ListViewSchema } from '@object-ui/types';
+import type { FilterBuilderRow } from '@object-ui/components';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { ListView } from '../ListView';
 
@@ -83,10 +84,11 @@ async function emptyState(container: HTMLElement): Promise<HTMLElement> {
   return container.querySelector('[data-testid="empty-state"]') as HTMLElement;
 }
 
-const COMPLETE = { id: 'c1', field: 'title', operator: 'contains', value: 'launch' };
-const NO_VALUE = { id: 'c2', field: 'priority', operator: 'equals', value: '' };
-const group = (...conditions: Array<Record<string, unknown>>) =>
-  ({ id: 'root', logic: 'and', conditions }) as React.ComponentProps<typeof ListView>['initialFilters'];
+type Row = FilterBuilderRow;
+const COMPLETE: Row = { id: 'c1', field: 'title', operator: 'contains', value: 'launch' };
+const NO_VALUE: Row = { id: 'c2', field: 'priority', operator: 'equals', value: '' };
+const group = (...conditions: Row[]): React.ComponentProps<typeof ListView>['initialFilters'] =>
+  ({ id: 'root', logic: 'and', conditions });
 
 const filterTrigger = () => screen.getByTestId('toolbar-filter-trigger');
 
