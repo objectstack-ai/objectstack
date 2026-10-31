@@ -400,9 +400,10 @@ no stored version can ever equal "nothing".
 ### Datasource Unavailable — `503 Service Unavailable`
 
 Returned when the object's declared `datasource` has no live driver: the host's
-connect policy refused it, or it failed to connect at startup and the server was
-started with `OS_ALLOW_DRIVER_CONNECT_FAILURE`. Nothing about the request is
-wrong, and the state may clear — so this is a `503`, not a `400` or a `500`.
+connect policy refused it, or its last connect attempt failed — at startup under
+`OS_ALLOW_DRIVER_CONNECT_FAILURE`, when a package declaring it was installed, or
+when it was created in Setup. Nothing about the request is wrong, and the state
+may clear — so this is a `503`, not a `400` or a `500`.
 
 `reason` is the class (`blocked` | `failed`). The underlying cause is
 deliberately **not** included — it routinely contains hosts, ports and DSNs; it
