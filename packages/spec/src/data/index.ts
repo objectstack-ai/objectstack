@@ -180,6 +180,12 @@ export * from './api-derivation';
 // so the two can never drift apart (#7521).
 export * from './managed-api-affordance';
 export * from './field.zod';
+// [ADR-0144 Open item 3] The ISO 4217 minor units per currency — the checked-in
+// CLDR snapshot whose key set is the `iso_4217_currency` value domain. Exported
+// for its first digit reader: objectql's write-time home projection rounds a
+// home amount to the home currency's minor units with it, from this one table
+// rather than a second copy or a runtime `Intl` probe.
+export * from './currency-fraction-digits';
 // The credential read mask (ADR-0100) — the ONE string a masked read serves, in
 // place of the two byte-identical literals objectql and service-settings each
 // declared until #7572. Both now import this one, so the mask a console sees on
