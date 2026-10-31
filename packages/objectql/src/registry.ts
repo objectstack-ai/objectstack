@@ -3997,7 +3997,8 @@ export class SchemaRegistry {
    * MetadataService layers run. A step added here reaches every one of them.
    *
    * 1. picklist-bound fields get their list's options resolved onto them;
-   * 2. [#24400] the code packages' bound top-level actions are attached
+   * 2. [#24400] the bound top-level actions are attached — the code
+   *    packages' and, [#28356], the runtime-authored ones
    *    ({@link attachBoundActions}).
    */
   private finishServedObject<T>(body: T): T {
@@ -4020,14 +4021,16 @@ export class SchemaRegistry {
    * the action may register in either order, and the cached fold is dropped
    * when an action registers ({@link registerItem}) or leaves.
    *
-   * What attaches: a standalone `action` item a CODE package shipped
-   * (`isCodeArtifactBody` — never a tenant-authored row), whose owner key
-   * ({@link standaloneActionOwnerKey}, the router's own test) is this object's
-   * name, and whose package is not disabled. Attached BY REFERENCE, so the
-   * served entry is the very declaration rung 2 resolves: its
-   * `requiredPermissions`, `requiresMembershipReach` and execution identity
-   * travel with it unchanged, and nothing about the object's own write policy
-   * moves.
+   * What attaches: a standalone `action` item this registry serves
+   * ({@link boundServedActions}) — one a code package shipped, or [#28356] one
+   * a runtime author saved through the metadata door, which the save's
+   * write-through and the boot's `sys_metadata` hydration register here —
+   * whose owner key ({@link standaloneActionOwnerKey}, the router's own test)
+   * is this object's name, and whose package is not disabled. Attached BY
+   * REFERENCE, so the served entry is the very declaration rung 2 resolves:
+   * its `requiredPermissions`, `requiresMembershipReach` and execution
+   * identity travel with it unchanged, and nothing about the object's own
+   * write policy moves.
    *
    * Deduplicated by NAME, which is also what makes the step idempotent over a
    * body that already carries the action — the same-stack merge's copy, a
@@ -4056,7 +4059,7 @@ export class SchemaRegistry {
     const base: any[] = Array.isArray(declared) ? declared : [];
     const present = new Set<unknown>(base.map((action) => action?.name));
     const fresh: any[] = [];
-    for (const action of this.boundCodeActions()) {
+    for (const action of this.boundServedActions()) {
       if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
       present.add(action.name);
       fresh.push(action);
@@ -4068,10 +4071,51 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#28356] The standalone `action` items bound to an object that this
+   * registry SERVES — the population {@link attachBoundActions} attaches.
+   *
+   * Every bound item in the collection, whoever authored it: a code package's
+   * (under its `<packageId>:<name>` key) and a runtime author's, which the
+   * save door's write-through and the boot's `sys_metadata` hydration register
+   * (under the bare name, or a bound package's key with `_provenance: 'org'`).
+   * Leaving the runtime rows out made a bound action saved through the
+   * metadata door dispatchable (rung 2 reads {@link getItem}) yet listed by no
+   * served object, so no client drew it.
+   *
+   * One item per name where {@link getItem} would pick one: a bare-key entry
+   * (an ADR-0005 overlay) shadows the composite entries of its name, so a
+   * customised bound action is attached as customised — the declaration rung 2
+   * resolves — and never as the packaged default under it.
+   *
+   * The registry holds no org-scoped row (the protocol's hydration declines
+   * one), so nothing here crosses an organization. A disabled package's items
+   * are left out, as the rest of its items are withheld.
+   *
+   * ⛔ Not the boot audits' population: a runtime row naming an object no
+   * package registers must not fail a boot, so {@link findUnboundActionTargets}
+   * and {@link FIND_BOUND_ACTION_COLLISIONS} keep reading
+   * {@link boundCodeActions}.
+   */
+  private boundServedActions(): any[] {
+    const collection = this.metadata.get('action');
+    if (!collection) return [];
+    const out: any[] = [];
+    for (const [key, action] of collection) {
+      if (!action || typeof action !== 'object' || typeof (action as any).name !== 'string') continue;
+      const name: string = (action as any).name;
+      if (key !== name && collection.has(name)) continue;
+      if (isObjectLessActionKey(standaloneActionOwnerKey(action))) continue;
+      if (this.isPackageDisabled((action as any)._packageId)) continue;
+      out.push(action);
+    }
+    return out;
+  }
+
+  /**
    * [#24400] The standalone `action` items code packages ship that are bound
-   * to an object — the population {@link attachBoundActions} attaches and
-   * {@link findUnboundActionTargets} audits. A disabled package's actions are
-   * left out, as the rest of its items are withheld.
+   * to an object — the population {@link findUnboundActionTargets} and
+   * {@link FIND_BOUND_ACTION_COLLISIONS} audit. A disabled package's actions
+   * are left out, as the rest of its items are withheld.
    */
   private boundCodeActions(): any[] {
     const out: any[] = [];
@@ -6151,6 +6195,9 @@ export class SchemaRegistry {
         const it = item as any;
         if (it && it._packageId && it._packageId !== 'sys_metadata') {
           collection.delete(name);
+          // [#28356] An object may carry the shadow as a bound action; the
+          // artifact it uncovers may bind elsewhere ({@link attachBoundActions}).
+          if (type === 'action') this.invalidateAll();
           this.log(`[Registry] Removed runtime shadow ${type}: ${name} (artifact ${it._packageId} restored)`);
           return true;
         }
@@ -6227,6 +6274,10 @@ export class SchemaRegistry {
       return false;
     }
     collection.delete(name);
+    // [#28356] …and an object may carry the retired entry as a bound action
+    // ({@link attachBoundActions}): drop the cached folds, as
+    // {@link unregisterItem} does, or a deleted runtime action stays listed.
+    if (type === 'action') this.invalidateAll();
     this.log(`[Registry] Removed overlay entry ${type}: ${name} (no layer serves it any more)`);
     return true;
   }

@@ -429,3 +429,78 @@ describe('a bound action is served as its ActionSchema parse', () => {
         expect(actionNames(host.engine.registry.getObject('ba_org'))).toEqual(['own_gated']);
     });
 });
+
+// ── [#28356] A bound action a runtime author saves through the metadata door ──
+
+describe('a bound action saved at runtime through the metadata door reaches its object as served', () => {
+    /** The standalone action an author saves for the owner's object — no package ships it. */
+    const RUNTIME = {
+        name: 'rt_action', label: 'Runtime', objectName: 'ba_org', type: 'url',
+        target: 'https://example.com/rt', locations: ['record_header'],
+    };
+    const save = (protocol: ObjectStackProtocolImplementation, item: any, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'action', name: item.name, item: structuredClone(item), ...extra } as any);
+    const listedActions = async (protocol: ObjectStackProtocolImplementation, name: string): Promise<string[]> => {
+        const listed: any = await protocol.getMetaItems({ type: 'object' } as any);
+        const items: any[] = Array.isArray(listed) ? listed : listed?.items ?? [];
+        return actionNames(items.find((o) => o?.name === name));
+    };
+
+    it('GET /meta/object/<target>, the object list and the registry object all list it after the owner\'s own actions', async () => {
+        const { engine, protocol } = await hostWith([OWNER, CONTROL]);
+        const saved: any = await save(protocol, RUNTIME);
+        expect(saved).toMatchObject({ success: true, state: 'active' });
+
+        const served: any = await protocol.getMetaItem({ type: 'object', name: 'ba_org' } as any);
+        expect(actionNames(served.item)).toEqual(['own_action', 'rt_action']);
+        expect(await listedActions(protocol, 'ba_org')).toEqual(['own_action', 'rt_action']);
+        expect(actionNames(engine.registry.getObject('ba_org'))).toEqual(['own_action', 'rt_action']);
+        // Control: the object it is not bound to is served as declared.
+        expect(actionNames(engine.registry.getObject('ba_control'))).toEqual([]);
+    });
+
+    it('the served entry is the declaration the router\'s rung 2 resolves, by reference', async () => {
+        const { engine, protocol } = await hostWith([OWNER]);
+        await save(protocol, RUNTIME);
+        const attached: any = engine.registry.getObject('ba_org')?.actions?.find((a: any) => a.name === 'rt_action');
+        expect(attached).toBe(engine.registry.getItem('action', 'rt_action'));
+        expect(attached).toMatchObject({ target: 'https://example.com/rt', objectName: 'ba_org' });
+    });
+
+    it('a re-save serves the new body, and a delete withdraws it from the cached object', async () => {
+        const { engine, protocol } = await hostWith([OWNER]);
+        await save(protocol, RUNTIME);
+        expect(actionNames(engine.registry.getObject('ba_org'))).toEqual(['own_action', 'rt_action']);
+
+        await save(protocol, { ...RUNTIME, label: 'Runtime v2' });
+        const resaved: any = engine.registry.getObject('ba_org')?.actions?.find((a: any) => a.name === 'rt_action');
+        expect(resaved?.label).toBe('Runtime v2');
+
+        const deleted: any = await protocol.deleteMetaItem({ type: 'action', name: 'rt_action' } as any);
+        expect(deleted).toMatchObject({ success: true });
+        expect(engine.registry.getItem('action', 'rt_action')).toBeUndefined();
+        expect(actionNames(engine.registry.getObject('ba_org'))).toEqual(['own_action']);
+        const served: any = await protocol.getMetaItem({ type: 'object', name: 'ba_org' } as any);
+        expect(actionNames(served.item)).toEqual(['own_action']);
+    });
+
+    it('a runtime action naming an object no package registers is listed nowhere, and the boot audit stays code-only', async () => {
+        const { engine, protocol } = await hostWith([OWNER]);
+        await save(protocol, { ...RUNTIME, name: 'rt_orphan', objectName: 'ba_missing' });
+        expect(engine.registry.getItem('action', 'rt_orphan')).toBeDefined();
+        expect(actionNames(engine.registry.getObject('ba_org'))).toEqual(['own_action']);
+        expect(engine.registry.findUnboundActionTargets()).toEqual([]);
+    });
+
+    it('a bare-key overlay of a packaged bound action is attached in its place, as the router resolves it', async () => {
+        const { engine } = await hostWith([OWNER, BINDER]);
+        // A rehydrated row under the bare name — the ADR-0005 overlay tier
+        // `getItem` answers first. The save door refuses an `action` overlay,
+        // so the registration is direct: the shape a stored legacy row takes.
+        engine.registry.registerItem('action', { ...BOUND, target: 'https://example.com/customised' }, 'name');
+        const attached: any[] = (engine.registry.getObject('ba_org')?.actions ?? []).filter((a: any) => a.name === 'rename_org');
+        expect(attached).toHaveLength(1);
+        expect(attached[0]).toBe(engine.registry.getItem('action', 'rename_org'));
+        expect(attached[0].target).toBe('https://example.com/customised');
+    });
+});
