@@ -20,7 +20,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { RelatedCountStore } from '@object-ui/components';
-import { RecordContextProvider } from '@object-ui/react';
+import { DiscussionContextProvider, RecordContextProvider } from '@object-ui/react';
 import { RecordTimelineCountContext, RecordTimelinePanelContext } from '../recordTimelineStream';
 
 vi.mock('@object-ui/react', async (importOriginal) => ({
@@ -231,6 +231,70 @@ describe('the enlarged state is the active tab (objectstack#27524, Target 9)', (
     );
     expect(tabIds().at(-1)).toBe('quote_line_item.quote');
     expect(activeTab()).toBe('quote_line_item.quote');
+  });
+
+  it('a link that opens another tab still names the 动态 count, counted from the feed the host holds (objectstack#27524)', async () => {
+    // ③'s preview gate: opened on 任务, neither the 动态 panel nor its tab's
+    // stream is drawn, and the stubbed stream reports nothing — the count
+    // comes from the feed itself.
+    const items = [
+      { id: 'c1', type: 'comment', actor: 'Ada', body: 'hi', createdAt: '2026-10-30T10:00:00Z' },
+      { id: 'c2', type: 'comment', actor: 'Ada', body: 'again', createdAt: '2026-10-30T11:00:00Z' },
+      { id: 'a1', type: 'activity', actor: 'Ada', body: 'called', createdAt: '2026-10-29T09:00:00Z' },
+    ];
+    const { container } = render(
+      <DiscussionContextProvider items={items as any} loading={false}>
+        <RecordPageColumns
+          tier="wide"
+          columns={columnsOf()}
+          enlargedRelated="task.lead_id"
+          onEnlargeRelated={vi.fn()}
+          onCloseEnlargedRelated={vi.fn()}
+        />
+      </DiscussionContextProvider>,
+    );
+    expect(activeTab()).toBe('task.lead_id');
+    expect(container.querySelector('[data-node="record:activity"]')).toBeNull();
+    await waitFor(() => expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBe('3'));
+  });
+
+  it('control: a feed still loading, or no feed held, names no 动态 count on another tab', async () => {
+    render(
+      <DiscussionContextProvider items={[]} loading>
+        <RecordPageColumns
+          tier="wide"
+          columns={columnsOf()}
+          enlargedRelated="task.lead_id"
+          onEnlargeRelated={vi.fn()}
+          onCloseEnlargedRelated={vi.fn()}
+        />
+      </DiscussionContextProvider>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBeNull();
+    cleanup();
+    render(
+      <RecordPageColumns
+        tier="wide"
+        columns={columnsOf()}
+        enlargedRelated="task.lead_id"
+        onEnlargeRelated={vi.fn()}
+        onCloseEnlargedRelated={vi.fn()}
+      />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBeNull();
+  });
+
+  it('the right column switched off names the 动态 count too', async () => {
+    const items = [{ id: 'c1', type: 'comment', actor: 'Ada', body: 'hi', createdAt: '2026-10-30T10:00:00Z' }];
+    const { container } = render(
+      <DiscussionContextProvider items={items as any} loading={false}>
+        <RecordPageColumns tier="wide" columns={columnsOf()} rightColumn={false} onEnlargeRelated={vi.fn()} />
+      </DiscussionContextProvider>,
+    );
+    expect(container.querySelector('[data-record-column="right"]')).toBeNull();
+    await waitFor(() => expect(tabCount(RECORD_PAGE_TIMELINE_PANEL)).toBe('1'));
   });
 
   it('Esc returns to 概览', () => {
