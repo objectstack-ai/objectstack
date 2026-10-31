@@ -10,7 +10,8 @@
 // Cells: better-sqlite3 and sqlite-wasm always run; PostgreSQL runs where
 // `OS_TEST_POSTGRES_URL` is set and is a named skip otherwise. The Postgres
 // cell owns one schema, named from this file, created before and dropped
-// after. The in-memory face of the same pins (and the strips, defaults,
+// after. One pin runs under the `isolated` posture with two organizations: a
+// rate row is read in the written row's organization only. The in-memory face of the same pins (and the strips, defaults,
 // preview and predicate-update cells) is packages/objectql's
 // `engine-home-amount-projection.test.ts`.
 
@@ -192,6 +193,38 @@ for (const cell of CELLS) {
         expect({ code: err?.code, status: err?.status, currency: err?.currency, date: err?.date })
           .toEqual({ code: 'ERR_EXCHANGE_RATE_MISSING', status: 400, currency: 'USD', date: '2025-12-31' });
         expect((await engine.find('fx_invoice', { context: SYS.context } as never)).length).toBe(before);
+      });
+
+      it('rates are per organization: one organization\'s rate row never converts another\'s write', async () => {
+        home = 'CNY';
+        // Organizations are walled from each other under the `isolated` posture;
+        // `single` is one organization by definition and reads install-wide.
+        engine.setTenancyPostureProvider(() => 'isolated');
+        try {
+          const driverOf = engine.getDriverForObject('sys_organization')!;
+          for (const id of ['org_fx_a', 'org_fx_b']) {
+            if (!(await driverOf.findOne('sys_organization', { where: { id } } as never))) await driverOf.create('sys_organization', { id, name: id });
+          }
+          const as = (org: string) => ({ context: { isSystem: true, tenantId: org } });
+          // SEK has a rate in organization A only; NOK in both, at different rates.
+          await engine.insert('sys_exchange_rate', { currency: 'SEK', effective_date: '2026-01-01', rate: 1.5, source: 'manual' }, as('org_fx_a'));
+          await engine.insert('sys_exchange_rate', { currency: 'NOK', effective_date: '2026-01-01', rate: 1.6, source: 'manual' }, as('org_fx_a'));
+          await engine.insert('sys_exchange_rate', { currency: 'NOK', effective_date: '2026-01-01', rate: 2, source: 'manual' }, as('org_fx_b'));
+
+          const inA = await engine.insert('fx_invoice', { name: 'a', currency_code: 'SEK', invoice_date: '2026-03-15', amount: 300 }, as('org_fx_a'));
+          expect(await read(inA.id)).toEqual({ home: 200, rate: 1.5, org: 'org_fx_a' });
+          const nokA = await engine.insert('fx_invoice', { name: 'a2', currency_code: 'NOK', invoice_date: '2026-03-15', amount: 320 }, as('org_fx_a'));
+          expect(await read(nokA.id)).toEqual({ home: 200, rate: 1.6, org: 'org_fx_a' });
+          const nokB = await engine.insert('fx_invoice', { name: 'b', currency_code: 'NOK', invoice_date: '2026-03-15', amount: 320 }, as('org_fx_b'));
+          expect(await read(nokB.id)).toEqual({ home: 160, rate: 2, org: 'org_fx_b' });
+
+          // Organization B has no SEK rate: A's row is not read for it, so the write is refused.
+          const err = await engine.insert('fx_invoice', { name: 'b2', currency_code: 'SEK', invoice_date: '2026-03-15', amount: 300 }, as('org_fx_b'))
+            .then(() => null, (e: { code?: string }) => e);
+          expect(err?.code).toBe('ERR_EXCHANGE_RATE_MISSING');
+        } finally {
+          engine.setTenancyPostureProvider(() => undefined);
+        }
       });
 
       it('an update of the amount, the code or the date converts again; another edit does not', async () => {

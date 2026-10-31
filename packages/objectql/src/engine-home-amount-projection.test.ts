@@ -6,20 +6,25 @@
 // orderBy, limit, fields), so the rate row the projection picks is chosen by
 // the same `effective_date <= date ORDER BY effective_date DESC LIMIT 1` a
 // SQL driver runs. ⛔ No driver-memory arm: its test consumers are a closed
-// census (`check:driver-memory-census`). The same pins on SQLite and Postgres
-// are packages/qa/dogfood's `test/home-amount-projection.test.ts`.
+// census (`check:driver-memory-census`). The double ignores `tenantId`, so
+// organization isolation of the rate read is not pinned here: the same pins,
+// and the two-organization one, on SQLite and Postgres are packages/qa/dogfood's
+// `test/home-amount-projection.test.ts`.
 //
 // Pinned here, per seam (insert, insertMany, by-id update, predicate update,
 // the validate() preview):
 //
-//  - the stored home amount is amount ÷ rate, rounded to the home minor units,
+//  - the stored home amount is amount ÷ rate, rounded to the home currency's
+//    CLDR fraction digits,
 //    stored with the rate used; the same currency as home is rate 1, read-free;
 //  - a missing rate refuses ERR_EXCHANGE_RATE_MISSING and an unset home
 //    currency ERR_HOME_CURRENCY_UNSET, and nothing is written;
 //  - the two projected fields: a caller's value is stripped (`readonly`) and
 //    recomputed over, a system or `preserveAudit` writer's value is recomputed
-//    over, a `defaultValue` never stands, a rate field `scale` below the
-//    rate's decimals refuses `max_scale` (never rounded);
+//    over, a `defaultValue` never stands; a rate field declaring a `scale`
+//    below the rate's decimals stores the full rate, never rounded and never
+//    refused (a `readonly` value is checked for shape only, so the declared
+//    scale reaches display only);
 //  - an update projects when it moves the amount, its code or its document
 //    date, and never otherwise (a corrected rate reaches stored rows only
 //    through a recompute).

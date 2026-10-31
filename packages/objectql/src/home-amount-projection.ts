@@ -19,7 +19,7 @@
  *   `ERR_HOME_CURRENCY_UNSET` / 400 (ADR-0144 Open item 4): the sources rule
  *   out a silent default, so the engine never picks one.
  * - **The same currency as home** stores rate `1` and the amount rounded to
- *   the home currency's minor units, with no rate lookup and no rate row
+ *   the home currency's fraction digits, with no rate lookup and no rate row
  *   needed (Open item 6).
  * - **A foreign currency** reads the rate row of that currency with the latest
  *   `effective_date` on or before the record's document date (Open item 2):
@@ -31,8 +31,10 @@
  *   foreign currency", so the home amount is the record amount DIVIDED by the
  *   rate. It is exact decimal arithmetic on the decimal spellings of the two
  *   numbers (scaled integers, never a floating-point division), rounded once,
- *   half away from zero, to the home currency's ISO 4217 minor units read from
- *   `CURRENCY_FRACTION_DIGITS` (Open item 3): JPY 0, USD 2, KWD 3.
+ *   half away from zero, to the home currency's CLDR fraction digits read from
+ *   `CURRENCY_FRACTION_DIGITS` (Open item 3): JPY 0, USD 2, KWD 3. CLDR's
+ *   count differs from ISO 4217's minor units for some codes (IQD, HUF, COP,
+ *   IDR, PKR among them); the table is CLDR's, and so is the rounding.
  * - **The rate stored** is the rate row's own value, never rounded (D1: the
  *   amount is stored "with the rate used"; a rounded rate would not reproduce
  *   the stored home amount). The rate field is `readonly`, and a readonly

@@ -263,8 +263,10 @@ document date, the engine computes the home amount:
   neither does "the most recent rate" when it is dated later. A `datetime` document date
   is read as its calendar day in UTC.
 - **The home amount** is the amount **divided by** the rate, computed in exact decimal
-  arithmetic and rounded once, half away from zero, to the home currency's minor units:
-  0 decimals for JPY, 2 for USD and CNY, 3 for KWD. USD 10,000 at a rate of 0.1389 into
+  arithmetic and rounded once, half away from zero, to the home currency's decimal
+  places as CLDR gives them (its fraction digits): 0 for JPY, 2 for USD and CNY, 3 for
+  KWD. For a few currencies CLDR's count differs from ISO 4217's minor units (IQD, HUF,
+  COP, IDR and PKR among them), and CLDR's applies. USD 10,000 at a rate of 0.1389 into
   CNY stores ¥71,994.24.
 - **The rate field** stores the rate row's own value, unrounded, so the stored home
   amount always reproduces from the stored amount and rate.

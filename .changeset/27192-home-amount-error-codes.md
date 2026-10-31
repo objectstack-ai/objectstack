@@ -11,4 +11,4 @@ Metadata-protocol: none
 
 - `ERR_EXCHANGE_RATE_MISSING` (400): a write that must convert an amount into the home currency found no exchange rate in force on the record's document date.
 - `ERR_HOME_CURRENCY_UNSET` (400): the same write found no home currency, because the organization's `localization.currency` setting is not set.
-- `CURRENCY_FRACTION_DIGITS` (ISO 4217 minor units per code) is the table the engine rounds a home amount with, exported so a consumer rounds with the same table instead of a copy.
+- `CURRENCY_FRACTION_DIGITS` (CLDR fraction digits per code, which differ from ISO 4217's minor units for some codes such as IQD, HUF, COP, IDR and PKR) is the table the engine rounds a home amount with, exported so a consumer rounds with the same table instead of a copy.
