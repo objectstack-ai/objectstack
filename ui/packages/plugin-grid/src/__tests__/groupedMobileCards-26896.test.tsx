@@ -23,6 +23,10 @@
  *   - collapsing a band removes its cards and keeps its band and count.
  * Control: the same grouped view at a desktop width still draws the one
  * grouped table (objectui#12620) and no card.
+ *
+ * The phone face (objectstack#27058): the card rows stay, and a tapped card
+ * hands its row to the host's `onRowClick`, which on a phone opens the record
+ * as a page (`ObjectView.phoneRecordPage-27058`).
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, cleanup, fireEvent, waitFor } from '@testing-library/react';
@@ -126,6 +130,30 @@ describe('a client-grouped list on a phone draws bands and cards (objectstack#26
 
     fireEvent.click(bandOf('Getting Started').querySelector('button')!);
     await waitFor(() => expect(cardTitlesIn('Getting Started')).toHaveLength(2));
+  });
+
+  it('a tapped card hands its row to the host (objectstack#27058: on a phone the record opens as a page)', async () => {
+    setWidth(390);
+    const onRowClick = vi.fn();
+    render(
+      <ActionProvider>
+        <ObjectGrid
+          schema={{
+            type: 'object-grid',
+            objectName: OBJECT,
+            columns: COLUMNS,
+            data: { provider: 'value', items: ARTICLES },
+            grouping: { fields: [{ field: 'category' }] },
+          } as any}
+          onRowClick={onRowClick}
+        />
+      </ActionProvider>,
+    );
+    await waitFor(() => expect(cardBands()).toHaveLength(4));
+    const card = [...bandOf('How-To').querySelectorAll('[data-testid="grid-card-title"]')][0] as HTMLElement;
+    fireEvent.click(card);
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(onRowClick.mock.calls[0][0]).toMatchObject({ id: '2', title: 'Rotate an API key' });
   });
 
   it('CONTROL: at a desktop width the same view still draws the one grouped table', async () => {

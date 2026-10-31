@@ -102,6 +102,11 @@ export { PageHeaderActions } from './renderers/layout/containers';
 // The host slot at the end of that row (objectstack#27241): the console's
 // record view puts the reader's panel switches there.
 export { PageHeaderTrailingContext } from './renderers/layout/page-header-trailing-context';
+// The phone's host slot (objectstack#27058): the console's record page hands
+// the header its bottom action bar, where the same row is drawn in its bar
+// face, and the subtitle it draws when the header declares none.
+export { PageHeaderPhoneContext } from './renderers/layout/page-header-phone-context';
+export type { PageHeaderPhoneFace } from './renderers/layout/page-header-phone-context';
 export type { PageHeaderActionsProps } from './renderers/layout/containers';
 
 // The field-face seam (objectui#13216): the slot `@object-ui/fields` fills

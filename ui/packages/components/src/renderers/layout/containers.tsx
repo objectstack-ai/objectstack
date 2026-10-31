@@ -19,6 +19,7 @@
  */
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { ComponentRegistry, ExpressionEvaluator, declaredNameField, evalRowPredicate, formatTitleTemplate, hasDeclaredPredicate, getRecordDisplayName, isActionSwitchedOff, recordDisplayValueAt, resolveNameField, toPredicateRecord } from '@object-ui/core';
 import type { ComponentInput } from '@object-ui/core';
 import { actionRendersAt, resolveDeclaredActionIds } from '@object-ui/types';
@@ -61,6 +62,7 @@ import { RecordTitleChip } from '../../custom/RecordTitleChip';
 import { resolveFieldReadFace } from '../../lib/field-face';
 import { PageDescriptionContext } from './page-description-context';
 import { PageHeaderTrailingContext } from './page-header-trailing-context';
+import { PageHeaderPhoneContext } from './page-header-phone-context';
 import { renderBlockChildren } from './page-block-grid';
 import { isFileIdToken } from '@objectstack/spec/data';
 import { readActionEntryParamValues } from '../action/static-params';
@@ -1739,6 +1741,14 @@ function recordPictureUrl(value: unknown): string | undefined {
 }
 
 /**
+ * The buttons a phone's bottom action bar holds before its `⋯`
+ * (objectstack#27058): the primary action and one more. The record page v4
+ * header row's cap is the primary, two more and the `⋯`; at 390 px the second
+ * of those folds into the `⋯`.
+ */
+const PHONE_ACTION_BAR_BUTTONS = 2;
+
+/**
  * The props of {@link PageHeaderActions}.
  *
  * `actions`, `maxVisible` and `mobileMaxVisible` are `page:header`'s own
@@ -1767,6 +1777,16 @@ export interface PageHeaderActionsProps {
    * no action, the row is the trailing chrome alone.
    */
   trailing?: React.ReactNode;
+  /**
+   * Where the row is drawn (objectstack#27058). `row` (the default) is the
+   * header's own action row. `bar` is a phone's bottom action bar: the primary
+   * action, one more and the `⋯`, each button sharing the bar's width. In the
+   * bar the host's Edit is one of the record's actions like any other: it
+   * takes a slot after the page's own actions, and folds into the `⋯` when
+   * they fill the bar. The page's `mobileMaxVisible` still sets the budget
+   * when it declares one.
+   */
+  face?: 'row' | 'bar';
 }
 
 /** The refresh entry of the header's `⋯` menu — see {@link PageHeaderActionsProps.refresh}. */
@@ -1797,6 +1817,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   emptySlot = null,
   refresh,
   trailing,
+  face = 'row',
 }) => {
   const ctx = useRecordContext();
   // Record-level inline-edit session (objectui#2572 item 4): while a shared
@@ -2299,9 +2320,12 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // renderer's job. Rejections are pinned in `page-header-actions.test.tsx`.
     const readMax = (v: any): number | undefined =>
       typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : undefined;
-    const maxVisible = isMobile
-      ? (readMax(rawMobileMaxVisible) ?? 1)
-      : (readMax(rawMaxVisible) ?? 3);
+    const barFace = face === 'bar';
+    const maxVisible = barFace
+      ? (readMax(rawMobileMaxVisible) ?? PHONE_ACTION_BAR_BUTTONS)
+      : isMobile
+        ? (readMax(rawMobileMaxVisible) ?? 1)
+        : (readMax(rawMaxVisible) ?? 3);
     const isMoreOnly = (a: any): boolean =>
       Array.isArray(a?.locations) &&
       a.locations.length > 0 &&
@@ -2356,13 +2380,29 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // the app's actions filled the row (objectui#12529). A DESTRUCTIVE host
     // action is the exception and always folds: a host's Delete belongs in
     // the `⋯`'s destructive band, never inline as a red button.
+    //
+    // The phone's bottom bar (objectstack#27058) has room for its budget and
+    // no more, so there the host's buttons queue after the page's own actions
+    // for the same slots (the primary keeps the first), and what does not fit
+    // folds into the `⋯` with them.
     const authoredButtons = ranked.filter((a) => !isHostAction(a));
-    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, maxVisible));
-    const inlineActions = ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
-    const foldedButtons = [
-      ...authoredButtons.slice(maxVisible),
-      ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
-    ];
+    const barQueue = barFace
+      ? [...(primaryAction ? [primaryAction] : []), ...authoredButtons, ...ranked.filter(isHostButton)]
+          .filter((a, i, all) => all.indexOf(a) === i)
+      : [];
+    const inlineAuthored = new Set<unknown>(barFace ? barQueue.slice(0, maxVisible) : authoredButtons.slice(0, maxVisible));
+    const inlineActions = barFace
+      ? ranked.filter((a) => inlineAuthored.has(a))
+      : ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
+    const foldedButtons = barFace
+      ? [
+          ...barQueue.slice(maxVisible),
+          ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
+        ]
+      : [
+          ...authoredButtons.slice(maxVisible),
+          ...ranked.filter((a) => isHostAction(a) && !isHostButton(a)),
+        ];
     // The overflow reads as one list in three bands (objectui#12529): the
     // authored actions first, then the host's menu chrome (favorites /
     // Share), then every destructive entry last, set apart by a separator.
@@ -2479,6 +2519,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           // same spelling as `PanelToggles` and `DeclaredActionsBar`).
           className={cn(
             'gap-2',
+            barFace && 'h-10 min-w-0 flex-1',
             pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
           )}
           onClick={() => {
@@ -2490,7 +2531,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           }}
         >
           {icon && <LazyIcon name={icon} className="h-4 w-4" />}
-          <span>{label}</span>
+          <span className={barFace ? 'truncate' : undefined}>{label}</span>
         </Button>
       );
       if (!disabledReason) return button;
@@ -2511,7 +2552,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
                 tabIndex={0}
                 aria-describedby={reasonId}
                 data-disabled-reason=""
-                className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className={cn(
+                  'inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  barFace && 'min-w-0 flex-1 [&>button]:w-full',
+                )}
               >
                 {button}
                 <span id={reasonId} className="sr-only">{disabledReason}</span>
@@ -2524,9 +2568,12 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     };
     return (
       <div
-        className="flex flex-wrap items-center gap-2 shrink-0 max-w-full"
+        className={barFace
+          ? 'flex w-full min-w-0 items-center gap-2'
+          : 'flex flex-wrap items-center gap-2 shrink-0 max-w-full'}
         role="toolbar"
         aria-label={tt('detail.pageHeaderActions', 'Page header actions')}
+        data-page-header-actions-face={face}
       >
         {inlineActions.map(renderButton)}
         {useOverflow && (
@@ -2535,7 +2582,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-1 px-2"
+                className={barFace ? 'h-10 w-10 shrink-0 px-0' : 'gap-1 px-2'}
                 aria-label={tt('detail.moreActions', 'More actions')}
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -2652,6 +2699,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   const pageDescription = React.useContext(PageDescriptionContext);
   // The host's trailing chrome for the action row (objectstack#27241).
   const headerTrailing = React.useContext(PageHeaderTrailingContext);
+  // A phone host's face (objectstack#27058): the actions go to its bottom bar,
+  // and its subtitle stands in for an undeclared one.
+  const phoneFace = React.useContext(PageHeaderPhoneContext);
   const headerObjectSchema: any = (ctx as any)?.objectSchema;
   const headerObjectName: string | undefined = ctx?.objectName || headerObjectSchema?.name;
   const explicitTitle = interpolate(
@@ -2702,16 +2752,26 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
    * rendered — including the first paint of a record page, before `ctx.data`
    * lands.
    */
-  const renderHeaderTail = (emptySlot: React.ReactNode): React.ReactNode => (
-    <PageHeaderActions
-      actions={rawHeaderActions}
-      maxVisible={schema?.maxVisible ?? schema?.properties?.maxVisible}
-      mobileMaxVisible={schema?.mobileMaxVisible ?? schema?.properties?.mobileMaxVisible}
-      emptySlot={emptySlot}
-      refresh={hostRefresh ? { label: tt('common.refresh', 'Refresh'), onSelect: handleManualRefresh } : undefined}
-      trailing={headerTrailing}
-    />
-  );
+  //
+  // On a phone the header draws no action row (objectstack#27058): the same
+  // row, in its bar face, is drawn into the host's bottom bar instead — a
+  // portal, so it stays inside this record's contexts — and nothing is drawn
+  // until that element exists.
+  const renderHeaderTail = (emptySlot: React.ReactNode): React.ReactNode => {
+    const row = (
+      <PageHeaderActions
+        actions={rawHeaderActions}
+        maxVisible={schema?.maxVisible ?? schema?.properties?.maxVisible}
+        mobileMaxVisible={schema?.mobileMaxVisible ?? schema?.properties?.mobileMaxVisible}
+        emptySlot={phoneFace ? null : emptySlot}
+        refresh={hostRefresh ? { label: tt('common.refresh', 'Refresh'), onSelect: handleManualRefresh } : undefined}
+        trailing={phoneFace ? undefined : headerTrailing}
+        face={phoneFace ? 'bar' : 'row'}
+      />
+    );
+    if (!phoneFace) return row;
+    return phoneFace.actionBar ? createPortal(row, phoneFace.actionBar) : null;
+  };
 
   // Decide whether to render the record chip. Conditions:
   //   1. There's a live RecordContext with data + an object schema.
@@ -3022,8 +3082,13 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
                 : undefined
             }
           />
-          {subtitle && (
-            <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
+          {(subtitle || phoneFace?.subtitle) && (
+            <p
+              className={cn('text-sm text-muted-foreground mt-1', !subtitle && 'truncate')}
+              data-page-header-subtitle={subtitle ? undefined : 'host'}
+            >
+              {subtitle || phoneFace?.subtitle}
+            </p>
           )}
           {explicitTitle && pageDescription && (
             <p className="text-sm text-muted-foreground mt-1" data-page-description="">{pageDescription}</p>

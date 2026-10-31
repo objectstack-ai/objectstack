@@ -23,7 +23,9 @@
  *  - < 760 px (the split pane at 720, a phone at 390): ONE column, the details
  *    then the right column's panels in their order. No rail, and no tab
  *    strip but the record's own tab row under the header (Target 8), the
- *    same on every tier: 「概览」, 动态, then the related panels.
+ *    same on every tier: 「概览」, 动态, then the related panels. On a phone
+ *    (objectstack#27058: a 390 px window, not only a 390 px root) the stack
+ *    is the same, and the header's actions sit in the bottom bar after it.
  *  - The embedded record (drawer / split pane) follows the same rule.
  *  - The right column opens with the 动态 panel, so History is read at open in
  *    every tier. `?tab=` addresses no strip (「概览」 stays the active tab);
@@ -147,8 +149,9 @@ function makeDataSource() {
   };
 }
 
-function renderPage({ width, embedded = false, search = '' }: { width: number; embedded?: boolean; search?: string }) {
+function renderPage({ width, embedded = false, search = '', windowWidth = 1440 }: { width: number; embedded?: boolean; search?: string; windowWidth?: number }) {
   rootWidth = width;
+  Object.defineProperty(window, 'innerWidth', { value: windowWidth, configurable: true, writable: true });
   dataSource = makeDataSource();
   const metadata = {
     objects: OBJECTS,
@@ -205,6 +208,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true, writable: true });
 });
 
 const shown = (container: HTMLElement) =>
@@ -277,10 +281,10 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
   });
 
   it.each([
-    ['the split pane', 720],
-    ['a phone', 390],
-  ])('%s (%i px): one column — the details, then the 动态 panel and the related panels; the tab row; History is read at open', async (_name, width) => {
-    const { container } = renderPage({ width });
+    ['the split pane', 720, 1440],
+    ['a phone', 390, 390],
+  ])('%s (%i px): one column — the details, then the 动态 panel and the related panels; the tab row; History is read at open', async (name, width, windowWidth) => {
+    const { container } = renderPage({ width, windowWidth });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('stack');
     expect(shown(container)).toBe('details');
@@ -292,6 +296,19 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(details.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
+    // objectstack#27058 — on a phone the stack ends where the bottom action
+    // bar starts: the header's actions are drawn there, after the body, and
+    // the header draws no action row. The split pane keeps the header's row.
+    const bar = container.querySelector('[data-record-action-bar]');
+    const header = container.querySelector('[data-record-page-root] header') as HTMLElement;
+    if (name === 'a phone') {
+      await waitFor(() => expect(bar?.querySelector('[role="toolbar"]')).toBeTruthy());
+      expect(right.compareDocumentPosition(bar!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(header.querySelector('[role="toolbar"]')).toBeNull();
+    } else {
+      expect(bar).toBeNull();
+      await waitFor(() => expect(header.querySelector('[role="toolbar"]')).toBeTruthy());
+    }
   });
 
   it('embedded (drawer / split pane): the same rule — two columns at 1440 px, one at 720 px', async () => {

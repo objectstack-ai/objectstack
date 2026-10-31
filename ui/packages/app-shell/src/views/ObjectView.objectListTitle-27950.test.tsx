@@ -30,7 +30,10 @@
  *  - Narrow rows: the object label is `shrink-0` and unwrapped, the view label
  *    is the switcher's `truncate` span. The test DOM computes no layout, so the
  *    classes that decide it are what is read.
- *  - The phone bar's trigger reads 「OBJECT / VIEW」, the object first.
+ *  - On a phone (objectstack#27058) the app bar's view dropdown and its
+ *    「OBJECT / VIEW」 trigger are retired with the channel that fed them
+ *    (`MobileViewSwitcherContext`): the one switcher leads the list's toolbar
+ *    row, and the app bar's label names the object.
  *
  * The record route's crumb is not drawn by this page (`RecordDetailView`);
  * `AppHeader.appBarLeftGroup-12461` pins that it stays absent from the app bar.
@@ -83,7 +86,6 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
-import { MobileViewSwitcherProvider, useMobileViewSwitcher } from '../layout/MobileViewSwitcherContext';
 
 // The page's own reads (the security `explain` probe among them) are relative
 // fetches, which happy-dom would send to a real socket. One double, installed
@@ -129,11 +131,6 @@ function SidebarStateProbe() {
   return <output data-testid="sidebar-state">{useSidebar().state}</output>;
 }
 
-/** The phone bar's trigger label, as `AppHeader` reads it. */
-function MobileTriggerProbe() {
-  return <output data-testid="mobile-trigger">{useMobileViewSwitcher()?.triggerLabel ?? ''}</output>;
-}
-
 function mount(entry: string, { sidebarOpen = true }: { sidebarOpen?: boolean } = {}) {
   const i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
   const dataSource = {
@@ -149,17 +146,14 @@ function mount(entry: string, { sidebarOpen = true }: { sidebarOpen?: boolean } 
     <I18nProvider instance={i18n}>
       <ExpressionProvider user={{ id: 'u1', name: 'Sales Manager' }}>
         <SidebarProvider open={sidebarOpen}>
-          <MobileViewSwitcherProvider>
-            <MemoryRouter initialEntries={[entry]}>
-              <LocationProbe />
-              <SidebarStateProbe />
-              <MobileTriggerProbe />
-              <Routes>
-                <Route path="/apps/:appName/:objectName/view/:viewId" element={page} />
-                <Route path="/apps/:appName/:objectName" element={page} />
-              </Routes>
-            </MemoryRouter>
-          </MobileViewSwitcherProvider>
+          <MemoryRouter initialEntries={[entry]}>
+            <LocationProbe />
+            <SidebarStateProbe />
+            <Routes>
+              <Route path="/apps/:appName/:objectName/view/:viewId" element={page} />
+              <Route path="/apps/:appName/:objectName" element={page} />
+            </Routes>
+          </MemoryRouter>
         </SidebarProvider>
       </ExpressionProvider>
     </I18nProvider>,
@@ -178,8 +172,11 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+const DESKTOP_WIDTH = window.innerWidth;
+
 afterEach(() => {
   cleanup();
+  Object.defineProperty(window, 'innerWidth', { value: DESKTOP_WIDTH, configurable: true, writable: true });
 });
 
 describe('objectstack#27950 — the list title names the object ahead of the view switcher', () => {
@@ -232,7 +229,6 @@ describe('objectstack#27950 — the list title names the object ahead of the vie
     await listToolbar();
     expect(within(heading()).queryByTestId('object-list-crumb')).toBeNull();
     expect(switcher()).toHaveTextContent('Notes');
-    expect(screen.getByTestId('mobile-trigger')).toHaveTextContent(/^$/);
   });
 
   it('a short row keeps the object label whole: it never shrinks, the view label truncates', async () => {
@@ -245,9 +241,14 @@ describe('objectstack#27950 — the list title names the object ahead of the vie
     expect(within(heading()).getByTestId('object-list-title')).toHaveClass('min-w-0');
   });
 
-  it('the phone bar\'s trigger reads 「Leads / VIEW」, the object first', async () => {
+  it('on a phone the one switcher leads the list\'s toolbar row, and the hidden header holds none', async () => {
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true, writable: true });
     mount('/apps/crm/crm_lead/view/mine');
     await listToolbar();
-    await waitFor(() => expect(screen.getByTestId('mobile-trigger')).toHaveTextContent(/^Leads \/ My Leads$/));
+    expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
+    const phoneTitle = within(screen.getByTestId('list-toolbar-leading')).getByTestId('list-phone-title');
+    expect(within(phoneTitle).getByTestId('list-view-switcher')).toHaveTextContent('My Leads');
+    // The app bar names the object on a phone; the row names the view.
+    expect(screen.queryByTestId('object-list-crumb')).toBeNull();
   });
 });
