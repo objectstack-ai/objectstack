@@ -531,7 +531,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 expect(caught?.code).toBe('INVALID_METADATA');
                 expect(caught?.status).toBe(422);
                 expect(caught.message).toContain('Did you mean `objectName` → `object`?');
-                expect(mockEngine.insert).not.toHaveBeenCalled();
+                // [#28355] The refusal's own `denied` audit row is the only insert;
+                // no `sys_metadata` row is written.
+                expect((mockEngine.insert as any).mock.calls.map(([table, row]: any[]) => [table, row.code]))
+                    // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                    .toEqual([['sys_metadata_audit', 'invalid_metadata']]);
             });
 
             it('rejects an invalid view (container with a listView missing `columns`) with 422', async () => {
@@ -560,7 +564,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 // message owes is the human sentence, which is asserted as prose.
                 expect(caught.message).toMatch(/failed spec validation/);
                 expect(Array.isArray(caught.issues)).toBe(true);
-                expect(mockEngine.insert).not.toHaveBeenCalled();
+                // [#28355] The refusal's own `denied` audit row is the only insert;
+                // no `sys_metadata` row is written.
+                expect((mockEngine.insert as any).mock.calls.map(([table, row]: any[]) => [table, row.code]))
+                    // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                    .toEqual([['sys_metadata_audit', 'invalid_metadata']]);
             });
 
             it('rejects a dashboard with wrong-typed widgets with 422', async () => {
@@ -580,7 +588,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
                 expect(caught?.code).toBe('INVALID_METADATA');
                 expect(caught?.status).toBe(422);
-                expect(mockEngine.insert).not.toHaveBeenCalled();
+                // [#28355] The refusal's own `denied` audit row is the only insert;
+                // no `sys_metadata` row is written.
+                expect((mockEngine.insert as any).mock.calls.map(([table, row]: any[]) => [table, row.code]))
+                    // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                    .toEqual([['sys_metadata_audit', 'invalid_metadata']]);
             });
 
             it('validates types via the central spec registry (e.g. app)', async () => {
@@ -601,7 +613,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
 
                 expect(caught?.code).toBe('INVALID_METADATA');
                 expect(caught?.status).toBe(422);
-                expect(mockEngine.insert).not.toHaveBeenCalled();
+                // [#28355] The refusal's own `denied` audit row is the only insert;
+                // no `sys_metadata` row is written.
+                expect((mockEngine.insert as any).mock.calls.map(([table, row]: any[]) => [table, row.code]))
+                    // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                    .toEqual([['sys_metadata_audit', 'invalid_metadata']]);
             });
 
             it('accepts plural type strings (e.g. `views`, `dashboards`)', async () => {

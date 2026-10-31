@@ -103,6 +103,7 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   step: 'presentation',       // input granularity
   rows: 'presentation',       // inline multiline-editor height (objectui#6140) — read by objectui's TextAreaField/RichTextField, never by the DDL (a rows-sized editor surface, not a column shape)
   useGrouping: 'presentation',
+  percentDisplay: 'presentation', // a percent field's read-only face (bar or plain), never read by the DDL
   options: 'presentation',    // select values: validation + UI, no DDL
   picklist: 'presentation',   // names the shared option list the server resolves into `options` — validation + UI, no DDL
   accept: 'presentation',     // upload validation
@@ -147,6 +148,7 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   lookupFilters: 'presentation',
   dependsOn: 'presentation',
   allowCreate: 'presentation',
+  lookupAutofill: 'presentation', // a lookup's pick autofill pairs (#27945), read by the form and grid on pick — never by `createColumn`
   // Read by the WRITE path, never by the DDL: `initObjects` registers an
   // autonumber generator off `type: 'auto_number'` without skipping builtin
   // names, so the format an author declares is honoured rather than discarded.

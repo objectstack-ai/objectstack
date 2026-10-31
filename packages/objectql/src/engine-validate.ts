@@ -51,6 +51,7 @@ import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStrin
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { assertRecordCurrencyCodes, RecordCurrencyCodeRequiredError } from './validation/record-currency-code.js';
+import { isHomeAmountRefusal } from './home-amount-projection.js';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from './engine-update-dispatch.js';
 import {
   droppedFieldEvents,
@@ -93,11 +94,12 @@ export interface ValidateHost {
   resolveOptionPermissions: ObjectQL['resolveOptionPermissions'];
   getSummaryDescriptors: ObjectQL['getSummaryDescriptors'];
   assertReferencesResolve: ObjectQL['assertReferencesResolve'];
+  previewHomeAmounts: ObjectQL['previewHomeAmounts'];
 }
 
 /** The body of `ObjectQL#validate`; the method's docblock there is its contract. */
 export async function validate(
-  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'assertReferencesResolve'>,
+  this: Pick<ValidateHost, 'resolveObjectName' | '_registry' | 'permissionResolution' | 'resolveDefaultPermissions' | 'initializeSummaryFields' | 'applyFieldDefaults' | '_writeWallVerdict' | 'staticReadonlyCreateStrip' | 'logger' | 'mediaValueShapeStrictFor' | 'valueShapeStrictFor' | 'validationMessageContext' | 'buildEvalUser' | 'findOne' | 'readUpdatePriorRow' | 'resolvePreviewParents' | '_writeGateProbe' | 'resolvePredicateRelated' | 'resolveOptionPermissions' | 'getSummaryDescriptors' | 'assertReferencesResolve' | 'previewHomeAmounts'>,
   object: string,
   data: Record<string, unknown> | Record<string, unknown>[],
   options?: {
@@ -563,6 +565,14 @@ export async function validate(
           object, (schemaForValidation as { fields?: unknown } | undefined)?.fields,
           mode === 'insert' ? row : judgedViews[i], mode, mode === 'insert' ? undefined : row, storedIds[i],
         );
+        // [ADR-0144 D5] The write's home projection, on the same image and
+        // under the same condition: a row the write refuses for no home
+        // currency or no rate on its document date (or a blank document date)
+        // is refused here with the same code, so a dry run does not pass it.
+        // It reads the rate table and the home currency; it writes nothing.
+        await this.previewHomeAmounts(
+          object, schemaForValidation, mode, row, mode === 'insert' ? row : judgedViews[i], options?.context, storedIds[i],
+        );
       }
       warnings.push(...evaluateValidationRules(schemaForValidation as any, row, mode, {
         // [#22445] The stored row, when this row named one: the by-id
@@ -593,7 +603,7 @@ export async function validate(
         return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
       }
       // The write throws this refusal whole; the preview answers it as the row's finding.
-      if (e instanceof RecordCurrencyCodeRequiredError) {
+      if (e instanceof RecordCurrencyCodeRequiredError || isHomeAmountRefusal(e)) {
         return { valid: false, errors: [{ field: e.field, code: e.code, message: e.message }], warnings };
       }
       throw e;

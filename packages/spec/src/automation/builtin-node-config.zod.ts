@@ -1487,7 +1487,7 @@ export const MapConfigSchema = lazySchema(() => strictObject({
     ),
   /** Variable the ordered list of per-item outputs is bound to — never a `$` name: those are the engine's (#22502). */
   outputVariable: flowBoundVariableNameSchema('outputVariable').optional()
-    .describe("Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`"),
+    .describe("Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`. An item whose run was cancelled keeps its slot as the closed marker `{ $status: 'cancelled', $itemRunId }`: never an output, and not counted as a run"),
 }));
 
 export type MapConfig = z.input<typeof MapConfigSchema>;

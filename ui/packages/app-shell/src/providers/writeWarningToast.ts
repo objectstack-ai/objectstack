@@ -8,9 +8,11 @@
 
 /**
  * Turning a write-warning (objectstack-ai/objectstack#3431 / objectstack-ai/objectstack#3455) into the message the user
- * reads. Lives apart from `AdapterProvider` — and, deliberately, imports NOTHING
- * that renders — so the wording, the label resolution and the reason-branching
- * can be exercised directly.
+ * reads. Lives apart from `AdapterProvider` — and, deliberately, imports no
+ * toaster (the caller owns the sink) — so the wording, the label resolution and
+ * the reason-branching can be exercised directly. The record save surfaces'
+ * claim on answer warnings is `@object-ui/react`'s `record-save-feedback`,
+ * shared with the `object-form` drawer and modal (objectstack-ai/objectstack#28216).
  *
  * @module providers/writeWarningToast
  */
@@ -22,6 +24,7 @@ import type {
   WriteWarningEvent,
 } from '@object-ui/data-objectstack';
 import type { TranslateFn } from '@object-ui/i18n';
+import { answerWarningLines, parkAnswerWarnings } from '@object-ui/react';
 
 /**
  * i18next's `t`, narrowed to what this module uses — RE-EXPORTED from its one
@@ -53,6 +56,7 @@ export type FieldLabelFn = (objectName: string, fieldName: string, fallback: str
  */
 export interface WriteWarningSink {
   warning(title: string, options?: { description?: string }): void;
+  info(title: string): void;
 }
 
 /**
@@ -239,14 +243,23 @@ function lineFor(reason: DroppedFieldsNotice['reason']): StrippedLine {
  * did.
  *
  * Except for a write a record save surface reports itself
- * (objectstack-ai/objectstack#27999): when an open {@link claimAnswerWarnings}
- * claim on `adapter` matches the event, its `warnings` are parked on that claim
+ * (objectstack-ai/objectstack#27999): when an open `claimAnswerWarnings`
+ * claim on `adapter` (`@object-ui/react`, objectstack-ai/objectstack#28216)
+ * matches the event, its `warnings` are parked on that claim
  * instead, and the surface's own record-named save toast carries them. The
  * match is decided SYNCHRONOUSLY, before this function's first `await`: the
  * adapter emits the event inside the write, before the write's promise settles,
  * so the claim holds the warnings by the time the surface's success handler
  * runs, whatever the label lookup below costs. The stripped-fields toast is
  * never claimed.
+ *
+ * The answer's `notice` (objectstack-ai/objectstack#28252) — the message a
+ * hook on the write set for the person who made it — is parked with the
+ * warnings on the same claim, so a record save surface shows it on its one
+ * save toast. Unclaimed, it gets the channel's own toast: it leads the
+ * warnings toast's lines when the write also carried warnings, and is an info
+ * toast of its own, the server's text as written, when it did not. Either way
+ * the write's answer feedback is one toast.
  */
 export async function emitWriteWarning(
   ev: WriteWarningEvent,
@@ -257,138 +270,34 @@ export async function emitWriteWarning(
 ): Promise<void> {
   // Before the first `await`: see the claim paragraph above.
   const messages = answerWarningLines(ev);
-  const claim = messages.length > 0 && adapter ? matchingClaim(adapter, ev) : undefined;
-  if (claim) claim.parked.push({ ev, show: () => emitAnswerWarnings(messages, t, sink) });
+  const notice = ev.notice || undefined;
+  const claimed = (messages.length > 0 || notice !== undefined) && !!adapter
+    && parkAnswerWarnings(adapter, ev, () => emitAnswerFeedback(messages, notice, t, sink));
   await emitStrippedFields(ev, t, adapter, fieldLabel, sink);
-  if (!claim) emitAnswerWarnings(messages, t, sink);
-}
-
-/** The write answer's advisory `warnings`, one entry per distinct message. */
-function answerWarningLines(ev: WriteWarningEvent): string[] {
-  const messages: string[] = [];
-  for (const w of ev.warnings ?? []) {
-    if (w.message && !messages.includes(w.message)) messages.push(w.message);
-  }
-  return messages;
+  if (!claimed) emitAnswerFeedback(messages, notice, t, sink);
 }
 
 /**
- * The write answer's advisory `warnings`, one line per distinct message, under
- * one title. Nothing when the event carries none.
+ * The write answer's advisory `warnings`, one line per distinct message under
+ * one title, led by its `notice` when there is one; a notice alone is an info
+ * toast of its own. Nothing when the event carries neither.
  */
-function emitAnswerWarnings(messages: string[], t: TranslateFn, sink: WriteWarningSink): void {
-  if (messages.length === 0) return;
+function emitAnswerFeedback(
+  messages: string[],
+  notice: string | undefined,
+  t: TranslateFn,
+  sink: WriteWarningSink,
+): void {
+  if (messages.length === 0) {
+    if (notice !== undefined) sink.info(notice);
+    return;
+  }
   sink.warning(
     t('detail.writeWarningsTitle', {
       defaultValue: 'Saved — with warnings',
     }),
-    { description: messages.join('\n') },
+    { description: (notice !== undefined ? [notice, ...messages] : messages).join('\n') },
   );
-}
-
-/**
- * The writes a record save surface reports itself: the record form an open
- * overlay or page saves (objectstack-ai/objectstack#27999). An update names
- * the record it writes; a create's record id is only known from its answer.
- */
-export interface AnswerWarningScope {
-  operation: WriteWarningEvent['operation'];
-  resource: string;
-  id?: string | number;
-}
-
-/** A record save surface's hold on the answer warnings of its own write. */
-export interface AnswerWarningClaim {
-  /**
-   * The distinct warning messages of the write that answered `saved`, removed
-   * from the claim. Every other event the claim parked is shown on the
-   * channel's own toast at once, so a write the surface did not make keeps
-   * the toast it always had.
-   */
-  take(saved: unknown): string[];
-  /** Close the claim; whatever it still parks is shown on the channel's toast. */
-  release(): void;
-}
-
-interface ParkedAnswerWarnings {
-  ev: WriteWarningEvent;
-  show: () => void;
-}
-
-interface ClaimEntry {
-  scope: AnswerWarningScope;
-  parked: ParkedAnswerWarnings[];
-}
-
-/** Open claims per adapter instance: the one `AdapterProvider` subscribes to. */
-const CLAIMS = new WeakMap<object, Set<ClaimEntry>>();
-
-const sameId = (a: unknown, b: unknown): boolean =>
-  a === undefined || a === null ? b === undefined || b === null : String(a) === String(b);
-
-function matchingClaim(adapter: object, ev: WriteWarningEvent): ClaimEntry | undefined {
-  for (const entry of CLAIMS.get(adapter) ?? []) {
-    const { scope } = entry;
-    if (scope.operation !== ev.operation || scope.resource !== ev.resource) continue;
-    if (scope.operation === 'update' && !sameId(scope.id, ev.id)) continue;
-    return entry;
-  }
-  return undefined;
-}
-
-/**
- * Claim the answer warnings of the writes `scope` names on `adapter`, for as
- * long as the surface that will report them is open. The surface reads its
- * write's warnings with {@link AnswerWarningClaim.take} when the save succeeds
- * and closes the claim with {@link AnswerWarningClaim.release} when it closes;
- * no parked warning is dropped by either.
- */
-export function claimAnswerWarnings(adapter: object, scope: AnswerWarningScope): AnswerWarningClaim {
-  const entry: ClaimEntry = { scope, parked: [] };
-  let open = CLAIMS.get(adapter);
-  if (!open) CLAIMS.set(adapter, (open = new Set()));
-  open.add(entry);
-  const showAll = (list: ParkedAnswerWarnings[]) => {
-    for (const p of list) p.show();
-  };
-  return {
-    take(saved) {
-      const record = saved && typeof saved === 'object' ? (saved as { id?: unknown; _id?: unknown }) : undefined;
-      const savedId = record?.id ?? record?._id;
-      // An update's parked events already name its record; a create's are its
-      // own only when the answer's record id is the saved record's.
-      const own = entry.parked.filter((p) => scope.operation === 'update' || sameId(p.ev.id, savedId));
-      const others = entry.parked.filter((p) => !own.includes(p));
-      entry.parked = [];
-      showAll(others);
-      const messages: string[] = [];
-      for (const p of own) {
-        for (const m of answerWarningLines(p.ev)) if (!messages.includes(m)) messages.push(m);
-      }
-      return messages;
-    },
-    release() {
-      open?.delete(entry);
-      const left = entry.parked;
-      entry.parked = [];
-      showAll(left);
-    },
-  };
-}
-
-/** Where a record save toast goes. Structurally satisfied by sonner's `toast`. */
-export interface RecordSaveSink extends WriteWarningSink {
-  success(title: string): void;
-}
-
-/**
- * The one toast of a record save (objectstack-ai/objectstack#27999): the
- * surface's record-named message, carrying its write's advisory warnings one
- * per line on the warning variant when there are any.
- */
-export function toastRecordSave(sink: RecordSaveSink, message: string, warnings: readonly string[] = []): void {
-  if (warnings.length > 0) sink.warning(message, { description: warnings.join('\n') });
-  else sink.success(message);
 }
 
 /** The stripped-fields toast — the channel's original and unchanged message. */

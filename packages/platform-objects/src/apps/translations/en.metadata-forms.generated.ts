@@ -616,6 +616,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Use Grouping",
         helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
       },
+      percentDisplay: {
+        label: "Percent Display",
+        helpText: "How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability."
+      },
       currencyConfig: {
         label: "Currency Config",
         helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in every mode."
@@ -1803,6 +1807,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Description",
         helpText: "Explanatory line under the title of this action's param dialog. On an action that collects params, the confirm question goes here rather than in confirmText — one dialog, not two. Not ai.description, which is the text an AI agent reads."
       },
+      submitText: {
+        label: "Submit button label",
+        helpText: "Label of the submit button in this action's param dialog, the verb the button performs (e.g. \"Send\", \"Log Call\"). Only for an action that collects params. Leave empty to show \"Confirm\"."
+      },
       confirmText: {
         label: "Confirm Text",
         helpText: "Confirmation message (e.g., \"Are you sure?\")"
@@ -2385,13 +2393,13 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     },
     fields: {
-      name: {
-        label: "Name",
-        helpText: "Machine name (snake_case)"
-      },
       label: {
         label: "Label",
         helpText: "Display label for admins"
+      },
+      name: {
+        label: "Name",
+        helpText: "Filled in from the label's Latin letters and digits when you create the set; if the label has none, type it yourself. snake_case"
       },
       description: {
         label: "Description",

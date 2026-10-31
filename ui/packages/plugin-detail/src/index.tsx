@@ -127,12 +127,15 @@ export type {
 } from './ConcurrentUpdateDialog';
 // `__clearRecordEditableCache` is test-only and stays off the barrel
 // (objectui#13453); tests import it from `useRecordEditable` directly.
-export { useRecordEditable } from './useRecordEditable';
+export { useRecordEditable, seedRecordVerdict } from './useRecordEditable';
+// objectstack#27627 — the record page payload's field projection, for the
+// in-place edit blocks' first ask.
+export { seedRecordFieldAccess } from './recordFieldAccess';
 export type { RecordOperation } from './useRecordEditable';
 // The Claim affordance on a record sitting in an ownership queue (objectstack
 // ADR-0142 D4): the server's `queue_claim` answer decides the button, the
 // claim is `{ owner_id: <self> }` through the normal update.
-export { recordSitsInQueue, queueClaimAdmitted, useQueueClaimOffered, claimQueuedRecord } from './queueClaim';
+export { recordSitsInQueue, queueClaimAdmitted, useQueueClaimOffered, claimQueuedRecord, seedQueueClaimDecision } from './queueClaim';
 export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
@@ -159,6 +162,10 @@ export type { DetailViewProps } from './DetailView';
 export type { DetailSectionProps, VirtualScrollOptions } from './DetailSection';
 export type { DetailTabsProps } from './DetailTabs';
 export type { RelatedListProps } from './RelatedList';
+// objectstack#27627 — the order a related list's row read asks, for the record
+// page's payload to ask a compact card's first rows in.
+export { normalizeSortSpec as normalizeRelatedListSort } from './RelatedList';
+export { COMPACT_RELATED_ROWS } from './relatedListCompact';
 export type { SectionGroupProps } from './SectionGroup';
 export type { HeaderHighlightProps } from './HeaderHighlight';
 export type { RecordCommentsProps } from './RecordComments';
@@ -198,15 +205,14 @@ export type {
   ObjectDefFieldLike,
   BuildPageOptions,
 } from './synth/buildDefaultPageSchema';
-// objectstack#26678 — the synthesized record page at two widths: the tier a
-// container takes, the page partitioned into its columns, and the columns.
+// objectstack#26678 / objectstack#27524 — the synthesized record page laid
+// out by its width: the tier a container takes, the page partitioned into its
+// details and panels, and the layout.
 export {
-  RECORD_PAGE_THREE_COLUMN_MIN_WIDTH,
+  RECORD_PAGE_WIDE_MIN_WIDTH,
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
   recordPageTierFor,
-  recordPageArrangementFor,
-  recordPageColumnDefaults,
-  recordTimelineDefaultReason,
+  recordPageTierHasRightColumn,
   recordPageColumnOfTab,
   buildDefaultPageColumns,
   bodyTableIdsOf,
@@ -217,10 +223,6 @@ export type {
   RecordPageTier,
   RecordPageColumn,
   DefaultPageColumns,
-  RecordPageColumnSwitches,
-  RecordPageArrangement,
-  RecordPageObjectLike,
-  RecordTimelineDefaultReason,
 } from './synth/recordPageColumns';
 export { useRecordPageTier } from './useRecordPageTier';
 export type { UseRecordPageTierOptions } from './useRecordPageTier';
@@ -234,8 +236,6 @@ export { RecordBodyTablesContext } from './relatedListCompact';
 // the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn, relatedCountTargetOf } from './useRelatedCounts';
 export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts';
-// The tabbed tier's 关联 tab in the reader's arrangement (objectstack#27055).
-export { ArrangedRelatedTab } from './ArrangedRelatedTab';
 // objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
 // the record's field changes over through this context.
 export {
@@ -980,6 +980,8 @@ ComponentRegistry.register('path', RecordPathRenderer, {
   inputs: [
     { name: 'statusField', type: 'string', required: true, description: 'Field representing the current status/stage' },
     { name: 'stages', type: 'array', of: 'object', description: 'Explicit stage definitions [{ value, label }] (else derived from field metadata)' },
+    // objectstack#28061 — read by `useStageChange` (`renderers/recordPathStageChange.tsx`).
+    { name: 'allowStageChange', type: 'boolean', description: 'Let the reader change the record\'s stage by pressing a stage on the path (default: off, a read-only progress rail). Each press asks for confirmation, then saves `statusField` through the record\'s ordinary update, guarded by the record\'s version, so the object\'s state machine and validation rules decide; a refused move is shown under the path. Stages are pressable only for a reader who may edit `statusField` on this record, and not while the record\'s inline edit holds unsaved changes.' },
   ],
 });
 

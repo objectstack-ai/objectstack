@@ -591,6 +591,30 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
   },
 
+  // [#27627] The record page payload (`POST /data/:object/:id/page`), declared
+  // in the PR that created it. The answer is `sendOk` and the two request
+  // refusals are `sendError`. The one write site is the catch, which relays
+  // `mapDataError`'s `{ status, body }` exactly as `GET /data/:object/:id`
+  // (`crud-routes.ts`) does, because a record the caller cannot read must
+  // refuse this request with the record read's own answer, byte for byte
+  // (`record-page.dogfood.test.ts` compares the two). It moves to the shared
+  // pair with the rest of the data family under #9559 option 1, never alone.
+  'packages/rest/src/record-page-routes.ts': {
+    responses: 1,
+    ok: 0,
+    err: 0,
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+  },
+
+  // [#27627] The app metadata bundle (`GET {metaPath}/app/:appId/bundle`),
+  // declared in the PR that created it. It builds no body itself: the bundle is
+  // sent by the `/meta` reads' shared `sendMetaRepresentation`
+  // (`meta-representation-validator.ts`), answered BARE like the item reads whose
+  // envelopes are its members, and every refusal goes through an existing
+  // emitter (the item read's own `sendMetaReadRefusal`, the shared absence and
+  // field-visibility emitters, `handleRouteError`).
+  'packages/rest/src/meta-app-bundle-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body — record
   // clone, the import doors and import-job reads, the export — moved out of
   // `rest-server.ts` whole. A MOVE, no wire answer changed, so it is held to
@@ -1588,6 +1612,14 @@ const EXPRESS_RESPONSE_MODULES = {
   // population is a dialect rather than a mounting mechanism — a name-based or
   // route-module-based walk would never have reached a middleware.
   'packages/runtime/src/security/inbound-rate-limit.ts': {},
+
+  // [#27627] FIRST AUDIT, verdict conformant. Not a route module: the send
+  // half of the `/meta` reads' body-hash validator, called by
+  // `meta-collection-routes.ts` and `meta-item-read-routes.ts`. It BUILDS no
+  // body. Its one `res.json(body)` relays the answer the calling route already
+  // built (relayed, so invisible here, and still counted in that route's own
+  // entry), and its revalidation exit is a bodiless `304` (`status(304).send()`).
+  'packages/rest/src/meta-representation-validator.ts': {},
 
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //

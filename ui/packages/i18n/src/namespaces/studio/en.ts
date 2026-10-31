@@ -1539,6 +1539,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': 'Show system objects ({count})',
   'engine.inspector.objectPicker.hideSystem': 'Hide system objects',
   'engine.inspector.objectPicker.noMatch': 'No object matches. Press Enter to keep what you typed.',
+  // objectstack#28240 — objects outside the edited package's closure.
+  'engine.inspector.objectPicker.groupOutside': 'Outside this package\u2019s dependencies',
+  'engine.inspector.objectPicker.showOutside': 'Show objects outside this package\u2019s dependencies ({count})',
+  'engine.inspector.objectPicker.hideOutside': 'Hide objects outside this package\u2019s dependencies',
+  'engine.inspector.objectPicker.outsideReason': '{package} can use only its own objects, the objects of the packages it declares as dependencies, and system objects. To use one of these, declare a dependency on the package it comes from.',
+  'engine.inspector.objectPicker.outsideFrom': 'From {package}',
+  'engine.inspector.objectPicker.declareDependency': 'Declare a dependency',
   // Add affordances (used by OutlineStrip + custom previews)
   'engine.inspector.add.widget': 'Add widget',
   'engine.inspector.add.block': 'Add block',
@@ -1575,6 +1582,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.historyEmptyTitle': 'No history yet',
   'engine.edit.historyEmptyDesc':
     'This item has never been edited via an overlay. The first save will create the initial history record.',
+  // Who wrote an event (ADR-0146 D1): the user's name, or the recorded id
+  // marked unresolved when no user row answers for it.
+  'engine.edit.historyBy': 'by',
+  'engine.edit.historyActorUnresolved': 'unresolved user',
+  'engine.edit.historyActorUnresolvedHint':
+    'No user record was found for this id: the user may have been deleted, or you cannot read the user directory.',
   // Reorder buttons (used in InspectorShell header)
   'engine.inspector.reorder.up': 'Move up',
   'engine.inspector.reorder.down': 'Move down',
@@ -1709,6 +1722,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.keyPattern': 'Key must match {pattern}',
   'engine.form.invalidJson': 'Invalid JSON',
   'engine.form.rootJsonObject': 'Root must be a JSON object',
+  // objectstack#28232 — under a create form's Name the label could not fill.
+  'engine.create.nameNotDerived': "This label can't be turned into a name; type one in snake_case.",
   // objectui#8218 — the metadata-admin form is now the Studio 「界面」 property
   // panel an AI-build maker edits, so every literal it still printed in English
   // landed inside an otherwise-Chinese surface. Swept from `widgets.tsx` +
@@ -2413,6 +2428,20 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.savedDraft': 'Automation “{label}” saved as draft',
   'engine.studio.auto.defaultOff': 'Off by default · review before enabling',
   'engine.studio.auto.heading': 'Automations',
+  'engine.studio.auto.deleteFlow': 'Delete flow',
+  'engine.studio.auto.flowDeleted': 'Deleted flow "{item}"',
+  // ADR-0146 D4 — a read-only package's flow: the activation-ledger switch
+  // (this deployment only, never the definition), offered on the item.
+  'engine.studio.auto.ledger.on': 'On for this deployment',
+  'engine.studio.auto.ledger.off': 'Off for this deployment',
+  'engine.studio.auto.ledger.notRunning': 'On for this deployment, not running here',
+  'engine.studio.auto.ledger.hint':
+    'This flow ships in a read-only package. The switch turns it on or off for this deployment only; the package is not changed.',
+  'engine.studio.auto.ledger.walled': 'On this deployment, only the platform operator can switch a packaged flow on or off.',
+  'engine.studio.auto.ledger.switchedOn': '"{label}" is switched on for this deployment.',
+  'engine.studio.auto.ledger.switchedOff': '"{label}" is switched off for this deployment.',
+  'engine.studio.auto.ledger.toggleFailedHttp': 'Could not change activation (HTTP {status}).',
+  'engine.studio.auto.ledger.toggleFailed': 'Could not change activation.',
   'engine.studio.auto.on': 'On',
   'engine.studio.auto.off': 'Off',
   'engine.studio.auto.offTitle': 'Disabled — will not run',
@@ -4028,6 +4057,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#12810 — a create that leaves a required seed placeholder unset
   // (a dataset's base object) is refused before any request.
   'engine.validation.seedPlaceholderUnset': 'Set {fields} before saving: a new item is never saved with the placeholder its template starts from.',
+  // objectstack#28179 — a row the served form marks required, left unset.
+  'engine.validation.fieldRequired': 'This field is required.',
   'engine.embedded.saved': 'Saved.',
   'engine.embedded.readOnlyParent': 'The parent type is read-only — saving will still attempt a PUT and may be refused by the server.',
   'engine.embedded.saveIntoParent': 'Save into {parentType}',
@@ -4167,6 +4198,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.more': '+{count} more…',
   'engine.translationPreview.keyCountOne': '{{count} key}',
   'engine.translationPreview.keyCountOther': '{{count} keys}',
+  // Studio item toolbar: the item tools Setup's item page opens, offered in
+  // every pillar's item header (objectstack#28239).
+  'engine.studio.itemTools.group': 'Item tools',
+  'engine.studio.itemTools.sourceReadOnly': 'Read-only: this item cannot be edited here.',
+  'engine.studio.itemTools.layersFailed': 'Could not read this item\'s layers: {message}',
+  'engine.studio.itemTools.layersRetry': 'Try again',
 };
 
 export default STUDIO_EN;

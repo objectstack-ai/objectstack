@@ -82,20 +82,36 @@
       "reason": "No hand-written guide covers the Job type; content/docs/references/system/job.mdx is generated from JobSchema. Note that automation/flows.mdx's `schedule: { type: 'cron' }` is a DIFFERENT surface — a flow start node's own config (flow.zod.ts tombstones a top-level `schedule`) — so it neither documents nor governs this union."
     },
     {
-      "key": "type:api-key|basic|bearer|none|oauth2",
+      "key": "type:api-key|basic|bearer|none",
       "label": "connector authentication",
       "docs": [
         "content/docs/automation/connectors.mdx"
       ],
-      "note": "The runtime auth shape (ConnectorAuthConfigSchema) — five variants including the enterprise-tier `oauth2`. Was exempt generated-reference-only while no hand-written connector page existed; #4289 wrote the guide and bound it, per the old exemption's own instruction."
+      "note": "The runtime auth shape (ConnectorAuthConfigSchema): the four static variants. Its `oauth2` variant was retired in spec 18 (ADR-0143 D7, #28137, ADR-0087 entry connector-auth-config-oauth2-retired); the grant moved to the instance `auth` below. Was exempt generated-reference-only while no hand-written connector page existed; #4289 wrote the guide and bound it, per the old exemption's own instruction."
     },
     {
-      "key": "type:api-key|basic|bearer|none",
-      "label": "connector auth (environment-artifact projection)",
+      "key": "type:api-key|app-credential|basic|bearer|none",
+      "label": "connector instance auth",
       "docs": [
         "content/docs/automation/connectors.mdx"
       ],
-      "note": "The declarative connector-instance auth shape (ADR-0097), reached via EnvironmentArtifactSchema.metadata.connectors[].auth: `credentialRef` references only, and `oauth2` deliberately absent (enterprise tier, ADR-0015) — the guide states that absence explicitly so authors don't read it as an omission."
+      "note": "The declarative connector-instance auth shape (ADR-0097, ADR-0143), reached via EnvironmentArtifactSchema.metadata.connectors[].auth and the assembled package manifest: `credentialRef` references only. `oauth2` and `signed` are members too, keyed separately because each is itself a union (on `grant` and on `scheme`; the walk reports the inner discriminator); see the grant and scheme entries below. The guide's 'Grant-bearing kinds' section covers `oauth2` and `app-credential`, and its 'Request signing' section covers `signed`."
+    },
+    {
+      "key": "grant:authorization_code|client_credentials",
+      "label": "connector instance oauth2 grant",
+      "docs": [
+        "content/docs/automation/connectors.mdx"
+      ],
+      "note": "The `oauth2` member of connector-instance auth, one strict shape per grant (ADR-0143 D2.1): `authorizationUrl` exists only on authorization_code, and client_credentials requires `credentialRef`."
+    },
+    {
+      "key": "scheme:aliyun-acs3-hmac-sha256|tencentcloud-tc3-hmac-sha256",
+      "label": "connector instance signing scheme",
+      "docs": [
+        "content/docs/automation/connectors.mdx"
+      ],
+      "note": "The `signed` member of connector-instance auth, one strict shape per scheme (ADR-0143 D2.3, #26710). The list is closed: a scheme joins only with its signer and its vendor test vectors, so this key grows one member per slice that ships one."
     },
     {
       "key": "strategy:isolated_db|isolated_schema|shared_schema",

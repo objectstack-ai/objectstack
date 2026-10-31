@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'package-api-contracts-unmounted-entries-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span.
   surface:
     'api.PackageApiContracts.upgradePackage / api.PackageApiContracts.resolveDependencies / '
     + 'api.PackageApiContracts.uploadArtifact — the three contract-map entries that bound '

@@ -73,6 +73,8 @@
  *   objects.<name>._views.<view>.label
  *   objects.<name>._views.<view>.description
  *   objects.<name>._views.<view>.emptyState.title / .message
+ *   objects.<name>._views.<form>.title
+ *   objects.<name>._views.<form>.submitBehavior.title / .message
  *   objects.<name>._views.<view>.bulkActions.<def>.label / .confirmText
  *                                                       / .confirmLabel
  *   objects.<name>._views.<view>.bulkActions.<def>.params.<param>.label
@@ -85,13 +87,14 @@
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
  *   objects.<name>._actions.<action>.disabledReason
+ *   objects.<name>._actions.<action>.submitText      (only beside a non-empty `params`)
  *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
- *                          / .disabledReason
+ *                          / .disabledReason / .submitText (beside a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
@@ -111,6 +114,8 @@
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
  *   pages.<page>.components.<tabsId>.items.<value>.label  (a `page:tabs` item label)
+ *   pages.<page>.components.<formId>.submitBehavior.title / .message
+ *                                       (an `object-form`'s thank-you panel)
  *   flows.<flow>.label
  *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
  *   flows.<flow>.screens.<node_id>.description                 (#22507)
@@ -152,6 +157,7 @@ import {
   FLOW_SCREEN_FIELD_COPY_KEYS,
   FLOW_TERMINAL_MESSAGE_KEYS,
   PAGE_TABS_COMPONENT_TYPE,
+  PAGE_FORM_COMPONENT_TYPE,
   globalFilterKey,
   pageTabItemKey,
   walkAddressedPageComponents,
@@ -457,11 +463,12 @@ function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: str
  * {@link defaultListViewKey} keeps for the default list, so the key written
  * here is the key the runtime reads.
  *
- * **Title only.** The other `_views` tails stay unemitted for a form: a
- * container's form entry carries no `label`, and its `description` is not
- * overlaid by anything a form renders. A form that authors no title still
- * records the key (`pushOptional`), so the coverage gate notices a bundle
- * that translates one the source never wrote.
+ * **Title and thank-you panel only** ({@link pushFormViewCopy}). The other
+ * `_views` tails stay unemitted for a form: a container's form entry carries
+ * no `label`, and its `description` is not overlaid by anything a form
+ * renders. A form that authors no title still records the key
+ * (`pushOptional`), so the coverage gate notices a bundle that translates one
+ * the source never wrote.
  */
 function pushContainerFormTitles(out: ExpectedEntry[], containerObject: string, container: any): void {
   if (!container?.form && !container?.formViews) return;
@@ -469,11 +476,46 @@ function pushContainerFormTitles(out: ExpectedEntry[], containerObject: string, 
   for (const item of expandViewContainer(containerObject, container)) {
     if (item.viewKind !== 'form') continue;
     const key = item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
-    const config = item.config as { title?: unknown } | undefined;
-    pushOptional(out, ['objects', containerObject, '_views', key, 'title'], config?.title, 'view', {
-      objectName: containerObject,
-    });
+    pushFormViewCopy(out, containerObject, key, item.config);
   }
+}
+
+/**
+ * Emit the `_views` tails ONE served form view carries: its heading
+ * (`_views.<key>.title`, `config.title`) and its thank-you panel
+ * (`_views.<key>.submitBehavior.title` / `.message`, the `title` / `message`
+ * of a `kind: 'thank-you'` `config.submitBehavior`) — the strings
+ * `translateView` overlays. A panel of another kind authors no copy, so its
+ * two keys are recorded unauthored (`pushOptional`), exactly as an untitled
+ * form's `title` is.
+ */
+function pushFormViewCopy(out: ExpectedEntry[], objectName: string, key: string, config: unknown): void {
+  const form = config && typeof config === 'object' ? config as { title?: unknown; submitBehavior?: any } : undefined;
+  const root = ['objects', objectName, '_views', key];
+  pushOptional(out, [...root, 'title'], form?.title, 'view', { objectName });
+  pushThankYouPanel(out, root, form?.submitBehavior, 'view', { objectName });
+}
+
+/**
+ * Emit `<root>.submitBehavior.title` / `.message` for one form's
+ * `submitBehavior` — the panel's two slots, under whichever address its
+ * carrier has: a form view's `_views.<key>` ({@link pushFormViewCopy}) or a
+ * page `object-form` component's `pages.<page>.components.<id>`
+ * ({@link emitPageComponentCopy}). Only a `kind: 'thank-you'` panel authors
+ * copy; any other kind records both keys unauthored (`pushOptional`), so the
+ * two carriers cannot read the kind differently.
+ */
+function pushThankYouPanel(
+  out: ExpectedEntry[],
+  root: string[],
+  behavior: unknown,
+  source: ExpectedEntry['source'],
+  extra?: EntryScope,
+): void {
+  const panel = behavior && typeof behavior === 'object' ? behavior as { kind?: unknown; title?: unknown; message?: unknown } : undefined;
+  const thankYou = panel?.kind === 'thank-you' ? panel : undefined;
+  pushOptional(out, [...root, 'submitBehavior', 'title'], thankYou?.title, source, extra);
+  pushOptional(out, [...root, 'submitBehavior', 'message'], thankYou?.message, source, extra);
 }
 
 /**
@@ -705,6 +747,25 @@ function pushOptional(
   const evidence = authoredEvidence(value);
   if (evidence.inline !== undefined) pushEntry(out, path, evidence.inline, source, extra);
   else out.push({ path, ...evidence, source, ...extra });
+}
+
+/**
+ * Emit `submitText`, the param dialog's submit button label, under an action's
+ * translation root — OPTIONAL-not-derived like `description` (an action that
+ * names no verb shows the console's own "Confirm"), and only for an action with
+ * a non-empty `params`: that is the only action `translateAction` overlays the
+ * key onto, because no other action opens the dialog the button sits in. A
+ * paramless action gets no slot, so a translation filed there stays dangling.
+ */
+function pushActionSubmitText(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  source: ExpectedEntry['source'],
+  objectName: string | undefined,
+): void {
+  if (!Array.isArray(action?.params) || action.params.length === 0) return;
+  pushOptional(out, [...actionRoot, 'submitText'], action.submitText, source, { objectName });
 }
 
 /**
@@ -1330,6 +1391,11 @@ function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): v
           );
         }
       }
+      // An `object-form`'s thank-you panel, under the form component's id —
+      // the key `translatePage` reads, by the form view's panel's rules.
+      if (component.type === PAGE_FORM_COMPONENT_TYPE) {
+        pushThankYouPanel(out, ['pages', name, 'components', id as string], props.submitBehavior, 'page');
+      }
     }
     return component;
   });
@@ -1460,6 +1526,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'confirmText'], actionCopy(action.confirmText), 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
         pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
+        pushActionSubmitText(out, aroot, action, 'action', objectName);
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1489,9 +1556,10 @@ export function collectExpectedEntries(
   // `i18n/missing-view` had zero producers repo-wide while the ratchet
   // reported green (#4123).
   //
-  // A container's form views (`formViews.*`, the default `form`) emit one
-  // `_views` tail, `title` — the form heading `translateView` overlays (see
-  // `pushContainerFormTitles`). Their `label` / `description` stay
+  // A container's form views (`formViews.*`, the default `form`) emit the
+  // `_views` tails `translateView` overlays — the form heading `title` and the
+  // thank-you panel's `submitBehavior.title` / `.message` (see
+  // `pushFormViewCopy`). Their `label` / `description` stay
   // unemitted: a container form entry carries no label, and nothing a form
   // renders reads a `_views` description.
   const views: any[] = Array.isArray(config?.views) ? config.views : [];
@@ -1501,11 +1569,10 @@ export function collectExpectedEntries(
 
     if (view.name) {
       pushViewEntries(out, containerObject, view.name, view);
-      // A `viewKind: 'form'` item carries its form under `config`, title included.
+      // A `viewKind: 'form'` item carries its form under `config`, title and
+      // thank-you panel included.
       if (view.viewKind === 'form' && view.config && typeof view.config === 'object') {
-        pushOptional(out, ['objects', containerObject, '_views', view.name, 'title'], view.config.title, 'view', {
-          objectName: containerObject,
-        });
+        pushFormViewCopy(out, containerObject, view.name, view.config);
       }
       continue;
     }
@@ -1557,6 +1624,7 @@ export function collectExpectedEntries(
     // reason shows the console's own default sentence, so there is no gap to
     // seed for it.
     pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
+    pushActionSubmitText(out, root, action, kind, objectName);
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);

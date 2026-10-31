@@ -5,6 +5,9 @@ import {
   BatchUpdateRequest,
   BatchUpdateResponse,
   GetRecordFieldAccessResponse,
+  RecordPageRequest,
+  RecordPageResponse,
+  AppMetadataBundleResponse,
   UpdateManyRequest,
   DeleteManyRequest,
   BatchOptions,
@@ -251,6 +254,15 @@ export interface ClientConfig {
 export type DiscoveryResult = GetDiscoveryResponse;
 
 /**
+ * [#27627] `meta.getAppBundle`'s answer: the bundle and its validator, or
+ * `notModified` when the `ifNoneMatch` sent still names what the server would
+ * serve this caller.
+ */
+export type AppBundleCacheResponse =
+  | { notModified: false; data: AppMetadataBundleResponse; etag?: { value: string; weak: boolean } }
+  | { notModified: true; etag?: { value: string; weak: boolean } };
+
+/**
  * @deprecated Use `data.query()` with standard QueryAST parameters instead.
  * This interface uses legacy parameter names (filter/sort/top/skip) that
  * require translation to QueryAST. Prefer QueryAST fields directly:
@@ -490,6 +502,22 @@ export interface CreateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
+  /**
+   * [#28000] One author-written message a hook on this write set to tell the
+   * person who made it what the save set in motion (for example "Sent to your
+   * manager for approval"). Info severity, distinct from `warnings`: show it
+   * with, or in place of, your own success message. Present only when a hook
+   * set one; never stored on the record.
+   */
+  notice?: string;
 }
 
 /**
@@ -544,6 +572,22 @@ export interface UpdateDataResult<T = any> {
    * person who made it. Present only when at least one rule hit.
    */
   warnings?: ValidateDataIssue[];
+  /**
+   * [#27703] The ids of the users this write @mentioned whose mention
+   * notification the mention gate withheld: they will not be notified. Ids only,
+   * never the reason. Only a `sys_comment` write fills it, only on the answer to
+   * the request that made the write, and nothing about it is stored on the
+   * comment. Present only when at least one mention was withheld.
+   */
+  withheldMentions?: string[];
+  /**
+   * [#28000] One author-written message a hook on this write set to tell the
+   * person who made it what the save set in motion (for example "Sent to your
+   * manager for approval"). Info severity, distinct from `warnings`: show it
+   * with, or in place of, your own success message. Present only when a hook
+   * set one; never stored on the record.
+   */
+  notice?: string;
 }
 
 /**
@@ -2058,9 +2102,11 @@ export class ObjectStackClient {
           headers['If-Modified-Since'] = cacheOptions.ifModifiedSince;
         }
         
+        // [#27627] The 304 is admitted by the transport; without it `fetch` threw on the
+        // non-ok status and the branch below was unreachable.
         const res = await this.fetch(`${this.baseUrl}${route}/object/${name}`, {
           headers
-        });
+        }, { admitNotModified: true });
         
         // Check for 304 Not Modified
         if (res.status === 304) {
@@ -2226,6 +2272,33 @@ export class ObjectStackClient {
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/references`);
         return this.unwrapResponse<FindReferencesToMetaResponse>(res);
+    },
+
+    /**
+     * [#27627] The app metadata bundle: the app and the objects, views, pages
+     * and dashboards its navigation reaches, each as its own
+     * `GET /meta/{type}/{name}` answers it to this caller, in one request
+     * (`GET /meta/app/{appId}/bundle`). An item the caller may not read is
+     * absent; an app the caller may not read rejects with the app read's own
+     * answer. The response carries a per-caller `ETag` under
+     * `Cache-Control: private, no-cache`, so the platform's HTTP cache
+     * revalidates it with `If-None-Match`.
+     */
+    getAppBundle: async (appId: string, cacheOptions?: { ifNoneMatch?: string }): Promise<AppBundleCacheResponse> => {
+        // The conditional spelling is `getCached`'s (`MetadataCacheRequest.ifNoneMatch` in,
+        // `notModified` + `etag: { value, weak }` out), with the 304 admitted by the transport
+        // instead of thrown as a failed request.
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/app/${encodeURIComponent(appId)}/bundle`,
+            cacheOptions?.ifNoneMatch ? { headers: { 'If-None-Match': cacheOptions.ifNoneMatch } } : {},
+            { admitNotModified: true },
+        );
+        const header = res.headers.get('ETag');
+        const etag = header ? { value: header.replace(/^W\/|"/g, ''), weak: header.startsWith('W/') } : undefined;
+        if (res.status === 304) return { notModified: true, ...(etag ? { etag } : {}) };
+        const data = await this.unwrapResponse<AppMetadataBundleResponse>(res);
+        return { notModified: false, data, ...(etag ? { etag } : {}) };
     },
 
     /**
@@ -2945,10 +3018,23 @@ export class ObjectStackClient {
      * signed-in caller; `backfillApplied` reports the rows written per field.
      * A field that is not new, or declares no literal default, refuses the
      * whole request with a 400 before anything is published.
+     *
+     * `opts.message` (ADR-0146 D1) is the author's change note: the package
+     * commit records it, and so does every item history row this publish
+     * writes (`change_note`, read back as each event's `message` by `meta.getHistory`).
+     * Without one those rows carry the sentence naming the package.
+     *
+     * The publish is recorded as the signed-in caller. `opts.actor` is
+     * ignored by this door and kept only so existing callers still compile.
      */
     publishDrafts: async (
         id: string,
-        opts?: { actor?: string; backfill?: Array<{ object: string; field: string }> },
+        opts?: {
+            /** @deprecated Ignored: the door records the signed-in caller (ADR-0146 D1). */
+            actor?: string;
+            backfill?: Array<{ object: string; field: string }>;
+            message?: string;
+        },
     ): Promise<PublishPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish-drafts`, {
@@ -5366,9 +5452,14 @@ export class ObjectStackClient {
   storage = {
     upload: async (file: any, scope: UploadScope = 'user'): Promise<FileUploadResponse> => {
         // 1. Get Presigned URL
+        // A browser `File` of unknown type carries `type === ''`, and the
+        // presigned door refuses an empty `mimeType` (its published contract,
+        // `GetPresignedUrlRequestSchema.mimeType` is `min(1)`). An unknown type
+        // is therefore sent as `application/octet-stream`; a typed file keeps
+        // its own type.
         const presignedReq: GetPresignedUrlRequest = {
             filename: file.name,
-            mimeType: file.type,
+            mimeType: file.type || 'application/octet-stream',
             size: file.size,
             scope
         };
@@ -5946,7 +6037,9 @@ export class ObjectStackClient {
        * intact keep their own codes and stay retryable — `INVALID_SIGNAL` /
        * `INVALID_SCREEN_INPUT` (400), `RESUME_IN_PROGRESS` (409),
        * `RESUME_CHILD_PENDING` (409: the run waits on a `map` item run that is
-       * still suspended; the message names that run, resume it instead),
+       * still suspended; the message names that run, resume it instead — or
+       * whose suspension is gone without a `cancelled` history entry; the
+       * message names the remedy, cancelling the parent run),
        * `STORE_UNAVAILABLE` (503).
        */
       resume: async <T extends AutomationResult = AutomationResult>(
@@ -7442,6 +7535,26 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#27627] The record page payload — `POST /data/:object/:id/page`,
+     * declared by `RecordPageRequestSchema` / `RecordPageResponseSchema`
+     * (`@objectstack/spec/api`): the record, the count and first rows of each
+     * related list `request.related` names, and — when asked — the record's
+     * field projection, its record-grained access decisions and its approval
+     * state, in one round trip. Each part is the answer of the read it replaces
+     * for the same caller; a part whose read refused carries `error` instead.
+     * A record that is absent or that the caller cannot read rejects with the
+     * record read's 404.
+     */
+    recordPage: async (object: string, id: string, request: RecordPageRequest = {}): Promise<RecordPageResponse> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/page`,
+            { method: 'POST', body: JSON.stringify(request) },
+        );
+        return this.unwrapResponse<RecordPageResponse>(res);
+    },
+
+    /**
      * Streaming export (M10.9): CSV / JSON / XLSX file download. Returns the
      * raw `Response` — the body is a file stream (`Content-Disposition`
      * attachment), not a JSON envelope; call `.blob()` / `.text()` yourself.
@@ -7538,7 +7651,11 @@ export class ObjectStackClient {
     this.token = token;
   }
 
-  private async fetch(url: string, options: RequestInit = {}): Promise<Response> {
+  /**
+   * `transport.admitNotModified` — [#27627] a conditional read's `304` is its
+   * answer, not a failure: returned to the caller instead of thrown.
+   */
+  private async fetch(url: string, options: RequestInit = {}, transport: { admitNotModified?: boolean } = {}): Promise<Response> {
     this.logger.debug('HTTP request', { 
       method: options.method || 'GET',
       url,
@@ -7574,7 +7691,7 @@ export class ObjectStackClient {
       ok: res.ok
     });
     
-    if (!res.ok) {
+    if (!res.ok && !(transport.admitNotModified && res.status === 304)) {
         let errorBody: any;
         try {
             errorBody = await res.json();
@@ -8380,6 +8497,8 @@ export type {
   GetObjectPermissionsResponse,
   GetEffectivePermissionsResponse,
   GetRecordFieldAccessResponse,
+  RecordPageRequest,
+  RecordPageResponse,
   RealtimeConnectRequest,
   RealtimeConnectResponse,
   RealtimeSubscribeRequest,

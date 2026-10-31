@@ -1,0 +1,31 @@
+{
+  "name": "@objectstack/connector-app-github",
+  "version": "0.1.0",
+  "description": "GitHub connector app (open edition): GitHub's remote MCP server as a declarative `mcp` connector instance with a read-tool allowlist, authenticated by a personal access token the administrator supplies through the credential store.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "main": "./objectstack.config.ts",
+  "types": "./objectstack.config.ts",
+  "exports": {
+    ".": "./objectstack.config.ts",
+    "./objectstack.config": "./objectstack.config.ts"
+  },
+  "scripts": {
+    "build": "objectstack build",
+    "validate": "objectstack validate",
+    "typecheck": "tsc --noEmit",
+    "test": "objectstack validate && vitest run"
+  },
+  "dependencies": {
+    "@objectstack/connector-mcp": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/cli": "workspace:*",
+    "@objectstack/verify": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

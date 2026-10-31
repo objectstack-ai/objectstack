@@ -62,6 +62,8 @@ export const zhCN: TranslationData = {
         nav_teams: { label: '团队' },
         nav_organizations: { label: '所有组织' },
         nav_invitations: { label: '邀请' },
+        nav_position_holders: { label: '岗位持有人' },
+        nav_permission_set_assignment: { label: '权限集分配' },
 
         nav_positions: { label: '岗位' },
         nav_capabilities: { label: '能力' },
@@ -116,6 +118,7 @@ export const zhCN: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'HTTP 投递' },
         nav_datasources: { label: '数据源' },
+        nav_connector_credentials: { label: '连接器凭据' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
       },

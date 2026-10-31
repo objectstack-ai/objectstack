@@ -22,6 +22,11 @@
  * the WAVE it went out in. A wave is one round of the held transport: every
  * request the page has issued is answered together, then the page is allowed
  * to settle, and whatever it asks for next is the next wave.
+ *
+ * Since objectstack#27627 the page asks all of it in ONE record page payload
+ * (`POST /data/OBJ/ID/page`): the record, each related list's count and first
+ * rows, and the access verdicts. The pins below read that request's body for
+ * the questions the separate reads used to ask.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -205,11 +210,35 @@ const topOf = (h: Held): number | undefined => {
   return top === null ? undefined : Number(top);
 };
 const objectOf = (h: Held): string | undefined => /\/api\/v1\/data\/([^/?]+)/.exec(h.path)?.[1];
-const isRecordRead = (h: Held) => h.method === 'GET' && objectOf(h) === OBJECT;
+const PAGE = `/api/v1/data/${OBJECT}/${REC}/page`;
+const isPageRead = (h: Held) => h.method === 'POST' && h.path === PAGE;
+/** The record read: the page payload carries it (objectstack#27627). */
+const isRecordRead = (h: Held) => isPageRead(h) || (h.method === 'GET' && objectOf(h) === OBJECT);
+interface PageList { object: string; field: string; filter?: unknown; top: number }
+const pageBody = (h: Held) => JSON.parse(h.body || '{}') as { related?: PageList[]; explain?: string[] };
+/** The related lists the open's page payload asked for. */
+const pageLists = (held: Held[]): PageList[] => held.filter(isPageRead).flatMap((h) => pageBody(h).related ?? []);
 const isChildRead = (h: Held) => h.method === 'GET' && [QUOTE, LINE, TASK].includes(objectOf(h) ?? '');
 const isExplain = (h: Held) => h.path.endsWith('/security/explain');
 
 function answerFor(h: Held): unknown {
+  if (isPageRead(h)) {
+    const body = pageBody(h);
+    return {
+      success: true,
+      data: {
+        object: OBJECT,
+        id: REC,
+        record: RECORD,
+        related: (body.related ?? []).map((list) => {
+          const total = TOTALS[list.object] ?? 0;
+          return { object: list.object, field: list.field, total, records: childRows(list.object, Math.min(list.top, total)) };
+        }),
+        explain: Object.fromEntries((body.explain ?? []).map((op) => [op, { allowed: true, record: { recordId: REC, visible: true } }])),
+        approvals: { requests: [], lock: null },
+      },
+    };
+  }
   if (isExplain(h)) return { allowed: true, record: { recordId: REC, visible: true } };
   if (h.path.startsWith(`/api/v1/data/${OBJECT}/${REC}`)) return { success: true, data: { object: OBJECT, id: REC, record: RECORD } };
   const object = objectOf(h);
@@ -373,19 +402,19 @@ describe('the record page open waves (objectui#13010)', () => {
   // explain questions (one `update`, one `delete` — two different bodies, not
   // one question sent twice) and the rail's three `top=3` card reads in wave
   // 1; the tab strip's three `top=1` badge probes in wave 2, because the probe
-  // keyed on the record BODY's id. After it: all thirteen in wave 1.
+  // keyed on the record BODY's id. After it: all thirteen in wave 1. Since
+  // objectstack#27627 all of them are ONE page payload request.
   it('the related cards and the tab badge probes go out in the first wave, beside the record read', async () => {
     const { held } = await openRecordPage();
     const table = waveTable(held);
     expect(held.filter(isRecordRead).map((h) => h.wave), table).toEqual([1]);
 
-    const cards = held.filter((h) => isChildRead(h) && topOf(h) === 3);
-    expect(cards.map((h) => objectOf(h)).sort(), table).toEqual([LINE, QUOTE, TASK].sort());
-    expect(cards.every((h) => h.wave === 1), table).toBe(true);
-
-    const probes = held.filter((h) => isChildRead(h) && topOf(h) === 1);
-    expect(probes.length, table).toBeGreaterThan(0);
-    expect(probes.every((h) => h.wave === 1), table).toBe(true);
+    // Neither a card read nor a badge probe goes out on its own.
+    expect(held.filter(isChildRead), table).toEqual([]);
+    // The payload asks every card's rows: three each.
+    const cards = pageLists(held).filter((l) => l.filter === undefined);
+    expect(cards.map((l) => l.object).sort(), table).toEqual([LINE, QUOTE, TASK].sort());
+    expect(cards.every((l) => l.top === 3), table).toBe(true);
 
     // One wave in all: nothing waits on the record body any more.
     expect(Math.max(...held.map((h) => h.wave)), table).toBe(1);
@@ -403,8 +432,9 @@ describe('the record page open waves (objectui#13010)', () => {
     const { held } = await openRecordPage();
     const table = waveTable(held);
     for (const object of [QUOTE, LINE]) {
-      const reads = held.filter((h) => objectOf(h) === object);
-      expect(reads.map((h) => topOf(h)), `${object}\n${table}`).toEqual([3]);
+      expect(held.filter((h) => objectOf(h) === object), `${object}\n${table}`).toEqual([]);
+      const asked = pageLists(held).filter((l) => l.object === object);
+      expect(asked.map((l) => l.top), `${object}\n${table}`).toEqual([3]);
     }
     // The badge total is drawn from that read: quote 6 + line 7 + the
     // filtered task probe's own 4.
@@ -423,19 +453,23 @@ describe('the record page open waves (objectui#13010)', () => {
   it('CONTROL: a badge whose declared filter differs from its card still probes, with its own filter', async () => {
     const { held } = await openRecordPage();
     const table = waveTable(held);
-    const taskProbes = held.filter((h) => objectOf(h) === TASK && topOf(h) === 1);
-    expect(taskProbes, table).toHaveLength(1);
-    expect(taskProbes[0].path, table).toContain('not_equals');
-    // The card's read carries no declared scope, so its total answers a
+    const tasks = pageLists(held).filter((l) => l.object === TASK);
+    expect(tasks, table).toHaveLength(2);
+    const taskProbe = tasks.filter((l) => l.filter !== undefined);
+    expect(taskProbe, table).toHaveLength(1);
+    expect(JSON.stringify(taskProbe[0].filter), table).toContain('not_equals');
+    // The card's list carries no declared scope, so its total answers a
     // different question and never stands in for the badge's.
-    const taskCard = held.filter((h) => objectOf(h) === TASK && topOf(h) === 3);
-    expect(taskCard, table).toHaveLength(1);
-    expect(taskCard[0].path, table).not.toContain('not_equals');
+    expect(tasks.filter((l) => l.filter === undefined), table).toHaveLength(1);
   });
 
   it('two explain questions on a record open, two different bodies', async () => {
     const { held } = await openRecordPage();
-    expect(held.filter(isExplain).map((h) => JSON.parse(h.body).operation).sort(), waveTable(held)).toEqual(['delete', 'update']);
+    const asked = [
+      ...held.filter(isExplain).map((h) => JSON.parse(h.body).operation as string),
+      ...held.filter(isPageRead).flatMap((h) => pageBody(h).explain ?? []),
+    ];
+    expect(asked.sort(), waveTable(held)).toEqual(['delete', 'update']);
   });
 });
 
@@ -619,17 +653,23 @@ describe('the timeline, comments, attachments and user list wait for their panel
     expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
   });
 
-  // The synthesized page has no discussion footer any more (#27055): its one
-  // timeline stream is a tab in the tabbed tier, so it reads like any other tab.
-  it('the synthesized page opened on its Details tab reads neither the feed nor the user list', async () => {
+  // The synthesized page has no discussion footer any more (#27055), and no
+  // tab strip at any width since objectstack#27524: its one stream is the 动态
+  // panel, the first panel of the right column — on screen at open in every
+  // tier, so the feed is read at open, like an authored page opened on its
+  // Activity tab. A page with tabs still waits for its tab (above).
+  it('the synthesized page reads the feed and the user list at open: its 动态 panel is on screen', async () => {
     const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver });
     const table = waveTable(held);
-    expect(screen.getByRole('tab', { name: /^Timeline/ }), table).toBeTruthy();
-    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) expect(held.filter(isRead), table).toEqual([]);
+    expect(screen.queryByRole('tab', { name: /^Timeline/ }), table).toBeNull();
+    expect(document.querySelector('[data-record-timeline-panel]'), table).not.toBeNull();
+    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
+      expect(held.filter(isRead).map((h) => h.wave), table).toEqual([1]);
+    }
   });
 
-  it('CONTROL: the synthesized page opened on its Timeline tab reads the feed and the user list at open', async () => {
-    const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver, search: '?tab=timeline' });
+  it('CONTROL: the synthesized page opened on its 动态 tab (?related=timeline) reads the feed and the user list at open', async () => {
+    const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver, search: '?related=timeline' });
     const table = waveTable(held);
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
       expect(held.filter(isRead).map((h) => h.wave), table).toEqual([1]);
@@ -637,7 +677,7 @@ describe('the timeline, comments, attachments and user list wait for their panel
   });
 });
 
-// ── objectui#13010 part 5: the audit read waits for the Timeline tab (#27055 merged History into it) ──
+// ── objectui#13010 part 5: the audit read goes out with its stream (#27055 merged History into it; #27524 made the stream a panel) ──
 
 /** Registered, so the view merges field changes into the timeline of a `trackHistory` object. */
 const auditLogDef = {
@@ -662,7 +702,7 @@ const isAuditUserLookup = (h: Held) => isPanelRead('sys_user')(h) && h.path.incl
 const openHistory = (options: OpenOptions = {}) =>
   openRecordPage({ page: SYNTH, object: historyObject, extraObjects: [auditLogDef], observer: FoldObserver, ...options });
 
-describe('the Timeline tab reads the audit log when it is shown (objectui#13010 part 5)', () => {
+describe('the 动态 stream reads the audit log when it is shown (objectui#13010 part 5)', () => {
   beforeEach(() => {
     offscreen.length = 0;
   });
@@ -671,36 +711,39 @@ describe('the Timeline tab reads the audit log when it is shown (objectui#13010 
   // object. Before this part: `sys_audit_log top=50` in wave 1 beside the
   // record read and its `sys_user` name lookup in wave 2, with the History tab
   // closed. After it: neither until the tab opens. Since #27055 the audit rows
-  // are the field changes of the one Timeline stream, so that tab gates them.
-  it('a trackHistory record opened on its Details tab reads neither the audit log nor its user names', async () => {
+  // are the field changes of the one stream, so the stream gates them; since
+  // objectstack#27524 that stream is the 动态 panel, on screen at open, so
+  // they are read at open — once, and not again when its tab opens.
+  it('a trackHistory record reads the audit log at open and its user names next: the 动态 panel shows the change', async () => {
     const { held } = await openHistory();
     const table = waveTable(held);
     expect(held.filter(isRecordRead).map((h) => h.wave), table).toEqual([1]);
-    // The tab is offered, so the silence is not a missing tab.
-    expect(screen.getByRole('tab', { name: /^Timeline/ }), table).toBeTruthy();
-    expect(screen.queryByRole('tab', { name: /^History/ }), table).toBeNull();
-    expect(held.filter(isAuditRead), table).toEqual([]);
-    expect(held.filter(isAuditUserLookup), table).toEqual([]);
-    expect(screen.queryByText('Grace'), table).toBeNull();
+    expect(screen.queryByRole('tab', { name: /^(Timeline|History)/ }), table).toBeNull();
+    expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
+    expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);
+    const panel = document.querySelector('[data-record-timeline-panel]') as HTMLElement;
+    expect(panel.textContent, table).toMatch(/negotiation/);
   });
 
-  it('opening the Timeline tab reads the audit log and its user names once each, and draws the rows', async () => {
+  it('opening the 动态 tab from its panel reads nothing again, and draws the rows with their actor', async () => {
     const { held, state } = await openHistory();
-    const openedWith = held.length;
-    await openTab('Timeline');
+    const audit = () => held.filter(isAuditRead);
+    expect(audit(), waveTable(held)).toHaveLength(1);
+    await act(async () => {
+      fireEvent.click(document.querySelector('[data-record-timeline-panel-open]') as HTMLElement);
+    });
     await runWaves(held, state);
     const table = waveTable(held);
-    const audit = held.filter(isAuditRead);
-    expect(audit, table).toHaveLength(1);
-    expect(audit[0].seq, table).toBeGreaterThanOrEqual(openedWith);
-    expect(topOf(audit[0]), table).toBe(50);
+    expect(document.querySelector('[data-related-enlarged="timeline"]'), table).not.toBeNull();
+    expect(audit(), table).toHaveLength(1);
+    expect(topOf(audit()[0]), table).toBe(50);
     expect(held.filter(isAuditUserLookup), table).toHaveLength(1);
     expect(screen.getByText('Grace')).toBeTruthy();
     expect(screen.getByText(/negotiation/)).toBeTruthy();
   });
 
-  it('CONTROL: a trackHistory record opened with ?tab=timeline reads the audit log at open and draws the rows', async () => {
-    const { held } = await openHistory({ search: '?tab=timeline' });
+  it('CONTROL: a trackHistory record opened with ?related=timeline reads the audit log at open and draws the rows', async () => {
+    const { held } = await openHistory({ search: '?related=timeline' });
     const table = waveTable(held);
     expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
     expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);

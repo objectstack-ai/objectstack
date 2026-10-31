@@ -5,7 +5,9 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * The record page v3 timeline: ONE stream (objectstack#27055, Target 3).
+ * The record page's 动态 stream: ONE stream (objectstack#27055, Target 3),
+ * drawn as the first panel of the right column and in full in the 动态 tab
+ * (objectstack#27524, Target 5).
  *
  * Three sources, one stream: the discussion (`sys_comment`, `enable.feeds`),
  * the activity (`sys_activity`, `enable.activities`) — both already merged by
@@ -26,6 +28,31 @@ import type { FeedItem } from '@object-ui/types';
  * page only.
  */
 export const RecordFieldChangesContext = React.createContext<FeedItem[] | null>(null);
+
+/**
+ * The 动态 panel being drawn (objectstack#27524, Target 5): the first panel
+ * of the record page's right column. The stream drawn inside it takes its
+ * peek face — the one-line composer, the newest `entries` and
+ * 「查看全部 N 条 →」 (`onViewAll`, the 动态 tab) — and reports how many
+ * entries the whole stream holds (`onCount`, `null` while unknown) for the
+ * panel's count chip. `null` anywhere else: the stream draws in full.
+ */
+export interface RecordTimelinePanel {
+  /** How many of the newest entries the panel shows: 3, or 5 when wide. */
+  entries: number;
+  onViewAll?: () => void;
+  onCount: (count: number | null) => void;
+}
+
+export const RecordTimelinePanelContext = React.createContext<RecordTimelinePanel | null>(null);
+
+/**
+ * Where the 动态 stream drawn in full — the 动态 tab — reports how many
+ * entries it holds, for the tab's count chip on the record page's tab row
+ * (objectstack#27524, Target 8). Reported while the 全部 chip is on, the
+ * whole stream; `null` while unknown. `null` anywhere else: nothing reports.
+ */
+export const RecordTimelineCountContext = React.createContext<((count: number | null) => void) | null>(null);
 
 /** One audit-log entry as the host enriches it (`RecordDetailView`'s history read). */
 export interface AuditEntryLike {

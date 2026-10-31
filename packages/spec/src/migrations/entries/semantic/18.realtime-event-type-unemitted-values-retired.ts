@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // see one — the refusal on the enum's own error map carries the prescription.
 export const entry: SemanticMigration = {
   id: 'realtime-event-type-unemitted-values-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     "api.RealtimeEventType — the values 'record.created', 'record.updated', "
     + "'record.deleted' and 'field.changed' left the enum. It types "

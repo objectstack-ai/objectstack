@@ -119,4 +119,32 @@ export interface ODataDialect {
   inList(property: string, literals: readonly string[]): string;
   /** The query options that ask a collection read to carry its total count. */
   countOptions(): Record<string, string>;
+
+  // The members below are optional: a dialect that leaves one out gets the v4
+  // behaviour, which is what `odataV4Dialect` relies on.
+
+  /**
+   * A property value as the service wrote it → the value a row carries (v2
+   * writes `Edm.DateTime` as `/Date(ms)/` and `Edm.Int64` as a string).
+   * `fieldType` is the declared type of the field the property backs, when the
+   * object declares one: v2 has no `Edm.Date`, so a `date` field over an
+   * `Edm.DateTime` reads the date alone. Absent: the value is carried as
+   * written.
+   */
+  readValue?(value: unknown, property: EdmProperty, fieldType?: string): unknown;
+  /** The inverse of {@link readValue}, for a request body. Absent: the value is sent as given. */
+  writeValue?(value: unknown, property: EdmProperty): unknown;
+  /**
+   * Read back one literal this dialect spelled (a part of a composite key
+   * predicate, `1L`, `guid'…'`) as the value {@link literal} spells again.
+   * Absent: a quoted string is unquoted and any other literal is taken as it
+   * is written, which is v4's spelling.
+   */
+  keyValue?(literal: string, type: string): unknown;
+  /**
+   * The request that applies a partial update to one entity. Absent: `PATCH`.
+   * v2 has no `PATCH`: its partial update is `MERGE`, sent as a `POST`
+   * tunnelled with `X-HTTP-Method` (MS-ODATA §2.2.5.8).
+   */
+  updateRequest?(): { method: 'PATCH' | 'POST'; headers: Record<string, string> };
 }

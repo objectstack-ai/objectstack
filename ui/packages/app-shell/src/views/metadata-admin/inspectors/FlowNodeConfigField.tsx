@@ -23,11 +23,13 @@ import { Button, Label, cn } from '@object-ui/components';
 import { Code2 } from 'lucide-react';
 import {
   FLOW_NODE_EXPRESSION_PATHS,
+  FLOW_NODE_SIBLING_EXPRESSION_BLOCKS,
   flowNodeConfigRefusals,
   flowNodeValueTemplateRefusals,
   isExpressionEnvelopeShaped,
   resolveFlowNodeValueSlots,
   valueSlotTemplateRefusals,
+  type FlowNodeExpressionBlock,
 } from '@objectstack/spec/automation';
 import { FlowKeyValueField, type FlowKeyValueFieldProps } from './FlowKeyValueField.js';
 import { FlowExprIssue } from './FlowExprIssue.js';
@@ -264,16 +266,49 @@ function configOf(node: Record<string, unknown> | null | undefined): Record<stri
   return cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? (cfg as Record<string, unknown>) : {};
 }
 
-/** Whether `path` on `node` is one `value`-role slot of the spec's ledger (objectui#12372). */
+/**
+ * `node` with `value` written at `path`, every object on the way copied: the
+ * node the spec's judges are asked about, as it would stand after the edit.
+ */
+function withValueAt(node: Record<string, unknown>, path: readonly string[], value: unknown): Record<string, unknown> {
+  const [head, ...rest] = path;
+  if (head === undefined) return node;
+  const cur = node[head];
+  const inner = cur && typeof cur === 'object' && !Array.isArray(cur) ? (cur as Record<string, unknown>) : {};
+  return { ...node, [head]: rest.length === 0 ? value : withValueAt(inner, rest, value) };
+}
+
+/**
+ * The node block a field at `path` is rooted in, when the ledger can root a
+ * slot there: `config` (one key deep, a `['config', KEY]` field), or a declared
+ * sibling block (`FLOW_NODE_SIBLING_EXPRESSION_BLOCKS` — a `connector_action`
+ * node's `connectorConfig`, whose `input.<key>` fields the connector's own
+ * input schema types).
+ */
+function slotBlockOf(path: readonly string[]): FlowNodeExpressionBlock | null {
+  const [block] = path;
+  if (block === 'config') return path.length === 2 ? 'config' : null;
+  return path.length >= 2 && Object.prototype.hasOwnProperty.call(FLOW_NODE_SIBLING_EXPRESSION_BLOCKS, block)
+    ? (block as FlowNodeExpressionBlock)
+    : null;
+}
+
+/**
+ * Whether `path` on `node` is one `value`-role slot of the spec's ledger
+ * (objectui#12372), in the block the ledger roots it in.
+ */
 function isScalarValueSlot(
   node: Record<string, unknown> | null | undefined,
   path: readonly string[],
 ): boolean {
   const type = node?.type;
-  if (typeof type !== 'string' || path.length !== 2 || path[0] !== 'config') return false;
-  const key = path[1];
-  const probe = { ...configOf(node), [key]: 'probe' };
-  return resolveFlowNodeValueSlots(type, probe).some((found) => found.path === key && found.entry.eachElement !== true);
+  const block = slotBlockOf(path);
+  if (!node || typeof type !== 'string' || block === null) return false;
+  const slot = path.slice(1).join('.');
+  const probe = withValueAt(node, path, 'probe');
+  return resolveFlowNodeValueSlots(type, configOf(probe), probe).some(
+    (found) => found.block === block && found.path === slot && found.entry.eachElement !== true,
+  );
 }
 
 /**
@@ -298,10 +333,22 @@ function filterOperandRefusal(value: unknown): string[] | null {
   return refusals.length > 0 ? refusals.map((r) => r.message) : null;
 }
 
-/** What the spec's config judges refuse at `key` of `config` on a node of `nodeType`. */
-function valueSlotRefusals(nodeType: string, config: Record<string, unknown>, key: string): string[] {
-  const at = (path: string) => path === key || path.startsWith(`${key}.`) || path.startsWith(`${key}[`);
-  const messages = [...flowNodeValueTemplateRefusals(nodeType, config), ...flowNodeConfigRefusals(nodeType, config)]
+/**
+ * What the spec's judges refuse at the field `path` of `node` on a node of
+ * `nodeType`. The value-slot judge is handed the node's sibling blocks, so a
+ * slot rooted outside `config` (a `connector_action` node's
+ * `connectorConfig.input`) is judged there; the contract judge reads `config`
+ * only, so it answers for a `config` field alone.
+ */
+function valueSlotRefusals(nodeType: string, node: Record<string, unknown>, path: readonly string[]): string[] {
+  const [block, ...rest] = path;
+  const key = rest.join('.');
+  const at = (p: string) => p === key || p.startsWith(`${key}.`) || p.startsWith(`${key}[`);
+  const config = configOf(node);
+  const messages = [
+    ...flowNodeValueTemplateRefusals(nodeType, config, node).filter((refusal) => refusal.block === block),
+    ...(block === 'config' ? flowNodeConfigRefusals(nodeType, config) : []),
+  ]
     .filter((refusal) => at(refusal.path))
     .map((refusal) => refusal.message);
   return [...new Set(messages)];
@@ -599,7 +646,7 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
     isScalarValueSlot(context?.node, field.path);
   const valueSlotIssues =
     valueSlot && typeof context?.node?.type === 'string' && !isUnsetFieldValue(value)
-      ? valueSlotRefusals(context.node.type, { ...configOf(context.node), [field.path[1]]: value }, field.path[1])
+      ? valueSlotRefusals(context.node.type, withValueAt(context.node, field.path, value), field.path)
       : [];
   // objectui#6226 — the row-based condition builder, on the fields that opted in
   // AND at a site that declares the vocabulary. All three conjuncts are load

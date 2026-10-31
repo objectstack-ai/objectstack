@@ -278,6 +278,16 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 // cannot register without refusing the boot (a name another package already
 // owns, a field naming a picklist no body declares) stays listed here and
 // unserved there, and the engine names it at boot.
+//
+// The residual's PICKLISTS are the one exception to "registered under the
+// stack's id": this rule lists them, and the engine never registers them, so
+// a residual picklist is metadata only. When a residual object's field names
+// it, that object is listed and not served, as above; when a body's field
+// names it, the boot's picklist audit refuses that field (`os validate` /
+// `os build` report it as `picklist-reference-unknown`). When no object field
+// the engine registers names it, the engine refuses the stack
+// before anything of it registers (`INVALID_METADATA`), and `os validate` /
+// `os build` refuse the same stack first.
 
 /**
  * Where one door's registrations land. The artifact door writes its in-memory

@@ -42,10 +42,23 @@ import { FullscreenEditor } from '../../custom/fullscreen-editor';
 import { CharacterCount } from '../../custom/character-count';
 import { cn } from '../../lib/utils';
 import React from 'react';
-import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
+
+/**
+ * A submit refusal as the banner and the toast draw it: one string as itself,
+ * several reasons as one list item each.
+ */
+function refusalContent(refusal: string | string[]): React.ReactNode {
+  if (typeof refusal === 'string') return refusal;
+  return (
+    <ul className="list-disc space-y-1 pl-4">
+      {refusal.map((line, i) => <li key={i}>{line}</li>)}
+    </ul>
+  );
+}
 
 /**
  * Whether a `section-divider` row draws anything: a heading, a blurb, or both.
@@ -808,7 +821,7 @@ function dependentLookupParents(f: FormFieldConfig | undefined): string[] {
   if (typeof widget !== 'string' || !EXPANDABLE_FIELD_TYPES.has(normalizeFieldType(widget))) {
     return [];
   }
-  const carrier: Record<string, unknown> = f.field || (f as Record<string, unknown>);
+  const carrier: Record<string, unknown> | FormFieldConfig = f.field || f;
   const inner = carrier.field;
   const meta =
     inner !== null && typeof inner === 'object' && ('reference' in inner || 'type' in inner)
@@ -1233,6 +1246,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     dependsOnLabels,
     emptyHint,
     onInvalidInputChange,
+    onAutofill,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1273,8 +1287,14 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
+    // Only a relationship pick fills sibling fields (`lookupAutofill`); every
+    // other widget would spread an unknown handler onto its DOM.
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) ? { onAutofill } : {}),
   };
 }
+
+/** The registered widgets whose pick writes `lookupAutofill` targets through `onAutofill`. */
+const LOOKUP_AUTOFILL_WIDGET_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
 
 /** The registered widgets that fire `onInvalidInputChange`: the date picker's two faces. */
 const INVALID_INPUT_REPORTING_WIDGET_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
@@ -1810,12 +1830,15 @@ ComponentRegistry.register('form',
     const formRef = React.useRef<HTMLFormElement>(null);
 
     const [isSubmitting, setIsSubmitting] = React.useState(false);
-    const [submitError, setSubmitError] = React.useState<string | null>(null);
+    /** One string, or one line per reason the refusal could not mark inline. */
+    const [submitError, setSubmitError] = React.useState<string | string[] | null>(null);
     /**
      * The sonner id every OUTCOME toast of THIS form is published under.
      *
-     * The in-form banner (`submitError`) and its toast are raised together at
-     * each of the three points below, but only the banner was ever retired
+     * A refusal is no longer toasted at all (`raiseRefusal` below), but the id
+     * still retires whatever outcome toast an earlier attempt left. History:
+     * the in-form banner (`submitError`) and its toast were once raised together
+     * at each refusal point, but only the banner was ever retired
      * together: the toast went out under sonner's auto-generated id, so nothing
      * here held a handle on it and a refused submit's toast outlived the
      * attempt that raised it. A later SUCCESSFUL submit — whose success toast a
@@ -1834,6 +1857,25 @@ ComponentRegistry.register('form',
      */
     const formInstanceId = React.useId();
     const outcomeToastId = `form-outcome:${formInstanceId}`;
+    /**
+     * A refused submit is said ONCE, by the banner above the fields
+     * (objectstack-ai/objectstack#27520). The toast that used to repeat it word
+     * for word was there for the banner a long modal or drawer form had
+     * scrolled out of view; instead the banner is brought into view each time
+     * it is raised, so no second copy of the refusal is needed. The stale
+     * toast of an earlier attempt is still dismissed under the outcome id.
+     */
+    const submitBannerRef = React.useRef<HTMLDivElement>(null);
+    const [refusalRaised, setRefusalRaised] = React.useState(0);
+    const raiseRefusal = (message: string | string[]) => {
+      toast.dismiss(outcomeToastId);
+      setSubmitError(message);
+      setRefusalRaised((n) => n + 1);
+    };
+    React.useEffect(() => {
+      if (refusalRaised === 0) return;
+      submitBannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+    }, [refusalRaised]);
     // Active `fieldTabs` panel. Undefined until something picks one — the
     // effective tab falls back to `defaultFieldTab`, then to the first tab.
     // Which tab of an in-progress form is showing is presentational and dies
@@ -3037,10 +3079,7 @@ ComponentRegistry.register('form',
 
           // Check if submission returned an error
           if (result?.error) {
-            setSubmitError(result.error);
-            // Also surface as a toast so the message is visible even when the
-            // in-form banner has scrolled out of view (long forms in modals/drawers).
-            toast.error(result.error, { id: outcomeToastId });
+            raiseRefusal(result.error);
             return;
           }
         }
@@ -3060,10 +3099,14 @@ ComponentRegistry.register('form',
         // toast — telling the user something was wrong, but not WHAT, on a
         // surface that already knows how to mark the input. Mark them.
         const fieldErrors = extractFieldErrors(error);
+        // The fields whose reason is now written under a DRAWN input; the
+        // banner says only the rest.
+        const shownInline = new Set<string>();
         if (fieldErrors) {
           const known = fieldErrors.filter((fe) =>
             (fields as FormFieldConfig[]).some((f) => f?.name === fe.field),
           );
+          for (const fe of known) if (fieldWrapper(fe.field)) shownInline.add(fe.field);
           for (const fe of known) {
             form.setError(fe.field, {
               type: 'server',
@@ -3074,9 +3117,8 @@ ComponentRegistry.register('form',
           }
           // Only take over the whole failure when EVERY rejected field has a
           // visible input to carry it. If the server also rejected something
-          // this form does not render, fall through: the top-level message
-          // concatenates every field's reason, so the part the user cannot see
-          // inline is still said out loud instead of silently dropped.
+          // this form does not render, fall through: the banner says each
+          // reason the user cannot see inline, so none is silently dropped.
           // The same holds for a rendered-schema field with no DRAWN input
           // (a predicate-hidden tab or section): `announceFieldErrors` names
           // those, and any one of them sends the failure down the same path.
@@ -3108,19 +3150,22 @@ ComponentRegistry.register('form',
         // boundary to fix (objectstack#26059, Q3). It is read before
         // `isPermissionError`, which answers true for any 403; every other
         // denial keeps the fixed line (objectstack#24914 B′).
-        const errorMessage =
+        // A refusal listing one entry per failed rule is said one line per
+        // entry left unmarked above, not as the envelope's `; `-joined
+        // summary, which would also repeat the reasons already under inputs.
+        const unmarked = unmarkedRefusalLines(error, (field) => shownInline.has(field));
+        const errorMessage: string | string[] =
           declaredUserMessage(error) ??
           delegationScopeMessage(error) ??
           (isPermissionError(error)
             ? t('form.noPermissionToSave')
-            : extractWriteErrorMessage(error) ?? t('form.submitFailed'));
+            : unmarked && unmarked.length > 1
+              ? unmarked
+              : unmarked?.[0] ?? extractWriteErrorMessage(error) ?? t('form.submitFailed'));
         if (isPermissionError(error) && typeof console !== 'undefined') {
           console.warn('[form] write denied:', error);
         }
-        setSubmitError(errorMessage);
-        // Also surface as a toast so the message is visible even when the
-        // in-form banner has scrolled out of view (long forms in modals/drawers).
-        toast.error(errorMessage, { id: outcomeToastId });
+        raiseRefusal(errorMessage);
 
         // Log errors for debugging (dev environment only)
         // process may not be defined in all environments
@@ -3186,14 +3231,12 @@ ComponentRegistry.register('form',
     const handleSubmit = (event?: React.BaseSyntheticEvent) => {
       if (faultedVisibleWhenFieldNames.length > 0) {
         event?.preventDefault?.();
-        toast.dismiss(outcomeToastId);
         const message = t('form.visibleWhenFaulted', {
           fields: faultedVisibleWhenFieldNames
             .map((n) => fieldLabelByName[n] || n)
             .join(t('validation.formInvalidJoiner')),
         });
-        setSubmitError(message);
-        toast.error(message, { id: outcomeToastId });
+        raiseRefusal(message);
         // Marks the tabs that hold the fields, as a rejected submit does.
         setRejectedFieldNames(faultedVisibleWhenFieldNames);
         return Promise.resolve();
@@ -3868,6 +3911,18 @@ ComponentRegistry.register('form',
                     invalidInputMessages.set(name, message);
                     void form.trigger(name);
                   },
+                  // A lookup pick's declared `lookupAutofill` targets, written
+                  // as edits of this form's record; the widget decides what the
+                  // overwrite rule lets it fill. A target already showing an
+                  // error is re-validated, so a filled required field clears.
+                  onAutofill: (patch: Record<string, unknown>) => {
+                    for (const [target, filled] of Object.entries(patch)) {
+                      form.setValue(target, filled, {
+                        shouldDirty: true,
+                        shouldValidate: !!form.getFieldState(target).error,
+                      });
+                    }
+                  },
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —
@@ -4053,9 +4108,9 @@ ComponentRegistry.register('form',
         >
           {/* Form Error Alert */}
           {submitError && (
-            <Alert variant="destructive" className="mb-4">
+            <Alert ref={submitBannerRef} variant="destructive" className="mb-4">
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{submitError}</AlertDescription>
+              <AlertDescription>{refusalContent(submitError)}</AlertDescription>
             </Alert>
           )}
 
@@ -4346,7 +4401,7 @@ interface RenderFieldProps {
   /** react-hook-form's ref binding, handed to the built-in control by name. */
   ref?: RefCallBack;
   /** The field's raw metadata object (`field.field`, else the field config). */
-  field?: Record<string, unknown>;
+  field?: Record<string, unknown> | FormFieldConfig;
   /** A dependent select's gate hint while its controlling field is unset (#2284). */
   emptyHint?: string;
   [key: string]: unknown;
@@ -4706,7 +4761,7 @@ const BuiltinSelectControl = React.forwardRef<HTMLButtonElement, BuiltinSelectCo
  * wrote it until objectui#12130; `objectFormNumericStep-9574.test.tsx` pins
  * both of its routes.
  */
-function nativeNumberStep(carrier: Record<string, unknown> | undefined): number | 'any' {
+function nativeNumberStep(carrier: RenderFieldProps['field']): number | 'any' {
   const step = carrier?.step;
   if (typeof step === 'number') return step;
   const scale = carrier?.scale;

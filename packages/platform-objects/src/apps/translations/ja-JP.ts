@@ -59,6 +59,8 @@ export const jaJP: TranslationData = {
         nav_teams: { label: 'チーム' },
         nav_organizations: { label: 'すべての組織' },
         nav_invitations: { label: '招待' },
+        nav_position_holders: { label: 'ポジション保持者' },
+        nav_permission_set_assignment: { label: '権限セットの割り当て' },
 
         nav_positions: { label: 'ポジション' },
         nav_capabilities: { label: 'ケイパビリティ' },
@@ -106,6 +108,7 @@ export const jaJP: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'HTTP 配信' },
         nav_datasources: { label: 'データソース' },
+        nav_connector_credentials: { label: 'コネクタ認証情報' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
       },

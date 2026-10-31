@@ -15,7 +15,8 @@
  * query parameter, a nested connector input); DARK is the same flow with
  * templates in those three positions — a `{{ var }}` hole at the http url and
  * header (text slots, where a single-brace token is refused since #19939), a
- * `{var}` token at the connector input — and must stay silent. Every
+ * CEL value envelope computing the connector input's `auth` map (a value slot
+ * since #27968, where a `{…}` token is refused) — and must stay silent. Every
  * value is a probe sentinel, not a credential.
  *
  * Integration tier: it spawns the source CLI (`packages/cli/vitest-tiers.ts`).
@@ -85,7 +86,11 @@ const stackOf = (literal: boolean) => ({
           connectorConfig: {
             connectorId: 'rest',
             actionId: 'request',
-            input: { method: 'GET', path: '/p', auth: { clientSecret: literal ? SENTINELS[2] : '{api_token}' } },
+            input: {
+              method: 'GET',
+              path: '/p',
+              auth: literal ? { clientSecret: SENTINELS[2] } : { dialect: 'cel', source: "{'clientSecret': api_token}" },
+            },
           },
         },
         { id: 'end', type: 'end', label: 'End' },

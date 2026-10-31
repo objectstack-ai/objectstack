@@ -74,6 +74,14 @@ export const SysAccount = ObjectSchema.create({
       params: [
         { name: 'accountId', field: 'id', defaultFromRow: true, required: true },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Unlink an external sign-in provider from the user\'s account (the record; param: its accountId): they can no longer sign in with that provider until they link it again. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 

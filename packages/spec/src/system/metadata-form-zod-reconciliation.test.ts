@@ -365,6 +365,36 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // [ADR-0144 D5] A record-mode amount's home-currency projection lands
+  // spec-first the same way: declared and judged at parse, written by nothing
+  // until the engine's write-time projection lands in the same release (D9).
+  {
+    kind: 'omit',
+    type: 'field',
+    path: 'currencyConfig',
+    key: 'homeAmount',
+    why: "planned, not yet written — the `{ field, rateDate, rateField }` pointers are validated at parse (all three required, each judged against the object's field map), but no engine converts the amount or stores the home amount and the rate until the write-time home-currency projection lands, which ADR-0144 D9 releases with this key. A form control offered today would let an author declare a home amount nothing writes",
+  },
+  // #27946 — an action's pressed-state predicate lands spec-first the same
+  // way: `planned` in the liveness ledger, drawn by no action surface until
+  // the console card that draws `aria-pressed` on the header buttons.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'pressed',
+    why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
+  },
+  // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
+  // in the liveness ledger, read by no form or grid until the ui card's lookup
+  // widget writes the declared targets on pick.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'lookupAutofill',
+    why: "planned, not yet read — a lookup's pick autofill pairs (`[{ target, source, overwrite? }]`) are validated at parse (a single-value relationship; each target a writable field of the same object, named once) and their sources at `os validate` / `os build`, but no form or grid fills a field from them until the ui card's lookup widget writes the declared targets on pick. A form control offered today would let an author declare a fill nothing performs",
+  },
   {
     kind: 'omit',
     type: 'view',

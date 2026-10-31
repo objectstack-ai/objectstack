@@ -204,6 +204,12 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
     if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
     if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
+    // [#28099] The caller's posture rung, already resolved beside the grants
+    // above — forwarded, never re-derived or raised, absent when the request
+    // carries none. The run carries those grants, so its setup does not
+    // re-resolve them and this is the only way it gets one.
+    // `AutomationContext.posture` names its readers.
+    if (typeof ec?.posture === 'string' && ec.posture.length > 0) automationContext.posture = ec.posture;
     // [#22450] The caller's language, already resolved (the request's
     // `Accept-Language` first, then the `localization` settings) — forwarded,
     // never re-derived, so a refused run's message renders in the language of
@@ -885,6 +891,143 @@ async function respondToConnectorCredentialDoor(
             context: executionContext,
         });
         return { handled: true, response: deps.success(entry) };
+    } catch (err) {
+        const refusal = connectorCredentialRefusal(deps, err);
+        if (refusal) return refusal;
+        throw err;
+    }
+}
+
+/**
+ * ADR-0143 D5 — the connector connection door's segments under `/connectors`:
+ * `GET` / `POST` / `DELETE /connectors/:name/connection` (status, connect or
+ * reconnect, revoke) and `GET /connectors/oauth/callback` (the authorization
+ * server's redirect).
+ */
+const CONNECTOR_CONNECTION_SEGMENT = 'connection';
+const CONNECTOR_OAUTH_SEGMENT = 'oauth';
+const CONNECTOR_OAUTH_CALLBACK_SEGMENT = 'callback';
+
+/** ADR-0143 D5 — which routes are the connector connection door, matched exactly as its arms match. */
+function isConnectorConnectionDoor(parts: string[], method: string): boolean {
+    if (parts[0] !== 'connectors' || parts.length !== 3) return false;
+    if (parts[1] === CONNECTOR_OAUTH_SEGMENT && parts[2] === CONNECTOR_OAUTH_CALLBACK_SEGMENT) return method === 'GET';
+    if (parts[2] !== CONNECTOR_CONNECTION_SEGMENT || parts[1] === CONNECTOR_CREDENTIAL_REFS_SEGMENT) return false;
+    return method === 'GET' || method === 'POST' || method === 'DELETE';
+}
+
+/**
+ * ADR-0143 D5 · route rule 5 — the connection routes' closed query set:
+ * none. The instance is named in the path, the organization is the caller's.
+ */
+export const CONNECTOR_CONNECTION_DOOR_QUERY_PARAMS: readonly string[] = Object.freeze([]);
+
+/**
+ * ADR-0143 D5 · route rule 5 — the callback's closed query set: what an
+ * authorization response carries (RFC 6749 §4.1.2 and §4.1.2.1) plus its
+ * issuer identifier (RFC 9207). Anything else is refused, never dropped.
+ */
+export const CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS: readonly string[] = Object.freeze([
+    'code', 'state', 'error', 'error_description', 'error_uri', 'iss',
+]);
+
+/**
+ * ADR-0143 D5 — "who may connect, reconnect or revoke is a capability check
+ * the server slice declares". The organization-scoped capability the spec
+ * declares for exactly this door (`PLATFORM_CAPABILITIES`). Connecting a vendor
+ * account is an organization act (Q1 = A), so the door asks this capability
+ * alone: the platform-scoped `manage_metadata` does not admit a caller here.
+ */
+export const CONNECTOR_CONNECTION_CAPABILITY = 'manage_connector_connections';
+
+const CONNECTOR_CONNECTION_DENY_MESSAGE =
+    `Connecting, reconnecting or revoking a connector instance, or reading its connection, requires the \`${CONNECTOR_CONNECTION_CAPABILITY}\` capability.`;
+
+/**
+ * ADR-0143 D5 — the connection door's capability gate:
+ * {@link CONNECTOR_CONNECTION_CAPABILITY}, fail-closed, only `isSystem`
+ * bypassing. The callback is gated too: the browser that lands on it is the
+ * administrator's, carrying the session that began the connect.
+ */
+function refuseUngrantedConnectorConnectionAccess(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): HttpDispatcherResult | undefined {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return undefined;
+    if (new Set<string>(ec?.systemPermissions ?? []).has(CONNECTOR_CONNECTION_CAPABILITY)) return undefined;
+    return {
+        handled: true,
+        response: deps.error(CONNECTOR_CONNECTION_DENY_MESSAGE, FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
+    };
+}
+
+const CONNECTOR_CONNECTION_UNSUPPORTED_MESSAGE = (member: string): string =>
+    'Connector connections are not supported by the automation service this deployment mounts — it does not '
+    + `implement \`${member}\`, an optional member of \`IAutomationService\`. Nothing was read or changed.`;
+
+/** The callback's parameters, each one value: a repeated one is refused naming it, never read as either. */
+function callbackQueryOf(query: unknown): { query: Record<string, string> } | { refusal: string } {
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries((query ?? {}) as Record<string, unknown>)) {
+        if (Array.isArray(value)) return { refusal: `The callback query parameter \`${key}\` is repeated; it is read only once.` };
+        if (typeof value === 'string') out[key] = value;
+    }
+    return { query: out };
+}
+
+/**
+ * ADR-0143 D5 — the connector connection door's four arms. Reached only past
+ * the capability gate above. ⛔ No token leaves here: every arm answers the
+ * connection's status.
+ */
+async function respondToConnectorConnectionDoor(
+    deps: DomainHandlerDeps,
+    automationService: unknown,
+    parts: string[],
+    method: string,
+    context: HttpProtocolContext,
+    query: unknown,
+): Promise<HttpDispatcherResult> {
+    const isCallback = parts[1] === CONNECTOR_OAUTH_SEGMENT && parts[2] === CONNECTOR_OAUTH_CALLBACK_SEGMENT;
+    const queryRefusal = unknownQueryParamRefusalMessage(
+        query,
+        isCallback ? CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS : CONNECTOR_CONNECTION_DOOR_QUERY_PARAMS,
+    );
+    if (queryRefusal !== undefined) {
+        return { handled: true, response: deps.error(queryRefusal, 400, { code: 'VALIDATION_ERROR' }) };
+    }
+    const svc = automationService as Pick<
+        IAutomationService,
+        'getConnectorConnection' | 'beginConnectorConnection' | 'completeConnectorConnection' | 'revokeConnectorConnection'
+    >;
+    const executionContext = (context as any)?.executionContext;
+    try {
+        if (isCallback) {
+            const read = callbackQueryOf(query);
+            if ('refusal' in read) return { handled: true, response: deps.error(read.refusal, 400, { code: 'VALIDATION_ERROR' }) };
+            if (typeof svc.completeConnectorConnection !== 'function') {
+                return { handled: true, response: deps.error(CONNECTOR_CONNECTION_UNSUPPORTED_MESSAGE('completeConnectorConnection'), 501) };
+            }
+            const state = await svc.completeConnectorConnection({ query: read.query, context: executionContext });
+            return { handled: true, response: deps.success(state) };
+        }
+        let connector: string;
+        try {
+            connector = decodeURIComponent(parts[1]);
+        } catch {
+            return {
+                handled: true,
+                response: deps.error('The connector instance name in the path is not a valid URL-encoded segment.', 400, { code: 'VALIDATION_ERROR' }),
+            };
+        }
+        const member = method === 'GET' ? 'getConnectorConnection' : method === 'POST' ? 'beginConnectorConnection' : 'revokeConnectorConnection';
+        const call = svc[member] as ((request: { connector: string; context?: unknown }) => Promise<unknown>) | undefined;
+        if (typeof call !== 'function') {
+            return { handled: true, response: deps.error(CONNECTOR_CONNECTION_UNSUPPORTED_MESSAGE(member), 501) };
+        }
+        const answer = await call.call(svc, { connector, context: executionContext });
+        return { handled: true, response: deps.success(answer) };
     } catch (err) {
         const refusal = connectorCredentialRefusal(deps, err);
         if (refusal) return refusal;
@@ -2949,6 +3092,16 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (refusal) return refusal;
     }
 
+    // ADR-0143 D5 — CONNECTOR CONNECTION GATE: `manage_connector_connections`,
+    // the organization-scoped capability, ahead of the service probe and of
+    // any query check, as above. No walled refusal: a
+    // connection belongs to its organization (Q1 = A), so it is served under
+    // every tenancy posture.
+    if (isConnectorConnectionDoor(parts, m)) {
+        const refusal = refuseUngrantedConnectorConnectionAccess(deps, context);
+        if (refusal) return refusal;
+    }
+
     // [ADR-0126 §5] ACTIVATION-WRITE GATE — the install-wide enable/disable
     // switch needs the platform operator in a walled posture. Placed directly
     // AFTER the authoring gate and BEFORE the service probe / body checks, for
@@ -3163,6 +3316,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // DELETE one. Ahead of `/:name` for the reason `/connectors` is.
     if (isConnectorCredentialDoor(parts, m)) {
         return respondToConnectorCredentialDoor(deps, automationService, parts, m, body, context, query);
+    }
+    // ADR-0143 D5 — the connector connection door, ahead of `/:name` for the
+    // reason `/connectors` is.
+    if (isConnectorConnectionDoor(parts, m)) {
+        return respondToConnectorConnectionDoor(deps, automationService, parts, m, context, query);
     }
 
     if (parts[0] === 'connectors' && parts.length === 1 && m === 'GET') {

@@ -83,7 +83,7 @@ import { measureResultType } from './measure-result-type.js';
 // compile.
 import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
 import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
-import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, ReadScopeFilterJudge } from './strategies/types.js';
+import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
@@ -99,6 +99,7 @@ import {
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
+import { measureCurrencyResolver, type DeclaredCurrency } from './measure-currency-coherence.js';
 import { bindDatasetFiltersToObjectFields } from './dataset-filter-field-binding.js';
 import { drillWindowBounds } from './drill-window.js';
 import {
@@ -2180,8 +2181,26 @@ export class AnalyticsService implements IAnalyticsService {
       authorCube ?? ({ name, title: name, sql: name, measures: {}, dimensions: {} } as Cube);
     const named = namedQueryFields(query, probeCube, undefined, this.hopReference);
     assertCallerMembersJudgeable(named, this.logger, context);
+    this.assertCallerMeasuresResolvable(query, probeCube, authorCube, scope.getCompiledDataset(name)?.durations, context);
+  }
 
-    // [#21156] The measure position, which `namedQueryFields` does not carry.
+  /**
+   * [#21156] The measure position of {@link assertCallerMembersResolvable},
+   * which `namedQueryFields` does not carry. `probeCube` is that method's probe
+   * (the author cube, or a member-less stand-in for an ad-hoc query).
+   *
+   * [#28172] A method of its own so the draft preview, which mints a
+   * caller-named measure with the same {@link mintCallerMeasures} and
+   * evaluates it, refuses the same spellings before it aggregates them.
+   */
+  private assertCallerMeasuresResolvable(
+    query: AnalyticsQuery,
+    probeCube: Cube,
+    authorCube: Cube | undefined,
+    durations: Readonly<Record<string, DurationMeasureSpec>> | undefined,
+    context: ExecutionContext | undefined,
+  ): void {
+    const name = probeCube.name;
     const baseObject = typeof probeCube.sql === 'string' ? probeCube.sql.trim() : '';
     if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
     for (const measure of query.measures ?? []) {
@@ -2189,7 +2208,7 @@ export class AnalyticsService implements IAnalyticsService {
       // Author-declared measures are not this gate's business. [#25778] A
       // dataset's duration measure is one, declared beside the cube.
       if (authorCube && declaredMemberEntry(authorCube, measure, 'measure')) continue;
-      if (durationMeasureIn(scope.getCompiledDataset(name)?.durations, measure, name)) continue;
+      if (durationMeasureIn(durations, measure, name)) continue;
       const inferredSql = inferredCallerMeasureSql(measure, name);
       // `null` — a dotted non-qualifier measure #5918 already refused — and a
       // column reference (`'*'`, a bare identifier, a relationship path) both
@@ -2563,13 +2582,20 @@ export class AnalyticsService implements IAnalyticsService {
       },
       // [ADR-0144, M0-3] …and the declared currency off the same hook, so the
       // compile-time currency guards judge exactly what the column would print.
-      declaredCurrency: (object: string, field: string) => {
-        const meta = this.sourceFieldMeta?.(object, field);
-        if (!meta) return undefined;
-        return { type: meta.type, defaultCurrency: meta.defaultCurrency, currencyField: meta.currencyField };
-      },
+      declaredCurrency: this.declaredCurrency,
     });
   }
+
+  /**
+   * [ADR-0144, M0-3] A field's declared currency off `sourceFieldMeta`: what
+   * the compile-time currency guards judge, and what a derived measure's
+   * column reads its resolved currency through (`enrichResultColumns`).
+   */
+  private readonly declaredCurrency = (object: string, field: string): DeclaredCurrency | undefined => {
+    const meta = this.sourceFieldMeta?.(object, field);
+    if (!meta) return undefined;
+    return { type: meta.type, defaultCurrency: meta.defaultCurrency, currencyField: meta.currencyField };
+  };
 
   /**
    * Compile a `dataset` (ADR-0021) and register its Cube + join allowlist in the
@@ -2722,21 +2748,61 @@ export class AnalyticsService implements IAnalyticsService {
         };
         const previewService = {
           query: async (q: AnalyticsQuery) => {
+            // [#28172] A measure the dataset does not declare is minted and
+            // judged as the published path's `ensureCube` mints and judges it:
+            // `amount_sum` is `SUM(amount)` here too, and a spelling whose
+            // field the object does not have (`nope`, `ghost_avg`) is refused
+            // with the same `INVALID_FIELD` / 400. Before, the evaluator read
+            // every undeclared measure as `count(*)` — a plausible row count
+            // under a typo, and the wrong number under a working spelling.
+            // The gates below and the evaluator read the cube WITH the minted
+            // measures, as the published gates read the cube after
+            // `ensureCube`, so a minted measure is judged by the field it
+            // aggregates.
+            const minted = mintCallerMeasures(q.measures, compiled.cube, compiled.cube.name, compiled.durations);
+            const cube: Cube = Object.keys(minted).length > 0
+              ? { ...compiled.cube, measures: { ...compiled.cube.measures, ...minted } }
+              : compiled.cube;
+            // The gates run in `ensureCube`'s order, then `query()`'s, so a
+            // query with two mistakes is answered about the same one first on
+            // every face. [#28201] …and an undeclared dimension is judged as
+            // `ensureCube` judges it: one whose field the object does not have
+            // (`bogus`) is refused `INVALID_FIELD` / 400 with the same message,
+            // where the evaluator grouped every row under one `null` key. One
+            // that names a real field (`amount`) groups by it, here as there.
+            this.assertMeasureFields(q, cube, Object.keys(compiled.cube.measures));
+            this.assertDimensionFields(q, cube, Object.keys(compiled.cube.dimensions));
+            // [#28257] …and the structured-JSON dimension door (#20807): a
+            // grouped dimension over a `json` column is refused there, where
+            // the evaluator grouped by each row's object value.
+            this.assertDimensionsGroupScalarColumns(q, cube);
+            // [#21044] …and the aggregate × field-type table: a minted
+            // `region_sum` over a text field is refused there, and here it
+            // would sum no number at all and read `0`.
+            this.assertMeasureFieldTypes(q, cube);
+            // [ADR-0144 D6] …and the record-currency door: a draft preview
+            // must not serve the sum across currencies that the published
+            // dataset refuses.
+            this.assertRecordCurrencyGrouped(q, cube);
+            // [#28257] …and the `where` field gate (#5669), last in
+            // `ensureCube`: a filter member whose field the object does not
+            // have (a `runtimeFilter` typo) is refused `INVALID_FIELD` / 400
+            // with `param: 'where'`, where the evaluator matched no row and
+            // served `[]` — or, under an `$or`, served the other arm's rows.
+            this.assertWhereFields(q, cube, Object.keys(compiled.cube.dimensions));
+            // [#21156] `query()` asks the caller-member gate after `ensureCube`.
+            this.assertCallerMeasuresResolvable(q, compiled.cube, compiled.cube, compiled.durations, context);
             // [#21120] The body-column refusal rides this preview path too —
             // a drafted seed row carries the same stored body the published
             // ones do.
-            this.assertStoredMetadataBodyNotQueried(q, compiled.cube, previewScope);
+            this.assertStoredMetadataBodyNotQueried(q, cube, previewScope);
             // …and the generic-exit gate's field half: a drafted seed row
             // carries the same `internal` fields the published ones do.
-            this.assertNoInternalFieldsQueried(q, compiled.cube, previewScope);
-            await this.assertFieldsReadable(q, compiled.cube, previewScope, context);
-            // [ADR-0144 D6] …and the record-currency door, which the published
-            // path meets in `ensureCube`: a draft preview must not serve the
-            // sum across currencies that the published dataset refuses.
-            this.assertRecordCurrencyGrouped(q, compiled.cube);
+            this.assertNoInternalFieldsQueried(q, cube, previewScope);
+            await this.assertFieldsReadable(q, cube, previewScope, context);
             return evaluateAnalyticsQueryOverRows(
               q,
-              compiled.cube,
+              cube,
               seedRows!,
               (field) => this.sourceFieldMeta?.(dataset.object, field)?.type,
               compiled.durations,
@@ -3131,6 +3197,7 @@ export class AnalyticsService implements IAnalyticsService {
     // this resolves TO a string rather than widening the contract.
     if (result.fields?.length && dataset.measures?.length) {
       const measureByName = new Map(dataset.measures.map((m) => [m.name, m]));
+      const currencies = measureCurrencyResolver(dataset, this.declaredCurrency);
       for (const f of result.fields) {
         const m = measureByName.get(f.name) ?? measureByName.get(f.name.replace(/__compare$/, ''));
         if (!m) continue;
@@ -3178,9 +3245,10 @@ export class AnalyticsService implements IAnalyticsService {
         // from: explicit measure `currency` → the source field's FIXED
         // currency (`sourceFieldMeta().defaultCurrency`, relayed only under
         // `currencyMode: 'fixed'` — #20091) → tenant default (`ctx.currency`).
-        // A measure is monetary if it declares a currency OR aggregates a
-        // `currency`-type field; non-monetary measures (count, avg of a plain
-        // number) never receive a currency code.
+        // A measure is monetary if it declares a currency OR takes an amount
+        // aggregate (`AMOUNT_AGGREGATES`) over a `currency`-type field;
+        // non-monetary measures (a count, over an amount field too, or an avg
+        // of a plain number) never receive a currency code.
         //
         // [ADR-0144 D2] A `record`-mode amount has one currency per ROW, held
         // in its code field, so no single code describes the column and no
@@ -3192,18 +3260,28 @@ export class AnalyticsService implements IAnalyticsService {
         // column left without the dimension gets neither key, rather than a
         // label that is wrong for every other row. A `count` over the amount
         // reads no amount, so it gets neither key either, grouped or not.
+        //
+        // [#28049] A derived measure has no field to lend a code. Its column
+        // takes the one `fixed` code its operands resolve to (a `sum` /
+        // `difference` over amounts in one `fixed` code), read off the compile
+        // guard's own resolution, so the column says what compile judged. Any
+        // other derived measure (a `ratio`, a `product`, operands in the
+        // tenant's or a record's currency) is monetary only by its own
+        // `currency`, as before.
         const fc = f as { currency?: string; currencyField?: string };
         const mc = m as { currency?: string };
         const meta = m.field ? this.sourceFieldMeta?.(dataset.object, m.field) : undefined;
+        const derivedCode = m.derived ? currencies.fixedCodeOf(m) : undefined;
         if (meta?.currencyField !== undefined) {
           const codeColumn = AMOUNT_AGGREGATES.has(m.aggregate ?? '')
             ? this.selectedDimensions(dataset, selection).find((d) => d.field === meta.currencyField)?.name
             : undefined;
           if (fc.currencyField == null && codeColumn !== undefined) fc.currencyField = codeColumn;
         } else if (fc.currency == null) {
-          const monetary = !!mc.currency || meta?.type === 'currency';
+          const amount = meta?.type === 'currency' && AMOUNT_AGGREGATES.has(m.aggregate ?? '');
+          const monetary = !!mc.currency || amount || derivedCode !== undefined;
           if (monetary) {
-            const resolved = mc.currency ?? meta?.defaultCurrency ?? context?.currency;
+            const resolved = mc.currency ?? meta?.defaultCurrency ?? derivedCode ?? context?.currency;
             if (resolved) fc.currency = resolved;
           }
         }
@@ -3580,17 +3658,10 @@ export class AnalyticsService implements IAnalyticsService {
     // [#25778] A dataset's duration measure is declared too, beside the cube
     // rather than in it (`DatasetScope.measureDurations`), so it is never
     // minted: the suffix rule would have read its name as a column to `sum`.
-    const extraMeasures: Record<string, any> = {};
-    const durations = scope.getCompiledDataset(name)?.durations;
-    for (const m of query.measures || []) {
-      if (cube.measures[m] || extraMeasures[m]) continue;
-      if (durationMeasureIn(durations, m, name)) continue;
-      const key = mintableMeasureKey(m, name);
-      if (cube.measures[key] || extraMeasures[key]) continue;
-      // [#21437] A spelling whose source names no field (`_sum`, `*`) is
-      // refused by the mint itself, naming `m` as the request spelled it.
-      extraMeasures[key] = inferMeasure(key, { member: m, cube: name });
-    }
+    //
+    // [#28172] The loop is {@link mintCallerMeasures}, shared with the draft
+    // preview, which mints the same spellings over the same compiled cube.
+    const extraMeasures = mintCallerMeasures(query.measures, cube, name, scope.getCompiledDataset(name)?.durations);
     if (Object.keys(extraMeasures).length > 0) {
       const augmented: Cube = {
         ...cube,
@@ -4434,6 +4505,40 @@ function mintableMeasureKey(member: string, cubeName: string): string {
       `only dot a measure may carry is the '${cubeName}.' qualifier.`,
     { member, param: 'measures', cube: cubeName },
   );
+}
+
+/**
+ * [#28172] The measures `measures` names that `cube` (registered as
+ * `cubeName`) does not declare, minted
+ * the way {@link AnalyticsService.ensureCube} mints them for the strategies:
+ * {@link mintableMeasureKey}'s qualifier rule, then {@link inferMeasure}'s
+ * suffix convention, keyed by the minted key. A declared measure, a declared
+ * dotted key and a dataset duration measure (declared beside the cube, #25778)
+ * are never minted. Empty when every measure is declared.
+ *
+ * One loop for both faces that answer a dataset query. The draft preview used
+ * to read an undeclared measure as `count(*)`, so `amount_sum` read the row
+ * count where the live faces read `SUM(amount)`, and a misspelled `nope` read
+ * the row count where they refuse it — {@link AnalyticsService.assertMeasureFields}
+ * judges what this returns, on both.
+ */
+function mintCallerMeasures(
+  measures: readonly string[] | undefined,
+  cube: Cube,
+  cubeName: string,
+  durations: Readonly<Record<string, DurationMeasureSpec>> | undefined,
+): Record<string, ReturnType<typeof inferMeasure>> {
+  const minted: Record<string, ReturnType<typeof inferMeasure>> = {};
+  for (const m of measures ?? []) {
+    if (cube.measures[m] || minted[m]) continue;
+    if (durationMeasureIn(durations, m, cubeName)) continue;
+    const key = mintableMeasureKey(m, cubeName);
+    if (cube.measures[key] || minted[key]) continue;
+    // [#21437] A spelling whose source names no field (`_sum`, `*`) is
+    // refused by the mint itself, naming `m` as the request spelled it.
+    minted[key] = inferMeasure(key, { member: m, cube: cubeName });
+  }
+  return minted;
 }
 
 /**

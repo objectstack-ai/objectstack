@@ -8,6 +8,7 @@ import {
   MEMBERSHIP_ROLE_MEMBER,
 } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
+import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
 /**
  * sys_member — System Member Object
@@ -127,8 +128,14 @@ export const SysMember = ObjectSchema.create({
         // (`INVITATION_ROLE_GRANTORS`), so a delegated_admin is offered
         // `member` alone. Declared on the param, not inherited from the
         // field, so the gate narrows this dialog and no other picker.
-        { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+        { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Invite a person by email address to join the current organization with a role (params: email, role). They join when they accept the invitation. Use when the user asks to invite someone who is not a member yet; the role options are only the roles the caller may grant.',
+      },
     },
     {
       // Admin-only: directly attach an existing user to the active org,
@@ -196,13 +203,23 @@ export const SysMember = ObjectSchema.create({
       refreshAfter: true,
       params: [
         { name: 'userId', field: 'user_id', required: true },
-        { field: 'role', required: true },
+        { field: 'role', required: true, helpText: MEMBERSHIP_ROLE_PARAM_HELP },
         { name: 'organizationId', field: 'organization_id' },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Add an existing user straight into an organization with a role, without an invitation (params: userId, role, and optionally organizationId, which defaults to the active organization). Platform administrators only.',
+      },
     },
     {
       name: 'update_member_role',
       label: 'Change Role',
+      // Names the member: a list row carries `user_id` expanded to the user
+      // record wherever the list shows that column (the organization page's
+      // Members list); a row without it reads "this member".
+      description: "Choose the new organization role for ${record.user_id?.name ?? 'this member'}.",
       icon: 'shield',
       mode: 'edit',
       locations: ['list_item'],
@@ -222,7 +239,7 @@ export const SysMember = ObjectSchema.create({
       },
       refreshAfter: true,
       params: [
-        { field: 'role', required: true, defaultFromRow: true },
+        { field: 'role', required: true, defaultFromRow: true, helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
     },
     {
@@ -240,6 +257,14 @@ export const SysMember = ObjectSchema.create({
       confirmText: 'Remove this member from the organization? They will lose access to all org resources.',
       successMessage: 'Member removed',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Remove a member (the record) from the organization: they lose access to all of its resources. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     // Make Owner is `update-member-role` with role=owner, and better-auth's
     // `updateMemberRole` writes the TARGET's role and nothing else: the caller

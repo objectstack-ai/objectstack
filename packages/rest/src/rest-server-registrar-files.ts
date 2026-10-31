@@ -69,6 +69,12 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#23050 slice 13e] The seventh `/meta` group of `registerMetadataEndpointsInner`'
     // body, the object state-machine read — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-object-state-routes.ts',
+    // [#27627] `registerRecordPageEndpoints`' body, the record page payload. New, not a
+    // moved slice: a registrar added beside the others joins the list in its own PR.
+    'record-page-routes.ts',
+    // [#27627] `registerMetaAppBundleRoute`' body, the app metadata bundle. New, not a
+    // moved slice, and a `/meta` group — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-app-bundle-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
@@ -113,6 +119,10 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // It is in no per-family switch and registers on the route manager itself, by value
     // from a host literal built inside the inner method.
     'meta-object-state-routes.ts',
+    // [#27627] The app metadata bundle, `GET {metaPath}/app/:appId/bundle`. New, not a
+    // moved slice; like the per-item writes it goes through the inner method's per-item
+    // registrar, handed over in its scope.
+    'meta-app-bundle-routes.ts',
 ];
 
 /**

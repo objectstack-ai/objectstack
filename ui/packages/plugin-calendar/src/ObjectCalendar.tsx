@@ -26,6 +26,12 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
 import { CalendarView, type CalendarViewEvent } from './CalendarView';
 import { getVisibleDateRange } from './visibleDays';
+import {
+  anchorDateFromResult,
+  isCalendarRecordAnchor,
+  recordAnchorQuery,
+  resolveInitialDateMacro,
+} from './initialDate';
 import { usePullToRefresh } from '@object-ui/mobile';
 import { firstDayOfWeek, useDisplayLocale } from '@object-ui/i18n';
 import {
@@ -521,7 +527,16 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
    * apart from one that is exactly that size.
    */
   const [rowCeiling, setRowCeiling] = useState<NonGridCeilingResult | null>(null);
-  const [currentDate, setCurrentDate] = useState(new Date());
+  // `calendar.initialDate` seeds the date ONCE, on mount (`./initialDate`): a
+  // date-macro token here, synchronously, so the first visible range reported
+  // is already the seeded one; a record anchor by the one-row read below. Absent
+  // or unresolvable ⇒ today. After the seed, user navigation owns the date.
+  const [currentDate, setCurrentDate] = useState(
+    () => resolveInitialDateMacro(schema.calendar?.initialDate) ?? new Date(),
+  );
+  // Set by the first user navigation, so a record-anchor answer that arrives
+  // later never moves a calendar the user has already moved.
+  const userNavigatedRef = useRef(false);
   // Disclosure state of the "unscheduled" area (`bc5870c9f`). Collapsed by
   // default, as ruled: the count is always on screen, the list is opt-in.
   // Component state is the right home per AGENTS.md §5 #8 — nobody would share
@@ -959,6 +974,63 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     return () => { isMounted = false; };
   }, [hasExternalData, dataProvider, schemaObjectName, dataItems, dataSource, hasInlineData,
       queryFilter, schema.sort, refreshKey, objectSchemaReady, objectSchema, perms, invalidationNonce]);
+
+  // `calendar.initialDate` as a record anchor (`first_record` / `next_record`):
+  // the period holding the earliest start date among the records the view's
+  // filter selects — its whole filter scope, not the drawn window, which is why
+  // it is its own one-row read rather than a scan of `data`. Read from the same
+  // source the record fetch above reads (a host that hands `data` down still
+  // hands this calendar its `dataSource` and `objectName`), behind the same
+  // object-schema gate, because the `next_record` bound is spelled by the start
+  // field's declared type: a `date` field compares as a calendar day.
+  //
+  // Seeds once: `anchorSeededRef` is set when an answer (or a failure) lands,
+  // not when the read starts, so a re-run that discards an in-flight answer
+  // asks again. No source to read, no qualifying record or a failed read ⇒ the
+  // calendar stays on today.
+  const declaredInitialDate = schema.calendar?.initialDate;
+  const initialDateAnchor = isCalendarRecordAnchor(declaredInitialDate) ? declaredInitialDate : undefined;
+  const anchorStartField = initialDateAnchor ? calendarConfig?.startDateField : undefined;
+  const anchorSeededRef = useRef(false);
+  useEffect(() => {
+    if (anchorSeededRef.current || !initialDateAnchor || !anchorStartField) return;
+    if (dataProvider === 'object' && !objectSchemaReady) return;
+    const source = dataProvider === 'value'
+      ? new ValueDataSource<any>({ items: (dataItems as any[]) ?? [] })
+      : dataProvider === 'object' && schemaObjectName && typeof dataSource?.find === 'function'
+        ? dataSource
+        : undefined;
+    if (!source) {
+      anchorSeededRef.current = true;
+      return;
+    }
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const declaredType = (objectSchema?.fields as Record<string, any> | undefined)?.[anchorStartField]?.type;
+    const params = recordAnchorQuery(
+      initialDateAnchor,
+      anchorStartField,
+      queryFilter,
+      toStoredDateValue(startOfToday, declaredType, undefined),
+    );
+    let live = true;
+    source.find(dataProvider === 'value' ? '' : (schemaObjectName as string), params).then(
+      (result) => {
+        if (!live) return;
+        anchorSeededRef.current = true;
+        if (userNavigatedRef.current) return;
+        const anchorDate = anchorDateFromResult(result, anchorStartField);
+        if (anchorDate) setCurrentDate(anchorDate);
+      },
+      (err) => {
+        if (!live) return;
+        anchorSeededRef.current = true;
+        console.warn(`[ObjectCalendar] Could not read the ${initialDateAnchor} the calendar opens on; it opens on today:`, err);
+      },
+    );
+    return () => { live = false; };
+  }, [initialDateAnchor, anchorStartField, dataProvider, dataItems, dataSource, schemaObjectName,
+      objectSchemaReady, objectSchema, queryFilter]);
 
   // Transform data to calendar events, and separate out the records that have
   // no date to be placed on at all (`bc5870c9f` — see the early return in the
@@ -1572,6 +1644,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
           // allows it (objectui#12082).
           onDateClick={onDateClick ?? dayClickCreate}
           onNavigate={(date) => {
+            userNavigatedRef.current = true;
             setCurrentDate(date);
             onNavigate?.(date);
           }}

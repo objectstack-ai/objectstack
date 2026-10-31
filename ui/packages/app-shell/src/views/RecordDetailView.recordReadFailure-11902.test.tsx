@@ -30,6 +30,9 @@
  * the one whose non-404 failure the adapter retries as a by-id GET before it
  * rejects (two wire requests for ONE page read). The pins count the page's
  * reads at the adapter, not at the wire, so they say how often the PAGE asked.
+ * Since objectstack#27627 the open's read is the record page payload
+ * (`getRecordPage`, which answers each status as the record read does) and a
+ * Retry is the record read alone (`findOne`); both are counted.
  *
  * Copy is asserted in `en` and `zh`, from the packs (no `defaultValue` path):
  * each answer renders its own state, a refusal names the object and never says
@@ -131,13 +134,14 @@ const NOT_FOUND_EN = 'Record not found';
 const NOT_FOUND_DESCRIPTION_EN = 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.';
 const NOT_FOUND_ZH = '未找到记录';
 
-/** Open the record page; returns the adapter's `findOne`, spied, to count the page's reads. */
+/** Open the record page; returns the adapter's two record reads, spied, to count the page's reads. */
 async function openRecordPage(config: I18nConfig = EN) {
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch: transport, autoReconnect: false });
   await ds.connect();
   // Object metadata is the metadata service's business, not this file's.
   (ds as unknown as { getObjectSchema: () => Promise<unknown> }).getObjectSchema = async () => objectDef;
   const findOne = vi.spyOn(ds, 'findOne');
+  const getRecordPage = vi.spyOn(ds, 'getRecordPage');
   const metadata = {
     objects: [objectDef], pages: [], loading: false, error: null,
     refresh: async () => {}, invalidate: () => {},
@@ -158,11 +162,12 @@ async function openRecordPage(config: I18nConfig = EN) {
       </MemoryRouter>
     </I18nProvider>,
   );
-  return { findOne };
+  return { findOne, getRecordPage };
 }
 
-const pageReads = (findOne: { mock: { calls: unknown[][] } }) =>
-  findOne.mock.calls.filter(([object, id]) => object === OBJECT && id === REC).length;
+type Spied = { mock: { calls: unknown[][] } };
+const pageReads = ({ findOne, getRecordPage }: { findOne: Spied; getRecordPage: Spied }) =>
+  [...findOne.mock.calls, ...getRecordPage.mock.calls].filter(([object, id]) => object === OBJECT && id === REC).length;
 
 const absent = (text: string | RegExp) => expect(screen.queryAllByText(text)).toHaveLength(0);
 
@@ -174,7 +179,7 @@ afterEach(() => {
 describe('a refused read renders a no-access state that names the object (objectui#11902)', () => {
   it('en: 403 PERMISSION_DENIED → "You don’t have access to Invoice records", never not-found', async () => {
     answer = 'forbidden';
-    const { findOne } = await openRecordPage(EN);
+    const reads = await openRecordPage(EN);
 
     const state = await screen.findByTestId('record-access-denied', undefined, { timeout: 5000 });
     expect(state).toHaveTextContent('You don’t have access to Invoice records');
@@ -186,7 +191,7 @@ describe('a refused read renders a no-access state that names the object (object
     // A permission decision is not retryable: no Retry is offered.
     expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
     // The page asked once; the refusal set off no re-read of its own.
-    expect(pageReads(findOne)).toBe(1);
+    expect(pageReads(reads)).toBe(1);
   });
 
   it('zh: 403 → "无权访问发票记录", naming the object by its translated label', async () => {
@@ -203,23 +208,26 @@ describe('a refused read renders a no-access state that names the object (object
 describe('a failed load renders a retryable load error, not not-found (objectui#11902)', () => {
   it('en: a 5xx → "Couldn’t load this record" with Retry; a Retry that succeeds renders the record', async () => {
     answer = 'serverError';
-    const { findOne } = await openRecordPage(EN);
+    const reads = await openRecordPage(EN);
+    const { findOne, getRecordPage } = reads;
 
     const state = await screen.findByTestId('record-load-failed', undefined, { timeout: 5000 });
     expect(state).toHaveTextContent('Couldn’t load this record');
     expect(state).toHaveTextContent('Something went wrong while loading it. Check your connection and try again.');
     absent(NOT_FOUND_EN);
     absent(/may have been deleted/);
-    expect(pageReads(findOne)).toBe(1);
+    expect(pageReads(reads)).toBe(1);
 
     // The server recovers; Retry re-runs the page's own read, once. The click
     // handler calls the load synchronously, so the count is read right after
     // it — before the recovered page mounts blocks that read on their own.
     answer = 'ok';
     fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
-    expect(pageReads(findOne)).toBe(2);
-    // The retry is the SAME read: the same object, id and expansion as the first.
-    expect(findOne.mock.calls[1]).toEqual(findOne.mock.calls[0]);
+    expect(pageReads(reads)).toBe(2);
+    // The retry is the SAME record read: the same object, id and expansion as
+    // the open's payload asked.
+    expect(getRecordPage.mock.calls[0].slice(0, 2)).toEqual([OBJECT, REC]);
+    expect(findOne.mock.calls).toEqual([[OBJECT, REC, { $expand: (getRecordPage.mock.calls[0][2] as any).expand }]]);
 
     expect((await screen.findAllByText(RECORD.name, undefined, { timeout: 5000 })).length).toBeGreaterThan(0);
     expect(screen.queryByTestId('record-load-failed')).toBeNull();

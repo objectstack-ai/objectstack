@@ -357,8 +357,8 @@ export type MetadataPublishPackageDraftsResult = Partial<PublishPackageDraftsRes
 
 /**
  * What {@link MetadataClient.publishPackageDrafts} may ask of the batch door
- * beyond the package id (objectui#12929): today the protocol's opt-in
- * `backfill` (objectstack#24253), and nothing else.
+ * beyond the package id: the protocol's opt-in `backfill` (objectui#12929,
+ * objectstack#24253) and the author's change note, `message` (ADR-0146 D1).
  *
  * Picked off `@objectstack/client`'s own `packages.publishDrafts` signature
  * rather than re-spelled, so the element shape (`{ object, field }`) is the
@@ -373,10 +373,14 @@ export type MetadataPublishPackageDraftsResult = Partial<PublishPackageDraftsRes
  * is not new, or declares no literal default, refuses the WHOLE request with a
  * 400 before anything is published, so a caller offers only fields it has
  * judged by the same rule.
+ *
+ * `message` is the change note: the package commit and every item history row
+ * the publish writes record it (`change_note`), so the item's history says why
+ * it changed. Without one the server records the sentence naming the package.
  */
 export type MetadataPublishPackageDraftsOptions = Pick<
   NonNullable<Parameters<ObjectStackClient['packages']['publishDrafts']>[1]>,
-  'backfill'
+  'backfill' | 'message'
 >;
 
 /**
@@ -1619,6 +1623,11 @@ export class MetadataClient {
    * receipt is `backfillApplied` on the returned body, unexamined like the rest
    * of a 2xx: one element per named field with the rows written, and `error`
    * on a field that stopped short (the publish itself stands).
+   *
+   * ## The change note (ADR-0146 D1)
+   *
+   * `options.message` is sent as the body's `message` key, as given, and only
+   * when the caller passes one, by the same rule as `backfill`.
    */
   async publishPackageDrafts(
     packageId: string,
@@ -1638,7 +1647,10 @@ export class MetadataClient {
       // superset of what the bare doors carried, never less.
       credentials: 'include',
       headers: { ...this.headers, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(options.backfill !== undefined ? { backfill: options.backfill } : {}),
+      body: JSON.stringify({
+        ...(options.backfill !== undefined ? { backfill: options.backfill } : {}),
+        ...(options.message !== undefined ? { message: options.message } : {}),
+      }),
     });
     if (!res.ok) throw await parseError(res);
     const body = unwrapDispatcherEnvelope(await res.json().catch(() => ({})));

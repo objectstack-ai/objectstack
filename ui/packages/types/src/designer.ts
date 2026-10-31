@@ -823,6 +823,8 @@ export interface UnifiedViewConfig {
     colorField?: string;
     allDayField?: string;
     defaultView?: string;
+    /** Where the calendar opens: `first_record`, `next_record` or a wrapped date-macro token. */
+    initialDate?: string;
   };
   /** Map-specific options */
   map?: {

@@ -1,48 +1,58 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#27681] An action on a `sys_*` object is reachable over MCP only when the
-// action itself declares `ai: { exposed: true, description }` (ADR-0011) —
-// pinned on a `sys_user` identity action, through the live MCP transport of a
-// booted showcase with better-auth's admin plugin on and the real
-// `/admin/ban-user` target.
+// [#27681, #27900] An action on a `sys_*` object is reachable over MCP only
+// when the action itself declares `ai: { exposed: true, description }`
+// (ADR-0011) — pinned on the platform's OWN identity declarations, through the
+// live MCP transport of a booted showcase with better-auth's admin plugin on
+// and the real identity targets.
 //
-// ## The ruling this file encodes
+// ## The rulings this file encodes
 //
-// Maintainer ruling 6513869839 (letter B). Before it, the runtime refused every
-// action on a `sys_*` object by name, ahead of the exposure check, and the MCP
-// tool layer hid and refused them again — while `POST /actions/sys_user/…`
-// served the same action to the same administrator. Now the name refusal
-// yields to the action's own opt-in at both MCP sites (`list_actions`,
+// Maintainer ruling 6513869839 on #27681 (letter B): the runtime's `sys_*` name
+// refusal yields to the action's own opt-in at both MCP sites (`list_actions`,
 // `run_action`), and every gate behind it runs unchanged.
 //
-// ## The declaration here is TEST-ONLY
+// Maintainer ruling 6523087116 on #27900 (letter A+): the platform identity
+// actions are assessed in three buckets, recorded in ADR-0011's 2026-10-30
+// addendum — E exposed by plain declaration, C exposed with
+// `requiresConfirmation: true`, H with no `ai` block. This file drives ONE
+// action per bucket. It is not a pin over the table: the ruling struck any
+// automatic check of it, and the table lives in the ADR only.
 //
-// No platform `sys_*` action declares an `ai` block (ruling parameter 2, as
-// amended: the declarations follow their own decision card). `ban_user` is
-// given one for THIS boot only — set on the imported `SysUser` before the boot
-// registers it, removed in `afterAll` — with `requiresConfirmation: true`, the
-// shape the ruling requires for a destructive identity act. Its sibling
-// `unban_user` keeps no `ai` block and is the unflagged control on the SAME
-// object.
+// ## Two callers
 //
-// ## What each case pins
+//   - The administrator's SESSION bearer pins the #27681 mechanism on
+//     `ban_user` (C): listed and attested, refused 428 unconfirmed, the
+//     ADR-0126 §8 switch, the target's own authorization, and the confirmed
+//     call that bans. The human-only `impersonate_user` (H) on the SAME object
+//     is the control: never listed, refused by name.
+//   - An OAUTH-connected agent — the caller the #27900 ruling exposes these
+//     actions to — drives the three bucket cases: `update_my_profile` (E)
+//     listed and run, `ban_user` (C) refused until confirmed, and
+//     `impersonate_user` (H) absent. Its token is minted by the embedded
+//     authorization server the way an MCP client connects: dynamic client
+//     registration, authorize with the MCP resource and PKCE, consent, token.
 //
-//   - `list_actions` lists `ban_user` (attested `aiExposed`) and not
-//     `unban_user`: the agent that lists sees exactly what it may run;
-//   - the unflagged `unban_user` is refused by name over MCP, with and
-//     without `objectName`;
-//   - HITL: an unconfirmed `ban_user` is refused 428 and the user stays
-//     unbanned;
-//   - the ADR-0126 §8 switch: off ⇒ 409 ACTION_DISABLED over MCP even when
-//     confirmed, user unbanned;
-//   - the target still authorizes: a plain member's confirmed call is refused
-//     and the user stays unbanned;
-//   - and the confirmed administrator call bans the user.
+// ## ⚠️ The E run does not succeed for the OAuth agent today — and says so
+//
+// Every one of these actions is `type: 'api'`: the door forwards the call to
+// its identity route as the caller, and an identity route accepts a signed-in
+// session only. So the agent's forward is answered 401 at the target and
+// nothing changes, while the administrator's session making the same call is
+// served (pinned beside it as the contrast — it is not the ruled case, and it
+// does not stand in for it). The run case pins TODAY's answer; the ruled
+// outcome (the agent's E call served) waits on
+// the open decision on #28178, which governs which credentials a forward
+// target accepts. ⛔ Do not make it pass by switching the caller to a session
+// bearer, by minting a session for the agent, or by widening what an identity
+// route or the REST face accepts — when #28178 lands, flip the expectation.
 //
 // `OS_SCIM_ENABLED=true` precedes the boot because `/admin/*` 501s without
-// better-auth's admin plugin (see `api-action-door-forward.dogfood.test.ts`).
-// The file is ISOLATED (an env toggle + a mutated platform declaration).
+// better-auth's admin plugin (see `api-action-door-forward.dogfood.test.ts`),
+// and `OS_OIDC_PROVIDER_ENABLED=true` mounts the embedded authorization server.
+// The file is ISOLATED (env toggles).
 
+import { createHash, randomBytes } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { MCPServerPlugin } from '@objectstack/mcp';
@@ -52,30 +62,31 @@ import { bootShowcase } from './showcase-boot.js';
 const SYS = { isSystem: true } as const;
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
 
+const ADMIN_EMAIL = 'admin@objectos.ai';
+const ADMIN_PASSWORD = 'admin123';
 const TARGET_EMAIL = 'mcp.sys.exposure.target@example.com';
+const AGENT_TARGET_EMAIL = 'mcp.sys.exposure.agent-target@example.com';
 const MEMBER_EMAIL = 'mcp.sys.exposure.member@example.com';
+const REDIRECT_URI = 'http://127.0.0.1:33419/callback';
+const AGENT_SCOPE = 'openid profile email offline_access data:read data:write actions:execute';
 
-/** The test-only opt-in, the shape the ruling requires on a destructive identity act. */
-const TEST_ONLY_AI = {
-  exposed: true,
-  description: 'Ban a user so they cannot sign in (dogfood test-only declaration).',
-  requiresConfirmation: true,
-};
-
-const banUserDeclaration = (): any => {
-  const found = ((SysUser as any).actions ?? []).find((a: any) => a?.name === 'ban_user');
-  if (!found) throw new Error("sys_user no longer declares 'ban_user' — the fixture moved");
+const declarationOf = (name: string): any => {
+  const found = ((SysUser as any).actions ?? []).find((a: any) => a?.name === name);
+  if (!found) throw new Error(`sys_user no longer declares '${name}' — the fixture moved`);
   return found;
 };
 
-describe('[#27681] a sys_user action the author exposed to AI is listed and run over MCP, behind every gate', () => {
+describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\'s declaration lets an agent reach', () => {
   let stack: VerifyStack;
   let ql: any;
   let admin: string;
   let member: string;
+  let agent: string;
+  let adminUserId: string;
   let targetUserId: string;
+  let agentTargetUserId: string;
   let priorScim: string | undefined;
-  let priorAi: unknown;
+  let priorOidc: string | undefined;
 
   /** One `tools/call` over the live MCP transport; the tool's text content, parsed. */
   const tool = async (token: string, name: string, args: Record<string, unknown>) => {
@@ -97,54 +108,142 @@ describe('[#27681] a sys_user action the author exposed to AI is listed and run 
     return { isError: rpc.result?.isError === true, payload, text };
   };
   const messageOf = (r: { payload: any; text: string }) => String(r.payload?.error?.message ?? r.payload?.message ?? r.text);
-  const isBanned = async () => {
-    const [row] = rowsOf(await ql.find('sys_user', { where: { id: targetUserId }, limit: 1 }, { context: SYS }));
+  const userRow = async (id: string) =>
+    rowsOf(await ql.find('sys_user', { where: { id }, limit: 1 }, { context: SYS }))[0];
+  const isBanned = async (id: string) => {
+    const row = await userRow(id);
     return row?.banned === true || row?.banned === 1;
+  };
+  const listedOnUser = async (token: string) => {
+    const listed = await tool(token, 'list_actions', {});
+    expect(listed.isError, listed.text).toBe(false);
+    return (listed.payload.actions as any[]).filter((a) => a.objectName === 'sys_user');
   };
   const flip = async (enabled: boolean) => {
     const res = await stack.apiAs(admin, 'POST', '/actions/_activation/sys_user/ban_user', { enabled });
     expect(res.status, await res.clone().text()).toBe(200);
   };
 
+  /**
+   * An access token for the MCP resource, minted by the embedded authorization
+   * server for the administrator, the way an MCP client connects (a public
+   * client, PKCE S256, `resource` = the MCP URL).
+   */
+  const mintAgentToken = async (): Promise<string> => {
+    const authSvc: any = await stack.kernel.getServiceAsync('auth');
+    const resource = authSvc.getMcpResourceUrl();
+    const reg = await stack.api('/auth/oauth2/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'sys-action exposure agent',
+        redirect_uris: [REDIRECT_URI],
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+        application_type: 'native',
+        scope: AGENT_SCOPE,
+      }),
+    });
+    const client: any = await reg.json();
+    expect(reg.status, JSON.stringify(client)).toBe(201);
+    const signIn = await stack.api('/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+    });
+    const cookie = ((signIn.headers as any).getSetCookie() as string[]).map((c) => c.split(';')[0]).join('; ');
+    const verifier = randomBytes(32).toString('base64url');
+    const query = new URLSearchParams({
+      client_id: client.client_id,
+      redirect_uri: REDIRECT_URI,
+      response_type: 'code',
+      scope: AGENT_SCOPE,
+      state: 'st',
+      code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+      code_challenge_method: 'S256',
+      resource,
+    });
+    const authorize = await stack.api(`/auth/oauth2/authorize?${query}`, { headers: { cookie }, redirect: 'manual' });
+    const location = authorize.headers.get('location') ?? '';
+    let code = new URL(location, 'http://localhost:3000').searchParams.get('code');
+    if (!code) {
+      const consent = await stack.api('/auth/oauth2/consent', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, origin: 'http://localhost:3000' },
+        body: JSON.stringify({ accept: true, oauth_query: location.slice(location.indexOf('?')) }),
+      });
+      const answer: any = await consent.json();
+      expect(consent.status, JSON.stringify(answer)).toBe(200);
+      code = new URL(answer?.redirect_uri ?? answer?.url).searchParams.get('code');
+    }
+    expect(code, `authorize answered ${authorize.status} ${location}`).toBeTruthy();
+    const token = await stack.api('/auth/oauth2/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code!,
+        redirect_uri: REDIRECT_URI,
+        client_id: client.client_id,
+        code_verifier: verifier,
+        resource,
+      }).toString(),
+    });
+    const issued: any = await token.json();
+    expect(token.status, JSON.stringify(issued)).toBe(200);
+    return String(issued.access_token);
+  };
+
   beforeAll(async () => {
     priorScim = process.env.OS_SCIM_ENABLED;
+    priorOidc = process.env.OS_OIDC_PROVIDER_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';
-    const ban = banUserDeclaration();
-    priorAi = ban.ai;
-    expect(priorAi, 'the platform now declares an ai block on ban_user — this fixture would mask it').toBeUndefined();
-    ban.ai = TEST_ONLY_AI;
+    process.env.OS_OIDC_PROVIDER_ENABLED = 'true';
+    // The premise, read off the platform's own declarations (ADR-0011's
+    // 2026-10-30 addendum): one action per bucket, nothing mutated here.
+    expect(declarationOf('ban_user').ai).toMatchObject({ exposed: true, requiresConfirmation: true });
+    expect(declarationOf('update_my_profile').ai).toMatchObject({ exposed: true });
+    expect(declarationOf('update_my_profile').ai.requiresConfirmation).toBeUndefined();
+    expect(declarationOf('impersonate_user').ai).toBeUndefined();
     stack = await bootShowcase({ extraPlugins: [new MCPServerPlugin()] });
     admin = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
     await stack.signUp(TARGET_EMAIL, 'Target-Pass-123');
+    await stack.signUp(AGENT_TARGET_EMAIL, 'Target-Pass-123');
     member = await stack.signUp(MEMBER_EMAIL, 'Member-Pass-123');
-    const [target] = rowsOf(await ql.find('sys_user', { where: { email: TARGET_EMAIL }, limit: 1 }, { context: SYS }));
-    targetUserId = String(target.id);
+    const idOf = async (email: string) =>
+      String(rowsOf(await ql.find('sys_user', { where: { email }, limit: 1 }, { context: SYS }))[0]?.id);
+    adminUserId = await idOf(ADMIN_EMAIL);
+    targetUserId = await idOf(TARGET_EMAIL);
+    agentTargetUserId = await idOf(AGENT_TARGET_EMAIL);
+    agent = await mintAgentToken();
   }, 300_000);
 
   afterAll(async () => {
     await stack?.stop?.();
-    const ban = banUserDeclaration();
-    if (priorAi === undefined) delete ban.ai;
-    else ban.ai = priorAi;
     if (priorScim === undefined) delete process.env.OS_SCIM_ENABLED;
     else process.env.OS_SCIM_ENABLED = priorScim;
+    if (priorOidc === undefined) delete process.env.OS_OIDC_PROVIDER_ENABLED;
+    else process.env.OS_OIDC_PROVIDER_ENABLED = priorOidc;
   });
 
-  it('list_actions lists the flagged ban_user (attested, confirmation-gated) and not the unflagged unban_user', async () => {
-    const listed = await tool(admin, 'list_actions', {});
-    expect(listed.isError, listed.text).toBe(false);
-    const onUser = (listed.payload.actions as any[]).filter((a) => a.objectName === 'sys_user');
-    expect(onUser.map((a) => a.name)).toEqual(['ban_user']);
-    expect(onUser[0]).toMatchObject({ aiExposed: true, requiresConfirmation: true, requiresRecord: true });
+  // ── The administrator's session: the #27681 mechanism on a C action ──────
+
+  it('list_actions lists the declared ban_user (attested, confirmation-gated) and not the human-only impersonate_user', async () => {
+    const onUser = await listedOnUser(admin);
+    const names = onUser.map((a) => a.name);
+    expect(names).toContain('ban_user');
+    expect(names).not.toContain('impersonate_user');
+    expect(onUser.find((a) => a.name === 'ban_user')).toMatchObject({ aiExposed: true, requiresConfirmation: true, requiresRecord: true });
   }, 120_000);
 
-  it('the unflagged unban_user stays refused by name, with and without objectName', async () => {
-    const scoped = await tool(admin, 'run_action', { actionName: 'unban_user', objectName: 'sys_user', recordId: targetUserId });
+  it('the human-only impersonate_user is refused by name, with and without objectName', async () => {
+    const scoped = await tool(admin, 'run_action', { actionName: 'impersonate_user', objectName: 'sys_user', recordId: targetUserId });
     expect(scoped.isError).toBe(true);
     expect(messageOf(scoped)).toContain('system object "sys_user" is not exposed via MCP');
 
-    const byName = await tool(admin, 'run_action', { actionName: 'unban_user', recordId: targetUserId });
+    const byName = await tool(admin, 'run_action', { actionName: 'impersonate_user', recordId: targetUserId });
     expect(byName.isError).toBe(true);
     expect(messageOf(byName)).toContain("is on a system object ('sys_user') and is not exposed via MCP");
   }, 120_000);
@@ -155,7 +254,7 @@ describe('[#27681] a sys_user action the author exposed to AI is listed and run 
     });
     expect(refused.isError).toBe(true);
     expect(refused.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
-    expect(await isBanned(), 'an unconfirmed agent call banned the user').toBe(false);
+    expect(await isBanned(targetUserId), 'an unconfirmed agent call banned the user').toBe(false);
   }, 120_000);
 
   it('the packaged-action switch holds over MCP: ban_user OFF answers 409 ACTION_DISABLED even confirmed', async () => {
@@ -166,7 +265,7 @@ describe('[#27681] a sys_user action the author exposed to AI is listed and run 
       });
       expect(refused.isError).toBe(true);
       expect(refused.payload?.error).toMatchObject({ code: 'ACTION_DISABLED', status: 409 });
-      expect(await isBanned()).toBe(false);
+      expect(await isBanned(targetUserId)).toBe(false);
     } finally {
       await flip(true);
     }
@@ -177,7 +276,7 @@ describe('[#27681] a sys_user action the author exposed to AI is listed and run 
       actionName: 'ban_user', objectName: 'sys_user', recordId: targetUserId, confirm: true,
     });
     expect(refused.isError).toBe(true);
-    expect(await isBanned()).toBe(false);
+    expect(await isBanned(targetUserId)).toBe(false);
   }, 120_000);
 
   it('the confirmed administrator call runs through every gate and bans the user', async () => {
@@ -186,6 +285,58 @@ describe('[#27681] a sys_user action the author exposed to AI is listed and run 
     });
     expect(ran.isError, ran.text).toBe(false);
     expect(ran.payload).toMatchObject({ ok: true, action: 'ban_user', objectName: 'sys_user', recordId: targetUserId });
-    expect(await isBanned()).toBe(true);
+    expect(await isBanned(targetUserId)).toBe(true);
+  }, 120_000);
+
+  // ── The OAuth-connected agent: one case per bucket ───────────────────────
+
+  it('E: the agent lists update_my_profile, attested and not confirmation-gated', async () => {
+    const onUser = await listedOnUser(agent);
+    expect(onUser.find((a) => a.name === 'update_my_profile')).toMatchObject({
+      aiExposed: true, requiresConfirmation: false, requiresRecord: true,
+    });
+  }, 120_000);
+
+  it('E, today (waits on #28178): the agent\'s update_my_profile run is answered 401 at its identity route, and the name is unchanged', async () => {
+    const before = (await userRow(adminUserId))?.name;
+    const ran = await tool(agent, 'run_action', {
+      actionName: 'update_my_profile', objectName: 'sys_user', recordId: adminUserId, params: { name: 'Renamed By Agent' },
+    });
+    expect(ran.isError, ran.text).toBe(true);
+    expect(ran.payload?.error).toMatchObject({ status: 401 });
+    expect((await userRow(adminUserId))?.name).toBe(before);
+  }, 120_000);
+
+  it('E, the contrast: the same update_my_profile run from the administrator\'s session is served — the declaration is live, and the agent\'s 401 is the identity route\'s credential rule', async () => {
+    const ran = await tool(admin, 'run_action', {
+      actionName: 'update_my_profile', objectName: 'sys_user', recordId: adminUserId, params: { name: 'Renamed By Session' },
+    });
+    expect(ran.isError, ran.text).toBe(false);
+    expect(ran.payload).toMatchObject({ ok: true, action: 'update_my_profile', objectName: 'sys_user', recordId: adminUserId });
+    expect((await userRow(adminUserId))?.name).toBe('Renamed By Session');
+  }, 120_000);
+
+  it('C: the agent\'s unconfirmed ban_user is refused 428 before any forward; confirmed, today it is answered 401 at its identity route (waits on #28178); nobody is banned', async () => {
+    const unconfirmed = await tool(agent, 'run_action', {
+      actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' },
+    });
+    expect(unconfirmed.isError).toBe(true);
+    expect(unconfirmed.payload?.error).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+    expect(await isBanned(agentTargetUserId)).toBe(false);
+
+    const confirmed = await tool(agent, 'run_action', {
+      actionName: 'ban_user', objectName: 'sys_user', recordId: agentTargetUserId, params: { banReason: 'agent' }, confirm: true,
+    });
+    expect(confirmed.isError, confirmed.text).toBe(true);
+    expect(confirmed.payload?.error).toMatchObject({ status: 401 });
+    expect(await isBanned(agentTargetUserId)).toBe(false);
+  }, 120_000);
+
+  it('H: impersonate_user is absent from the agent\'s listing and refused by name', async () => {
+    const onUser = await listedOnUser(agent);
+    expect(onUser.map((a) => a.name)).not.toContain('impersonate_user');
+    const refused = await tool(agent, 'run_action', { actionName: 'impersonate_user', objectName: 'sys_user', recordId: agentTargetUserId });
+    expect(refused.isError).toBe(true);
+    expect(messageOf(refused)).toContain('system object "sys_user" is not exposed via MCP');
   }, 120_000);
 });

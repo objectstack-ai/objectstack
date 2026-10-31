@@ -211,3 +211,114 @@ describe('ConnectorRestPlugin — a credential the upstream refuses (#27237)', (
         await kernel.shutdown();
     });
 });
+
+// ADR-0143 D2.3 end to end, on the REAL host and the REAL rest provider: a
+// declarative `signed` instance is materialized with the host's signer, every
+// call carries an ACS3-HMAC-SHA256 signature, and the signing key appears in
+// nothing the instance sends or publishes. (The signature's bytes are pinned
+// against the vendor's worked example in service-automation's signer test.)
+describe('ConnectorRestPlugin — a declarative `signed` instance (ADR-0143 D2.3)', () => {
+    it('signs every call with the key its credentialRef names, and never sends or lists the key', async () => {
+        const KEY = 'dummy-aliyun-access-key-secret-26710';
+        const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+        const impl = (async (url: string, init: RequestInit) => {
+            calls.push({ url, headers: init.headers as Record<string, string> });
+            return new Response('{"RequestId":"r-1"}', { status: 200, headers: { 'content-type': 'application/json' } });
+        }) as unknown as typeof fetch;
+        const declared = [{
+            name: 'aliyun_ecs',
+            label: 'Aliyun ECS',
+            type: 'api',
+            provider: 'rest',
+            providerConfig: { baseUrl: 'https://ecs.cn-shanghai.aliyuncs.com', defaultHeaders: { 'x-acs-version': '2014-05-26' } },
+            auth: { type: 'signed', scheme: 'aliyun-acs3-hmac-sha256', keyId: 'YourAccessKeyId', credentialRef: 'ALIYUN_SECRET_26710' },
+        }];
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin({ credentialResolver: (r) => (r === 'ALIYUN_SECRET_26710' ? KEY : undefined) }));
+        kernel.use(new ConnectorRestPlugin({ fetchImpl: impl }));
+        kernel.use({
+            name: 'test.metadata',
+            type: 'standard',
+            version: '1.0.0',
+            dependencies: [],
+            async init(ctx: any) {
+                ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        const engine = kernel.getService<AutomationEngine>('automation');
+        expect(engine.getConnectorDegradedReason('aliyun_ecs')).toBeUndefined();
+
+        const request = engine.resolveConnectorAction('aliyun_ecs', 'request')!;
+        const answered = await request({ method: 'POST', path: '/', query: { RegionId: 'cn-shanghai' }, headers: { 'x-acs-action': 'DescribeRegions' } }, {} as never);
+        await request({ method: 'POST', path: '/', query: { RegionId: 'cn-shanghai' }, headers: { 'x-acs-action': 'DescribeRegions' } }, {} as never);
+        expect(answered).toEqual({ status: 200, ok: true, body: { RequestId: 'r-1' } });
+
+        expect(calls).toHaveLength(2);
+        expect(calls[0]!.url).toBe('https://ecs.cn-shanghai.aliyuncs.com/?RegionId=cn-shanghai');
+        expect(calls[0]!.headers.authorization).toMatch(
+            /^ACS3-HMAC-SHA256 Credential=YourAccessKeyId,SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version,Signature=[0-9a-f]{64}$/,
+        );
+        expect(calls[0]!.headers['x-acs-action']).toBe('DescribeRegions');
+        // Two calls, two nonces, two signatures: nothing is replayed.
+        expect(calls[0]!.headers['x-acs-signature-nonce']).not.toBe(calls[1]!.headers['x-acs-signature-nonce']);
+        expect(calls[0]!.headers.authorization).not.toBe(calls[1]!.headers.authorization);
+
+        expect(JSON.stringify(calls)).not.toContain(KEY);
+        expect(JSON.stringify(engine.getConnectorDescriptors())).not.toContain(KEY);
+
+        await kernel.shutdown();
+    });
+
+    it('signs a tencentcloud-tc3-hmac-sha256 instance the same way, with the service named by its host', async () => {
+        const KEY = 'dummy-tencent-secret-key-26710';
+        const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+        const impl = (async (url: string, init: RequestInit) => {
+            calls.push({ url, headers: init.headers as Record<string, string> });
+            return new Response('{"Response":{"RequestId":"r-1"}}', { status: 200, headers: { 'content-type': 'application/json' } });
+        }) as unknown as typeof fetch;
+        const declared = [{
+            name: 'tencent_cvm',
+            label: 'Tencent CVM',
+            type: 'api',
+            provider: 'rest',
+            providerConfig: { baseUrl: 'https://cvm.tencentcloudapi.com', defaultHeaders: { 'X-TC-Version': '2017-03-12', 'X-TC-Region': 'ap-guangzhou' } },
+            auth: { type: 'signed', scheme: 'tencentcloud-tc3-hmac-sha256', keyId: 'test-secret-id', credentialRef: 'TENCENT_SECRET_26710' },
+        }];
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin({ credentialResolver: (r) => (r === 'TENCENT_SECRET_26710' ? KEY : undefined) }));
+        kernel.use(new ConnectorRestPlugin({ fetchImpl: impl }));
+        kernel.use({
+            name: 'test.metadata',
+            type: 'standard',
+            version: '1.0.0',
+            dependencies: [],
+            async init(ctx: any) {
+                ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        const engine = kernel.getService<AutomationEngine>('automation');
+        expect(engine.getConnectorDegradedReason('tencent_cvm')).toBeUndefined();
+
+        const request = engine.resolveConnectorAction('tencent_cvm', 'request')!;
+        const answered = await request({ method: 'POST', path: '/', body: { Limit: 1 }, headers: { 'X-TC-Action': 'DescribeInstances' } }, {} as never);
+        expect(answered).toEqual({ status: 200, ok: true, body: { Response: { RequestId: 'r-1' } } });
+
+        expect(calls).toHaveLength(1);
+        const headers = calls[0]!.headers;
+        expect(headers.authorization).toMatch(
+            /^TC3-HMAC-SHA256 Credential=test-secret-id\/\d{4}-\d{2}-\d{2}\/cvm\/tc3_request, SignedHeaders=content-type;host, Signature=[0-9a-f]{64}$/,
+        );
+        expect(headers['x-tc-timestamp']).toMatch(/^\d{10}$/);
+        expect(headers['content-type']).toBe('application/json');
+        expect(headers['x-tc-action']).toBe('DescribeInstances');
+
+        expect(JSON.stringify(calls)).not.toContain(KEY);
+        expect(JSON.stringify(engine.getConnectorDescriptors())).not.toContain(KEY);
+
+        await kernel.shutdown();
+    });
+});

@@ -7,9 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // the engine cannot tell from an earlier edge. Neither has a D2 conversion —
 // a dangling endpoint carries no intent a rewrite could recover, and dropping
 // a repeated edge changes how many times its target runs.
-//
-// No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-// span already, and a nested backtick would close it.
 export const entry: SemanticMigration = {
   id: 'flow-edge-unresolved-or-repeated-refused',
   surface:

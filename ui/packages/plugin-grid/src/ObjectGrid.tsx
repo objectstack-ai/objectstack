@@ -25,7 +25,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField } from '@object-ui/types';
 import { resolveFieldScale } from '@objectstack/spec/data';
-import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, notifyDataChanged, useMetadata } from '@object-ui/react';
+import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -84,6 +84,7 @@ import type { BulkActionDef } from '@object-ui/types';
 import { type ObjectGridColumnDraft } from './objectGridColumns';
 import { rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
+import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInlineRules';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
 import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
 import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary } from './objectGridProps';
@@ -160,17 +161,23 @@ function isAvatarColumn(column: { accessorKey?: string; type?: string }, fieldTy
  * The columns of a list a record pane has narrowed to its `columns` face
  * (objectstack#27545): its first {@link RECORD_LIST_NARROW_COLUMN_COUNT} view
  * columns that are not avatars, in the view's order, and its row actions.
+ *
+ * The row-actions column keeps its header's name for assistive technology but
+ * draws no label: the column is as wide as its widest cell, and beside a pane
+ * the label alone (wider than a row's ⋮) pushed the third column under it.
  */
-function narrowListColumns<C extends { accessorKey?: string; type?: string }>(
+function narrowListColumns<C extends { accessorKey?: string; type?: string; header?: string; headerIcon?: React.ReactNode }>(
   columns: readonly C[],
   fieldTypeOf: (key: string) => unknown,
 ): C[] {
   let kept = 0;
-  return columns.filter((column) => {
-    if (column.accessorKey === '_actions') return true;
-    if (isAvatarColumn(column, fieldTypeOf) || kept >= RECORD_LIST_NARROW_COLUMN_COUNT) return false;
+  return columns.flatMap((column) => {
+    if (column.accessorKey === '_actions') {
+      return [{ ...column, header: '', headerIcon: <span className="sr-only">{column.header}</span> }];
+    }
+    if (isAvatarColumn(column, fieldTypeOf) || kept >= RECORD_LIST_NARROW_COLUMN_COUNT) return [];
     kept += 1;
-    return true;
+    return [column];
   });
 }
 
@@ -2293,6 +2300,22 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return 'saved';
   };
 
+  /**
+   * The field rules a row's edits break, refused before anything is sent
+   * (objectstack-ai/objectstack#27520): the record form's own rules, judged
+   * here so a value the form would refuse never reaches the server. `null`
+   * when the edits keep every rule.
+   */
+  const inlineRuleRefusal = (changes: Record<string, any>): Error | null => {
+    const refusals = inlineEditRuleRefusals(
+      changes,
+      objectSchema?.fields,
+      (field) => resolveFieldLabel(objectName ?? '', field, objectSchema?.fields?.[field]?.label || field),
+      t,
+    );
+    return refusals.length > 0 ? inlineRuleRefusalError(refusals) : null;
+  };
+
   const defaultRowSave = async (
     _rowIndex: number,
     changes: Record<string, any>,
@@ -2305,19 +2328,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     if (id === undefined || id === null) {
       throw new Error('Cannot persist inline edit: row has no id/_id.');
     }
+    const refused = inlineRuleRefusal(changes);
+    if (refused) throw refused;
+    // objectstack-ai/objectstack#28252 — the row's write answer feedback (its
+    // warnings and its hook's notice) rides the save toast below, so the
+    // write is one toast.
+    const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
     try {
-      await writeRowGuarded(dataSource, objectName, id, changes, row);
-    } catch (err) {
-      if (!isConcurrentUpdateError(err)) throw err;
-      // A reload re-reads through the bus; there is nothing of ours to show.
-      if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)) === 'reloaded') return;
+      try {
+        await writeRowGuarded(dataSource, objectName, id, changes, row);
+      } catch (err) {
+        if (!isConcurrentUpdateError(err)) throw err;
+        // A reload re-reads through the bus; there is nothing of ours to show.
+        if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)) === 'reloaded') return;
+      }
+      // Refresh so the grid shows the persisted values.
+      setRefreshKey(k => k + 1);
+      // objectui#12303 — the write is said, through the console's shared toast
+      // (the one the form, kanban and view surfaces raise). Only here, once the
+      // row landed: a refusal rejects above, and the table flags the row.
+      toastRecordSave(toast, t('table.saved', { count: 1 }), claim.take(undefined));
+    } finally {
+      claim.release();
     }
-    // Refresh so the grid shows the persisted values.
-    setRefreshKey(k => k + 1);
-    // objectui#12303 — the write is said, through the console's shared toast
-    // (the one the form, kanban and view surfaces raise). Only here, once the
-    // row landed: a refusal rejects above, and the table flags the row.
-    toast.success(t('table.saved', { count: 1 }));
   };
 
   const defaultBatchSave = async (
@@ -2337,12 +2370,36 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that landed are reported as saved, and only the rows that did not are
     // handed back to the table as `failed`.
     const ids = changes.map(({ row }) => resolveRecordId(row));
+    // objectstack-ai/objectstack#28252 — each row's write answer feedback rides
+    // the one "Save All" toast below, as the single-row save's does.
+    const claims: AnswerWarningClaim[] = ids.flatMap((id) =>
+      id === undefined || id === null ? [] : [claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id })],
+    );
+    try {
+      return await saveRowsClaimed(dataSource, objectName, changes, ids, claims);
+    } finally {
+      for (const claim of claims) claim.release();
+    }
+  };
+
+  /** The body of {@link defaultBatchSave}, run while its rows' claims are open. */
+  const saveRowsClaimed = async (
+    dataSource: DataSource,
+    objectName: string,
+    changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>,
+    ids: Array<string | undefined>,
+    claims: AnswerWarningClaim[],
+  ): Promise<BatchSaveOutcome | undefined> => {
     const attempts = await Promise.allSettled(
       changes.map(({ changes: rowChanges, row }, i) => {
         const id = ids[i];
         if (id === undefined || id === null) {
           return Promise.reject(new Error('Cannot persist inline edit: row has no id/_id.'));
         }
+        // A row whose edits break a field rule is refused here, unsent; the
+        // other rows still go (each row is its own outcome).
+        const refused = inlineRuleRefusal(rowChanges);
+        if (refused) return Promise.reject(refused);
         return writeRowGuarded(dataSource, objectName, id, rowChanges, row);
       }),
     );
@@ -2377,7 +2434,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       // shared toast, counting only the rows the server accepted. A row that
       // failed is not in the count: the table keeps it, flags it and shows
       // the reason. A reloaded row wrote nothing, so it is not either.
-      toast.success(t('table.saved', { count: saved }));
+      // A row that wrote nothing parked nothing, so every claim is read.
+      const feedback: RecordSaveFeedback = { warnings: [] };
+      const notices: string[] = [];
+      for (const claim of claims) {
+        const own = claim.take(undefined);
+        for (const w of own.warnings) if (!feedback.warnings.includes(w)) feedback.warnings.push(w);
+        if (own.notice && !notices.includes(own.notice)) notices.push(own.notice);
+      }
+      if (notices.length > 0) feedback.notice = notices.join('\n');
+      toastRecordSave(toast, t('table.saved', { count: saved }), feedback);
     }
     return failed.length > 0 ? { failed } : undefined;
   };
@@ -2677,7 +2743,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // author writes `true`, and an explicit `false` turns it off on an editable
     // grid. Not an alias fallback: the right side is the key's own default.
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
-    className: schema.className,
+    // The save bar sits on the grid's own inset, as its cells do (`px-3`),
+    // never flush against the view's edge (objectstack-ai/objectstack#27520).
+    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
       ? 'px-3 py-1 text-[13px] leading-tight'
       : rowHeightMode === 'short'

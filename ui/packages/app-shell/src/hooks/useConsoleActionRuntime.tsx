@@ -25,7 +25,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
-import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useObjectLabel, useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import { ActionProvider, useGlobalUndo, useMetadata, type ActionProviderProps } from '@object-ui/react';
 import { toast } from 'sonner';
 import type {
@@ -170,7 +170,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   // `requiredPermissions` action closed on exactly the deployments this
   // doctrine exists to protect (objectui#4656).
   const { systemPermissions } = usePermissions();
-  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionResultDialog } = useObjectLabel();
+  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionResultDialog } = useObjectLabel();
   // Entitlement 403s render as a dialog, not a toast — its copy is localized
   // here rather than taken from the server (objectui#2458 / cloud#959).
   // `language` also resolves inline per-locale action-param labels below, and
@@ -342,6 +342,11 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       const overrideNotice = typeof action?.overrideNotice === 'string' && action.overrideNotice
         ? action.overrideNotice
         : undefined;
+      // The submit button's verb (`submitText`): the bundle's
+      // `_actions.<name>.submitText` (`globalActions.<name>.submitText` for an
+      // object-less action) first, then the authored `I18nLabel` collapsed to
+      // the active language. Absent, the dialog keeps its default "Confirm".
+      const submitText = actionSubmitText(objForI18n, action?.name, pickLocalized(action?.submitText, language) || undefined);
       setParamState({
         open: true,
         params: localized,
@@ -356,6 +361,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         description: overrideNotice
           ? [overrideNotice, declaredDescription].filter(Boolean).join('\n\n')
           : declaredDescription,
+        submitText,
         interpolate,
         resolve,
         // The runner's `run`, so Confirm runs the action from inside the
@@ -363,7 +369,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         run,
       });
     })(); });
-  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel]);
+  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, language]);
 
   const currentUser = user
     ? { id: user.id, name: user.name, avatar: user.image, isPlatformAdmin: (user as any)?.isPlatformAdmin ?? false, systemPermissions }
@@ -819,7 +825,8 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // Read through the env ref so the spinner-tab / popup-blocked copy
       // follows a language switch without invalidating the handler instance
       // (objectui#3321).
-      t: (key, englishDefault) => String(serverActionEnvRef.current.t(key, englishDefault)),
+      t: (key, englishDefault, values) =>
+        String(serverActionEnvRef.current.t(key, { defaultValue: englishDefault, ...values })),
     }),
     [authFetch],
   );

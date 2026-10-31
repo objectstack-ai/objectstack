@@ -28,8 +28,11 @@
  *    - one is a record-mode amount, and the other is another code field, a
  *      code or the tenant's; or
  *    - both resolve to `fixed` codes, and the codes differ.
- *    Non-monetary operands (a `count`) are not compared, so an amount per
- *    invoice stays legal.
+ *    Non-monetary operands are not compared, so an amount per invoice stays
+ *    legal: only an amount aggregate (`AMOUNT_AGGREGATES`) resolves a
+ *    currency, so a `count` resolves to none whatever field it names or
+ *    currency it declares (ADR-0144 open item 12: "a `count` operand is not
+ *    compared").
  *
  * ⛔ Not judged (the ruling's own list): a `fixed` code against the tenant's
  * currency, which is not known at compile ("cannot answer, do not block"); a
@@ -46,7 +49,9 @@
  * field. A derived `sum` / `difference` resolves to its operands' common
  * currency (none when they differ; `fixed` when every operand's is), so a
  * derived measure built on one is judged too; a `ratio` or `product`
- * resolves to none.
+ * resolves to none. The same reading labels the result column: a derived
+ * measure that resolves to one `fixed` code carries that code on the wire
+ * (`enrichResultColumns`, through {@link measureCurrencyResolver}).
  *
  * ## Not judged
  *
@@ -57,6 +62,7 @@
  */
 
 import type { Dataset, DatasetMeasure } from '@objectstack/spec/ui';
+import { AMOUNT_AGGREGATES } from './cube-record-currency-door.js';
 import { datasetInvalidError } from './dataset-refusal.js';
 
 /**
@@ -97,20 +103,19 @@ const pairRefused = (a: Resolved, b: Resolved): boolean =>
   ((a.kind === 'record' || b.kind === 'record') && provablyDiffer(a, b))
   || (a.kind === 'code' && a.fixed && b.kind === 'code' && b.fixed && a.code !== b.code);
 
+type DeclaredCurrencyOf = ((objectName: string, field: string) => DeclaredCurrency | undefined) | undefined;
+
 /**
- * Refuse the first measure of `dataset` that breaks either guard — see the
- * module header. `declaredCurrency` answers for a bare field of the base
- * object, `undefined` when nothing authoritative can.
+ * Each measure's resolved currency (module header), which both guards read and
+ * the result column of a derived measure takes (`enrichResultColumns`), so the
+ * column says what compile judged. `declaredCurrency` answers for a bare field
+ * of the base object, `undefined` when nothing authoritative can.
  */
-export function assertMeasureCurrenciesCoherent(
-  dataset: Dataset,
-  declaredCurrency: ((objectName: string, field: string) => DeclaredCurrency | undefined) | undefined,
-): void {
+export function measureCurrencyResolver(dataset: Dataset, declaredCurrency: DeclaredCurrencyOf) {
   const byName = new Map(dataset.measures.map((m) => [m.name, m]));
   const fieldOf = (m: DatasetMeasure): DeclaredCurrency | undefined =>
     m.field && !m.field.includes('.') ? declaredCurrency?.(dataset.object, m.field) : undefined;
 
-  // Each measure's resolved currency (module header), which both guards read.
   const memo = new Map<string, Resolved | undefined>();
   const resolving = new Set<string>();
   const resolvedOf = (m: DatasetMeasure): Resolved | undefined => {
@@ -128,7 +133,7 @@ export function assertMeasureCurrenciesCoherent(
           ? { ...first, fixed: common.every((c) => c.kind === 'code' && c.fixed) }
           : first;
       }
-    } else if (!m.duration) {
+    } else if (!m.duration && AMOUNT_AGGREGATES.has(m.aggregate ?? '')) {
       const field = fieldOf(m);
       if (field?.currencyField !== undefined) r = { kind: 'record', codeField: field.currencyField };
       else if (m.currency) r = { kind: 'code', code: m.currency, fixed: field?.defaultCurrency === m.currency };
@@ -148,6 +153,20 @@ export function assertMeasureCurrenciesCoherent(
       const resolved = operand ? resolvedOf(operand) : undefined;
       return resolved ? [{ name, resolved }] : [];
     });
+  /** The one `fixed` code a measure resolves to, `undefined` for any other currency or none. */
+  const fixedCodeOf = (m: DatasetMeasure): string | undefined => {
+    const r = resolvedOf(m);
+    return r?.kind === 'code' && r.fixed ? r.code : undefined;
+  };
+  return { fieldOf, resolvedOf, monetaryOperands, fixedCodeOf };
+}
+
+/**
+ * Refuse the first measure of `dataset` that breaks either guard — see the
+ * module header.
+ */
+export function assertMeasureCurrenciesCoherent(dataset: Dataset, declaredCurrency: DeclaredCurrencyOf): void {
+  const { fieldOf, resolvedOf, monetaryOperands } = measureCurrencyResolver(dataset, declaredCurrency);
 
   // Guard 1 — a measure `currency` over a record-mode amount (aggregated or
   // derived), or contradicting a `fixed` code (a field's, or the one its
@@ -185,8 +204,8 @@ export function assertMeasureCurrenciesCoherent(
       throw datasetInvalidError(
         `[dataset-compiler] dataset "${dataset.name}" derived measure "${m.name}" declares currency `
         + `"${m.currency}" over measures ${operands}, whose amounts are fixed to ${resolved.code}. The amounts are `
-        + `${resolved.code}, so the column would print them as ${m.currency}: restate the operands' `
-        + `${resolved.code} as the measure's \`currency\`, or delete it (the column then carries no currency code).`,
+        + `${resolved.code}, so the column would print them as ${m.currency}: delete the measure's \`currency\` `
+        + `(the column takes the operands' ${resolved.code}), or restate ${resolved.code}.`,
       );
     }
   }

@@ -172,6 +172,17 @@ afterEach(() => {
   cleanup();
 });
 
+/**
+ * The refusal as the form says it: its banner, the one message a refused
+ * submit raises (objectstack-ai/objectstack#27520) — no error toast repeats it.
+ */
+const refusalBanners = (): HTMLElement[] =>
+  screen.queryAllByRole('alert').filter((el) => (el.textContent ?? '').includes(REFUSAL));
+const saidOnceByBanner = () => {
+  expect(refusalBanners()).toHaveLength(1);
+  expect(onScreen().filter((t) => t.type === 'error')).toEqual([]);
+};
+
 describe('WizardForm — a later outcome supersedes this form’s earlier one', () => {
   it('leaves only the success toast after a refused submit is retried and accepted', async () => {
     const ds = makeDataSource();
@@ -185,7 +196,7 @@ describe('WizardForm — a later outcome supersedes this form’s earlier one', 
     fireEvent.change(await inputNamed(container, 'status'), { target: { value: 'archived' } });
     submitStep(container);
     await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(onScreen()).toEqual([{ type: 'error', message: REFUSAL }]));
+    await waitFor(saidOnceByBanner);
 
     // Back to step 2 of the reported flow, change the status, and Create again.
     // The navigation matters: it is what proves the id survives step changes —
@@ -200,6 +211,7 @@ describe('WizardForm — a later outcome supersedes this form’s earlier one', 
 
     // The card's own sentence: one form, one outcome on screen.
     await waitFor(() => expect(onScreen()).toEqual([{ type: 'success', message: SUCCESS }]));
+    expect(refusalBanners()).toEqual([]);
   });
 
   it('does not stack a second refusal when the retry is refused too', async () => {
@@ -216,10 +228,10 @@ describe('WizardForm — a later outcome supersedes this form’s earlier one', 
 
     submitStep(container);
     await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(onScreen()).toHaveLength(1));
+    await waitFor(saidOnceByBanner);
 
     submitStep(container);
     await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(onScreen()).toEqual([{ type: 'error', message: REFUSAL }]));
+    await waitFor(saidOnceByBanner);
   });
 });

@@ -12,7 +12,13 @@
  * The technical detail lives in the deployment docs; the help names the
  * effect in business words.
  *
- * The sweep reads every string an administrator is shown for those three
+ * AI & Embedder and Knowledge had the same problem (#28069): the help named the
+ * env vars a saved key or model stands in for (`OPENAI_API_KEY`,
+ * `AI_GATEWAY_MODEL`), the trace object, the embedding call and the knowledge
+ * source's config path. They now say what the setting does, and a saved key
+ * is described as used instead of the one in the server configuration.
+ *
+ * The sweep reads every string an administrator is shown for those five
  * namespaces — the manifest literals (the English fallback) and each shipped
  * locale's copy — and refuses the four shapes that only a developer can read.
  * It pins SHAPES, never wording: a rewrite that stays in business words keeps
@@ -24,12 +30,17 @@ import type { SettingsManifest } from '@objectstack/spec/system';
 import { authSettingsManifest } from './manifests/auth.manifest.js';
 import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { mailSettingsManifest } from './manifests/mail.manifest.js';
+import { aiSettingsManifest } from './manifests/ai.manifest.js';
+import { knowledgeSettingsManifest } from './manifests/knowledge.manifest.js';
 import { en, zhCN, jaJP, esES } from './translations/index.js';
 
 const MANIFESTS: SettingsManifest[] = [
   authSettingsManifest,
   featureFlagsSettingsManifest,
   mailSettingsManifest,
+  // #28069
+  aiSettingsManifest,
+  knowledgeSettingsManifest,
 ];
 
 const LOCALES: Array<[string, { settings?: Record<string, any>; settingsCommon?: Record<string, any> }]> = [
@@ -89,7 +100,7 @@ function packStrings(tr: Record<string, any> | undefined, ns: string): Array<[st
   return out;
 }
 
-describe('Settings help is in business words (#27853)', () => {
+describe('Settings help is in business words (#27853, #28069)', () => {
   it('the sweep has teeth: each shape catches the string it was written for', () => {
     // Every shape is exercised by a string the old help carried, so a regex
     // that stops matching anything goes red here instead of passing quietly.
@@ -98,6 +109,12 @@ describe('Settings help is in business words (#27853)', () => {
     expect(shapesIn('emailAndPassword.requireEmailVerification: false')).not.toEqual([]);
     expect(shapesIn('declared via defineWebhook() is read')).not.toEqual([]);
     expect(shapesIn('Pin via env vars (e.g. `X`)')).not.toEqual([]);
+    // The strings #28069 was filed for.
+    expect(shapesIn('Forwarded as GOOGLE_GENERATIVE_AI_API_KEY.')).not.toEqual([]);
+    expect(shapesIn('Persist traces to sys_ai_trace for replay.')).not.toEqual([]);
+    expect(shapesIn('Per-source values on KnowledgeSource.adapterConfig take precedence.')).not.toEqual([]);
+    expect(shapesIn('Chunks per embed() call.')).not.toEqual([]);
+    expect(shapesIn('Format: provider/model, e.g. openai/gpt-4o. Examples: deepseek-chat (V3).')).toEqual([]);
     expect(shapesIn('Invitation only closes self-registration (SCIM, e.g. smtp.example.com).')).toEqual([]);
   });
 

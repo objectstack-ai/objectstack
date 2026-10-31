@@ -11,6 +11,7 @@
 import * as React from "react"
 import { ResponsiveContainer, Tooltip, Legend } from "recharts"
 import { useDisplayLocale } from "@object-ui/i18n"
+import { formatMonthBucketLabel } from "@object-ui/core"
 
 // Utility function to merge class names (inline to avoid external dependency)
 const cn = (...classes: (string | undefined)[]) => classes.filter(Boolean).join(' ')
@@ -348,7 +349,12 @@ function ChartTooltipContent({
       return null
     }
 
-    return <div className={cn("font-medium", labelClassName)}>{value}</div>
+    // A month bucket key (`2025-10`) reads as the axis beside it does,
+    // `Oct 2025`; the row keeps its key (objectstack#27520).
+    const shown =
+      typeof value === "string" ? formatMonthBucketLabel(value, displayLocale) ?? value : value
+
+    return <div className={cn("font-medium", labelClassName)}>{shown}</div>
   }, [
     label,
     labelFormatter,
@@ -357,6 +363,7 @@ function ChartTooltipContent({
     labelClassName,
     config,
     labelKey,
+    displayLocale,
   ])
 
   if (!active || !payload?.length) {
@@ -445,12 +452,23 @@ function ChartTooltipContent({
 
 const ChartLegend = Legend
 
+/**
+ * The swatch a legend item draws for a series, keyed by its `dataKey`, when
+ * the chart knows better than the colour recharts hands the legend: a mark
+ * filled from a gradient hands it a paint-server reference (`url(#…)`), which
+ * no swatch can draw. A `comparison` series draws its swatch hollow, the way
+ * its mark is muted. `none` draws no swatch, only the label: a series whose
+ * marks each carry another colour.
+ */
+export type LegendSwatch = { color: string; comparison?: boolean; none?: boolean }
+
 function ChartLegendContent({
   className,
   hideIcon = false,
   payload,
   verticalAlign = "bottom",
   nameKey,
+  swatches,
 }: any) {
   const { config } = useChart()
 
@@ -471,6 +489,7 @@ function ChartLegendContent({
         .map((item: any) => {
           const key = `${nameKey || item.dataKey || "value"}`
           const itemConfig = getPayloadConfigFromPayload(config, item, key)
+          const swatch: LegendSwatch | undefined = (swatches as Record<string, LegendSwatch> | undefined)?.[String(item.dataKey)]
 
           return (
             <div
@@ -479,7 +498,7 @@ function ChartLegendContent({
                 "[&>svg]:text-muted-foreground flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3"
               )}
             >
-              {itemConfig?.icon && !hideIcon ? (
+              {swatch?.none ? null : itemConfig?.icon && !hideIcon ? (
                 <itemConfig.icon />
               ) : (
                 // The series colour is author-declared, so it reaches the DOM
@@ -487,10 +506,16 @@ function ChartLegendContent({
                 // same shape as the tooltip indicator above (AGENTS.md styling
                 // carve-out; objectui#10021).
                 <div
-                  className="h-2 w-2 shrink-0 rounded-[2px] bg-(--color-bg)"
+                  className={cn(
+                    "h-2 w-2 shrink-0 rounded-[2px]",
+                    swatch?.comparison
+                      ? "border-[1.5px] border-(--color-bg) bg-transparent"
+                      : "bg-(--color-bg)"
+                  )}
+                  data-swatch={swatch?.comparison ? "comparison" : undefined}
                   style={
                     {
-                      "--color-bg": item.color,
+                      "--color-bg": swatch?.color ?? item.color,
                     } as React.CSSProperties
                   }
                 />

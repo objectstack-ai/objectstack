@@ -11,7 +11,7 @@ import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuild
 import type { SortItem } from '@object-ui/components';
 import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
+import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion, useRecordListFace } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
@@ -29,10 +29,10 @@ import {
 import { SchemaRenderer, useNavigationOverlay, classifyLoadError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
 import type { LoadErrorKind } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
-import type { DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
+import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -893,6 +893,36 @@ export function objectHasOwnershipQueue(objectDef: unknown): boolean {
 const WITHHELD_FILTER_GROUP: FilterBuilderRowGroup = { id: 'root', logic: 'and', conditions: [] };
 const WITHHELD_USER_FILTER_CONDITIONS: unknown[] = [];
 
+/**
+ * Whether a filter-panel row is FINISHED: it applies to the query. The same
+ * test `convertFilterGroupToAST` keeps a row by, so the badge, the stored list
+ * state and the query never disagree about what is filtered.
+ */
+function isAppliedFilterRow(row: { operator: string; value?: unknown }): boolean {
+  return isValuelessFilterOperator(row.operator) || isFilterValueComplete(row.operator, row.value as never);
+}
+
+/**
+ * The filter-panel group with its unfinished rows left out (objectstack#27520
+ * row 7): a row with no value yet is not a filter. It is not counted on the
+ * Filter badge, it does not make the list a "no matching records" list, and it
+ * is not what the host stores as the user's list state, so it does not come
+ * back after a reload. The panel itself keeps the whole group, so the user can
+ * still finish the row.
+ *
+ * A record-mode amount's currency companion goes with its amount row: kept
+ * while the amount row is kept, never left behind as a filter of its own.
+ *
+ * Returns `group` itself when every row is finished, so an emit with nothing
+ * to drop hands the host the identity it had before.
+ */
+function appliedFilterGroup(group: FilterBuilderRowGroup): FilterBuilderRowGroup {
+  const rows = group.conditions ?? [];
+  const finished = rows.filter(isAppliedFilterRow);
+  const kept = finished.filter((c) => !isCurrencyCompanion(c, group) || isCurrencyCompanion(c, { ...group, conditions: finished }));
+  return kept.length === rows.length ? group : { ...group, conditions: kept };
+}
+
 export function convertFilterGroupToAST(group: FilterBuilderRowGroup): any[] {
   if (!group || !group.conditions || group.conditions.length === 0) return [];
 
@@ -1026,6 +1056,7 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.firstRunMessage': 'Create your first record to get started.',
   'list.noMatches': 'No matching records',
   'list.noMatchesMessage': 'No records match your current filters or search. Try adjusting or clearing them.',
+  'list.clearSearch': 'Clear search',
   // Emptied by the VIEW's own declared filter, with no user filter or search
   // applied (objectui#11687): the "your filters" wording above would name
   // filters the user never set.
@@ -1169,7 +1200,8 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordOpen': 'Open records',
   'list.recordOpenDrawer': 'Drawer',
   'list.recordOpenSplit': 'Split',
-  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. Both expand to the full page.',
+  'list.recordOpenPage': 'Full page',
+  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
   'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
   // Heading of the record-detail overlay this view opens when a child view's
   // row is clicked (objectui#3426). Borrowed from the `detail.*` namespace
@@ -1269,7 +1301,16 @@ export const DEFAULT_LIST_FETCH_BATCH_SIZE = 100;
  * built on and the lane its query is gated on are one answer.
  */
 function kanbanBlockOf(schema: ListViewSchema): Record<string, any> {
-  return { ...((schema as any).kanban || {}) };
+  return { ...(schema.kanban || {}) };
+}
+
+/**
+ * The host-composed `rowActionDefs` (objectui#8653): declared on no list
+ * mirror because the spec refuses it by name, so this is its one narrow cast,
+ * typed as the `object-grid` child that consumes it declares it.
+ */
+function hostRowActionDefsOf(schema: ListViewSchema): DataTableSchema['rowActionDefs'] {
+  return (schema as Pick<DataTableSchema, 'rowActionDefs'>).rowActionDefs;
 }
 
 /**
@@ -1794,6 +1835,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // slots. `position: 'both'` renders both buttons — it used to collapse
       // to `top` through a binary ternary (#2941).
       showAddRecord: addRecordEnabled,
+      // objectstack#27520 row 17 — the empty-state Create, read apart from
+      // the inline add-record slots: withheld only by an explicit opt-out.
+      emptyStateAddRecord: schema.addRecord?.enabled !== false && ua?.addRecordForm !== false,
       showAddRecordTop: addRecordEnabled && addRecordPlacement.top,
       showAddRecordBottom: addRecordEnabled && addRecordPlacement.bottom,
     };
@@ -2586,11 +2630,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         if (typeof f === 'string' && f) collected.add(f);
       }
     };
-    collectViewFields((schema as any).kanban);
-    collectViewFields((schema as any).calendar);
-    collectViewFields((schema as any).gallery);
-    collectViewFields((schema as any).timeline);
-    collectViewFields((schema as any).gantt);
+    collectViewFields(schema.kanban);
+    collectViewFields(schema.calendar);
+    collectViewFields(schema.gallery);
+    collectViewFields(schema.timeline);
+    collectViewFields(schema.gantt);
     // [objectui#10370] The map, read through the resolver its render branch
     // and capability gate share — see the `$select` twin below for why the
     // resolver rather than the two blocks one at a time. A coordinate or title
@@ -2655,11 +2699,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     objectDef?.fields,
     groupingConfig,
     schema.columns,
-    (schema as any).kanban,
-    (schema as any).calendar,
-    (schema as any).gallery,
-    (schema as any).timeline,
-    (schema as any).gantt,
+    schema.kanban,
+    schema.calendar,
+    schema.gallery,
+    schema.timeline,
+    schema.gantt,
     schema.map,
     perms,
     schema.objectName,
@@ -2912,7 +2956,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // key. `__tests__/ListView.harvestInputsFetchKey-10689.test.tsx` pins each
   // input.
   const conditionalFormattingRaw = schema.conditionalFormatting as readonly unknown[] | undefined;
-  const rowActionDefsRaw = (schema as { rowActionDefs?: readonly unknown[] }).rowActionDefs;
+  const rowActionDefsRaw = hostRowActionDefsOf(schema);
   const bulkActionDefsRaw = (schema as { bulkActionDefs?: readonly unknown[] }).bulkActionDefs;
   const predicateProjectionKey = React.useMemo(
     () => JSON.stringify(collectPredicateFieldRefs(listViewPredicates({
@@ -3352,8 +3396,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
              * `__tests__/listViewNonAuthorKeys-8653.test.tsx` §4 SITE 2; the
              * declared sibling `bulkActionDefs` is that pin's control.
              */
-            rowActionDefs: (schema as any).rowActionDefs,
-            bulkActionDefs: (schema as any).bulkActionDefs,
+            rowActionDefs: hostRowActionDefsOf(schema),
+            bulkActionDefs: schema.bulkActionDefs,
             objectActions: (objectDef as any)?.actions,
             // KEY COLLISION — `userActions` names TWO different blocks, and
             // only the OBJECT's is interpretable here. This read is therefore
@@ -3644,7 +3688,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, (schema as any).kanban, (schema as any).calendar, (schema as any).gallery, (schema as any).timeline, (schema as any).gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -3722,7 +3766,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
 
     // Check for Tree capabilities — a self-referencing parent pointer.
-    if ((schema as any).tree?.parentField || schema.viewType === 'tree') {
+    if (schema.tree?.parentField || schema.viewType === 'tree') {
       resolvable.push('tree');
     }
 
@@ -3763,7 +3807,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
 
     return resolvable;
-  }, [schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, (schema as any).tree, (schema as any).chart, schema.appearance?.allowedVisualizations]);
+  }, [schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, schema.tree, schema.chart, schema.appearance?.allowedVisualizations]);
 
   /**
    * Whether the visualization switcher is actually WORTH drawing (objectui#7547).
@@ -3823,6 +3867,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setSearchInput(value);
     onSearchChange?.(value);
   }, [onSearchChange]);
+
+  // objectstack#27520 row 17 — see `toolbarFlags.emptyStateAddRecord`.
+  // A view that declares the inline block keeps its empty-state Create as
+  // before; a host-supplied create path now offers it too.
+  const emptyStateOffersCreate =
+    toolbarFlags.showAddRecord || (toolbarFlags.emptyStateAddRecord && !!props.onAddRecord);
 
   // --- NavigationConfig support ---
   // No assertion, deliberately. `schema.navigation` is the spec-derived
@@ -4198,9 +4248,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
            * `__tests__/listViewNonAuthorKeys-8653.test.tsx` §4 SITE 1, with
            * the declared `bulkActionDefs` below as that pin's control.
            */
-          ...((schema as any).rowActionDefs ? { rowActionDefs: (schema as any).rowActionDefs } : {}),
+          ...(hostRowActionDefsOf(schema) ? { rowActionDefs: hostRowActionDefsOf(schema) } : {}),
           ...(schema.bulkActions ? { batchActions: schema.bulkActions } : {}),
-          ...((schema as any).bulkActionDefs ? { bulkActionDefs: (schema as any).bulkActionDefs } : {}),
+          ...(schema.bulkActionDefs ? { bulkActionDefs: schema.bulkActionDefs } : {}),
           // ⛔ No `options.grid` spread (objectui#6152 round 14). A grid has no
           // per-kind block: the spec refuses the whole `options` bag (#25923;
           // `options.grid` since round 12), and the raw spread that still put
@@ -4217,7 +4267,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // re-derives lanes once it does.
         const kanbanCfg = kanbanBlockOf(schema);
         // ⭐ THE BLOCK'S DECLARED KEYS ONLY (objectui#6152 round 14). The spec's
-        // kanban block is `groupByField` / `columns` / `titleField` /
+        // kanban block is `groupByField` / `columns` / `lanes` / `titleField` /
         // `summarizeField`, each read by name below. This branch used to read
         // the pre-#2231 `groupField` / `cardFields` aliases as well and to spread
         // the REST of the block onto the node after its own keys, so an undeclared
@@ -4228,9 +4278,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         //
         // `columns` is the spec's list of fields shown on each card.
         // ObjectKanban's own `columns` prop is its LANES, so it goes out as
-        // `cardFields` (mirrors plugin-view's adapter).
-        const { columns: kanbanCardColumns, titleField, summarizeField } = kanbanCfg as Record<string, any>;
+        // `cardFields` (mirrors plugin-view's adapter), and the block's `lanes`
+        // goes out as that `columns`.
+        const { columns: kanbanCardColumns, titleField, summarizeField, lanes } = kanbanCfg as Record<string, any>;
         const laneField = kanbanLaneFieldOf(schema, objectDef);
+        // objectstack#28211 — the block's `lanes`, the lanes the board draws
+        // in the author's order, go out as the node's `columns` (its lanes).
+        // A record whose value is not listed lands in `Uncategorized`.
+        const declaredLanes = kanbanDeclaredLanes(
+          lanes,
+          laneField ? objectDef?.fields?.[laneField]?.options : undefined,
+        );
         // objectui#12619 — the card fields: the block's own `columns` when
         // the author named some (the spec's card-field key, every one of
         // them), else the view's first columns past the title, the lane and
@@ -4264,6 +4322,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           type: 'object-kanban',
           ...baseProps,
           groupBy: laneField,
+          ...(declaredLanes ? { columns: declaredLanes } : {}),
           ...(titleField ? { titleField } : {}),
           cardFields,
           ...(groupingConfig ? { grouping: groupingConfig } : {}),
@@ -4322,6 +4381,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // fold would re-create the dialect this closes.
         const colorField = schema.calendar?.colorField;
         const allDayField = schema.calendar?.allDayField;
+        // The date the calendar opens on: a block key, not a field binding,
+        // forwarded with the five so `ObjectCalendar` can seed its date from it.
+        const initialDate = schema.calendar?.initialDate;
         // ⭐ objectstack#25923 — the five go out NESTED, as the node's own
         // `calendar` block: the spec's `ComponentPropsMap['object-calendar']`
         // refuses them flat, so the published `ObjectCalendarSchema` no longer
@@ -4341,6 +4403,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               ...(titleField ? { titleField } : {}),
               ...(colorField ? { colorField } : {}),
               ...(allDayField ? { allDayField } : {}),
+              ...(initialDate ? { initialDate } : {}),
             }
           : undefined;
         return {
@@ -4620,7 +4683,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // Self-referencing tree-grid. Config lives under view.tree.* (the
         // `options.tree` bag retired in #25923). parentField auto-detects
         // from the object's tree/self-reference field when omitted.
-        const treeCfg = (schema as any).tree || {};
+        const treeCfg = schema.tree || {};
         return {
           type: 'object-tree',
           ...baseProps,
@@ -4707,10 +4770,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // otherwise `editable` keeps the pre-verdict answer for the session.
   }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
-  const hasFilters = currentFilters.conditions && currentFilters.conditions.length > 0;
   // The count the toolbar shows: a record-mode amount's code condition is
-  // part of its amount row (objectstack#27188), not a filter of its own.
-  const shownFilterCount = (currentFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, currentFilters)).length;
+  // part of its amount row (objectstack#27188), not a filter of its own, and a
+  // row with no value yet is not a filter at all (objectstack#27520).
+  const appliedPanelFilters = React.useMemo(() => appliedFilterGroup(currentFilters), [currentFilters]);
+  const shownFilterCount = (appliedPanelFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, appliedPanelFilters)).length;
+  const hasFilters = shownFilterCount > 0;
 
   /**
    * Every field this view can name, before any per-builder rule narrows it.
@@ -4966,7 +5031,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // URL sort; the picker never offers one), so the list IS sorted by the
     // stored ID: said in one line under the rows, only while it is true.
     let picked = false;
-    const fields: Array<{ value: string; label: string; disabled?: boolean }> = [];
+    const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
     for (const field of candidateFields) {
       const readable = canReadField(perms, schema.objectName, field.value);
       if (!readable && !inUse.has(field.value)) continue;
@@ -4974,8 +5039,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       const platformSortable = platformSortability
         ? isPlatformSortableField(platformSortability, field.value)
         : !UNMATERIALIZED_FIELD_TYPES.has(field.type);
+      // `type` lets the picker name a date's direction as time
+      // (objectstack#27520): "Oldest → Newest", not "A → Z".
       if (readable && !relational && platformSortable) {
-        fields.push({ value: field.value, label: field.label });
+        fields.push({ value: field.value, label: field.label, type: field.type });
         continue;
       }
       if (inUse.has(field.value)) {
@@ -5475,6 +5542,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // not take the summaries down with the count.
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
+  // objectstack#27545 — beside a record pane (a narrowed face) the host prints
+  // the count under the list it handed over, so the bar does not print it a
+  // second time. The rest of the row (the cap warning, the summaries) stays.
+  const recordListFace = useRecordListFace();
+  const recordCountInBar = recordCountShown && recordListFace === 'full';
+  const dataLimitWarningShown =
+    recordCountShown && dataLimitReached && !(paginate && serverTotal != null);
   // objectui#12619 — a board that pages its own lanes draws every record of the
   // view, a page per lane at a time, so the footer counts the VIEW: the total
   // this component's own query answered, which is the sum of the board's lane
@@ -5801,8 +5875,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   value={currentFilters}
                   extraOperators={LIST_VIEW_EXTRA_OPERATORS}
                   onChange={(newFilters) => {
+                    // The panel keeps every row; the host stores only the
+                    // filter that applies (objectstack#27520).
                     setCurrentFilters(newFilters);
-                    if (onFilterChange) onFilterChange(newFilters);
+                    if (onFilterChange) onFilterChange(appliedFilterGroup(newFilters));
                   }}
                 />
               </div>
@@ -6509,9 +6585,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               !!(searchTerm && searchTerm.trim()) ||
               (Array.isArray(appliedUserFilterConditions) && appliedUserFilterConditions.length > 0) ||
               appliedQueueSittingConditions.length > 0 ||
-              (Array.isArray(appliedFilters?.conditions) && appliedFilters.conditions.length > 0)
+              // A panel row with no value yet is not the user's query
+              // (objectstack#27520): the list is not "no matches" for it.
+              (Array.isArray(appliedFilters?.conditions) && appliedFilterGroup(appliedFilters).conditions.length > 0)
             }
-            onAddRecord={toolbarFlags.showAddRecord ? () => props.onAddRecord?.() : undefined}
+            // objectstack#27520 row 17 — the empty list offers Create whenever
+            // the host hands a create path (the console hands its header New's
+            // create only when that New is offered, objectui#13089) and the
+            // user may create (`mayCreate`). The view no longer has to author
+            // an inline `addRecord` block for an empty list to say how to
+            // start; an author's explicit `addRecord: { enabled: false }`, or
+            // `userActions.addRecordForm: false`, still withholds it.
+            onAddRecord={emptyStateOffersCreate ? () => props.onAddRecord?.() : undefined}
+            // objectstack#27520 row 7 — the search persists across
+            // navigation, so a user can come back to a list their own search
+            // emptied: the empty state offers the way out.
+            onClearSearch={searchTerm && searchTerm.trim() ? () => handleSearchChange('') : undefined}
             t={t}
             displayLocale={displayLocale}
           />
@@ -6753,7 +6842,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountShown || boardRecordCountShown || footerSummaryText) && (
+      {listChromeShown && (recordCountInBar || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -6763,7 +6852,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {t('list.recordCount', { count: fetchedTotal })}
           </span>
           )}
-          {recordCountShown && (
+          {recordCountInBar && (
           <span className="shrink-0 font-medium text-foreground/80">
             {/* Under server pagination `data` is only the current page, so the
                 honest record count is the server's grand total (#586). When the
@@ -6782,7 +6871,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               with a known total can reach them all through its pager, so the
               warning stays off there — the gate the fetch used to apply when it
               wrote this flag (objectui#7394). */}
-          {recordCountShown && dataLimitReached && !(paginate && serverTotal != null) && (
+          {dataLimitWarningShown && (
             <span className="text-amber-600" data-testid="data-limit-warning">
               {t('list.dataLimitReached', { limit: effectivePageSize })}
             </span>

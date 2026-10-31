@@ -336,6 +336,32 @@ export function useAppReportEntries(
 }
 
 /**
+ * The apps in `apps` other than `current` that ship at least one report the
+ * member may read (objectstack#27356): where an app's empty report index sends
+ * the reader. The list reads the same served reports and read rule as
+ * {@link useAppReportEntries}; each app's own index still applies that app's
+ * navigation gates when it opens. Empty while either list is loading.
+ */
+export function useOtherAppsWithReports<T extends { name?: unknown }>(apps: readonly T[], current: unknown): T[] {
+  const metadata = useMetadata();
+  const { can } = usePermissions();
+  const reports = metadata.reports;
+  const datasets = metadata.getItemsByType('dataset');
+  const pending = (type: string) => {
+    const status = metadata.getTypeStatus?.(type);
+    return status === 'idle' || status === 'loading';
+  };
+  if (pending('report') || pending('dataset')) return [];
+  const currentName = current && typeof current === 'object' ? (current as { name?: unknown }).name : undefined;
+  const datasetObjects = datasetObjectIndex(datasets);
+  return apps.filter(
+    (app) =>
+      app.name !== currentName &&
+      appShippedReports(reports, app).some((report) => mayOpenReport(report, datasetObjects, can)),
+  );
+}
+
+/**
  * The object names the `type: 'object'` entries of the app's served
  * navigation name, in the order each is first named, at any depth: the order
  * of the index's sections (objectstack#27526).

@@ -107,15 +107,16 @@ administrator, not for a contributor:
   install looks like.
 - **Every credential it needs** — for each one, its name, where the
   administrator obtains it, and which permissions or scopes it must carry. You
-  write the names; the administrator supplies the values. The platform does not
-  prompt for credentials at install yet: the install-time prompt and the
-  credential store arrive with
-  [#27237](https://github.com/objectstack-ai/objectstack/issues/27237) and the
-  Console credentials page with
-  [#27238](https://github.com/objectstack-ai/objectstack/issues/27238). Until
-  then the README is the whole hand-off. An app that ships declarative
-  connectors gains an offline spec-normalization tool with
-  [#26709](https://github.com/objectstack-ai/objectstack/issues/26709).
+  write the names; the administrator supplies the values. Once the app is
+  installed, the Console lists the credentials its connectors still need in the
+  install result, and **Setup → Integrations → Connector Credentials** holds
+  every one of them ([Setting a credential](/docs/automation/connectors#setting-a-credential)).
+  The README is still where the administrator learns what each value is and
+  where to get it. An app that ships declarative
+  OpenAPI connectors produces its packaged document with the offline
+  `normalize-openapi` script: `--trim` keeps only the operations the app calls,
+  and the sha256 it prints is the one to record here
+  ([`provider: 'openapi'`](/docs/automation/connectors#provider-openapi--one-action-per-operation)).
 
 ## Build and verify before publishing
 
@@ -203,16 +204,24 @@ the detail.
 4. **The dependency check.** An app that declares a dependency the environment
    lacks is refused before anything is written, one line per unmet entry
    ([App dependencies](/docs/deployment/app-dependencies)).
-5. **Credentials.** No screen yet — the administrator follows your README (see
-   above, and #27237 / #27238).
+5. **Credentials.** Once the install lands, its result lists the credentials
+   the app's connectors still need, each with a masked input and **Skip for
+   now**. A skipped one leaves its connectors disconnected until it is set in
+   **Setup → Integrations → Connector Credentials**
+   ([Setting a credential](/docs/automation/connectors#setting-a-credential)).
+   Your README says where each value comes from (see above).
 6. **Sample data.** The **⋯** (More install options) menu on the app's page
    offers **Add sample data**, then **Re-seed sample data**, and **Purge sample
    data**, which deletes only the records your seed created. Behind them are
    `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and
    `…/purge-sample-data`, both requiring `manage_metadata`.
 7. **Enable and disable.** **Setup → Installed Apps** lists the apps installed
-   from the marketplace. **Disable** is offered only for a writable package:
-   for a package provided by code or by an installed app, the runtime answers
+   from the marketplace. An admin with `manage_metadata` may disable a writable
+   package, and a **module of an installed app**: a `type: 'module'` package
+   that declares an installed `type: 'app'` package in its
+   `manifest.dependencies` ([Disabling a module](#disabling-a-module) below).
+   For every other package provided by code or by an installed app (the app
+   itself, a plugin, a platform package), the runtime answers
    `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`.
    To take an installed app away, uninstall it.
 8. **Upgrading.** You publish a new version; nothing running changes. An
@@ -251,6 +260,45 @@ An app ships extras in one of two shapes:
 - **A module built into the same artifact** — a `type: 'module'` package
   composed at build time, which travels inside your App rather than as a
   listing of its own ([A project is a multi-package artifact](/docs/getting-started/examples#a-project-is-a-multi-package-artifact)).
+
+### Disabling a module
+
+A customer who does not use one of your modules can switch it off, per
+environment, with `PATCH /api/v1/packages/:id/disable`, and back on with
+`PATCH /api/v1/packages/:id/enable`. The module qualifies when its manifest
+says `type: 'module'` and declares your app in `dependencies`, the way every
+module of a suite already does:
+
+```ts
+manifest: {
+  id: 'app.example.suite.orders',
+  type: 'module',
+  namespace: 'suite',
+  dependencies: { 'app.example.suite': '^1.0.0' },
+  navigationContributions: [/* its menu entries in the app's groups */],
+},
+```
+
+Disabled has one meaning: the module is hidden, refused on the data plane, and
+its data is kept.
+
+- **Data plane.** `/api/v1/data/<object>` and the by-name metadata reads answer
+  the module's objects `404 OBJECT_PACKAGE_DISABLED`. Records stay in the
+  database and come back on enable.
+- **Navigation.** The module's `navigationContributions` leave the app's menu.
+- **Flows.** Record-change flows on the module's objects do not run while it is
+  disabled, whoever writes the record.
+- **Restart.** The choice is kept per environment and survives a restart.
+- **Authoring.** A disabled module is still read-only: edit, publish, revert
+  and delete keep answering `422 WRITABLE_PACKAGE_REQUIRED`.
+
+**What your app's own code meets.** A hook of your app that reads or writes a
+module's object through `ctx.api.object('<object>')` runs inside the server,
+not through the data plane, and it is **not** refused: a `find` returns the
+module's kept records, and a write lands (no record-change flow runs on it).
+There is no `OBJECT_PACKAGE_DISABLED` error to catch there. A browser or API
+client reading the module's objects does meet the `404 OBJECT_PACKAGE_DISABLED`
+refusal while the module is off.
 
 ## Related
 

@@ -7,7 +7,7 @@
 // typo that isn't there. The connection layer knows which one it is; the engine
 // just had no way to be told.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { DatasourceUnavailableError } from './driver-connect-errors.js';
 
@@ -67,16 +67,48 @@ describe('ObjectQL.getDriver — a declared datasource with no driver (framework
     expect((await queryError(engine)).message).toContain('require the Scale plan');
   });
 
-  it('says the connect failed and a restart is needed, for the degraded-boot case', async () => {
-    const engine = engineWithBoundObject();
-    engine.markDatasourceUnavailable({ name: 'analytics', kind: 'failed' });
+  // A `failed` record is the same `{ kind: 'failed' }` for a boot connect the
+  // flag waved through, a package installed into the running server and a
+  // Setup-created datasource: the connection layer records no origin. The
+  // flag is the one fact that separates them — without it the first cannot
+  // exist, because that boot is refused.
+  describe('a failed connect', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
 
-    const err = await queryError(engine);
-    expect(err.kind).toBe('failed');
-    expect(err.message).toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
-    // The durable fact: the client may reconnect, but nothing re-runs the
-    // connect, so waiting it out does not help (#3759).
-    expect(err.message).toContain('restarted');
+    it('says the connect failed, and a restart only conditionally, while OS_ALLOW_DRIVER_CONNECT_FAILURE is set', async () => {
+      // The boot-under-flag origin: the client may reconnect, but nothing
+      // re-runs the connect, so waiting it out does not help (#3759).
+      vi.stubEnv('OS_ALLOW_DRIVER_CONNECT_FAILURE', '1');
+      const engine = engineWithBoundObject();
+      engine.markDatasourceUnavailable({ name: 'analytics', kind: 'failed' });
+
+      const err = await queryError(engine);
+      expect(err.kind).toBe('failed');
+      expect(err.message).toContain('its last connect attempt failed');
+      expect(err.message).toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE is set on this server');
+      expect(err.message).toContain('if this datasource is declared in code');
+      expect(err.message).toContain('until the server is restarted');
+    });
+
+    it('names neither the flag nor a restart without it — the install-local and Setup origins', async () => {
+      // A datasource whose connect failed when its package was installed into
+      // the running server, or when it was created in Setup: no flag was
+      // involved, and a restart is not what re-runs its connect.
+      vi.stubEnv('OS_ALLOW_DRIVER_CONNECT_FAILURE', '');
+      const engine = engineWithBoundObject();
+      engine.markDatasourceUnavailable({ name: 'analytics', kind: 'failed' });
+
+      const err = await queryError(engine);
+      expect(err.kind).toBe('failed');
+      expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+      expect(err.message).toContain('its last connect attempt failed, so no driver serves it.');
+      expect(err.message).not.toContain('OS_ALLOW_DRIVER_CONNECT_FAILURE');
+      expect(err.message).not.toMatch(/restart/i);
+      expect(err.message).not.toContain('at startup');
+      expect(err.message).toContain('See Setup → Datasources or the server log for the cause.');
+    });
   });
 
   it('never carries the underlying cause — that is what leaks hosts and DSNs', async () => {
@@ -86,7 +118,7 @@ describe('ObjectQL.getDriver — a declared datasource with no driver (framework
     engine.markDatasourceUnavailable({ name: 'analytics', kind: 'failed' });
     const err = await queryError(engine);
     expect(err.message).not.toMatch(/ECONNREFUSED|\d+\.\d+\.\d+\.\d+|postgres:\/\//);
-    expect(err.message).toContain('startup logs');
+    expect(err.message).toContain('Setup → Datasources');
   });
 
   it('clears the explanation once the datasource connects', async () => {

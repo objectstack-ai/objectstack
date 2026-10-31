@@ -213,7 +213,11 @@ describe('saveMetaItem applies the rule to a flow, before anything is written', 
             }).then(() => undefined, (e) => e);
 
             expect(shape(thrown)).toEqual({ code: 'INVALID_METADATA', status: 422 });
-            expect(insert).not.toHaveBeenCalled();
+            // [#28355] The refusal's own `denied` audit row is the only insert:
+            // no `sys_metadata` row is written.
+            expect(insert.mock.calls.map(([table, values]: any[]) => [table, values.code])).toEqual([
+                ['sys_metadata_audit', 'invalid_metadata'],
+            ]);
         }
     });
 

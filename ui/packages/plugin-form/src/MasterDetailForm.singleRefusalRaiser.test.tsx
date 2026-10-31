@@ -147,7 +147,7 @@ afterEach(() => {
 });
 
 describe('MasterDetailForm — a refused save reports its refusal exactly once (objectui#7354)', () => {
-  it('leaves exactly one error toast on screen, not one per raiser', async () => {
+  it('says it once, by the form banner, with no error toast from any raiser', async () => {
     const ds = makeDataSource();
     const { container } = masterDetail(ds);
 
@@ -155,15 +155,16 @@ describe('MasterDetailForm — a refused save reports its refusal exactly once (
     save();
     await waitFor(() => expect(ds.batchTransaction).toHaveBeenCalledTimes(1));
 
-    // Wait for the outcome to settle, then read the raw (undeduplicated)
-    // registry: this is the count that told the two-raiser defect apart from
-    // the fix. Give the throw its full trip through `<ObjectForm>`'s catch
-    // and back up into the form renderer's before asserting.
-    await waitFor(() => expect(onScreen().length).toBeGreaterThan(0));
+    // Wait for the outcome to settle: the throw's full trip through
+    // `<ObjectForm>`'s catch and back up into the form renderer's, which
+    // raises the banner (objectstack-ai/objectstack#27520).
+    await waitFor(() =>
+      expect(screen.queryAllByRole('alert').filter((el) => (el.textContent ?? '').includes(REFUSAL))).toHaveLength(1),
+    );
 
-    const entries = onScreen();
-    // The lit control: the surviving entry must still be the refusal, so this
-    // cannot pass by silencing every raiser instead of collapsing to one.
-    expect(entries).toEqual([{ type: 'error', message: REFUSAL }]);
+    // The raw (undeduplicated) registry: no raiser toasts the refusal as well.
+    // The lit control is the banner above, so this cannot pass by silencing
+    // every raiser.
+    expect(onScreen().filter((entry) => entry.type === 'error')).toEqual([]);
   });
 });

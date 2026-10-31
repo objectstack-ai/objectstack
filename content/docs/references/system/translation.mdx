@@ -92,7 +92,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -117,6 +117,7 @@ Translation data for a single field
 | **label** | `string` | optional | Translated view label |
 | **description** | `string` | optional | Translated view description |
 | **title** | `string` | optional | Translated form view title — overlays a form view's own `title` (`FormViewSchema.title`); only a form that authors one is translated |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays a form view's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`; only copy the form authors is translated |
 | **emptyState** | `{ title?: string; message?: string }` | optional | Translated empty-state copy shown when the view has no rows |
 | **bulkActions** | `Record<string, { label?: string; confirmText?: string; confirmLabel?: string; params?: Record<string, object> }>` | optional | Selection-bar translations keyed by bulk-action def name (`BulkActionDefSchema.name`) |
 
@@ -129,6 +130,7 @@ Translation data for a single field
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
+| **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -201,7 +203,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -231,6 +233,7 @@ Translation data for a single object
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
+| **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -375,7 +378,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -405,6 +408,7 @@ Translation data for a single object
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
+| **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -611,7 +615,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -641,6 +645,7 @@ Translation data for a single object
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
+| **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -816,7 +821,7 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; title?: string; emptyState?: object; … }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
@@ -846,6 +851,7 @@ Translation data for a single object
 | **confirmText** | `string` | optional | Translated confirmation prompt |
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
+| **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |

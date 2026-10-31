@@ -1,8 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Connector, RetryConfig } from '@objectstack/spec/integration';
-import { connectorFetchOptions } from '@objectstack/spec/integration';
+import type {
+    BorrowedConnectorAuth,
+    Connector,
+    ConnectorCredentialHandle,
+    ConnectorRequestSigner,
+    RetryConfig,
+} from '@objectstack/spec/integration';
+import { connectorFetchOptions, readConnectorResponse } from '@objectstack/spec/integration';
 import { resilientFetch } from '@objectstack/spec/shared';
+import { callWithBorrowedCredential, withoutBorrowedCredential } from '@objectstack/types';
 
 /**
  * OpenAPI connector generator — turns a declarative OpenAPI 3.x document into a
@@ -19,9 +26,35 @@ import { resilientFetch } from '@objectstack/spec/shared';
  * hand-written one — the registry, the `connector_action` node, the discovery
  * route, and the Studio palette never know it came from OpenAPI.
  *
- * Open-source scope: **static** auth only (`none` / `api-key` / `basic` /
- * `bearer`), with credentials supplied by the caller. Managed OAuth2, credential
- * vaulting, and per-tenant lifecycle are the enterprise tier (ADR-0015 / 0022).
+ * Three ways to authenticate, one per connector (mirrors connector-rest):
+ *
+ *   - **static** auth (`none` / `api-key` / `basic` / `bearer`), the credential
+ *     supplied by the caller;
+ *   - a **credential handle** (ADR-0143 D4) for a grant-bearing instance —
+ *     `oauth2` or `app-credential`, open tier since ADR-0143 D1 — asked on
+ *     every request through `callWithBorrowedCredential` (`@objectstack/types`):
+ *     an expired token is refreshed before it is sent, and an upstream `401`
+ *     refreshes it once and retries once;
+ *   - a **request signer** (ADR-0143 D2.3) instead of a credential: every
+ *     attempt is signed by it — retries included — and its response
+ *     verification, when the scheme has one, runs before a body is returned
+ *     (`connectorFetchOptions` / `readConnectorResponse`, shared with
+ *     `@objectstack/connector-rest`).
+ *
+ * **What the document's security says** (OpenAPI 3.x §4.8.27, §4.8.30), read
+ * for a connector with a credential handle — the token comes from the
+ * platform, so the document decides only where it is NOT sent and which
+ * inputs it fills:
+ *
+ *   - an operation whose effective `security` is the empty list (`security:
+ *     []` on the operation, or on the document with no operation override) is
+ *     anonymous: its request carries no credential and never asks the handle,
+ *     so a grant's token is not handed to an endpoint that never asked for one;
+ *   - a header or query parameter an `apiKey` security scheme the operation
+ *     requires names (`in` + `name` — a vendor token that rides a query
+ *     parameter, WeCom's `access_token`) is the platform's to fill, so it is
+ *     left out of the action's input schema, as `Authorization` is for an
+ *     `oauth2`, `openIdConnect` or `http` scheme.
  */
 
 /** Static auth understood by the generated connector (the open-source subset). */
@@ -50,7 +83,15 @@ export interface OpenApiDocument {
     servers?: { url: string }[];
     paths?: Record<string, OpenApiPathItem>;
     components?: { securitySchemes?: Record<string, OpenApiSecurityScheme> };
+    /** The document-wide security requirement (§4.8.1); an operation's own `security` replaces it. */
+    security?: OpenApiSecurityRequirement[];
 }
+
+/**
+ * One Security Requirement Object (§4.8.30): scheme name → required scopes.
+ * The operation's list is alternatives; `{}` in it makes the security optional.
+ */
+export type OpenApiSecurityRequirement = Record<string, string[]>;
 
 export interface OpenApiPathItem {
     /** Parameters shared by every operation under this path (OpenAPI 3.x Path Item Object). */
@@ -66,6 +107,8 @@ export interface OpenApiOperation {
     parameters?: OpenApiParameter[];
     requestBody?: OpenApiRequestBody;
     responses?: Record<string, OpenApiResponse>;
+    /** This operation's security requirement, replacing the document's; `[]` = anonymous. */
+    security?: OpenApiSecurityRequirement[];
 }
 
 export interface OpenApiParameter {
@@ -88,10 +131,22 @@ export interface OpenApiResponse {
 }
 
 export interface OpenApiSecurityScheme {
-    type: 'apiKey' | 'http' | 'oauth2' | 'openIdConnect';
+    type: 'apiKey' | 'http' | 'oauth2' | 'openIdConnect' | 'mutualTLS';
     name?: string;
     in?: 'header' | 'query' | 'cookie';
     scheme?: string;
+    bearerFormat?: string;
+    /** `oauth2` only (§4.8.28): the flows the scheme supports. */
+    flows?: Record<string, OpenApiOAuthFlow | undefined>;
+    openIdConnectUrl?: string;
+}
+
+/** One OAuth Flow Object (§4.8.29). */
+export interface OpenApiOAuthFlow {
+    authorizationUrl?: string;
+    tokenUrl?: string;
+    refreshUrl?: string;
+    scopes?: Record<string, string>;
 }
 
 /** Flattened view of a single operation, passed to the `include` predicate. */
@@ -120,6 +175,18 @@ export interface OpenApiConnectorConfig {
     baseUrl?: string;
     /** Static auth with credentials. Defaults to `{ type: 'none' }`. */
     auth?: RestAuth;
+    /**
+     * Per-request signer of a `signed` instance (ADR-0143 D2.3): signs every
+     * attempt and verifies every response its scheme signs. Exclusive with a
+     * static `auth` other than `none` — a request is authenticated one way.
+     */
+    requestSigner?: ConnectorRequestSigner;
+    /**
+     * Per-dispatch credential of a grant-bearing instance (ADR-0143 D4): asked
+     * on every request an operation that is not anonymous sends. Exclusive with
+     * a static `auth` other than `none` and with `requestSigner`.
+     */
+    credentialHandle?: ConnectorCredentialHandle;
     /** Headers merged into every request (request-level headers win). */
     defaultHeaders?: Record<string, string>;
     /** Only include operations for which this predicate returns true (allowlist). */
@@ -169,6 +236,7 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
     const fetchOptions = connectorFetchOptions(
         { retryConfig: config.retryConfig, requestTimeoutMs: config.requestTimeoutMs },
         { fetchImpl: config.fetchImpl },
+        config.requestSigner,
     );
     const name = config.name ?? slug(document.info?.title ?? 'openapi_connector');
     const label = config.label ?? document.info?.title ?? titleize(name);
@@ -177,29 +245,59 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
     if (!baseUrl) {
         throw new Error('createOpenApiConnector: no base URL — provide config.baseUrl or document.servers[0].url');
     }
+    const ways = [
+        auth.type !== 'none' ? `a static '${auth.type}' credential` : undefined,
+        config.requestSigner ? 'a request signer' : undefined,
+        config.credentialHandle ? 'a credential handle' : undefined,
+    ].filter((w): w is string => w !== undefined);
+    if (ways.length > 1) {
+        throw new Error(
+            `createOpenApiConnector: connector '${name}' is given ${ways.join(' and ')}; ` +
+                'a request is authenticated one way — pass one of them.',
+        );
+    }
+    const handle = config.credentialHandle;
 
     // One shared transport (mirrors connector-rest) reused by every action handler.
-    async function request(input: RequestInput): Promise<Record<string, unknown>> {
+    async function request(input: RequestInput, ctx: unknown, anonymous: boolean): Promise<Record<string, unknown>> {
         const method = input.method.toUpperCase();
-        const headers: Record<string, string> = { ...config.defaultHeaders, ...input.headers };
-        const query: Record<string, string> = { ...input.query };
-        applyAuth(auth, headers, query);
 
-        const url = buildUrl(baseUrl as string, input.path, query);
-        const hasBody = input.body !== undefined && method !== 'GET' && method !== 'HEAD';
-        if (hasBody && headers['Content-Type'] === undefined && headers['content-type'] === undefined) {
-            headers['Content-Type'] = 'application/json';
-        }
+        /** One attempt, with the static auth or the credential the handle answered. */
+        const send = (credential?: BorrowedConnectorAuth): Promise<Response> => {
+            const headers: Record<string, string> = { ...config.defaultHeaders, ...input.headers };
+            const query: Record<string, string> = { ...input.query };
+            applyAuth(credential ?? auth, headers, query);
 
-        const response = await resilientFetch(url, {
-            method,
-            headers,
-            body: hasBody ? JSON.stringify(input.body) : undefined,
-        }, fetchOptions);
+            const url = buildUrl(baseUrl as string, input.path, query);
+            const hasBody = input.body !== undefined && method !== 'GET' && method !== 'HEAD';
+            if (hasBody && headers['Content-Type'] === undefined && headers['content-type'] === undefined) {
+                headers['Content-Type'] = 'application/json';
+            }
 
-        const contentType = response.headers.get('content-type') ?? '';
-        const parsed = contentType.includes('application/json') ? await response.json() : await response.text();
-        return { status: response.status, ok: response.ok, body: parsed };
+            return resilientFetch(url, {
+                method,
+                headers,
+                body: hasBody ? JSON.stringify(input.body) : undefined,
+            }, fetchOptions);
+        };
+
+        // ADR-0143 D4 — ask the handle on every request an operation that
+        // requires security sends; a `401` refreshes once and retries once. A
+        // thrown transport error is scrubbed of the credential first.
+        const response = handle && !anonymous
+            ? await callWithBorrowedCredential(handle, async (credential) => {
+                try {
+                    return await send(credential);
+                } catch (err) {
+                    if (err instanceof Error) err.message = withoutBorrowedCredential(err.message, credential);
+                    throw err;
+                }
+            }, { organizationId: organizationOfDispatch(ctx) })
+            : await send();
+
+        // A signed instance's response is verified first, when its scheme
+        // signs responses.
+        return readConnectorResponse(response, config.requestSigner);
     }
 
     const actions: ConnectorAction[] = [];
@@ -209,16 +307,18 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
     for (const op of collectOperations(document)) {
         if (include && !include(toInfo(op))) continue;
         const key = uniqueKey(operationActionKey(op), seenKeys);
+        const security = effectiveSecurity(op, document);
+        const anonymous = security !== undefined && security.length === 0;
 
         actions.push({
             key,
             label: op.summary ?? titleize(key),
             description: op.description,
-            inputSchema: buildInputSchema(op, auth),
+            inputSchema: buildInputSchema(op, auth, handle && !anonymous ? schemeFilledParameters(security, document) : new Set()),
             outputSchema: buildOutputSchema(op),
         });
 
-        handlers[key] = async (input: Record<string, unknown>) => {
+        handlers[key] = async (input: Record<string, unknown>, ctx: unknown) => {
             const req = input as { path?: unknown; query?: unknown; header?: unknown; body?: unknown };
             return request({
                 method: op.method,
@@ -226,7 +326,7 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
                 query: stringifyValues(asRecord(req.query)),
                 headers: stringifyValues(asRecord(req.header)),
                 body: req.body,
-            });
+            }, ctx, anonymous);
         };
     }
 
@@ -253,6 +353,51 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
 interface Op extends OpenApiOperation {
     method: string;
     path: string;
+}
+
+/**
+ * The organization a dispatch runs in, read from the host's handler context
+ * (`ConnectorActionContext.automation.tenantId` in
+ * `@objectstack/service-automation`). A credential handle selects the
+ * organization's connection by it (ADR-0143 Q1 = A); absent, the handle
+ * answers as D4 rules for a run with none.
+ */
+function organizationOfDispatch(ctx: unknown): string | undefined {
+    const tenantId = (ctx as { automation?: { tenantId?: unknown } } | null | undefined)?.automation?.tenantId;
+    return typeof tenantId === 'string' && tenantId.length > 0 ? tenantId : undefined;
+}
+
+/**
+ * The operation's effective security requirement (§4.8.10 `security`): its
+ * own list, else the document's, else `undefined` — the document says nothing.
+ * A list that is not an array reads as saying nothing, never as anonymous.
+ */
+function effectiveSecurity(op: OpenApiOperation, doc: OpenApiDocument): OpenApiSecurityRequirement[] | undefined {
+    const own = (op as { security?: unknown }).security;
+    if (Array.isArray(own)) return own as OpenApiSecurityRequirement[];
+    const shared = (doc as { security?: unknown }).security;
+    return Array.isArray(shared) ? (shared as OpenApiSecurityRequirement[]) : undefined;
+}
+
+/**
+ * The parameters (`header:<name lower-cased>` / `query:<name>`) that the
+ * `apiKey` schemes `security` names place the credential in — filled by the
+ * platform, never by the flow's input. A scheme the document does not declare
+ * fills nothing.
+ */
+function schemeFilledParameters(security: OpenApiSecurityRequirement[] | undefined, doc: OpenApiDocument): Set<string> {
+    const filled = new Set<string>();
+    const schemes = doc.components?.securitySchemes ?? {};
+    for (const requirement of security ?? []) {
+        if (!requirement || typeof requirement !== 'object') continue;
+        for (const schemeName of Object.keys(requirement)) {
+            const scheme = Object.prototype.hasOwnProperty.call(schemes, schemeName) ? schemes[schemeName] : undefined;
+            if (!scheme || scheme.type !== 'apiKey' || typeof scheme.name !== 'string') continue;
+            if (scheme.in === 'header') filled.add(`header:${scheme.name.toLowerCase()}`);
+            else if (scheme.in === 'query') filled.add(`query:${scheme.name}`);
+        }
+    }
+    return filled;
 }
 
 /**
@@ -334,9 +479,11 @@ const IGNORED_HEADER_PARAMETERS = new Set(['accept', 'content-type', 'authorizat
  * breaks this schema, so it must not demand what the caller cannot supply:
  * the ignored header parameters above, and the header or query parameter
  * the connector's own `auth` fills (the credential never belongs in a
- * flow's `connectorConfig.input`), are left out of it.
+ * flow's `connectorConfig.input`), are left out of it — and so, for a
+ * connector with a credential handle, is every parameter an `apiKey` security
+ * scheme the operation requires places the token in (`schemeFilled`).
  */
-function buildInputSchema(op: OpenApiOperation, auth: RestAuth): JsonSchema | undefined {
+function buildInputSchema(op: OpenApiOperation, auth: RestAuth, schemeFilled: ReadonlySet<string>): JsonSchema | undefined {
     const sections: Record<'path' | 'query' | 'header', { props: Record<string, JsonSchema>; required: string[] }> = {
         path: { props: {}, required: [] },
         query: { props: {}, required: [] },
@@ -350,6 +497,7 @@ function buildInputSchema(op: OpenApiOperation, auth: RestAuth): JsonSchema | un
         if (p.in !== 'path' && p.in !== 'query' && p.in !== 'header') continue;
         if (p.in === 'header' && (IGNORED_HEADER_PARAMETERS.has(p.name.toLowerCase()) || p.name.toLowerCase() === authHeader)) continue;
         if (p.in === 'query' && authQuery !== undefined && p.name === authQuery) continue;
+        if (schemeFilled.has(p.in === 'header' ? `header:${p.name.toLowerCase()}` : `${p.in}:${p.name}`)) continue;
         const sec = sections[p.in];
         sec.props[p.name] = p.schema ?? (p.description ? { type: 'string', description: p.description } : { type: 'string' });
         if (p.required) sec.required.push(p.name);
@@ -418,7 +566,7 @@ function buildUrl(baseUrl: string, path: string, query: Record<string, string>):
 }
 
 /** Apply static auth to the outgoing headers / query (mirrors connector-rest). */
-function applyAuth(auth: RestAuth, headers: Record<string, string>, query: Record<string, string>): void {
+function applyAuth(auth: RestAuth | BorrowedConnectorAuth, headers: Record<string, string>, query: Record<string, string>): void {
     switch (auth.type) {
         case 'none':
             return;

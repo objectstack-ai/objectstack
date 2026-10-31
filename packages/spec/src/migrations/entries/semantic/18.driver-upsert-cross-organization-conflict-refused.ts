@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // the migration channel beside the changeset's FROM → TO table.
 export const entry: SemanticMigration = {
   id: 'driver-upsert-cross-organization-conflict-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'IDataDriver upsert on SqlDriver, SqliteWasmDriver and TursoDriver (both faces): a '
     + 'tenant-scoped call whose conflict lands on a row of another organization, and the '

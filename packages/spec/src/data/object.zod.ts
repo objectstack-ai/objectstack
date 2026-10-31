@@ -1938,6 +1938,206 @@ function refuseDishonestRecordCurrencyField(
   }
 }
 
+/** The field types a `homeAmount.rateDate` pointer may name: a calendar date, with or without a time. */
+const HOME_AMOUNT_RATE_DATE_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
+
+/**
+ * [ADR-0144 D5] A `record`-mode amount's `currencyConfig.homeAmount` names
+ * three fields THIS object declares: `field`, where the engine stores the
+ * amount converted into the home currency; `rateDate`, the document date whose
+ * rate it converts at; and `rateField`, where it stores the rate it used
+ * (ruling 6465431966 D1, "STORED with the rate used"; D8 rule 2, every
+ * currency-related field "declared by the app author and referenced by
+ * pointer"). `CurrencyConfigSchema` sees one config and refuses the half it can
+ * see (`homeAmount` outside `record`, a missing or empty pointer); what the
+ * pointers name is judged here, beside
+ * {@link refuseDishonestRecordCurrencyField}, because only the object holds
+ * the field map.
+ *
+ * One located issue per offending pointer, at
+ * `['fields', <amount>, 'currencyConfig', 'homeAmount', <pointer>]`, each with
+ * its remedy and the object's candidate fields:
+ *
+ *  - the amount is not a stored `currency` field — a `formula` computes on
+ *    read and is never written, so nothing converts it at write (at
+ *    `homeAmount` itself; the pointers are not judged further);
+ *  - `field` is not another declared field, is not a stored `currency` field,
+ *    or is one whose mode is not `dynamic` (D8 rule 5: "the home field is a
+ *    `dynamic`-mode currency field", so metadata never names the home
+ *    currency), or is already another amount's home field (one column, two
+ *    writers);
+ *  - `rateDate` is not a declared `date` / `datetime` field;
+ *  - `rateField` is not a declared `number` field, or is shared with an amount
+ *    that names another code field or another document date (the two would
+ *    store two different rates into one column);
+ *  - the home field or the rate field is not marked platform-written. The
+ *    engine writes both, so each declares `readonly: true` — the existing mark
+ *    that drops every non-system write of the field from the payload — and no
+ *    `expression`, which would make the engine store a second, CEL-computed
+ *    value in the same column.
+ *
+ * Judged against the AUTHORED (parsed) field map, so a field an extension or
+ * the registry adds is not a candidate. Not judged on `ObjectExtensionSchema`,
+ * for the reason {@link refuseDishonestRecordCurrencyField} gives.
+ */
+function refuseDishonestHomeAmount(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  type HomeAmount = { field?: unknown; rateDate?: unknown; rateField?: unknown };
+  type CurrencyConfigView = { currencyMode?: unknown; currencyField?: unknown; homeAmount?: HomeAmount };
+  type FieldView = { type?: unknown; readonly?: unknown; expression?: unknown; currencyConfig?: CurrencyConfigView } | null;
+  const map = fields as Record<string, FieldView>;
+  const has = (name: string): boolean => Object.prototype.hasOwnProperty.call(map, name);
+  const modeOf = (f: FieldView): unknown => f?.currencyConfig?.currencyMode ?? 'dynamic';
+  const isHomeCandidate = (f: FieldView): boolean => f?.type === 'currency' && modeOf(f) === 'dynamic';
+  const list = (names: string[], none: string): string =>
+    names.length > 0 ? `candidates: ${names.map((c) => `\`${c}\``).join(', ')}.` : `the object has none; ${none}.`;
+  // The amounts that declare a home amount, in declaration order: the first
+  // claimant of a home field keeps it, a later one is told who holds it.
+  const declaring = Object.entries(map).filter(([, f]) => {
+    const config = f?.currencyConfig;
+    return config?.currencyMode === 'record' && config.homeAmount !== null && typeof config.homeAmount === 'object';
+  });
+  const homeOwner = new Map<string, string>();
+  const rateOwner = new Map<string, { amount: string; currencyField: unknown; rateDate: unknown }>();
+
+  for (const [name, f] of declaring) {
+    const config = f!.currencyConfig!;
+    const home = config.homeAmount!;
+    const base = ['fields', name, 'currencyConfig', 'homeAmount'];
+    const at = `\`${name}.currencyConfig.homeAmount`;
+    if (f?.type !== 'currency') {
+      ctx.addIssue({
+        code: 'custom',
+        path: base,
+        message: `${at}\` is declared on a \`${String(f?.type)}\` field of object \`${objectName}\`, `
+          + (f?.type === 'formula'
+            ? 'which computes its value on read and is never written, so nothing converts it at write. '
+              + 'Declare `homeAmount` on the stored `currency` amount the formula reads, or delete it.'
+            : 'and only a stored `currency` amount is converted at write. Declare `homeAmount` on a `currency` '
+              + 'field, or delete it.'),
+      });
+      continue;
+    }
+    // A field the engine writes, and nobody else: `readonly: true` drops every
+    // non-system write of it, and no `expression` competes with the engine.
+    const refuseUnlessPlatformWritten = (key: 'field' | 'rateField', target: string, what: string): void => {
+      const t = map[target];
+      if (t?.readonly === true && t.expression === undefined) return;
+      ctx.addIssue({
+        code: 'custom',
+        path: [...base, key],
+        message: `${at}.${key}\` names \`${target}\`, ${what} only the engine writes, but it `
+          + (t?.readonly === true
+            ? 'declares an `expression`, so the engine would store a second, computed value in the same column. '
+              + `Delete \`expression\` from \`${target}\`.`
+            : 'does not declare `readonly: true`, so a client write could overwrite what the engine stored. '
+              + `Add \`readonly: true\` to \`${target}\`.`),
+      });
+    };
+
+    // `field` — a stored `dynamic`-mode `currency` sibling, claimed by this amount alone.
+    if (typeof home.field === 'string') {
+      const target = home.field;
+      const candidates = Object.keys(map).filter((k) => k !== name && isHomeCandidate(map[k]!) && !homeOwner.has(k));
+      const remedy = `\`homeAmount.field\` must name a stored \`currency\` field of this object in \`dynamic\` mode — `
+        + list(candidates, `declare one, conventionally \`${name}_home: Field.currency({ readonly: true })\``);
+      const t = map[target];
+      if (target === name || !has(target)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...base, 'field'],
+          message: `${at}.field\` names \`${target}\`, but object \`${objectName}\` declares no other field \`${target}\`. ${remedy}`,
+        });
+      } else if (t?.type !== 'currency') {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...base, 'field'],
+          message: `${at}.field\` names \`${target}\`, a \`${String(t?.type)}\` field on object \`${objectName}\`; the `
+            + `home amount is stored, as an amount of money, in a \`currency\` field. ${remedy}`,
+        });
+      } else if (modeOf(t) !== 'dynamic') {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...base, 'field'],
+          message: `${at}.field\` names \`${target}\`, a \`${String(modeOf(t))}\`-mode currency field on object `
+            + `\`${objectName}\`; the home field is in \`dynamic\` mode, so it displays in the home currency `
+            + `(\`localization.currency\`) and metadata never names that currency. Give \`${target}\` `
+            + `\`currencyMode: 'dynamic'\` (or no \`currencyConfig\`), or point at another field. ${remedy}`,
+        });
+      } else if (homeOwner.has(target)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...base, 'field'],
+          message: `${at}.field\` names \`${target}\`, which is already the home field of \`${homeOwner.get(target)}\`; `
+            + `one column cannot store two converted amounts. ${remedy}`,
+        });
+      } else {
+        homeOwner.set(target, name);
+        refuseUnlessPlatformWritten('field', target, 'the home field');
+      }
+    }
+
+    // `rateDate` — a declared `date` / `datetime` sibling.
+    if (typeof home.rateDate === 'string') {
+      const target = home.rateDate;
+      const t = map[target];
+      if (!has(target) || typeof t?.type !== 'string' || !HOME_AMOUNT_RATE_DATE_TYPES.has(t.type)) {
+        const candidates = Object.keys(map).filter((k) => typeof map[k]?.type === 'string'
+          && HOME_AMOUNT_RATE_DATE_TYPES.has(map[k]!.type as string));
+        ctx.addIssue({
+          code: 'custom',
+          path: [...base, 'rateDate'],
+          message: `${at}.rateDate\` names \`${target}\`, `
+            + (has(target)
+              ? `a \`${String(t?.type)}\` field on object \`${objectName}\`; the document date is a \`date\` or \`datetime\` field.`
+              : `but object \`${objectName}\` declares no field \`${target}\`.`)
+            + ' `homeAmount.rateDate` must name the record\'s document date, whose rate the amount converts at — '
+            + list(candidates, 'declare one, e.g. `invoice_date: Field.date()`; nothing defaults to `created_at`'),
+        });
+      }
+    }
+
+    // `rateField` — a declared `number` sibling, shared only by amounts that store the same rate.
+    if (typeof home.rateField === 'string') {
+      const target = home.rateField;
+      const t = map[target];
+      const holder = rateOwner.get(target);
+      if (!has(target) || t?.type !== 'number') {
+        const candidates = Object.keys(map).filter((k) => map[k]?.type === 'number');
+        ctx.addIssue({
+          code: 'custom',
+          path: [...base, 'rateField'],
+          message: `${at}.rateField\` names \`${target}\`, `
+            + (has(target)
+              ? `a \`${String(t?.type)}\` field on object \`${objectName}\`; the rate used is stored in a \`number\` field.`
+              : `but object \`${objectName}\` declares no field \`${target}\`.`)
+            + ' `homeAmount.rateField` must name the field that stores the exchange rate the conversion used — '
+            + list(candidates, `declare one, conventionally \`${name}_rate: Field.number({ readonly: true })\``),
+        });
+      } else if (holder !== undefined && (holder.currencyField !== config.currencyField || holder.rateDate !== home.rateDate)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...base, 'rateField'],
+          message: `${at}.rateField\` names \`${target}\`, which already stores the rate of \`${holder.amount}\`, an `
+            + 'amount with another code field or another document date, so the two rates can differ and one column '
+            + `cannot store both. Give \`${name}\` its own \`number\` rate field, or the same \`currencyField\` and `
+            + '`rateDate` as the amount it shares with.',
+        });
+      } else if (holder === undefined) {
+        // The first holder is judged for the platform-written mark; a consistent
+        // sharer stores the same rate into the same, already judged, column.
+        rateOwner.set(target, { amount: name, currencyField: config.currencyField, rateDate: home.rateDate });
+        refuseUnlessPlatformWritten('rateField', target, 'the rate field');
+      }
+    }
+  }
+}
+
 /**
  * [objectui#12489 ruling 6203737086, letter A] A field's
  * `referenceDeletedWhen: { field, value }` names a SIBLING `select` field on
@@ -2045,6 +2245,91 @@ function refuseDishonestReferenceDeletedWhen(
           + `values: ${declared.map((v) => `\`${v}\``).join(', ')}. ${prescription}`,
       });
     }
+  }
+}
+
+/** Field types whose stored value the engine computes, so a filled value never stands. */
+const LOOKUP_AUTOFILL_COMPUTED_TYPES: ReadonlySet<string> = new Set(['formula', 'summary', 'autonumber']);
+
+/**
+ * [#27945] Each `lookupAutofill` pair's `target` names a field of THIS object
+ * that an author writes: a pick fills it on the form, and the form saves it as
+ * an ordinary write. A target the write path drops or recomputes would show a
+ * value the save then loses, and a target named twice would have two writers
+ * on one pick — each parses and fills nothing that lasts (ADR-0049 declared =
+ * enforced).
+ *
+ * Refused, one located issue per offending pair at
+ * `['fields', <field>, 'lookupAutofill', <i>, 'target']`, when the target:
+ *
+ *  - is the declaring lookup itself (a pick already writes it);
+ *  - names no declared field of this object;
+ *  - is `readonly: true` (a non-system write drops it from the payload);
+ *  - is computed — `formula`, `summary`, `autonumber`, or a stored field with
+ *    an `expression` (the engine writes it, so a client value never stands);
+ *  - is named by an earlier pair of the same field.
+ *
+ * Judged here, in the object's `superRefine` beside
+ * {@link refuseDishonestReferenceDeletedWhen}: `FieldSchema` sees one field at
+ * a time and refuses only the half it can see (the key off a single-value
+ * relationship). The SOURCE half needs the referenced object, which only the
+ * stack holds — `collectLookupAutofillErrors` in `stack.zod.ts`. Judged at
+ * parse, so every door — `defineStack`, a raw `.parse()`, the save door —
+ * refuses it; the key is new, so no metadata at rest carries it.
+ */
+function refuseDishonestLookupAutofill(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const fieldMap = fields as Record<string, unknown>;
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const pairs = (fieldDef as { lookupAutofill?: unknown } | null)?.lookupAutofill;
+    if (!Array.isArray(pairs)) continue;
+    const seen = new Set<string>();
+    pairs.forEach((pair: unknown, i: number) => {
+      const target = (pair as { target?: unknown } | null)?.target;
+      if (typeof target !== 'string') return;
+      const path = ['fields', fieldName, 'lookupAutofill', i, 'target'];
+      const where = `Field \`${fieldName}\` on object \`${objectName}\` declares \`lookupAutofill[${i}].target: '${target}'\``;
+      const prescription =
+        '`lookupAutofill[].target` must name a field of this object, other than the lookup itself, that an '
+        + 'author writes — not `readonly`, not computed — and each target once.';
+      const refuse = (reason: string): void => {
+        ctx.addIssue({ code: 'custom', path, message: `${where}, ${reason} ${prescription}` });
+      };
+      if (target === fieldName) {
+        refuse('which is the lookup itself: a pick already writes the picked id there.');
+        return;
+      }
+      if (!Object.prototype.hasOwnProperty.call(fieldMap, target)) {
+        refuse(`but the object declares no field \`${target}\`.`);
+        return;
+      }
+      const targetDef = fieldMap[target] as
+        | { type?: unknown; readonly?: unknown; expression?: unknown }
+        | null
+        | undefined;
+      if (typeof targetDef?.type === 'string' && LOOKUP_AUTOFILL_COMPUTED_TYPES.has(targetDef.type)) {
+        refuse(`a \`${targetDef.type}\` field: the engine computes its value, so a filled value never stands.`);
+        return;
+      }
+      if (targetDef?.expression !== undefined) {
+        refuse('a field computed from its `expression` on every write, so a filled value never stands.');
+        return;
+      }
+      if (targetDef?.readonly === true) {
+        refuse('a `readonly` field: a non-system write drops it from the payload, so the filled value is never saved.');
+        return;
+      }
+      if (seen.has(target)) {
+        refuse('a target an earlier pair of this field already fills: one pick would write it twice.');
+        return;
+      }
+      seen.add(target);
+    });
   }
 }
 
@@ -2187,8 +2472,8 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * `@objectstack/formula`, the pair `os build` / `os validate` run, and no other
  * field-existence check. A block is on `record` only where `record` is a row
  * the declaring service SERVED, so the validator reads this key only at those
- * sites: an action's `visible` and `disabled` predicates (`SERVED_ROW_SITES`
- * in `@objectstack/lint`). There each declared block name joins the names
+ * sites: an action's `visible`, `disabled` and `pressed` predicates
+ * (`SERVED_ROW_SITES` in `@objectstack/lint`). There each declared block name joins the names
  * `record.<x>` may resolve to, and `@objectstack/formula`'s field-existence
  * pass judges the SECOND segment of `record.<block>.<leaf>` against the
  * block's declared leaves, under its existing `unknown-field` refusal — so
@@ -3601,10 +3886,16 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
   // ISO 4217 `text` sibling — the same door: only the object holds the map.
   refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
+  // [ADR-0144 D5] Its `homeAmount` names a `dynamic` currency home field, a
+  // date and a number rate field, the two written ones `readonly` — same door.
+  refuseDishonestHomeAmount(object.name, object.fields, ctx);
   // [objectui#12489 ruling 6203737086, letter A] A `referenceDeletedWhen`
   // predicate names a declared single-value `select` sibling and one of its
   // options — the same door: only the object holds the sibling map.
   refuseDishonestReferenceDeletedWhen(object.name, object.fields, ctx);
+  // [#27945] Each `lookupAutofill` target is a writable field of this object,
+  // named once — the same door: only the object holds the field map.
+  refuseDishonestLookupAutofill(object.name, object.fields, ctx);
   // [#23809] Every option of the field `stageField` names declares its
   // lifecycle `kind` — the same door: only the object knows which field is
   // its stage.

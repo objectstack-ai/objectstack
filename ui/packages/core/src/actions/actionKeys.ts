@@ -124,10 +124,18 @@ export const ACTION_DEF_KEYS = [
   // of an action), forwarded by all four action renderers and read by the
   // param-collection dialog, but never declared on `ActionDef`.
   'description',
+  // The param dialog's submit-button label (`ActionSchema.submitText`), derived
+  // from the spec and drawn by the console's param dialog. Display only: the
+  // runner never reads it.
+  'submitText',
   'confirmText',
   'confirm',
   'condition',
   'disabled',
+  // The pressed-state predicate (`ActionSchema.pressed`), derived from the
+  // spec and drawn as `aria-pressed` by the record header and the declared
+  // actions bar. Display only: the runner never reads it.
+  'pressed',
   'api',
   'endpoint',
   'method',
@@ -299,6 +307,11 @@ export const SPEC_ACTION_KEYS = [
   'outcomeMessages',
   'params',
   'patch',
+  // Added to `ActionSchema` by objectstack#27946: the pressed-state predicate a
+  // header button draws as `aria-pressed` for the reader ("you voted Helpful").
+  // `ActionDef` declares it (derived), and the record header and the declared
+  // actions bar draw it.
+  'pressed',
   'recordIdField',
   'recordIdParam',
   'refreshAfter',
@@ -315,6 +328,10 @@ export const SPEC_ACTION_KEYS = [
   // question.
   'requiresMembershipReach',
   'resultDialog',
+  // Added to `ActionSchema` by objectstack#27944: the param dialog's submit
+  // button label. `ActionDef` declares it (derived), and the console's param
+  // dialog draws it.
+  'submitText',
   'successMessage',
   'target',
   'type',

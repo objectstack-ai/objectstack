@@ -1,7 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { connectorFetchOptions, type ConnectorFetchPolicy } from './connector-fetch-policy';
+import { connectorFetchOptions, readConnectorResponse, type ConnectorFetchPolicy } from './connector-fetch-policy';
+import type { ConnectorRequestSigner, ConnectorSignableRequest } from './connector-provider';
+import { resilientFetch } from '../shared/resilient-fetch';
 
 describe('connectorFetchOptions', () => {
     it('leaves the wrapper on its own defaults when nothing is declared', () => {
@@ -107,5 +109,125 @@ describe('connectorFetchOptions', () => {
         // `maxAttempts` is bounded max(10) on the schema. Parsing here is what
         // makes the bound real at the execution site too.
         expect(() => connectorFetchOptions({ retryConfig: { maxAttempts: 99 } })).toThrow();
+    });
+});
+
+describe('connectorFetchOptions — a signed instance is signed per attempt (ADR-0143 D2.3)', () => {
+    /** A signer double: each call answers a fresh nonce, and records what it was asked to sign. */
+    function countingSigner(over: Partial<ConnectorRequestSigner> = {}) {
+        const seen: ConnectorSignableRequest[] = [];
+        const signer: ConnectorRequestSigner = {
+            connector: 'vendor',
+            scheme: 'aliyun-acs3-hmac-sha256',
+            async sign(request) {
+                seen.push(request);
+                return { headers: { Authorization: `Sig n${seen.length}`, 'X-Nonce': `n${seen.length}` } };
+            },
+            ...over,
+        };
+        return { signer, seen };
+    }
+
+    /** A fetch double answering the queued statuses in order, recording each call. */
+    function scriptedFetch(statuses: number[]) {
+        const calls: Array<{ url: string; init: RequestInit }> = [];
+        const impl = (async (input: string | URL | Request, init: RequestInit = {}) => {
+            calls.push({ url: String(input), init });
+            return new Response('{}', { status: statuses.shift() ?? 200, headers: { 'content-type': 'application/json' } });
+        }) as typeof fetch;
+        return { impl, calls };
+    }
+
+    it('CONTROL: without a signer the caller\'s fetch is handed through untouched', () => {
+        const { impl } = scriptedFetch([]);
+        expect(connectorFetchOptions({}, { fetchImpl: impl }).fetchImpl).toBe(impl);
+    });
+
+    it('signs every attempt afresh, so a retry never replays a signature', async () => {
+        const { signer, seen } = countingSigner();
+        const { impl, calls } = scriptedFetch([503, 200]);
+        const opts = connectorFetchOptions({}, { fetchImpl: impl, sleep: async () => {} }, signer);
+        const res = await resilientFetch('https://api.example.com/v1/items?q=1', {
+            method: 'post',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{"a":1}',
+        }, opts);
+        expect(res.status).toBe(200);
+        expect(seen).toHaveLength(2);
+        expect(calls.map((c) => (c.init.headers as Record<string, string>)['x-nonce'])).toEqual(['n1', 'n2']);
+        expect(seen[0]).toEqual({
+            method: 'POST',
+            url: 'https://api.example.com/v1/items?q=1',
+            headers: { 'content-type': 'application/json' },
+            body: '{"a":1}',
+        });
+    });
+
+    it('a signer header replaces a same-named request header, whatever its case', async () => {
+        const { signer } = countingSigner();
+        const { impl, calls } = scriptedFetch([200]);
+        await resilientFetch('https://api.example.com/', { headers: { authorization: 'Bearer stale' } },
+            connectorFetchOptions({}, { fetchImpl: impl }, signer));
+        expect(calls[0]!.init.headers).toEqual({ authorization: 'Sig n1', 'x-nonce': 'n1' });
+    });
+
+    it('sends the URL a signer answers, when its scheme signs a canonical query', async () => {
+        const { signer } = countingSigner({
+            async sign() { return { headers: {}, url: 'https://api.example.com/?a=x%20y' }; },
+        });
+        const { impl, calls } = scriptedFetch([200]);
+        await resilientFetch('https://api.example.com/?a=x+y', {}, connectorFetchOptions({}, { fetchImpl: impl }, signer));
+        expect(calls[0]!.url).toBe('https://api.example.com/?a=x%20y');
+    });
+
+    it('refuses a body that is not text, and a Request object, rather than sign something else', async () => {
+        const { signer } = countingSigner();
+        const { impl, calls } = scriptedFetch([]);
+        const opts = connectorFetchOptions({}, { fetchImpl: impl, sleep: async () => {} }, signer);
+        await expect(opts.fetchImpl!('https://api.example.com/', { method: 'POST', body: new Uint8Array([1]) }))
+            .rejects.toThrow(/body must be text/);
+        await expect(opts.fetchImpl!(new Request('https://api.example.com/'))).rejects.toThrow(/not as a Request object/);
+        expect(calls).toHaveLength(0);
+    });
+});
+
+describe('readConnectorResponse', () => {
+    const json = (body: string, status = 200) =>
+        new Response(body, { status, headers: { 'content-type': 'application/json' } });
+
+    it('CONTROL: parses JSON and passes text through, as the HTTP connectors always did', async () => {
+        expect(await readConnectorResponse(json('{"a":1}'))).toEqual({ status: 200, ok: true, body: { a: 1 } });
+        expect(await readConnectorResponse(new Response('plain', { status: 404 })))
+            .toEqual({ status: 404, ok: false, body: 'plain' });
+    });
+
+    it('CONTROL: a signer without response verification reads exactly as no signer', async () => {
+        const signer: ConnectorRequestSigner = { connector: 'v', scheme: 'aliyun-acs3-hmac-sha256', sign: async () => ({ headers: {} }) };
+        expect(await readConnectorResponse(json('{"a":1}'), signer)).toEqual({ status: 200, ok: true, body: { a: 1 } });
+    });
+
+    it('runs verifyResponse over the raw body before parsing', async () => {
+        const verified: string[] = [];
+        const signer: ConnectorRequestSigner = {
+            connector: 'v',
+            scheme: 'aliyun-acs3-hmac-sha256',
+            sign: async () => ({ headers: {} }),
+            async verifyResponse(response) {
+                verified.push(`${response.status} ${response.headers.get('x-sig')} ${response.body}`);
+            },
+        };
+        const res = new Response('{ "a" : 1 }', { headers: { 'content-type': 'application/json', 'x-sig': 'ok' } });
+        expect(await readConnectorResponse(res, signer)).toEqual({ status: 200, ok: true, body: { a: 1 } });
+        expect(verified).toEqual(['200 ok { "a" : 1 }']);
+    });
+
+    it('a response that fails verification throws, and its body is never returned', async () => {
+        const signer: ConnectorRequestSigner = {
+            connector: 'v',
+            scheme: 'aliyun-acs3-hmac-sha256',
+            sign: async () => ({ headers: {} }),
+            async verifyResponse() { throw new Error('response signature does not verify'); },
+        };
+        await expect(readConnectorResponse(json('{"forged":true}'), signer)).rejects.toThrow(/does not verify/);
     });
 });

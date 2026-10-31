@@ -234,8 +234,11 @@ async function loadOpenApiDocument(
  * boot the automation service invokes it for each `provider: 'openapi'`
  * declarative instance: it loads the OpenAPI document from `providerConfig.spec`,
  * then produces the same `{ def, handlers }` bundle {@link createOpenApiConnector}
- * generates for a hand-wired OpenAPI connector — one action per operation over a
- * static-auth HTTP transport, with the resolved `auth` applied.
+ * generates for a hand-wired OpenAPI connector — one action per operation over
+ * an HTTP transport, with the resolved `auth` applied — or, for a grant-bearing
+ * instance (`oauth2`, `app-credential`), the `credentialHandle` asked on every
+ * request (ADR-0143 D4); the document's `security` decides which operations
+ * send it (see `createOpenApiConnector`).
  *
  * `providerConfig.include` (optional) narrows the actions to an allowlist of
  * operation keys, through the generator's own `include` predicate.
@@ -276,6 +279,10 @@ export function createOpenApiProviderFactory(deps: OpenApiProviderDeps = {}): Co
       document,
       baseUrl: typeof cfg.baseUrl === 'string' ? cfg.baseUrl : undefined,
       auth,
+      // ADR-0143 D2.3 — a `signed` instance's signer, applied to every attempt.
+      requestSigner: ctx.requestSigner,
+      // ADR-0143 D4 — a grant-bearing instance's per-dispatch credential.
+      credentialHandle: ctx.credentialHandle,
       include,
       // ADR-0049 · #18975 — the authored resilience policy, already resolved by
       // the materializer, reaches the transport this bundle closes over.
@@ -303,6 +310,8 @@ export function createOpenApiProviderFactory(deps: OpenApiProviderDeps = {}): Co
         );
       }
     }
-    return bundle;
+    // Says so, so the host serves the `signed` instance (it refuses one whose
+    // provider does not apply the signer).
+    return ctx.requestSigner ? { ...bundle, requestSignerApplied: true } : bundle;
   };
 }

@@ -3302,11 +3302,14 @@ const CHART_AXIS_NOT_SELECTED_EXPLANATION: RuleExplanation = {
       'chart drawn is unaffected. Advisory: the selection may legitimately be widened at runtime. A ' +
       'query position is never reported: it IS the selection, or the query itself.',
     'The selection is per surface. On a page chart it is `values`, the measure set the query asks ' +
-      'for. On a report it is the chart\'s own `chart.yAxis`: the embedded chart queries ' +
-      'exactly one dimension × one measure and derives ONE series, while `report.values` is the ' +
+      'for. On a report it is the chart\'s own `chart.yAxis`: the embedded chart queries its ' +
+      '`chart.xAxis` dimension (and its `chart.seriesBy` split, when set) × that one measure and, ' +
+      'without a split, derives ONE series, while `report.values` is the ' +
       'selection of the table beneath it. So a report\'s `chart.yAxis` is never reported — a chart ' +
       'cannot fail to select what it queries — and a `chart.series[].name` override lands only when ' +
-      'it names `chart.yAxis`. The verdict quotes at most three names of the selection.',
+      'it names `chart.yAxis`. With `chart.seriesBy` set the chart derives one series per value of ' +
+      'that dimension, so an override names a value, which no static check can see, and is not ' +
+      'judged. The verdict quotes at most three names of the selection.',
     CHART_BINDING_SURFACES,
   ],
 };
@@ -3527,6 +3530,37 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
     'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
       'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
       'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
+  ],
+};
+
+const LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-kanban-lane-unknown',
+  covers: 'why each kanban lane must name a group field option',
+  paragraphs: [
+    'A kanban board\'s `lanes` lists the lanes it draws, in order, as stored option values of the field ' +
+      'named by `groupByField`. The board puts each card in the lane whose id equals the card\'s value for ' +
+      'that field, and a card whose value matches no lane goes to the `Uncategorized` lane.',
+    'So a lane spelled as no option has (`inprogress` for `in_progress`, or a label such as `In Progress`) is ' +
+      'a lane no card can land in, and every card carrying the value it was meant to name lands in ' +
+      '`Uncategorized` instead: the board draws the wrong lanes and puts the wrong cards in them. An error, so ' +
+      'the publish is refused and `os validate` and `os build` fail.',
+    'Judged against the group field\'s own inline `options`. Not judged: a group field whose options come from a ' +
+      'shared `picklist` (its options are the list\'s plus its extensions\'), a group field with no inline ' +
+      '`options` (a `boolean` or a lookup, whose lanes are values rather than options), and a `groupByField` ' +
+      'that names no field, which is `list-view-field-unknown`.',
+    'To fix it, write the option\'s stored `value`, not its label, or drop the entry. To keep cards off the ' +
+      'board, filter the view: `lanes` chooses lanes, it does not filter records.',
+  ],
+};
+
+const LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-kanban-lane-repeated',
+  covers: 'why a kanban board lists each lane once',
+  paragraphs: [
+    'Each `kanban.lanes` entry is the id of one lane. A value listed twice draws two lanes with the same id, ' +
+      'so a card carrying that value has two lanes to fall into and a drop has two targets with one name.',
+    'Reported at the second entry, with or without the bound object: the rule needs no field map. An error, so ' +
+      'the publish is refused and `os validate` and `os build` fail. To fix it, delete the repeated entry.',
   ],
 };
 
@@ -4673,7 +4707,12 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       'variable in the open tier) and never stored in metadata (ADR-0097 §3), called from a ' +
       '`connector_action` node. The fix line routes by shape, to a variant the connector auth schema ' +
       'really has: a header credential to `bearer` or a header `api-key`, a query-string key to ' +
-      '`api-key` with `paramName`. A credential in `connectorConfig.input` is dropped instead, ' +
+      '`api-key` with `paramName`. The schema\'s other kinds also take their secret only as a ' +
+      '`credentialRef`, but none is a home a literal moves into by shape: `oauth2` (grant ' +
+      '`authorization_code` or `client_credentials`) and `app-credential` (vendor `feishu`, ' +
+      '`dingtalk` or `wecom`) carry a grant whose token the server obtains per dispatch, and until it ' +
+      'runs that grant such an instance is held degraded and calls no upstream; `signed` signs each ' +
+      'request with its key. A credential in `connectorConfig.input` is dropped instead, ' +
       'because the connector authenticates through its own `auth`. No variant carries a secret in a ' +
       'url path, so a url path is not judged and no fix line promises one.',
     // [#22161] What the fix line stopped saying. The variants are held to the
@@ -5373,6 +5412,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
   [LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION.rule]: LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION,
   [LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION.rule]: LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION,
+  [LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION,
+  [LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION,
   [LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION.rule]: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE_EXPLANATION,
   [LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_OBJECT_UNKNOWN_EXPLANATION,
   [TRANSLATION_TARGET_UNKNOWN_EXPLANATION.rule]: TRANSLATION_TARGET_UNKNOWN_EXPLANATION,

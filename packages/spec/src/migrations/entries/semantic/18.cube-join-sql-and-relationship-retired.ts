@@ -16,8 +16,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'cube-join-sql-and-relationship-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'analyticsCubes[].joins.<alias>.sql / analyticsCubes[].joins.<alias>.relationship — the '
     + 'authored ON clause and the declared cardinality on a cube join',

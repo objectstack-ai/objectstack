@@ -801,12 +801,28 @@ export const ERROR_CODE_LEDGER = {
     'ERR_CURRENCY_CODE_REQUIRED',
     'ERR_DATASOURCE_UNAVAILABLE',
     'ERR_DRIVER_CONNECT',
+    // [ADR-0144 D5, Open items 2 and 9] A write would store a `record`-mode
+    // amount declaring `homeAmount` in a foreign currency, and no exchange rate
+    // for that currency is in force on the record's document date (the latest
+    // `effective_date` on or before it). 400; the driver is never asked to write
+    // the row (`ExchangeRateMissingError`, `home-amount-projection.ts`); the
+    // message names the currency and the date. No 1:1 rate, later rate or empty
+    // home amount is stored in its place. Fixed by adding a rate row.
+    'ERR_EXCHANGE_RATE_MISSING',
     // [#8846] a `before*` hook moved or cleared the id the engine resolved a
     // by-id (or per-row predicate) write against — refused rather than
     // silently writing a different record (`HOOK_TARGET_REBIND_ERROR_CODE`,
     // `hook-target-rebind-errors.ts`), during a write the dispatcher is
     // serving. Same #8087-gate family.
     'ERR_HOOK_TARGET_REBIND',
+    // [ADR-0144 Open item 4] A write would store a `record`-mode amount
+    // declaring `homeAmount`, and the organization has no usable home currency:
+    // `localization.currency` is unset (or holds no ISO 4217 code). 400; the
+    // driver is never asked to write the row (`HomeCurrencyUnsetError`,
+    // `home-amount-projection.ts`). The platform never assumes a home currency.
+    // Fixed by setting `localization.currency` — a different remedy from
+    // `ERR_EXCHANGE_RATE_MISSING`, hence its own code.
+    'ERR_HOME_CURRENCY_UNSET',
     // [#5320] Third EMITTER of the code (metadata-protocol and plugin-security
     // already register it) — the registration loop's `views:` tighten refuses a
     // non-container entry, and the `viewItems:` channel refuses an entry the
@@ -1323,7 +1339,7 @@ export const ERROR_CODE_LEDGER = {
     // line — no HTTP door; registered under `@objectstack/metadata-protocol`
     // too, so this row is provenance, not identity.
     'NOT_OVERRIDABLE',
-    'RESUME_CHILD_PENDING',       // [#27877] parent-id resume of a map whose item child run is still suspended (409; resume the named child)
+    'RESUME_CHILD_PENDING',       // [#27877] parent-id resume of a map whose item child run is still suspended (409; resume the named child) — or [#27971] whose item row is gone without a `cancelled` history (409; cancel the parent run)
     'RESUME_IN_PROGRESS',         // duplicate resume refused while the first is running
     'RUN_NOT_FOUND',              // no suspension for this run id — unresumable for good
     'STORE_UNAVAILABLE',          // durable suspended-run store unreadable — existence unknown

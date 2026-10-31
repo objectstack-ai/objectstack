@@ -12,7 +12,7 @@
  * Ruled on objectstack#11345 (maintainer, 2026-08-23 15:02Z), direction 1:
  * derived related lists inherit the child object's default list view `sort`,
  * with NO new spec key. The user-visible bug this closes: a task version's
- * "check items" tab rendered 20/30/10/40 (the server's primary-key fallback)
+ * "check items" list rendered 20/30/10/40 (the server's primary-key fallback)
  * while the child object's own list, sorted by `seq_no`, rendered 10/20/30/40.
  *
  * ## Why this file renders the whole page instead of asserting the descriptor
@@ -174,7 +174,7 @@ function renderPage(objects: any[], dataSource: any) {
     getItemsByType: () => [],
   } as any;
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}?tab=related`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}?related=${CHILD}.${PARENT}`]}>
       <MetadataCtx.Provider value={metadata}>
         <RecordDetailView
           dataSource={dataSource}
@@ -190,19 +190,20 @@ function renderPage(objects: any[], dataSource: any) {
 }
 
 /**
- * Render the page with the Related tab already open and return the params the
- * related list's own fetch went out with.
+ * Render the page with the related list's whole face already open and return
+ * the params the list's own fetch went out with.
  *
- * The tab is selected through the URL (`?tab=related` — tabs are
- * URL-addressable by a stable semantic value, ADR-0054 C3) rather than by
- * clicking, so the list is mounted by the page's own routing rather than by a
- * synthetic event this test would then also be asserting about.
+ * The face is opened through the URL (`?related=<object>.<field>`, the record
+ * page's one path to a related list's every record since objectstack#27055;
+ * the Related tab it replaces was addressed by `?tab=related`, ADR-0054 C3)
+ * rather than by clicking, so the list is mounted by the page's own routing
+ * rather than by a synthetic event this test would then also be asserting
+ * about.
  *
- * The child object is queried TWICE on this page and only one of the two is
- * the subject: the tab strip auto-derives its count badge with a
- * `$top: 1, $count: true` probe that carries no ordering by design. Picking
- * the windowed page fetch explicitly keeps a counter-probe from passing
- * because it read the count probe instead.
+ * The child object may be queried more than once on this page and only the
+ * windowed page fetch is the subject: a count probe (`$top: 1, $count: true`)
+ * carries no ordering by design. Picking the windowed fetch explicitly keeps
+ * a counter-probe from passing because it read the count probe instead.
  */
 const isListFetch = (params: any) => !params?.$count && typeof params?.$top === 'number';
 

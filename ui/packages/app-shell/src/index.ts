@@ -265,6 +265,7 @@ export { LoginPage as DefaultLoginPage } from './console/auth/LoginPage.js';
 export { signInRefusalMessages } from './console/auth/signInRefusalMessages.js';
 export { RegisterPage as DefaultRegisterPage } from './console/auth/RegisterPage.js';
 export {
+  signUpCaptchaFailedMessage,
   signUpRefusalMessages,
   type SignUpRefusalInvitation,
 } from './console/auth/signUpRefusalMessages.js';
@@ -282,10 +283,11 @@ export { useBootstrapStatus, type BootstrapStatus } from './console/auth/bootstr
 // arrived from an invitation link (#25886), and the signed-out invitation
 // preview both login and both register pages greet that visitor with (#26473),
 // or answer with the "no longer valid" notice when the server no longer knows
-// the invitation (#27509).
+// the invitation (#27509), and the plain login's hint to open the link.
 export {
   InvitationSignUpPrompt,
   InvitationGoneNotice,
+  InvitationLinkHint,
   invitationArrivalCopy,
   useInvitationArrival,
   useInvitationPreview,
@@ -436,11 +438,11 @@ export { MetadataDirectoryPage } from './views/metadata-admin/DirectoryPage.js';
 export { MetadataResourceRouter } from './views/metadata-admin/ResourceRouter.js';
 export { MetadataResourceListPage } from './views/metadata-admin/ResourceListPage.js';
 export { MetadataResourceEditPage } from './views/metadata-admin/ResourceEditPage.js';
-export { MetadataResourceHistoryPage } from './views/metadata-admin/ResourceHistoryPage.js';
+export { MetadataResourceHistoryPage } from './views/item-tools/ResourceHistoryPage.js';
 export { MetadataDiagnosticsPage } from './views/metadata-admin/DiagnosticsPage.js';
 export { MetadataQuickFind } from './views/metadata-admin/QuickFind.js';
 export { SchemaForm } from './views/metadata-admin/SchemaForm.js';
-export { LayeredDiff } from './views/metadata-admin/LayeredDiff.js';
+export { LayeredDiff } from './views/item-tools/LayeredDiff.js';
 // objectui#7611 — the Setup catalog's URL scope (`?scope=environment`), for a
 // host that routes its own legacy URLs onto the catalog (the console's
 // `system/positions` / `system/permissions`). A dependency-free leaf.

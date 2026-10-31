@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // the EQUALITY slot, where the view entry covers every scalar operator.
 export const entry: SemanticMigration = {
   id: 'filter-equality-array-comparand-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.FilterCondition — an ARRAY as an EQUALITY comparand, at the runtime filter doors (the '
     + 'shared comparand-shape face that parseFilterAST and the engine lowering seam both run): the '

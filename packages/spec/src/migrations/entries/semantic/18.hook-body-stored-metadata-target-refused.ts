@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // carries no intent the chain could rewrite into one the runtime runs.
 export const entry: SemanticMigration = {
   id: 'hook-body-stored-metadata-target-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span and a table cell.
   surface:
     'hook.object naming sys_metadata or sys_metadata_history, as the string or as any member of the '
     + 'list, on a hook that carries a body',

@@ -254,11 +254,15 @@ export function resolveSearchFieldResolution(
  * present.
  *
  * TOLERANT by design — unknown requested names are dropped, and a request
- * naming none of the allowed fields falls back to the full allowed set. This
- * guards INTERNAL callers (hooks, flows, registry-less hosts) that never pass
- * an ingress; the REST read path refuses those same inputs loudly BEFORE the
- * engine sees them (`400 INVALID_FIELD`, #4254), exactly like the projection
- * axis, whose engine-side `SELECT *` tolerance sits behind the #4226 gate.
+ * naming none of the allowed fields falls back to the full allowed set. The
+ * REST read path refuses those same inputs loudly BEFORE the engine sees them
+ * (`400 INVALID_FIELD`, #4254), exactly like the projection axis, whose
+ * engine-side `SELECT *` tolerance sits behind the #4226 gate. [#28120] The
+ * ObjectQL engine refuses the fallback's input too, for its in-process callers
+ * (hooks, flows, host handlers): an override naming none of the allowed fields
+ * is `400 INVALID_FIELD` there before this runs, so the fallback is reached
+ * only by a caller that resolves a search set without the engine. A request
+ * naming SOME allowed field still has the rest dropped here.
  */
 export function resolveSearchFields(opts: SearchFieldResolutionOptions): string[] {
   const { allowed } = resolveSearchFieldResolution(opts);

@@ -616,6 +616,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "千位分隔符",
         helpText: "显示值时的数字分组（千位分隔符）。未设置：由渲染端决定；未改动过的开关不写入任何值，所以即使渲染端会分组，它也显示为关闭。关闭：从不分组，例如年份或 ID。开启：始终分组。"
       },
+      percentDisplay: {
+        label: "百分比显示",
+        helpText: "只读时的显示方式（列表单元格与记录页）。未设置：百分比旁显示进度条。条形：始终显示进度条，用于进度。纯数字：只显示百分比，用于比率或概率。"
+      },
       currencyConfig: {
         label: "货币配置",
         helpText: "此字段使用哪种货币——货币字段，或返回类型为“货币”的公式字段。未设置时为 dynamic 模式。任何模式下值都是一个纯数字。"
@@ -1803,6 +1807,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "描述",
         helpText: "显示在此动作参数对话框标题下方的说明文字。对于会收集参数的动作，确认问题应写在这里而不是 confirmText 中——一个对话框，而不是两个。它不是 ai.description，后者是 AI 智能体读取的文字。"
       },
+      submitText: {
+        label: "提交按钮文字",
+        helpText: "此动作参数对话框中提交按钮的文字，即按钮执行的动作（例如“发送”“记录通话”）。仅用于需要收集参数的动作。留空则显示“确认”。"
+      },
       confirmText: {
         label: "确认文本",
         helpText: "执行前的确认提示（如 \"确定要执行吗？\"）"
@@ -2385,13 +2393,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     },
     fields: {
-      name: {
-        label: "名称",
-        helpText: "唯一标识符（snake_case）"
-      },
       label: {
         label: "显示名称",
         helpText: "面向管理员的显示标签"
+      },
+      name: {
+        label: "名称",
+        helpText: "创建权限集时由显示名称中的拉丁字母和数字自动填写；显示名称不含这些字符时（如全为中文）请自行输入。snake_case"
       },
       description: {
         label: "描述",

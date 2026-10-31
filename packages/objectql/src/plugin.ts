@@ -11,8 +11,14 @@ import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScop
 // [ADR-0130 D4] The residual rule's decision half — which top-level items of a
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
-import { unclaimedTopLevel } from '@objectstack/metadata';
-import { applyConversionsToStoredItem } from '@objectstack/spec';
+import { unclaimedTopLevel, type UnclaimedTopLevel } from '@objectstack/metadata';
+import { ASSEMBLED_VIEW_ITEMS_KEY, applyConversionsToStoredItem, expandViewContainer, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
+import { judgePermissionSetOwnerBinding } from '@objectstack/spec/security';
+// [ADR-0017] The one object derivation of a view container and the one
+// divergent-`name` judge, called by the residual's view registration as by a
+// body's (see `registerUnclaimedTopLevelItems`).
+import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
+import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
@@ -42,6 +48,8 @@ import {
   collectManifestPicklistNames,
   collectManifestPicklistReferences,
   describeUnresolvedPicklistReferences,
+  picklistMetadataError,
+  type PicklistMetadataError,
 } from './picklist-resolution.js';
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
@@ -137,13 +145,14 @@ function hasLoadMetaFromDb(service: unknown): service is ProtocolWithDbRestore {
  * object was listed by `GET /meta/object` and answered `404` on
  * `/data/<name>`, through both boot doors.
  *
+ * @param residual - The stack's residual, as `unclaimedTopLevel` answers it,
+ *   read once per registration and shared with {@link unclaimedTopLevelItems}.
  * @returns `undefined` when the stack has no residual object — every stack
  *   without `packages[]`, and every normally composed one.
  */
 function unclaimedTopLevelObjects(
-  stack: unknown,
+  residual: UnclaimedTopLevel | undefined,
 ): { ownerId: string | undefined; ownerVersion: string | undefined; objects: ServiceObject[] } | undefined {
-  const residual = unclaimedTopLevel(stack);
   if (!residual) return undefined;
   const objects = residual.items
     .filter((entry) => entry.type === 'object')
@@ -154,39 +163,107 @@ function unclaimedTopLevelObjects(
 }
 
 /**
- * The items of ONE registry type in a multi-package stack's residual, and the
- * id they are owned by — the residual rule's answer read the way
- * {@link unclaimedTopLevelObjects} reads it, for the residual types a
- * boot-time reader takes from the registry alone:
+ * The residual types the engine does NOT register through
+ * {@link unclaimedTopLevelItems}, each because it has a path of its own:
  *
- *  - `connector` (ADR-0015 D7): the connector credential lender and the
- *    ADR-0097 reconcile read `registry.listItems('connector')`, never the
- *    metadata service. A residual connector instance registered by the
- *    metadata door only was therefore invisible to both at boot — the instance
- *    did not materialize, and a datasource's `external.connector` borrow of it
- *    was refused as undeclared until a dev reload carried the artifact in —
- *    while the composed check (`composeStacks`) accepts that borrow, because
- *    the instance is declared.
- *  - `flow`: the automation plugin's boot pull (`service-automation`'s
- *    `start()`) reads `registry.listItems('flow')`, never the metadata service.
- *    A residual flow registered by the metadata door only was listed by `/meta`
- *    and never registered with the engine: `getFlow` answered `null`, a run
- *    answered "not found", and its trigger never armed.
- *
- * @returns `undefined` when the stack has no residual item of `type`.
+ *  - `object`: {@link unclaimedTopLevelObjects}, through the registry's object
+ *    verb, with the two classes it lists and does not serve;
+ *  - `picklist`: kept as metadata only. A field naming a picklist only the
+ *    residual declares is what the objects rule lists and does not serve, and
+ *    a body's field naming one fails the boot's picklist audit — both loud,
+ *    and both judged on that premise, so registering the residual's lists here
+ *    would change which objects the data door serves. A residual list no
+ *    object field names is refused instead
+ *    ({@link unreferencedResidualPicklistRefusal});
+ *  - `object_extension`: an extension has no slot of its own (it is keyed by
+ *    `extend`, and its `name` spelling is a retired alias the schema refuses),
+ *    so the residual rule never lists one.
  */
-function unclaimedTopLevelItemsOfType(
-  stack: unknown,
-  type: 'connector' | 'flow',
-): { type: 'connector' | 'flow'; ownerId: string | undefined; ownerVersion: string | undefined; items: Record<string, unknown>[] } | undefined {
-  const residual = unclaimedTopLevel(stack);
+const RESIDUAL_TYPES_WITH_OWN_PATH: ReadonlySet<string> = new Set(['object', 'picklist', 'object_extension']);
+
+/**
+ * Every OTHER item of a multi-package stack's residual, and the id they are
+ * owned by — the residual rule's answer read the way
+ * {@link unclaimedTopLevelObjects} reads it, for every type a package body's
+ * collections take into the registry (`registerApp`'s metadata collections).
+ *
+ * Why the engine needs them: a reader that asks the registry and not the
+ * metadata service sees a residual item only if this registers it. Measured:
+ * the engine registered a residual's objects, connectors (ADR-0015 D7: the
+ * connector credential lender and the ADR-0097 reconcile) and flows (the
+ * automation plugin's boot pull) and no other type, so every other residual
+ * item was registered by the metadata door alone. Among the readers that then
+ * answered "not declared": the metadata save door's managed-content seal
+ * (`isArtifactBacked`, ADR-0131 D6), which asks the registry whether a code
+ * package ships an item — so a residual security rule was not sealed the way
+ * the same rule declared in a package body is.
+ *
+ * @returns `undefined` when the stack has no such residual item.
+ */
+function unclaimedTopLevelItems(
+  residual: UnclaimedTopLevel | undefined,
+): { ownerId: string | undefined; ownerVersion: string | undefined; items: Array<{ type: string; item: Record<string, unknown> }> } | undefined {
   if (!residual) return undefined;
   const items = residual.items
-    .filter((entry) => entry.type === type)
-    .map((entry) => entry.item as Record<string, unknown>);
+    .filter((entry) => !RESIDUAL_TYPES_WITH_OWN_PATH.has(entry.type))
+    .map((entry) => ({ type: entry.type, item: entry.item as Record<string, unknown> }));
   return items.length > 0
-    ? { type, ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, items }
+    ? { ownerId: residual.ownerId, ownerVersion: residual.ownerVersion, items }
     : undefined;
+}
+
+/**
+ * [ADR-0130 D4] The refusal for a residual PICKLIST that no object field of
+ * the stack names — `undefined` when there is none.
+ *
+ * A residual picklist is kept as metadata only (see
+ * {@link RESIDUAL_TYPES_WITH_OWN_PATH}), so the engine never registers it.
+ * One that a field names is loud already: a residual object's field makes
+ * that object listed and not served, and a body's field fails the boot's
+ * picklist audit. One that no field names was neither registered nor
+ * refused, so it went missing from the engine with nothing said. It is
+ * refused here, before anything of the artifact registers, naming each list
+ * and the stack.
+ *
+ * "Names" is judged off the fields the engine registers from this artifact:
+ * every package body's (its objects, its `objectExtensions` and its nested
+ * `plugins[]`) and the residual's own objects, the set
+ * {@link ObjectQLPlugin.registerUnclaimedTopLevelObjects} judges. ⛔ Never off
+ * the whole top level: in a composed stack a top-level `objectExtensions`
+ * entry, a top-level copy of an object a body declares and a top-level
+ * `plugins[]` entry are registered by no door, so a list only they name is
+ * dropped all the same. And never off the registry, which is still filling
+ * while a boot registers.
+ */
+function unreferencedResidualPicklistRefusal(
+  residual: UnclaimedTopLevel | undefined,
+  bodies: readonly unknown[],
+): PicklistMetadataError | undefined {
+  if (!residual) return undefined;
+  const picklists = residual.items
+    .filter((entry) => entry.type === 'picklist')
+    .map((entry) => String((entry.item as { name?: unknown }).name));
+  if (picklists.length === 0) return undefined;
+  const named = new Set<string>();
+  const residualObjects = residual.items.filter((entry) => entry.type === 'object').map((entry) => entry.item);
+  for (const source of [...bodies, { objects: residualObjects }]) {
+    for (const ref of collectManifestPicklistReferences(source, undefined)) named.add(ref.picklist);
+  }
+  const unreferenced = picklists.filter((name) => !named.has(name));
+  if (unreferenced.length === 0) return undefined;
+  const owner = residual.ownerId ?? '<none>';
+  const listed = unreferenced.map((name) => `'${name}'`).join(', ');
+  return picklistMetadataError(
+    `${unreferenced.length === 1 ? 'Picklist' : 'Picklists'} ${listed} ${unreferenced.length === 1 ? 'is' : 'are'} `
+    + `declared on the top level of stack '${owner}', and no package body declares `
+    + `${unreferenced.length === 1 ? 'it' : 'them'} and no object field the engine registers names `
+    + `${unreferenced.length === 1 ? 'it' : 'them'} (in a composed stack, a top-level \`objectExtensions\` entry, a `
+    + 'top-level copy of an object a package body declares and a top-level `plugins[]` entry are not '
+    + 'registered). The engine registers a top-level picklist only through a package body, so this list would be missing from the engine with nothing said. Declare it inside the '
+    + '`packages[]` entry of the package whose objects use it; or name it from a field of the object meant to '
+    + 'use it (a top-level object that does is then listed and not served until both move into a package '
+    + 'body); or remove it from the top level.',
+  );
 }
 
 /**
@@ -803,18 +880,22 @@ export class ObjectQLPlugin implements Plugin {
           : registeredArtifact;
         const entries = resolveArtifactPackageEntries(artifact);
         const ordered = entries.map((entry) => entry.manifest) as any[];
-        // [ADR-0130 D4] The objects of the stack's RESIDUAL — top-level objects
-        // no package body declares — as the residual rule answers it. See
-        // {@link unclaimedTopLevelObjects}.
-        const residual = unclaimedTopLevelObjects(artifact);
-        // …and its CONNECTORS and FLOWS, which the credential lender and the
-        // automation plugin's boot pull read from the registry alone. See
-        // {@link unclaimedTopLevelItemsOfType}.
-        const residualItems = (['connector', 'flow'] as const)
-          .map((type) => unclaimedTopLevelItemsOfType(artifact, type))
-          .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+        // [ADR-0130 D4] The stack's RESIDUAL — top-level items no package body
+        // declares — as the residual rule answers it, read once: its objects
+        // (see {@link unclaimedTopLevelObjects})…
+        const residualAnswer = unclaimedTopLevel(artifact);
+        const residual = unclaimedTopLevelObjects(residualAnswer);
+        // …and every other item a body's collections take into the registry,
+        // which readers of the registry alone see only through this. See
+        // {@link unclaimedTopLevelItems}.
+        const residualItems = unclaimedTopLevelItems(residualAnswer);
+        // …and its picklists, which neither of those registers: one that no
+        // object field names is refused here, before anything registers. See
+        // {@link unreferencedResidualPicklistRefusal}.
+        const unreferencedPicklists = unreferencedResidualPicklistRefusal(residualAnswer, ordered);
+        if (unreferencedPicklists) throw unreferencedPicklists;
 
-        if (ordered.length === 0 && residual === undefined && residualItems.length === 0) {
+        if (ordered.length === 0 && residual === undefined && residualItems === undefined) {
           // An artifact that declared `packages: []` registers nothing. Said out
           // loud rather than returning quietly: "the install did nothing" is not
           // a state anyone should have to infer from an absence.
@@ -867,8 +948,12 @@ export class ObjectQLPlugin implements Plugin {
         if (this.boundActionTargetsSealed) {
           const declared = new Set<string>(residual?.objects.map((o) => o.name) ?? []);
           for (const manifest of ordered) for (const name of collectManifestObjectNames(manifest)) declared.add(name);
+          // The residual's own actions are judged with the bodies': they
+          // register below, under the residual rule's id.
+          const residualActions = residualItems?.items.filter((entry) => entry.type === 'action').map((entry) => entry.item) ?? [];
           const unbound = ordered
             .flatMap((manifest) => collectManifestBoundActions(manifest, artifactPackageId(manifest)))
+            .concat(collectManifestBoundActions({ actions: residualActions }, residualItems?.ownerId))
             .filter((bound) => !declared.has(bound.objectName) && ql.registry.getObject(bound.objectName) === undefined);
           const refusal = describeUnboundActionTargets(unbound);
           if (refusal) throw refusal;
@@ -888,29 +973,19 @@ export class ObjectQLPlugin implements Plugin {
         // bodies (a composed stack keeps one member's manifest) that body's
         // record must not be replaced.
         if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
-        // [ADR-0015 D7, ADR-0130 D4] The residual's connectors and flows, the
-        // same way and in the same place: after every body, under the residual
-        // rule's id, through the registry verb a body's own connectors and
-        // flows take (`registerApp`'s metadata collections). No body declares
-        // one of these names — that is what makes it residual — so none of
-        // them shadows a body's entry. Stamped as a residual object is: the
-        // version first, on a shallow copy, leaving the artifact's own entry as
-        // the registry leaves it.
-        for (const { type, ownerId, ownerVersion, items } of residualItems) {
-          for (const item of items) {
-            const stamped = ownerVersion === undefined
-              ? { ...item }
-              : applyProtection({ ...item } as any, { packageId: ownerId, packageVersion: ownerVersion });
-            ql.registry.registerItem(type, stamped, 'name' as any, ownerId);
-          }
-        }
+        // [ADR-0015 D7, ADR-0130 D4] Every other residual item, the same way
+        // and in the same place: after every body, under the residual rule's
+        // id, through the registration a body's own item of that type takes.
+        // See {@link registerUnclaimedTopLevelItems}.
+        if (residualItems) this.registerUnclaimedTopLevelItems(ctx, residualItems);
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either
         // side. Reported, never refused — nothing above is undone.
         if (this.boundActionTargetsSealed) {
           const arrived = new Set(scope.packageIds);
-          if (residual?.ownerId !== undefined) arrived.add(residual.ownerId);
+          const residualOwner = residual?.ownerId ?? residualItems?.ownerId;
+          if (residualOwner !== undefined) arrived.add(residualOwner);
           this.reportBoundActionCollisions(ctx, ql.registry[FIND_BOUND_ACTION_COLLISIONS](arrived));
         }
         // Manifests registered AFTER start() (marketplace install / ledger
@@ -1265,6 +1340,51 @@ export class ObjectQLPlugin implements Plugin {
                 error: e.message,
             });
         }
+
+        // [ADR-0144 D4, Open item 4] The localization the write-time home
+        // projection reads: the organization's `localization.currency` (the
+        // home currency it converts into) and `localization.timezone` (the
+        // zone a `datetime` document date is dated in; ruling 6539345871,
+        // letter B), in one grouped `getMany` read. The settings service is
+        // resolved when a write asks, not here, so plugin order cannot leave
+        // the projection without it. No settings service, or a `localization`
+        // namespace or key not registered, is an unset setting — an unset home
+        // currency is refused, never defaulted, and an unset timezone reads
+        // UTC; a read that FAILS is the write's failure, not an unset setting.
+        const isUnregisteredSetting = (e: any) => e?.code === 'SETTINGS_UNKNOWN_NAMESPACE' || e?.code === 'SETTINGS_UNKNOWN_KEY';
+        const settingText = (resolved: { value?: unknown } | undefined) => (typeof resolved?.value === 'string' ? resolved.value : undefined);
+        this.ql.setHomeLocalizationResolver(async (organizationId) => {
+            let settings: {
+                get?: (ns: string, key: string, c?: Record<string, unknown>) => Promise<{ value?: unknown } | undefined>;
+                getMany?: (ns: string, keys: string[], c?: Record<string, unknown>) => Promise<Record<string, { value?: unknown } | undefined>>;
+            } | undefined;
+            try {
+                settings = ctx.getService('settings') as typeof settings;
+            } catch {
+                return undefined;
+            }
+            if (!settings || typeof settings.get !== 'function') return undefined;
+            const scope = organizationId !== undefined ? { tenantId: organizationId } : {};
+            if (typeof settings.getMany === 'function') {
+                try {
+                    const many = await settings.getMany('localization', ['currency', 'timezone'], scope);
+                    return { currency: settingText(many?.currency), timezone: settingText(many?.timezone) };
+                } catch (e: any) {
+                    // `getMany` is all-or-nothing: one unregistered key refuses
+                    // both, so each is asked on its own below.
+                    if (!isUnregisteredSetting(e)) throw e;
+                }
+            }
+            const one = async (key: string) => {
+                try {
+                    return settingText(await settings!.get!('localization', key, scope));
+                } catch (e: any) {
+                    if (isUnregisteredSetting(e)) return undefined;
+                    throw e;
+                }
+            };
+            return { currency: await one('currency'), timezone: await one('timezone') };
+        });
     }
 
     // Initialize drivers (calls driver.connect() which sets up persistence)
@@ -3011,6 +3131,94 @@ export class ObjectQLPlugin implements Plugin {
       + 'together with every picklist its fields name; to add fields to an object another package owns, '
       + 'use `objectExtensions` instead of declaring it again.',
     );
+  }
+
+  /**
+   * [ADR-0015 D7, ADR-0130 D4] Register every residual item that is not an
+   * object ({@link unclaimedTopLevelItems}) in the engine, the way
+   * `registerApp`'s metadata collections register a package body's item of
+   * that type: under the residual rule's id, with the stack's version stamped
+   * beside it, after the judges that seam runs first. A residual item and a
+   * body's then answer every reader of the registry alike, and refuse alike.
+   *
+   *  - A `view` container is filed under the object it binds to and expanded
+   *    into its views (ADR-0017), once the one divergent-`name` judge
+   *    (`viewContainerNameRefusal`) has passed it — the expansion and the
+   *    object derivation are `@objectstack/spec`'s and `@objectstack/metadata`'s,
+   *    the copies the body seam and the metadata door call.
+   *  - A permission set whose body `packageId` disagrees with the residual's id
+   *    is refused by the one owner-binding judge (ADR-0086 D3,
+   *    `judgePermissionSetOwnerBinding`), in the envelope the body seam's
+   *    refusal of the same set carries.
+   *  - Any other `view` entry takes the body seam's two lines: one with no
+   *    `name` is filed under its slot, and one that is not container-shaped
+   *    (`isViewContainerShaped`) is refused 422 `INVALID_METADATA` in the seam's
+   *    words, which this copies (the seam lives in `engine.ts`).
+   *  - Every other item is one `registerItem` under its name.
+   *
+   * No body declares one of these names — that is what makes it residual — so
+   * none of them shadows a body's entry. Each is stamped on a shallow copy,
+   * leaving the artifact's own entry as it arrived. What judges a body's item
+   * AFTER it registers judges the residual's too: the ownership-queue service
+   * check and the bound-action target audit at `kernel:ready`.
+   */
+  private registerUnclaimedTopLevelItems(
+    ctx: PluginContext,
+    residual: { ownerId: string | undefined; ownerVersion: string | undefined; items: Array<{ type: string; item: Record<string, unknown> }> },
+  ): void {
+    const ql = this.ql;
+    if (!ql) return;
+    const { ownerId, ownerVersion } = residual;
+    const stamp = (item: Record<string, unknown>): Record<string, unknown> => ownerVersion === undefined
+      ? { ...item }
+      : applyProtection({ ...item } as any, { packageId: ownerId, packageVersion: ownerVersion });
+    for (const { type, item } of residual.items) {
+      if (type === 'view' && isAggregatedViewContainer(item)) {
+        const nameRefusal = viewContainerNameRefusal(item, 'manifest', ownerId);
+        if (nameRefusal) throw nameRefusal;
+        const object = deriveViewContainerObject(item);
+        if (!object) continue;
+        const container = stamp({ ...item, name: object });
+        ql.registry.registerItem('view', container, 'name' as any, ownerId);
+        for (const view of expandViewContainer(object, container)) {
+          for (const w of view._diagnostics?.warnings ?? []) {
+            ctx.logger.warn(`View expansion warning for '${view.name}': ${w.message}`, { from: ownerId });
+          }
+          ql.registry.registerItem('view', stamp(view as unknown as Record<string, unknown>), 'name' as any, ownerId);
+        }
+        continue;
+      }
+      if (type === 'permission') {
+        const refusal = judgePermissionSetOwnerBinding(item, String(item.name), ownerId, 'register');
+        if (refusal) {
+          throw Object.assign(new Error(refusal.message), {
+            code: 'VALIDATION_ERROR',
+            status: 400,
+            httpStatus: 400,
+            issues: [{ path: 'packageId', message: refusal.issueMessage, code: 'custom' }],
+          });
+        }
+      }
+      // The body seam's two `views:` lines, in its words: a non-container entry
+      // with no `name` is filed under the slot the residual rule gave it, and an
+      // entry that is not container-shaped (`viewKind`/`config`/flattened
+      // overlay keys) is refused — `views:` carries containers only (#5320).
+      const name = (item.name as string | undefined) || (type === 'view' ? deriveViewContainerObject(item) : undefined);
+      const toRegister = item.name === name ? item : { ...item, name };
+      if (type === 'view' && !isViewContainerShaped(toRegister)) {
+        throw Object.assign(new Error(
+          `Invalid \`views:\` entry '${name}' from manifest '${ownerId}': the stack `
+          + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
+          + 'config belong to a single VIEW, not to the container — wrap it: '
+          + '`defineView({ list: { type, data, columns, … } })`, or name it — '
+          + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
+          + `(package export, environment artifact) carries non-container view artifacts under `
+          + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
+          + 'writes that channel.',
+        ), { code: 'INVALID_METADATA', status: 422, httpStatus: 422 });
+      }
+      ql.registry.registerItem(type, stamp(toRegister), 'name' as any, ownerId);
+    }
   }
 
   /**

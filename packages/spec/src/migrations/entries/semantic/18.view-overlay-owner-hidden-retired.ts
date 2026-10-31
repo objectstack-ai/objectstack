@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // by `config`; the two share the prescription texts, not a conversion.
 export const entry: SemanticMigration = {
   id: 'view-overlay-owner-hidden-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'view.owner / view.hidden on a flattened view overlay — the lean PUT /api/v1/meta/view/:name body '
     + 'with no config that the console saves for a view it personalizes',

@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // encryption, or wants a remote database is intent no artifact records.
 export const entry: SemanticMigration = {
   id: 'turso-config-local-encryption-key-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.TursoConfig (a turso / libsql datasource.config), the published TursoConfigSchema mirror and '
     + 'the TursoDriver constructor of @objectstack/driver-turso — a non-empty encryptionKey beside a '

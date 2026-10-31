@@ -438,7 +438,7 @@ import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
-import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress } from './protocol-environment-rows.js';
+import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
@@ -447,6 +447,8 @@ import { deletePackage } from './protocol-package-uninstall.js';
 import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-unmanaged-import.js';
 // [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
+// [#28355] The `denied` row the four single-item doors leave for a refusal that writes none of its own.
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -5186,18 +5188,28 @@ export interface StoredMetadataSearchSchema {
  *   string or an array) — naming one is refused, `INVALID_FIELD` / 400, the
  *   evaluate refusals' envelope, under the caller's wire spelling of the slot
  *   (`wireSpelling`, the door's; the bare canonical name when absent);
+ * - [#28120] an explicit list that names NO field — an empty array, a blank or
+ *   comma-only string, an array with no string entry — is not "names none": it
+ *   is passed through untouched, for the engine's own refusal to answer
+ *   (`400 VALIDATION_ERROR` for an empty one, #27732; `400 INVALID_FIELD` for
+ *   one naming no searchable field). Narrowing it here wrote a non-empty set
+ *   back over the caller's list, so an override the door and the engine both
+ *   refuse was served. The door never reaches this with one: its ingress gate
+ *   refuses it first;
  * - a search that names none is NARROWED: the object's resolved searchable set
  *   ({@link resolveSearchFieldResolution}) minus those columns is returned, for
  *   the caller to run as `searchFields` — the engine intersects an override
  *   with that set and never widens it;
  * - a set that narrows to nothing is refused rather than returned empty: an
- *   empty override is ABSENT to the engine, which would then scan the whole
- *   default set, these columns included.
+ *   empty override is refused by the engine as one naming no field, a
+ *   caller's mistake this caller did not make, so the family's own refusal
+ *   names the cause instead.
  *
  * Returns `undefined` when the query runs as it is — an object outside the
- * family, no search, an explicit list that passes, or no readable field map
- * (the engine has none to expand a search over either; the same rule the door's
- * field gates apply: a non-object, array or empty `fields`). Throws the refusal.
+ * family, no search, an explicit list that passes or names no field, or no
+ * readable field map (the engine has none to expand a search over either; the
+ * same rule the door's field gates apply: a non-object, array or empty
+ * `fields`). Throws the refusal.
  */
 export function narrowStoredMetadataSearch(
     object: string,
@@ -5222,6 +5234,8 @@ export function narrowStoredMetadataSearch(
         if (refusal) throw refusal;
         return undefined;
     }
+    // [#28120] A list naming no field is the engine's to refuse, never narrowed.
+    if (typeof explicit === 'string' || Array.isArray(explicit)) return undefined;
     if (search == null) return undefined;
     const fields = schema?.fields;
     if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
@@ -5481,7 +5495,8 @@ function collectCompositeKeyHeadHits(
 /**
  * Phase 3a-destructive: detect changes between an existing object schema
  * and an incoming overlay that would break runtime data — removed fields,
- * field type narrowing, required toggled on without a default. Returned
+ * field type narrowing, required toggled on without a default, a stored
+ * amount switched to `currencyMode: 'record'` (rows left codeless). Returned
  * issues are surfaced as HTTP 409 `destructive_change` unless the caller
  * sets `force: true`, letting the admin UI render a warning dialog before
  * proceeding.
@@ -5601,6 +5616,36 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
                 code: 'field_required_no_default',
                 field: fname,
                 message: `Field '${fname}' is now required but has no default value — existing rows with null values may fail validation.`,
+            });
+        }
+        // [ADR-0144, ruling 6492000994] An existing amount switched to
+        // `currencyMode: 'record'` — the sibling of `field_required_no_default`:
+        // a one-word config edit that leaves every stored row owing a value.
+        // The rows already stored hold an amount and no code; the switch is
+        // allowed (the write guard refuses such a row only when a write
+        // touches the pair), so this finding acknowledges it and names the
+        // explicit backfill. Like its siblings it reads no row: whether the
+        // table holds any is not this gate's to judge, and a finding over an
+        // empty table costs one `force`. Judged by what the STORED side holds,
+        // so a previously unstored field (a formula) raises nothing.
+        if (
+            nextField?.type === 'currency'
+            && nextField.currencyConfig?.currencyMode === 'record'
+            && prevField.currencyConfig?.currencyMode !== 'record'
+            && isStored(prevField)
+        ) {
+            const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
+            const codeField = typeof nextField.currencyConfig.currencyField === 'string'
+                ? `'${nextField.currencyConfig.currencyField}'`
+                : 'its currency code field';
+            issues.push({
+                code: 'currency_mode_to_record',
+                field: fname,
+                message: `Field '${fname}' switched to currencyMode 'record' — rows already stored with an amount and a blank ${codeField} `
+                    + 'display as a plain number, fall into the null group of a grouped aggregate, and sit outside every '
+                    + 'currency-paired filter until they hold a code; once saved, write it with '
+                    + `\`os migrate record-currency-codes --object ${objectName} --field ${fname} --code <ISO 4217 code>\``
+                    + ' (a dry run; add --apply to write).',
             });
         }
     }
@@ -6363,6 +6408,124 @@ export interface RowlessExpandedView {
     item: Record<string, unknown>;
     container: StoredOverlayEntry;
 }
+
+/*
+ * [#28355] The request shapes of the four single-item doors. Each door is a
+ * public wrapper (refusal audit) over a private body, and both read the shape
+ * from here: a private member's type is not published, so a wrapper typed off
+ * its body would publish an untyped `request`. Deliberately not exported — the
+ * published signatures are what they were, under these local names.
+ */
+
+/** The request of {@link ObjectStackProtocolImplementation.saveMetaItem}. */
+type SaveMetaItemRequest = { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient };
+
+/** The request of {@link ObjectStackProtocolImplementation.publishMetaItem}. */
+type PublishMetaItemRequest = {
+    type: string;
+    name: string;
+    actor?: string;
+    message?: string;
+    /**
+     * [commit 490879ad0] ADR-0048 — the software package the draft being promoted was
+     * listed under, when the caller has one to state. Forwarded whole to
+     * {@link promoteDraftForPublish}, which threads it into BOTH the #9612
+     * gate closure and `repo.promoteDraft`, so the gate and the write
+     * resolve the draft under the SAME key it was listed by.
+     *
+     * Declared because it is REAL on this door, not merely tolerated:
+     * since commit 9e04c3e35 `POST /meta/:type/:name/publish?package=PKG_ID` states it
+     * on every HTTP-driven promotion that names a package — which is
+     * Studio's designer save-then-publish loop. Until it was declared the
+     * value flowed correctly but was invisible to every typed caller, and
+     * the only caller that states one reaches this method through a cast,
+     * so the binding was enforced by nothing. Commit 490879ad0 added the pins in
+     * `protocol-publish-drafts-package-scope.test.ts`.
+     *
+     * ⚠️ `null` is NOT the same as absent, and the difference is load
+     * bearing the whole way down: {@link promoteDraftForPublish} branches on
+     * the KEY BEING PRESENT (`'packageId' in request`), so an ABSENT key
+     * names no package while `null` pins the lookup to the UNBOUND row.
+     * [#23495] Naming no package is no longer "match any package": the
+     * publish promotes the draft a draft save naming no package writes
+     * ({@link packagelessDraftAddress}), and is refused `409
+     * RESOURCE_CONFLICT` when the item's active rows are bound to two or
+     * more packages. Spread it in conditionally; never write
+     * `packageId: maybeUndefined`, which arrives as a present-and-undefined
+     * key, coerces to `null` downstream, and makes a package-bound draft
+     * unfindable — a silent `no_draft` on the untouched path.
+     */
+    packageId?: string | null;
+    // [commit 490879ad0] `environmentId` is deliberately NOT declared here, although
+    // the REST door spreads it into this very request literal. It is the
+    // multi-kernel ROUTING key, and it is out of the protocol request shape
+    // by explicit maintainer ruling (recorded 2026-08-18, landed as commit 2a29caa53):
+    // `resolveProtocol(environmentId)` has already selected the target
+    // kernel before this method is entered, and this class reads its
+    // environment off the INSTANCE (`this.environmentId`, set at
+    // construction) and never off a request — measured, `request.environmentId`
+    // occurs nowhere in this file. `packages/rest` declares that one
+    // transport-level member on top of the declared shape instead
+    // (`TransportScopedMetaRequest`), which is where a routing key belongs.
+    // Adding it here would reverse that ruling rather than record it.
+    /**
+     * INTERNAL — `publishPackageDrafts` publishes many drafts and batch-applies
+     * every seed body in ONE loader pass afterwards (cross-seed references need
+     * multi-pass over the whole set), so it suppresses the per-item apply here.
+     */
+    _skipSeedApply?: boolean;
+    /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+    member?: string;
+};
+
+/** The request of {@link ObjectStackProtocolImplementation.rollbackMetaItem}. */
+type RollbackMetaItemRequest = {
+    type: string;
+    name: string;
+    toVersion: number;
+    actor?: string;
+    message?: string;
+    /**
+     * [#22877] The bundle member to revert — {@link resolveBundleMemberSelector};
+     * omitted, the canonical one. The bundle shares one lineage counter, so
+     * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
+     */
+    member?: string;
+};
+
+/** The request of {@link ObjectStackProtocolImplementation.deleteMetaItem}. */
+type DeleteMetaItemRequest = {
+    type: string;
+    name: string;
+    parentVersion?: string | null;
+    actor?: string;
+    state?: 'active' | 'draft';
+    /**
+     * When true, also drop the object's physical table after the metadata
+     * is removed (object + active only; never `sys_`). Default false keeps
+     * delete non-destructive to data. Used by the "discard a previewed
+     * object" flow so a publish-to-preview leaves no orphan table.
+     * [#23415] Only with the object's last stored row: while another row
+     * of it stays stored, the delete is refused `409 RESOURCE_CONFLICT`
+     * ({@link dropStorageRemainingRowsRefusal}).
+     */
+    dropStorage?: boolean;
+    /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+    member?: string;
+    /**
+     * [#23165, ADR-0048] The package whose row this delete removes, as a
+     * save names the row it writes (`?package=` on the REST door). Named,
+     * the delete removes that package's row and no other. Absent or `null`
+     * names no package: the delete removes the row of the one package the
+     * item's rows at its state are bound to, is refused `409
+     * RESOURCE_CONFLICT` when they are bound to two or more, and with none
+     * removes the package-unbound row ({@link packagelessAddress}).
+     * [#23495] A draft discard naming none removes the draft a draft save
+     * naming none writes ({@link packagelessDraftAddress}), the one the
+     * per-item publish naming none promotes.
+     */
+    packageId?: string | null;
+};
 
 /**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
@@ -10801,12 +10964,18 @@ export class ObjectStackProtocolImplementation implements
         // The package-less binding ({@link packagelessReadAddress}'s), selected
         // from those rows; the `version` below ({@link readVersionToken})
         // takes the same binding instead of reading it again.
-        const packagelessBinding = readState === 'active' && !request.packageId
-            ? (await this.packagelessAddress(
+        const packagelessAddressed = readState === 'active' && !request.packageId
+            ? await this.packagelessAddress(
                 PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member, 'active', activeRows,
-            )).packageId
+            )
             : undefined;
-        const contentPackageId = request.packageId || (packagelessBinding ?? undefined);
+        const packagelessBinding = packagelessAddressed?.packageId;
+        // [#28238] The content, though, is {@link packagelessContentPackage}'s:
+        // the code package that ships the name is a candidate too, so a row
+        // another package stored under the name is not served for it.
+        const contentPackageId = request.packageId || (packagelessAddressed
+            ? packagelessContentPackage(packagelessAddressed, this.shippedArtifactsOf(request.type, request.name))
+            : undefined);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -10825,7 +10994,7 @@ export class ObjectStackProtocolImplementation implements
                     state: 'draft',
                     ...(draftContentAddress
                         ? { packageId: draftContentAddress.packageId }
-                        : contentPackageId ? { packageId: contentPackageId } : {}),
+                        : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
                 // [#23715] Two or more packages and no package-unbound draft:
@@ -10885,7 +11054,7 @@ export class ObjectStackProtocolImplementation implements
                 state: readState,
                 ...(readState === 'draft' && draftContentAddress
                     ? { packageId: draftContentAddress.packageId }
-                    : contentPackageId ? { packageId: contentPackageId } : {}),
+                    : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }, activeRows))?.row;
             // [#23715] Two or more packages and no package-unbound draft: the
@@ -11516,7 +11685,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: 'active',
-                ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                ...(contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
@@ -13693,9 +13862,24 @@ export class ObjectStackProtocolImplementation implements
         // — the engine reports them through the write's own options, so a
         // nested write a hook makes inside this one never adds to them.
         const warnings: ValidationAdvisoryEvent[] = [];
+        // [#27703] The mentioned users the mention recipient gate withheld on
+        // THIS write, answered as `withheldMentions` to this request alone: the
+        // mention writer reads the listener off its `after*` hook's
+        // `ctx.input.options`, which is this bag, so neither a nested write
+        // nor any other request's answer ever carries them, and nothing is
+        // stored on the comment.
+        const withheldMentions = new Set<string>();
+        // [#28000] The one message a hook on THIS write set to tell the
+        // requester what the save set in motion, answered as `notice`. The hook
+        // reads the listener off `ctx.input.options`, which is this bag, so a
+        // nested write's hook never reaches it; a later call replaces an
+        // earlier one, and anything but a non-empty string sets nothing.
+        let notice: string | undefined;
         const opts: any = {
             onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
             onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
+            onMentionsWithheld: (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); },
+            onNotice: (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; },
         };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.insert(request.object, request.data, opts);
@@ -13713,6 +13897,8 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
+            ...(notice !== undefined ? { notice } : {}),
         };
     }
 
@@ -13861,6 +14047,13 @@ export class ObjectStackProtocolImplementation implements
         // (see `createData`).
         const warnings: ValidationAdvisoryEvent[] = [];
         opts.onValidationAdvisory = (e: ValidationAdvisoryEvent) => { warnings.push(e); };
+        // [#27703] The mentions this update ADDED that the gate withheld,
+        // answered as `withheldMentions` (see `createData`).
+        const withheldMentions = new Set<string>();
+        opts.onMentionsWithheld = (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); };
+        // [#28000] The hook-set message answered as `notice` (see `createData`).
+        let notice: string | undefined;
+        opts.onNotice = (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; };
         // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
         // the path `:id` — and nothing in the payload gets to move it.
         //
@@ -13937,6 +14130,8 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
+            ...(notice !== undefined ? { notice } : {}),
         };
     }
 
@@ -17008,11 +17203,18 @@ export class ObjectStackProtocolImplementation implements
      * layered read's `effective` and `/published` serve one row. [#23715] The
      * strict draft read asks {@link strictDraftReadAddress} instead: the draft
      * its `version` names.
+     *
+     * [#28238] The code packages that ship the name are candidates too
+     * ({@link packagelessContentPackage}, the rule {@link getMetaItem} applies
+     * to the rows it already read): a row bound to another package is not
+     * served for a name one code package ships, and `null` is the
+     * package-unbound row alone. The write address does not move.
      */
-    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | null | undefined> {
         // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
         const host: ThisParameterType<typeof packagelessReadAddress> = {
             packagelessAddress: (...a) => this.packagelessAddress(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
         return packagelessReadAddress.call(host, type, name, member);
     }
@@ -20112,7 +20314,16 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient }) {
+    async saveMetaItem(request: SaveMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'save', type: request.type, name: request.name, actor: request.actor,
+            source: request.source ?? 'protocol.saveMetaItem',
+        }, () => this.saveMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async saveMetaItemUnaudited(request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -22424,62 +22635,16 @@ export class ObjectStackProtocolImplementation implements
      * Records a history event with `op='publish'`. 404 (`NO_DRAFT`)
      * when there is nothing to publish.
      */
-    async publishMetaItem(request: {
-        type: string;
-        name: string;
-        actor?: string;
-        message?: string;
-        /**
-         * [commit 490879ad0] ADR-0048 — the software package the draft being promoted was
-         * listed under, when the caller has one to state. Forwarded whole to
-         * {@link promoteDraftForPublish}, which threads it into BOTH the #9612
-         * gate closure and `repo.promoteDraft`, so the gate and the write
-         * resolve the draft under the SAME key it was listed by.
-         *
-         * Declared because it is REAL on this door, not merely tolerated:
-         * since commit 9e04c3e35 `POST /meta/:type/:name/publish?package=PKG_ID` states it
-         * on every HTTP-driven promotion that names a package — which is
-         * Studio's designer save-then-publish loop. Until it was declared the
-         * value flowed correctly but was invisible to every typed caller, and
-         * the only caller that states one reaches this method through a cast,
-         * so the binding was enforced by nothing. Commit 490879ad0 added the pins in
-         * `protocol-publish-drafts-package-scope.test.ts`.
-         *
-         * ⚠️ `null` is NOT the same as absent, and the difference is load
-         * bearing the whole way down: {@link promoteDraftForPublish} branches on
-         * the KEY BEING PRESENT (`'packageId' in request`), so an ABSENT key
-         * names no package while `null` pins the lookup to the UNBOUND row.
-         * [#23495] Naming no package is no longer "match any package": the
-         * publish promotes the draft a draft save naming no package writes
-         * ({@link packagelessDraftAddress}), and is refused `409
-         * RESOURCE_CONFLICT` when the item's active rows are bound to two or
-         * more packages. Spread it in conditionally; never write
-         * `packageId: maybeUndefined`, which arrives as a present-and-undefined
-         * key, coerces to `null` downstream, and makes a package-bound draft
-         * unfindable — a silent `no_draft` on the untouched path.
-         */
-        packageId?: string | null;
-        // [commit 490879ad0] `environmentId` is deliberately NOT declared here, although
-        // the REST door spreads it into this very request literal. It is the
-        // multi-kernel ROUTING key, and it is out of the protocol request shape
-        // by explicit maintainer ruling (recorded 2026-08-18, landed as commit 2a29caa53):
-        // `resolveProtocol(environmentId)` has already selected the target
-        // kernel before this method is entered, and this class reads its
-        // environment off the INSTANCE (`this.environmentId`, set at
-        // construction) and never off a request — measured, `request.environmentId`
-        // occurs nowhere in this file. `packages/rest` declares that one
-        // transport-level member on top of the declared shape instead
-        // (`TransportScopedMetaRequest`), which is where a routing key belongs.
-        // Adding it here would reverse that ruling rather than record it.
-        /**
-         * INTERNAL — `publishPackageDrafts` publishes many drafts and batch-applies
-         * every seed body in ONE loader pass afterwards (cross-seed references need
-         * multi-pass over the whole set), so it suppresses the per-item apply here.
-         */
-        _skipSeedApply?: boolean;
-        /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
-        member?: string;
-    }): Promise<{
+    async publishMetaItem(request: PublishMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'publish', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.publishMetaItem',
+        }, () => this.publishMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link publishMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async publishMetaItemUnaudited(request: PublishMetaItemRequest): Promise<{
         success: boolean;
         version: string;
         seq: number;
@@ -23616,7 +23781,13 @@ export class ObjectStackProtocolImplementation implements
     async publishPackageDrafts(request: {
         packageId: string;
         actor?: string;
-        /** ADR-0067 — commit message (for AI turns: the user's instruction). */
+        /**
+         * ADR-0067 — commit message (for AI turns: the user's instruction).
+         * [ADR-0146 D1] Also the change note of every item this publish
+         * promotes: each `sys_metadata_history` row it writes records it as
+         * `change_note`. Absent or empty, those rows keep the sentence naming
+         * the package.
+         */
         message?: string;
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
@@ -24187,7 +24358,15 @@ export class ObjectStackProtocolImplementation implements
                             // an object draft beside them may name.
                             batchDatasources,
                             ...(request.actor ? { actor: request.actor } : {}),
-                            message: `publish app package '${request.packageId}'`,
+                            // [ADR-0146 D1] The author's change note, when the
+                            // publish carries one, is what every history row
+                            // this batch writes records as its `change_note`
+                            // (the same note the package commit below keeps),
+                            // so the item history says why the item changed.
+                            // With none, the sentence naming the package.
+                            message: request.message
+                                ? request.message
+                                : `publish app package '${request.packageId}'`,
                         });
                         promoted.push({
                             d, singularType,
@@ -26849,19 +27028,16 @@ export class ObjectStackProtocolImplementation implements
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
      */
-    async rollbackMetaItem(request: {
-        type: string;
-        name: string;
-        toVersion: number;
-        actor?: string;
-        message?: string;
-        /**
-         * [#22877] The bundle member to revert — {@link resolveBundleMemberSelector};
-         * omitted, the canonical one. The bundle shares one lineage counter, so
-         * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
-         */
-        member?: string;
-    }): Promise<{
+    async rollbackMetaItem(request: RollbackMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.rollbackMetaItem',
+        }, () => this.rollbackMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async rollbackMetaItemUnaudited(request: RollbackMetaItemRequest): Promise<{
         success: boolean;
         version: string;
         seq: number;
@@ -27460,38 +27636,16 @@ export class ObjectStackProtocolImplementation implements
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
      * with {@link saveMetaItem}.
      */
-    async deleteMetaItem(request: {
-        type: string;
-        name: string;
-        parentVersion?: string | null;
-        actor?: string;
-        state?: 'active' | 'draft';
-        /**
-         * When true, also drop the object's physical table after the metadata
-         * is removed (object + active only; never `sys_`). Default false keeps
-         * delete non-destructive to data. Used by the "discard a previewed
-         * object" flow so a publish-to-preview leaves no orphan table.
-         * [#23415] Only with the object's last stored row: while another row
-         * of it stays stored, the delete is refused `409 RESOURCE_CONFLICT`
-         * ({@link dropStorageRemainingRowsRefusal}).
-         */
-        dropStorage?: boolean;
-        /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
-        member?: string;
-        /**
-         * [#23165, ADR-0048] The package whose row this delete removes, as a
-         * save names the row it writes (`?package=` on the REST door). Named,
-         * the delete removes that package's row and no other. Absent or `null`
-         * names no package: the delete removes the row of the one package the
-         * item's rows at its state are bound to, is refused `409
-         * RESOURCE_CONFLICT` when they are bound to two or more, and with none
-         * removes the package-unbound row ({@link packagelessAddress}).
-         * [#23495] A draft discard naming none removes the draft a draft save
-         * naming none writes ({@link packagelessDraftAddress}), the one the
-         * per-item publish naming none promotes.
-         */
-        packageId?: string | null;
-    }): Promise<{
+    async deleteMetaItem(request: DeleteMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'delete', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.deleteMetaItem',
+        }, () => this.deleteMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async deleteMetaItemUnaudited(request: DeleteMetaItemRequest): Promise<{
         success: boolean;
         message?: string;
         reset?: boolean;

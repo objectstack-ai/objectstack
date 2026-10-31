@@ -247,6 +247,7 @@ import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
   deriveImplicitPackageBook,
+  PAGE_FORM_COMPONENT_TYPE,
   PAGE_TABS_COMPONENT_TYPE,
   hasPlatformObjectPrefix,
   isPlatformProvidedObjectName,
@@ -396,6 +397,14 @@ const IMPLICIT_FIELDS: ReadonlySet<string> = new Set([
   '_id', 'name', 'space',
 ]);
 
+/**
+ * The `_views` tails only a FORM view resolves — `title` (the form's heading,
+ * `config.title`) and `submitBehavior` (its thank-you panel,
+ * `config.submitBehavior`), both overlaid by `translateView`. The default
+ * form's key is legal for these alone.
+ */
+const FORM_ONLY_VIEW_TAILS: ReadonlySet<string> = new Set(['title', 'submitBehavior']);
+
 /** Everything a bundle may legally name under one object. */
 interface ObjectFacts {
   fields: Map<string, AnyRec>;
@@ -403,11 +412,12 @@ interface ObjectFacts {
   /**
    * The `_views` keys of the FORM views this object's containers serve — each
    * `formViews.<key>` entry, the default `form`, and a `viewKind: 'form'`
-   * item — the views a `_views.<view>.title` key addresses (`translateView`
-   * overlays it onto the form's `config.title`). A list view carries no
-   * title, so a `title` key over one resolves nothing. The default form's key
-   * is legal for `title` alone: its other `_views` tails stay non-keys (see
-   * {@link collectViewRecord}).
+   * item — the views a `_views.<view>.title` or `.submitBehavior` key
+   * addresses (`translateView` overlays them onto the form's `config.title`
+   * and `config.submitBehavior`). A list view carries neither, so either key
+   * over one resolves nothing. The default form's key is legal for those two
+   * alone ({@link FORM_ONLY_VIEW_TAILS}): its other `_views` tails stay
+   * non-keys (see {@link collectViewRecord}).
    */
   forms: Set<string>;
   actions: Map<string, AnyRec>;
@@ -562,7 +572,7 @@ interface Universe {
   pages: Map<string, Map<string, PageComponentFacts>>;
 }
 
-/** What the `items` check knows about one addressed page component. */
+/** What the `items` and `submitBehavior` checks know about one addressed page component. */
 interface PageComponentFacts {
   type: string | undefined;
   /** The `page:tabs` item `value`s (`pageTabItemKey`); empty for any other type. */
@@ -702,10 +712,11 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   // legal that no consumer ever reads. Its SECTIONS are a different matter —
   // `ObjectForm` resolves those, which is exactly what #5415 established.
   //
-  // One `_views` tail of the default form IS read: its `title`, which
-  // `translateView` overlays onto the served `<object>.form` item's
-  // `config.title`. So its runtime key is registered as a FORM key only
-  // (`forms`), legal for `title` and nothing else.
+  // Two `_views` tails of the default form ARE read: its `title` and its
+  // `submitBehavior`, which `translateView` overlays onto the served
+  // `<object>.form` item's `config.title` and `config.submitBehavior`. So its
+  // runtime key is registered as a FORM key only (`forms`), legal for those
+  // two and nothing else.
   if (isRec(view.form)) {
     const formBinding = bindingOf(view.form) ?? listBinding;
     addSections(view.form, formBinding);
@@ -1388,7 +1399,8 @@ function buildUniverse(stack: AnyRec): Universe {
   for (const page of artifactProvidedRecords(stack, 'pages')) collectPageRecord(page);
 
   // ── Pages: the components `pages.<page>.components.<id>` addresses, for the
-  //    `page:tabs` item key (`components.<id>.items.<value>.label`) ──
+  //    `page:tabs` item key (`components.<id>.items.<value>.label`) and the
+  //    `object-form` panel key (`components.<id>.submitBehavior`) ──
   //
   // Walked with spec's `walkAddressedPageComponents`, NOT lint's
   // `walkPageComponents`: the key is read by `translatePage`, which runs that
@@ -1905,12 +1917,11 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
 
         // _views.<name>
         for (const [viewName, rawView] of Object.entries(asRecord(rawNode._views))) {
-          const hasTitle = isRec(rawView) && 'title' in rawView;
           const isForm = facts.forms.has(viewName);
           // A `title` key translates a FORM view's heading only: over a list
           // view it resolves nothing (a list view has no title), where the
           // author most likely meant the tab's `label`.
-          if (hasTitle && !isForm && facts.views.has(viewName)) {
+          if (isRec(rawView) && 'title' in rawView && !isForm && facts.views.has(viewName)) {
             orphan(
               `${inLocale} · object "${objectName}" · view "${viewName}"`,
               `${objPath}._views.${viewName}.title`,
@@ -1919,9 +1930,20 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             );
             continue;
           }
+          // A `submitBehavior` key translates a FORM view's thank-you panel
+          // only: a list view submits nothing, so the key resolves nothing.
+          if (isRec(rawView) && 'submitBehavior' in rawView && !isForm && facts.views.has(viewName)) {
+            orphan(
+              `${inLocale} · object "${objectName}" · view "${viewName}"`,
+              `${objPath}._views.${viewName}.submitBehavior`,
+              `View "${viewName}" of object "${objectName}" is not a form view, so no thank-you panel resolves this key.`,
+              `Only a form view has a \`submitBehavior\`; key its panel under that form's own \`_views\` entry, or drop it.`,
+            );
+            continue;
+          }
           if (facts.views.has(viewName)) continue;
-          // The default form's key is legal for its `title` alone.
-          if (isForm && isRec(rawView) && Object.keys(rawView).every((k) => k === 'title')) continue;
+          // The default form's key is legal for its form-only tails alone.
+          if (isForm && isRec(rawView) && Object.keys(rawView).every((k) => FORM_ONLY_VIEW_TAILS.has(k))) continue;
           orphan(
             `${inLocale} · object "${objectName}" · view "${viewName}"`,
             `${objPath}._views.${viewName}`,
@@ -2154,18 +2176,47 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         }
       }
 
-      // ── pages.<name>.components.<id>.items.<value> ────────────────────
+      // ── pages.<name>.components.<id>.items.<value> / .submitBehavior ──
       //
-      // Only the `items` member is judged here: it is the one page key whose
-      // target this check can see whole — a declared tabs component's item
-      // `value`s. A page this stack does not declare is skipped (no rung
+      // Only the `items` and `submitBehavior` members are judged here: they
+      // are the two page keys whose target this check can see whole — a
+      // declared tabs component's item `value`s, and a declared
+      // `object-form`. A page this stack does not declare is skipped (no rung
       // judges `pages.<name>` itself yet), and so is every other member.
       for (const [pageName, rawPage] of Object.entries(asRecord(rawData.pages))) {
         const page = universe.pages.get(pageName);
         if (!page || !isRec(rawPage)) continue;
         const pagePath = `${base}.pages.${pageName}`;
         for (const [componentId, rawComponent] of Object.entries(asRecord(rawPage.components))) {
-          if (!isRec(rawComponent) || rawComponent.items === undefined) continue;
+          if (!isRec(rawComponent)) continue;
+          // An `object-form`'s thank-you panel: `translatePage` reads the key
+          // under a declared `object-form`'s id only, so one under any other
+          // component (or under an id the page does not declare) resolves
+          // nothing.
+          if (rawComponent.submitBehavior !== undefined) {
+            const panelPath = `${pagePath}.components.${componentId}.submitBehavior`;
+            const component = page.get(componentId);
+            const formHint = 'Thank-you panel translations go under the `id` of an `object-form` component.';
+            if (!component) {
+              orphan(
+                `${inLocale} · page "${pageName}" · component "${componentId}"`,
+                panelPath,
+                `Translations carry a thank-you panel for "${componentId}", a component id page "${pageName}" ` +
+                  `does not declare, so nothing resolves it.` +
+                  suggest(componentId, [...page].filter(([, c]) => c.type === PAGE_FORM_COMPONENT_TYPE).map(([id]) => id)),
+                formHint,
+              );
+            } else if (component.type !== PAGE_FORM_COMPONENT_TYPE) {
+              orphan(
+                `${inLocale} · page "${pageName}" · component "${componentId}"`,
+                panelPath,
+                `Translations carry a thank-you panel for "${componentId}", which page "${pageName}" declares as a ` +
+                  `\`${component.type ?? 'component'}\`, not an \`object-form\`, so nothing resolves it.`,
+                formHint,
+              );
+            }
+          }
+          if (rawComponent.items === undefined) continue;
           const itemsPath = `${pagePath}.components.${componentId}.items`;
           const where = `${inLocale} · page "${pageName}" · component "${componentId}"`;
           const tabsHint = 'Tab-item translations go under the `id` of a `page:tabs` component.';
@@ -2573,14 +2624,18 @@ interface ActionEntryContext {
  *   | `outcomeMessages.<outcome>`         | the action's `outcomeMessages` keys  | `resolveActionOutcomeMessages`  |
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
+ *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
  *
  * A dialog leaf under a DECLARED dialog is read whether or not the dialog
  * authors that leaf itself — the resolver overlays a translated `title` onto a
  * dialog that declares none — so declaring the dialog is the whole condition.
  *
- * The leaf keys beside them (`label`, `description`, `confirmText`,
- * `successMessage`, `disabledReason`) are prose on a node that resolved, read
- * whenever the action is, as on the object branch.
+ * `submitText` is the param dialog's button, the one leaf with a host of its
+ * own: the dialog opens only for a non-empty `params`, and `translateAction`
+ * overlays the key only then (#27944). The leaf keys beside them (`label`,
+ * `description`, `confirmText`, `successMessage`, `disabledReason`) are prose
+ * on a node that resolved, read whenever the action is, as on the object
+ * branch.
  *
  * ⛔ One vocabulary: a key naming a target the action does not declare is
  * `translation-target-unknown` at `params`' severity; an OPTION key keyed off
@@ -2593,6 +2648,32 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionOutcomeMessages(findings, ctx);
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
+  checkActionSubmitText(findings, ctx);
+}
+
+/**
+ * [#27944] `submitText` — the label of the param dialog's submit button. The
+ * dialog opens only for an action with a non-empty `params`, and
+ * `translateAction` overlays the key only for such an action, so under any
+ * other action the translation is read by nothing: the result-dialog leaves'
+ * rule (declaring the dialog is the whole condition), with `params` as the
+ * declaration.
+ */
+function checkActionSubmitText(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  if (!isRec(ctx.rawAction) || ctx.rawAction.submitText === undefined) return;
+  if (Array.isArray(ctx.action.params) && ctx.action.params.length > 0) return;
+  findings.push({
+    severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+    rule: TRANSLATION_TARGET_UNKNOWN,
+    where: `${ctx.where} · submit button`,
+    path: `${ctx.path}.submitText`,
+    message:
+      `Translations carry a param dialog \`submitText\`, but ${ctx.subject} declares no ` +
+      `\`params\`, so it opens no param dialog and nothing reads this label.`,
+    hint:
+      `Move the \`submitText\` translation under the action that collects the params, declare ` +
+      `\`params\` on this action first if it should open a dialog, or drop it.`,
+  });
 }
 
 /** Action-parameter translations are keyed by the param's `name`. */

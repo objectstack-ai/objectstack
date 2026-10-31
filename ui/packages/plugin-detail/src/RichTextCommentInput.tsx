@@ -19,6 +19,7 @@ import {
   Send,
 } from 'lucide-react';
 import { useDetailTranslation } from './useDetailTranslation';
+import { extractMentions } from './extractMentions';
 
 export interface MentionSuggestion {
   id: string;
@@ -41,15 +42,35 @@ export interface RichTextCommentInputProps {
   /** When true, the Send button is enabled even if the text value is empty.
    *  Hosts pass this when attachments-only submits should be allowed. */
   canSubmitEmpty?: boolean;
+  /** Focus the editor when it mounts: the 动态 panel opens this composer
+   *  from its one-line stand-in, and the reader's press lands in it. */
+  autoFocus?: boolean;
 }
 
-/** Render minimal markdown to HTML for preview. */
-function renderMarkdown(text: string): string {
-  let html = text
-    // Escape HTML
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+/** The look of a picked mention, in the preview and in the composer's chip row. */
+const MENTION_CHIP_CLASS =
+  'inline-flex items-center rounded-full bg-primary/10 px-1.5 text-primary font-medium';
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Render minimal markdown to HTML for preview. `@LABEL` of a picked mention
+ * (a label in `mentionLabels`, the suggestions the write resolves mentions
+ * through) is drawn as a chip, longest label first and only where no letter
+ * or digit follows, as `extractMentions` matches it; any other `@word` keeps
+ * the plain highlight.
+ */
+function renderMarkdown(text: string, mentionLabels: readonly string[] = []): string {
+  const picked = [...mentionLabels]
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map((label) => escapeHtml(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const mentionRe = picked.length
+    ? new RegExp(`@(?:(${picked.join('|')})(?![\\p{L}\\p{N}_])|(\\w+))`, 'gu')
+    : /@()(\w+)/g;
+  let html = escapeHtml(text)
     // Code blocks (```)
     .replace(/```([\s\S]*?)```/g, '<pre class="bg-muted rounded p-2 text-xs font-mono my-1 overflow-x-auto">$1</pre>')
     // Inline code
@@ -58,8 +79,12 @@ function renderMarkdown(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     // Italic
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    // @mentions
-    .replace(/@(\w+)/g, '<span class="text-primary font-medium">@$1</span>')
+    // @mentions: a picked one as a chip, any other `@word` highlighted
+    .replace(mentionRe, (_match: string, label: string | undefined, word: string) =>
+      label
+        ? `<span class="${MENTION_CHIP_CLASS}" data-mention-chip="">@${label}</span>`
+        : `<span class="text-primary font-medium">@${word}</span>`,
+    )
     // Unordered lists
     .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     // Line breaks
@@ -84,6 +109,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   disabled = false,
   extraSlot,
   canSubmitEmpty = false,
+  autoFocus = false,
 }) => {
   const { t } = useDetailTranslation();
   const [isPreview, setIsPreview] = React.useState(false);
@@ -91,6 +117,22 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   const [mentionQuery, setMentionQuery] = React.useState('');
   const [mentionIndex, setMentionIndex] = React.useState(0);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  React.useEffect(() => {
+    if (autoFocus) textareaRef.current?.focus();
+    // On mount only: a later re-render must not pull focus back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The mentions the text holds, resolved the way the write resolves them
+  // (`extractMentions`), drawn as chips under the editor.
+  const pickedMentions = React.useMemo(() => {
+    const ids = new Set(extractMentions(value, mentionSuggestions));
+    return mentionSuggestions.filter((s) => ids.has(s.id));
+  }, [value, mentionSuggestions]);
+  const mentionLabels = React.useMemo(
+    () => mentionSuggestions.map((s) => s.label),
+    [mentionSuggestions],
+  );
 
   const filteredMentions = React.useMemo(() => {
     if (!mentionQuery) return mentionSuggestions;
@@ -305,7 +347,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
         {isPreview ? (
           <div
             className="min-h-[80px] px-3 py-2 text-sm prose prose-sm max-w-none"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(value) }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(value, mentionLabels) }}
           />
         ) : (
           <>
@@ -318,6 +360,23 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
               onKeyDown={handleKeyDown}
               disabled={disabled}
             />
+
+            {pickedMentions.length > 0 && (
+              <ul
+                aria-label={t('detail.mentionedPeople')}
+                className="flex flex-wrap gap-1 px-3 pb-2"
+                data-testid="mention-chips"
+              >
+                {pickedMentions.map((s) => (
+                  <li key={s.id} className={cn(MENTION_CHIP_CLASS, 'gap-1 py-0.5 text-xs')} data-mention-chip="">
+                    {s.avatarUrl ? (
+                      <img src={s.avatarUrl} alt="" className="h-4 w-4 rounded-full object-cover" />
+                    ) : null}
+                    <span>@{s.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             {/* @mention dropdown */}
             {showMentions && filteredMentions.length > 0 && (

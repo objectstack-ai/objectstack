@@ -503,6 +503,30 @@ record as a full page in a new browser tab. Inert rows stay inert: `mode: 'none'
 `preventNavigation`, and `operations.read: false` without a `navigation` config
 ignore a modifier click too.
 
+#### The Console's record pane
+
+In the Console's object pages, a record that opens in the drawer opens
+**beside the list** by default. The pane is 720 px wide, and the reader can
+drag its divider from 360 px to 60% of the viewport. The list next to it stays
+readable and clickable:
+
+- it shows its first three non-avatar columns, or one card row per record when
+  it is narrower than 440 px;
+- the open record's row is highlighted and follows the pane's ↑ ↓;
+- clicking another row swaps the record.
+
+On a content area narrower than 1000 px, the pane becomes the drawer over the
+list. The drawer is non-modal too. Readers who prefer the drawer, or the full
+page, choose it in the list's Display menu (Open records). That choice is the
+reader's own, stored in the browser, never metadata.
+
+The pane's ⤢ maximizes it in place, up to the sidebar. The URL and history
+stay as they are, and ⤡ or `Esc` restores it. The full page opens from a row's
+↗, or from 「Open as full page」, the last host item of the record header's
+`⋯`. 「Collapse to drawer」 on that page returns to the list only when the ↗
+opened it. None of this is declared in metadata: `navigation.mode` still
+decides only whether a record opens in the drawer at all.
+
 ## CRUD Operations
 
 All four operations are built in and run against the `dataSource` prop. You do

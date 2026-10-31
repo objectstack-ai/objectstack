@@ -33,7 +33,8 @@
  *   3. A child row action that bypasses the dataSource (posted as an
  *      object-wide change by `notifyRelatedChanged`) does the same.
  *   4. The refetch is IN PLACE (AGENTS.md #8): the header is the same DOM node
- *      and the Related tab stays the active tab.
+ *      and the related list's whole face (`?related=`, which took the Related
+ *      tab's place in objectstack#27524) stays open.
  *   5. Scope stays tight: a write to an object that is not one of the page's
  *      related children does not re-read the parent, and a `'*'` or a change
  *      to the parent itself reads it once, not twice.
@@ -215,7 +216,7 @@ function renderPage(ds: FakeDataSource) {
     getItemsByType: () => [],
   } as unknown as React.ContextType<typeof MetadataCtx>;
   return render(
-    <MemoryRouter initialEntries={[`/apps/${APP}/${PARENT}/record/${RECORD_ID}?tab=related`]}>
+    <MemoryRouter initialEntries={[`/apps/${APP}/${PARENT}/record/${RECORD_ID}?related=${CHILD}.${PARENT}`]}>
       <MetadataCtx.Provider value={metadata}>
         <ConsoleHost dataSource={ds}>
           <Routes>
@@ -288,9 +289,9 @@ describe('RecordDetailView — a child write in a related list refreshes the par
     await waitFor(() => expect(parentReads(ds)).toBe(2));
     await waitFor(() => expect(figureShown(3000)).toBe(true));
     expect(figureShown(9000)).toBe(false);
-    // In place: the same header node, the Related tab still the active one.
+    // In place: the same header node, the list's face still the open one.
     expect(document.querySelector('header')).toBe(headerBefore);
-    expect(screen.getByRole('tab', { name: /Related/i }).getAttribute('aria-selected')).toBe('true');
+    expect(document.querySelector(`[data-related-enlarged="${CHILD}.${PARENT}"]`)).not.toBeNull();
   });
 
   it('a child update through the dataSource (the form overlay\'s save) re-reads the parent', async () => {

@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // refusal an authored source meets and the edit only its author can make.
 export const entry: SemanticMigration = {
   id: 'stage-field-option-kind-required',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface: 'object.stageField naming a select whose options declare no kind (data/object.zod.ts)',
   replacement:
     "`kind: 'open' | 'won' | 'lost'` on every option of the field `stageField` names, for example "

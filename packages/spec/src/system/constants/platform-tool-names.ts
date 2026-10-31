@@ -56,8 +56,10 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
   ],
   /**
    * `@objectstack/service-ai-studio` (cloud) — the shared schema-reader pair
-   * (`describe_object`/`list_objects`) plus the `build` authoring product's
-   * metadata/blueprint/package/verify tools.
+   * (`describe_object`/`list_objects`), the `build` authoring product's
+   * metadata/blueprint/package/verify tools, and the `ask` agent's hand-off
+   * signals (`suggest_builder`, `open_record`, `draft_record`), which write
+   * nothing.
    */
   'service-ai-studio': [
     'add_field',
@@ -70,6 +72,7 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
     'delete_field',
     'describe_metadata',
     'describe_object',
+    'draft_record',
     'get_active_package',
     'get_authoring_rules',
     'get_metadata_schema',

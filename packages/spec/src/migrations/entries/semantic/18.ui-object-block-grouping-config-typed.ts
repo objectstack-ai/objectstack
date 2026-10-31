@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // field, never trimmed in silence.
 export const entry: SemanticMigration = {
   id: 'ui-object-block-grouping-config-typed',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'the grouping property of the object-grid and object-kanban page blocks '
     + "(ComponentPropsMap['object-grid' | 'object-kanban'].grouping), which was z.unknown and "

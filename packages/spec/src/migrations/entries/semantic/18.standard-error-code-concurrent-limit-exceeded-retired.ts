@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'standard-error-code-concurrent-limit-exceeded-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'error.code value CONCURRENT_LIMIT_EXCEEDED — a StandardErrorCode member retired from the '
     + 'closed catalogue, so constructing or parsing an error with it now refuses at every catalogue '

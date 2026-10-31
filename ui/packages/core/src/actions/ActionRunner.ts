@@ -151,6 +151,16 @@ export interface ActionDef {
    */
   description?: UIActionSchema['description'];
   /**
+   * Label of the submit button in the param-collection dialog — the verb the
+   * button performs ("Send", "Log Call"), in place of the dialog's default
+   * "Confirm". Derived from the spec field: an `I18nLabel`, a string or an
+   * inline per-locale map. Display copy only — the runner never reads it; the
+   * console's param-collection handlers resolve it (the translation bundle's
+   * `_actions.ACTION.submitText` first, then the authored text collapsed to the
+   * active language) and the param dialog draws it.
+   */
+  submitText?: SpecActionInput['submitText'];
+  /**
    * Confirmation text — shows a confirm dialog before executing. The ONE
    * confirm spelling: `@objectstack/spec`'s action surface and the
    * TranslationBundle key (`{ns}.objects.{obj}._actions.{name}.confirmText`)
@@ -196,6 +206,19 @@ export interface ActionDef {
    * so the two keys cannot drift apart again.
    */
   disabled?: SpecActionInput['disabled'];
+  /**
+   * Pressed-state predicate — the button is drawn already pressed for this
+   * reader (`aria-pressed="true"` and the pressed face) while it holds.
+   *
+   * Derived from the spec field. Unlike {@link ActionDef.disabled} it has no
+   * boolean arm: the spec refuses a literal, because a constant is a style and
+   * not the reader's state. Display only — the runner never reads it, and a
+   * pressed action stays runnable. Drawn by the record header
+   * (`PageHeaderActions`) and the declared actions bar
+   * (`DeclaredActionButton`); a predicate that cannot be evaluated draws the
+   * plain, unpressed button.
+   */
+  pressed?: SpecActionInput['pressed'];
   /**
    * API endpoint (string URL or complex config).
    *

@@ -920,6 +920,41 @@ const actionDisabledReason = () => z.union([
 ]);
 
 /**
+ * [#27944] `submitText` — the verb on the submit button of the dialog an action
+ * opens to collect its `params` ("Send", "Log Call"), in place of the dialog's
+ * default "Confirm".
+ *
+ * An I18nLabel (a plain string translated at
+ * `objects.OBJECT._actions.ACTION.submitText`, or an inline locale map), the
+ * route `description` — the same dialog's line under its title — takes. The
+ * name is the protocol's existing word for a submit button's copy:
+ * `object-form`'s `submitText` (`component.zod.ts`), beside its `cancelText`.
+ * `submitLabel` is the spelling the platform retired twice in favour of that
+ * one (the `element:form` prop and the page component-copy translation key),
+ * so it is an alias here, not the key.
+ *
+ * It is not `confirmText`. That one is the MESSAGE of the confirm dialog a
+ * param-LESS action opens; this one is the BUTTON of the param dialog, the
+ * dialog an action with params opens instead. The two never meet on one
+ * registered action: `confirmText` beside a non-empty `params` is refused
+ * below, and so is `submitText` without one — an action with no params opens
+ * no param dialog, so the text would parse clean and never show (ADR-0078).
+ *
+ * A blank string is refused for the reason `disabledReason`'s is: it would
+ * replace the default label with an empty button. Omitting the key keeps
+ * "Confirm". The rule is {@link NON_BLANK_STRING}, so the published JSON Schema
+ * carries it too.
+ */
+const SUBMIT_TEXT_BLANK =
+  'a blank `submitText` would replace the param dialog\'s default button label, "Confirm", with '
+  + 'an empty button. Write the verb the button performs (e.g. "Send", "Log Call"), or omit the '
+  + 'key to keep the default.';
+const actionSubmitText = () => z.union([
+  z.string().refine(NON_BLANK_STRING, { message: SUBMIT_TEXT_BLANK }),
+  InlineLocaleMapSchema,
+]);
+
+/**
  * The object half of {@link ActionSchema}, before its refinements.
  *
  * A factory rather than a schema so `lazySchema`'s deferral still holds — the
@@ -953,6 +988,15 @@ const actionObject = () => strictObject({
     // by the copy keys' `*Message` family.
     disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
     disabledHint: 'disabledReason', disabledText: 'disabledReason',
+    // [#27944] The two spellings of the param dialog's button copy that are
+    // measured on a neighbouring surface: `submitLabel`, the form copy key the
+    // platform retired in favour of `submitText`, and `confirmLabel`, the
+    // spelling of the same button on a view's `bulkActionDefs` dialog. Neither
+    // is reachable by distance from `submitText`.
+    submitLabel: 'submitText', confirmLabel: 'submitText',
+    // [#27946] The card's own second spelling (`active`) and the `*When`
+    // predicate family's spelling of the pressed-state predicate.
+    active: 'pressed', activeWhen: 'pressed', pressedWhen: 'pressed',
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
@@ -1370,6 +1414,12 @@ const actionObject = () => strictObject({
         : undefined
     ),
   }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
+
+  /**
+   * The submit button label of the dialog `params` opens — the contract is
+   * on {@link actionSubmitText}.
+   */
+  submitText: actionSubmitText().optional().describe('Label of the submit button in the action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"), in place of the default "Confirm" — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action). Only on an action with a non-empty `params`: without one no param dialog opens, so it is refused. Not `confirmText`, which is the message of a param-less action\'s confirm dialog. A blank label is refused.'),
   
   /** Visual Style */
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'link']).optional().describe('Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent)'),
@@ -1584,6 +1634,34 @@ const actionObject = () => strictObject({
    * only; the contract is on {@link actionDisabledReason}.
    */
   disabledReason: actionDisabledReason().optional().describe('Display-only reason a greyed action shows (its hover title and accessible description, or a menu item\'s second line) while `disabled` evaluates TRUE — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused.'),
+  /**
+   * [#27946] Whether the action is drawn as ALREADY PRESSED for this reader —
+   * the toggle face of a button the reader acts on and can act on again
+   * ("you voted Helpful"). A CEL predicate over the same scope as `visible`
+   * and `disabled` (`record`, the reader), evaluated by the action surface
+   * against the row it fetched; TRUE draws the button pressed
+   * (`aria-pressed="true"`), FALSE or absent draws it as a plain button.
+   *
+   * Display only, like {@link actionDisabledReason}: it never gates, greys or
+   * routes the action — a pressed action stays runnable, and the action's own
+   * body decides what a second press does (records again, withdraws, or
+   * answers "already").
+   *
+   * No boolean arm, unlike `visible` / `disabled`: a literal `true` would draw
+   * the button pressed for every reader on every record, which is a static
+   * style and not a reader's state, so it is refused at parse with the
+   * evaluated-slot sentence.
+   *
+   * Reading the reader's OWN state. A per-reader fact is rarely a column of
+   * the row — a vote is a child row per user. The row reaches the predicate
+   * through the object's `attachedOnRead` block: the serving side computes
+   * it per caller (a service, or an app's `afterFind` hook shaping the rows
+   * it returns) and the predicate reads `record.<block>.<leaf>`, guarded with
+   * `has()` because a row fetched by another route carries no block. Action
+   * predicates are the sites where the build validator resolves a declared
+   * block (`SERVED_ROW_SITES` in `@objectstack/lint`).
+   */
+  pressed: EvaluatedExpressionInputSchema.optional().describe('Pressed-state predicate (CEL string or `{dialect, source}` envelope) over the same scope as `visible`: the action surface draws the button as already pressed for this reader (a toggle face, `aria-pressed`) while it evaluates TRUE. Display only — it never gates, greys or routes the action. A per-reader fact (e.g. the reader\'s own vote) is read from a block the object declares under `attachedOnRead`, as `has(record.viewer) && record.viewer.vote == \'helpful\'`. A boolean literal is refused: a constant is a style, not a reader\'s state. Omit = never drawn pressed.'),
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a
@@ -1610,11 +1688,6 @@ const actionObject = () => strictObject({
    * and ungoverned — the door does not dispatch it, MCP does not list it, the
    * activation switch refuses to flip it, and nothing checks this declaration
    * server-side.
-   *
-   * Landing, as of 2026-10-29: ADR-0066 records the decision; the server half,
-   * the ruling's step 2 (#27506), is on `main` (#27649). Until step 3 (#27611)
-   * lands the console fetches `target` directly; card #27694 removes this
-   * paragraph when it does.
    */
   requiredPermissions: z.array(z.string()).optional().describe('[ADR-0066 D4] Capabilities required to invoke this action. Enforced with 403 on every call the platform action door (`POST /actions/:object/:action` and MCP `run_action`) dispatches, and mirrored as a UI hide. ADR-0066 D4, as amended 2026-10-29, brings a `type: api` action whose declared `target` is a same-origin platform path (exactly one leading `/`, followed by neither `/` nor a backslash, with a path after it) under that door; its `target` endpoint stays directly reachable, so it MUST still enforce this capability itself, the door\'s gate being the added check. A `type: api` action with an off-origin `target` is browser-only and not gated server-side.'),
 
@@ -2167,6 +2240,24 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
     + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
   path: ['confirmText'],
+}).refine((data) => {
+  // [#27944] The mirror of the rule above, for the param dialog's button copy.
+  // The console's action runner opens the param dialog only for a non-empty
+  // `params` array (objectui `ActionRunner.execute`), so `submitText` on any
+  // other action parses clean and is never drawn — the ADR-0078 shape. Scoped
+  // by schema boundary like the rule above: `InlineActionSchema` does not pick
+  // the key at all.
+  if (data.submitText != null && !(Array.isArray(data.params) && data.params.length > 0)) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    '`submitText` labels the submit button of the dialog an action opens to collect its `params`, '
+    + 'and this action declares no `params`, so it opens no such dialog and the label would never '
+    + 'show. Declare the `params` the dialog collects, or drop `submitText`. A param-less action '
+    + 'that asks first opens a confirm dialog instead, whose message is `confirmText`.',
+  path: ['submitText'],
 }).superRefine((data, ctx) => {
   // #9566/#9474 — `onSuccess` is scoped to the action types whose success
   // carries a result for `${result.*}` to read: `api` (the `target` call's

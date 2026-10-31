@@ -88,6 +88,11 @@ export const en: TranslationData = {
         nav_teams: { label: 'Teams' },
         nav_organizations: { label: 'Organizations' },
         nav_invitations: { label: 'Invitations' },
+        // Contributed by @objectstack/plugin-security (ADR-0146 D7): the two
+        // assignment pages, `security:position-holders` and
+        // `security:permission-set-assignment`.
+        nav_position_holders: { label: 'Position Holders' },
+        nav_permission_set_assignment: { label: 'Permission Set Assignment' },
 
         // Access Control
         nav_positions: { label: 'Positions' },
@@ -155,6 +160,7 @@ export const en: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'HTTP Deliveries' },
         nav_datasources: { label: 'Datasources' },
+        nav_connector_credentials: { label: 'Connector Credentials' },
 
         // Advanced
         //

@@ -633,6 +633,19 @@ function manifestIdOf(p: any): string | undefined {
 }
 
 /**
+ * [#28039] The datasources a package body declares, as `AppPlugin` reads a
+ * stack's: a list, or a map keyed by name.
+ */
+function declaredDatasources(body: unknown): any[] {
+    const defs = isPlainObject(body) ? body.datasources : undefined;
+    return Array.isArray(defs)
+        ? defs
+        : isPlainObject(defs)
+            ? Object.entries(defs).map(([name, def]) => ({ name, ...(def as any) }))
+            : [];
+}
+
+/**
  * The seed datasets a cached manifest bundles: its `data[]` entries that name
  * an object and carry records. One reading for the two doors that match seed
  * rows — the purge, and the listing's `withSampleData` (#21775).
@@ -1009,6 +1022,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     const ql: any = ctx.getService('objectql');
                     if (ql && typeof ql.syncSchemas === 'function') await ql.syncSchemas();
                 } catch { /* non-fatal */ }
+                // [#28039] Connect the package's declared datasources — the
+                // boot artifact's were connected in `AppPlugin.start`, and this
+                // package arrives after it.
+                await this.connectDeclaredDatasources(ctx, converted, entry.manifestId, entry.version);
                 // [#21321] Bind the package's script-action bodies and body
                 // hooks — `register` above makes them declared, not runnable.
                 await this.bindArtifactHandlers(ctx, converted, entry.manifestId);
@@ -1788,6 +1805,48 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 409);
         }
 
+        // 2a. [#28039] The package's datasources are registered as code and
+        //     connected in step 4b′, so a name another holder already owns —
+        //     the host's `default`, a datasource created in Setup or another
+        //     package's — is refused here, before any write: connecting would
+        //     hand the package's objects that holder's pool (the connect is
+        //     idempotent on the name), and recording the name as code would
+        //     make the holder's own datasource read-only to the admin door.
+        //     [#28143] Judged by the runtime's ONE judge, which reads the data
+        //     engine as well (a driver the legacy `onEnable` bridge registered
+        //     has no metadata item), and a holder that cannot be read refuses
+        //     `503`: a check that did not run is never taken for "no holder".
+        const heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        if (heldDatasource && 'reading' in heldDatasource) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] install of ${manifestId} refused: whether another holder owns its datasource `
+                + `'${heldDatasource.name}' could not be judged — ${heldDatasource.reading} could not be read (${heldDatasource.error})`,
+            );
+            return c.json({
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: `Package '${manifestId}' cannot be installed now: it declares the datasource '${heldDatasource.name}', `
+                        + `and whether another holder already owns that name could not be checked (${heldDatasource.reading} `
+                        + 'could not be read). A check that did not run is never taken for "no holder". Nothing was installed '
+                        + 'or written. Retry once that store answers.',
+                    details: { datasource: heldDatasource.name, reading: heldDatasource.reading },
+                },
+            }, 503);
+        }
+        if (heldDatasource) {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'RESOURCE_CONFLICT',
+                    message: `Package '${manifestId}' cannot be installed: it declares the datasource '${heldDatasource.name}', `
+                        + `and ${heldDatasource.holder} already holds that name in this system. Rename the package's datasource, `
+                        + 'or remove the one holding the name first.',
+                    details: { datasource: heldDatasource.name },
+                },
+            }, 409);
+        }
+
         // 2b. [ADR-0120 D5e] `isolated`-posture gate on installation-wide
         //     uniques. Runs BEFORE hot-register and before anything is written
         //     to the ledger: a stopped install must leave the runtime exactly as
@@ -1967,6 +2026,16 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             ctx.logger?.warn?.(`[MarketplaceInstallLocal] syncSchemas failed for ${manifestId}: ${err?.message ?? err}`);
         }
 
+        // 4b′. [#28039] Register, record and connect the package's declared
+        //     datasources through the runtime's ONE path — the call
+        //     `AppPlugin.start` makes for a boot artifact — after the schema
+        //     sync, where the boot connects them too. Only for a package the
+        //     running kernel holds: on the lenient path nothing of it is
+        //     registered until the restart's rehydrate, which connects them.
+        const datasources = hotLoadError === undefined
+            ? await this.connectDeclaredDatasources(ctx, converted, manifestId, version)
+            : undefined;
+
         // 4c. [#21321] Bind the package's script-action bodies and body hooks
         //     through the runtime's ONE binder — the call `AppPlugin.start`
         //     makes for a boot artifact. A reinstall replaces the previous
@@ -2026,6 +2095,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // [#27237] Omitted, not emptied, for a package whose connectors
                 // name no credential, so that answer's key set is unchanged.
                 ...(credentialRefs !== undefined ? { credentialRefs } : {}),
+                // [#28039] Each declared datasource's connect verdict — `connected`,
+                // or the connection service's named non-`ok` status (a credential
+                // it cannot resolve is `failed-credentials`). Omitted for a package
+                // that declares none, so that answer's key set is unchanged.
+                ...(datasources !== undefined ? { datasources } : {}),
                 ...(unsetRefs.length > 0 ? { credentialNote: installedCredentialNote(unsetRefs, { door }) } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 translationsLoaded: seededSummary.translationsLoaded,
@@ -3475,6 +3549,128 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         let ql: { convertPackageBodyForward?: (body: unknown) => unknown } | undefined;
         try { ql = ctx.getService('objectql') as typeof ql; } catch { /* no data engine */ }
         return typeof ql?.convertPackageBodyForward === 'function' ? ql.convertPackageBodyForward(manifest) : manifest;
+    };
+
+    /**
+     * [#28039] Register, record and connect the datasources `manifest`
+     * declares, through `connectPackageDatasources` — the ONE path, which
+     * `AppPlugin.start` takes for the artifact the host boots: each registered
+     * in the metadata registry as `origin: 'code'` stamped with this package,
+     * its name recorded in the host's code-datasource set, and connected
+     * through the `datasource-connection` service (the D2 gate and the host's
+     * connect policy apply as on a boot). A reinstall replaces the previous
+     * version's datasources; the uninstall withdraws them through the
+     * `runtime.package-datasources` uninstall cleanup.
+     *
+     * Before this, the door registered a package's objects and nothing of its
+     * datasources: an object bound to one had no driver, and the admin door
+     * did not serve the datasource as code-defined.
+     *
+     * ⛔ Where a declared credential comes from is not decided here (#27687):
+     * a credential the connection service cannot resolve is its
+     * `failed-credentials` verdict, which the datasource answers and a read of
+     * a bound object names (`ERR_DATASOURCE_UNAVAILABLE`).
+     *
+     * Answers each declared datasource's verdict, or `undefined` when the
+     * package declares none (or the runtime predates the path). Never throws:
+     * the package is installed either way.
+     */
+    private connectDeclaredDatasources = async (
+        ctx: PluginContext,
+        manifest: unknown,
+        manifestId: string,
+        version: string | undefined,
+    ): Promise<Array<{ name: string; status: string }> | undefined> => {
+        const declared = declaredDatasources(manifest);
+        let connect: typeof import('@objectstack/runtime')['connectPackageDatasources'] | undefined;
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.connectPackageDatasources === 'function') connect = mod.connectPackageDatasources;
+        } catch { /* reported below */ }
+        if (!connect) {
+            if (declared.length > 0) {
+                ctx.logger?.warn?.(
+                    `[MarketplaceInstallLocal] this runtime has no connectPackageDatasources — the datasources of ${manifestId} are NOT connected: `
+                    + 'the objects bound to them have no driver. Upgrade @objectstack/runtime alongside @objectstack/cloud-connection.',
+                );
+            }
+            return undefined;
+        }
+        const objects = isPlainObject(manifest) && Array.isArray(manifest.objects) ? manifest.objects : [];
+        try {
+            // Called with an empty list too: a reinstall whose new version
+            // declares none withdraws what the previous version registered.
+            const verdicts = await connect(ctx, {
+                appId: manifestId,
+                source: 'MarketplaceInstallLocal',
+                datasources: declared,
+                owned: declared.map((datasource) => ({
+                    datasource,
+                    owner: { packageId: manifestId, ...(typeof version === 'string' ? { packageVersion: version } : {}) },
+                })),
+                objects,
+                installed: true,
+            });
+            return declared.length > 0 ? verdicts : undefined;
+        } catch (err: any) {
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] the datasources of ${manifestId} could not be registered or connected: ${err?.message ?? err}`,
+            );
+            return declared.length > 0 ? [] : undefined;
+        }
+    };
+
+    /**
+     * [#28039] The first datasource `manifest` declares whose name another
+     * holder already owns, with that holder — or [#28143] whose holder could
+     * not be read, with what could not be. `undefined` when every name is free.
+     *
+     * The judge is the runtime's `datasourceNameHolder`, the one the
+     * rehydrate's `connectPackageDatasources` leaves a held name alone on: the
+     * host's `default`, a datasource item in the metadata registry not stamped
+     * with this package (one created in Setup, another package's), a name in
+     * the host's code-datasource set this package did not record, and a driver
+     * registered on the data engine with no metadata item. This package's own
+     * earlier registration is its own, so a reinstall passes.
+     *
+     * ⛔ Never `undefined` on a read fault: a holder that cannot be read is the
+     * `reading` answer, which the door refuses `503`. A runtime without the
+     * judge is that answer too.
+     */
+    private findHeldDatasourceName = async (
+        ctx: PluginContext,
+        manifest: unknown,
+        manifestId: string,
+    ): Promise<{ name: string; holder: string } | { name: string; reading: string; error: string } | undefined> => {
+        const names = declaredDatasources(manifest)
+            .map((ds) => ds?.name)
+            .filter((name): name is string => typeof name === 'string' && name.length > 0);
+        if (names.length === 0) return undefined;
+        let judge: typeof import('@objectstack/runtime')['datasourceNameHolder'] | undefined;
+        let loadError: unknown;
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.datasourceNameHolder === 'function') judge = mod.datasourceNameHolder;
+        } catch (err) {
+            loadError = err;
+        }
+        if (!judge) {
+            return {
+                name: names[0],
+                reading: "the runtime's datasource-name judge",
+                error: loadError !== undefined
+                    ? String((loadError as Error)?.message ?? loadError)
+                    : '@objectstack/runtime has no datasourceNameHolder — upgrade it alongside @objectstack/cloud-connection',
+            };
+        }
+        for (const name of names) {
+            const holding = await judge(ctx, manifestId, name);
+            if (holding.status === 'held') return { name, holder: holding.holder };
+            if (holding.status === 'unreadable') {
+                return { name, reading: holding.reading, error: String((holding.cause as Error)?.message ?? holding.cause) };
+            }
+        }
+        return undefined;
     };
 
     /**

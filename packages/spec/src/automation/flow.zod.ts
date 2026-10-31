@@ -23,7 +23,7 @@ import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
-import { predicateSlotRefusal, resolveFlowNodeExpressions } from './flow-node-expression-paths';
+import { predicateSlotRefusal, resolveFlowNodeExpressions, type FlowNodeSiblingBlocks } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { apiTriggerSecretRefRefusals } from './api-trigger-secret-ref.zod';
 // [#23543 F3] The loose `config` keys of the two sibling-block node types — one
@@ -667,8 +667,19 @@ function flowNodeObject() { return strictObject(
       // outbound credential belongs in the connector's own `auth.credentialRef`
       // (ADR-0097 §3), never here. `@objectstack/lint`'s
       // `flow-credential-literal` advisory names a literal that reads as one.
-      input: z.record(z.string(), z.unknown()).optional().describe(
-        'Mapped inputs for the action. The flow definition, this map included, is served to every member who can '
+      //
+      // [#27968] Every value is a value slot of the expression ledger
+      // (`FLOW_NODE_EXPRESSION_PATHS`' `connector_action` entry, rooted in this
+      // block): the marker below declares it, the executor evaluates a CEL
+      // envelope there before dispatch, and `registerFlow` and
+      // `objectstack validate` judge it — a malformed envelope, and a `{…}`
+      // template token in a string, are refused there. The value stays
+      // `z.unknown()`: like every value slot in a node's open `config`, the
+      // flow parse does not judge it.
+      input: z.record(z.string(), z.unknown().meta({ xExpression: 'value' })).optional().describe(
+        'Mapped inputs for the action. Each value is a literal, handed to the action as written, or a CEL value '
+          + 'envelope `{ dialect: \'cel\', source }` evaluated in the run\'s scope before dispatch; a `{…}` template '
+          + 'token in a string is refused when the flow is registered or validated. The flow definition, this map included, is served to every member who can '
           + 'read flows, so never put a credential here: the connector authenticates through its own '
           + '`auth.credentialRef`.',
       ),
@@ -851,6 +862,40 @@ function flowNodeObject() { return strictObject(
 }); }
 
 /**
+ * [#27968] Every property of a flow node OTHER than `config` — the sibling
+ * blocks `connectorConfig`, `waitEventConfig`, `boundaryConfig` and the rest —
+ * as JSON Schema, keyed by the property name, memoized.
+ *
+ * The third channel the expression ledger's reconciliation ratchet reads
+ * (`config-expression-ledger.test.ts` in `service-automation`), beside a
+ * descriptor's `configSchema` and `getSchemalessNodeConfigJsonSchemas()`: a
+ * `.meta({ xExpression })` marker inside a block declares a slot the ledger
+ * roots in that block (`FlowNodeExpressionPath.block`), and the ratchet maps
+ * the block to its node type through `FLOW_NODE_SIBLING_EXPRESSION_BLOCKS` —
+ * every block is handed over, not only the listed ones, so a marker on a block
+ * the ledger cannot address fails it instead of going unseen.
+ *
+ * Derived in `input` mode, like the schemaless channel, which is what carries
+ * the markers through verbatim.
+ */
+let cachedFlowNodeSiblingBlockJsonSchemas: Readonly<Record<string, unknown>> | undefined;
+export function getFlowNodeSiblingBlockJsonSchemas(): Readonly<Record<string, unknown>> {
+  if (cachedFlowNodeSiblingBlockJsonSchemas === undefined) {
+    const json = z.toJSONSchema(flowNodeObject(), {
+      target: 'draft-2020-12',
+      io: 'input',
+      unrepresentable: 'any',
+    }) as { properties?: Record<string, unknown> };
+    const out: Record<string, unknown> = {};
+    for (const [key, schema] of Object.entries(json.properties ?? {})) {
+      if (key !== 'config') out[key] = schema;
+    }
+    cachedFlowNodeSiblingBlockJsonSchemas = out;
+  }
+  return cachedFlowNodeSiblingBlockJsonSchemas;
+}
+
+/**
  * Flow Edge Schema
  * Connections between nodes.
  */
@@ -947,8 +992,9 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *     { id: "check_amount", type: "decision", label: "Check Amount", position: {x: 0, y: 100} },
  *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200},
  *       config: { objectName: "order", filter: { id: { dialect: "cel", source: "record.id" } }, fields: { status: "approved" } } },
- *     // `connectorConfig.input` is handed to the action as written: no template
- *     // is read there, so it holds literals.
+ *     // Each `connectorConfig.input` value is a literal, handed to the action as
+ *     // written, or a CEL value envelope evaluated in the run's scope before
+ *     // dispatch, e.g. `{ amount: { dialect: "cel", source: "record.amount" } }`.
  *     { id: "submit_for_approval", type: "connector_action", label: "Submit", position: {x: 100, y: 200},
  *       connectorConfig: { connectorId: "approvals_desk", actionId: "submit", input: { queue: "large_orders" } } }
  *   ],
@@ -1495,14 +1541,18 @@ export const FlowSchema = lazySchema(() => strictObject(
     graph.nodes.forEach((node, index) => {
       const type: unknown = (node as { type?: unknown } | null)?.type;
       if (typeof type !== 'string') return;
-      for (const found of resolveFlowNodeExpressions(type, (node as { config?: unknown }).config)) {
+      for (const found of resolveFlowNodeExpressions(
+        type,
+        (node as { config?: unknown }).config,
+        node as FlowNodeSiblingBlocks,
+      )) {
         if (found.entry.role !== 'predicate') continue;
         if (typeof found.value !== 'string' && !(found.entry.required && found.value == null)) continue;
         const refusal = predicateSlotRefusal(found.value);
         if (!refusal) continue;
         ctx.addIssue({
           code: 'custom',
-          path: [...graph.path, 'nodes', index, 'config', ...ledgerPathSegments(found.path)],
+          path: [...graph.path, 'nodes', index, found.block, ...ledgerPathSegments(found.path)],
           message: refusal.message,
         });
       }

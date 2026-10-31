@@ -590,6 +590,27 @@ const deletedWhen: Scrub = (value, denied) => {
 };
 
 /**
+ * [ADR-0106 D1] One `lookupAutofill` pair `{ target, source, overwrite? }`
+ * (#27945). `target` is a field of THIS object the pick fills; `source` names a
+ * field of the lookup's `reference` object — that object's projection governs
+ * it, and this scrub cannot verify it, so it is kept. A pair whose `target` is
+ * denied is dropped whole: a bare `source` would fill a column the caller is not
+ * served. An emptied list is deleted by {@link arrayOf}.
+ */
+export const LOOKUP_AUTOFILL_PAIR_POSITIONS: Readonly<Record<string, Scrub>> = {
+    target: pointer,
+    source: keep,
+    overwrite: keep,
+};
+
+const lookupAutofillPair: Scrub = (value, denied) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
+    const rec = value as Record<string, unknown>;
+    if (typeof rec.target === 'string' && namesDeniedField(rec.target, denied)) return REMOVE;
+    return scrubRecord(rec, LOOKUP_AUTOFILL_PAIR_POSITIONS, denied);
+};
+
+/**
  * [ADR-0106 D1] Every `FieldSchema` key, classified. Pinned against the live
  * schema shape by `object-schema-fls-references.test.ts`.
  */
@@ -598,7 +619,7 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     name: keep, label: keep, type: keep, description: keep, format: keep, required: keep,
     storage: keep, searchable: keep, multiple: keep, unique: keep, maxLength: keep,
     minLength: keep, valueDomain: keep, rows: keep, precision: keep, scale: keep, min: keep,
-    max: keep, useGrouping: keep, accept: keep, maxSize: keep, picklist: keep, reference: keep,
+    max: keep, useGrouping: keep, percentDisplay: keep, accept: keep, maxSize: keep, picklist: keep, reference: keep,
     deleteBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
     relatedListTitle: keep, lookupPageSize: keep, allowCreate: keep, returnType: keep,
     language: keep, step: keep, currencyConfig: keep, dimensions: keep, trackHistory: keep,
@@ -629,6 +650,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     referenceDeletedWhen: deletedWhen,
     inlineAmountField: pointer,
     inlineColumns: arrayOf(inlineColumn),
+    // A lookup's pick autofill pairs (#27945): each `target` is a field of this
+    // object, each `source` one of the referenced object's.
+    lookupAutofill: arrayOf(lookupAutofillPair),
     relatedListColumns: names,
     dependsOn: nameList(DEPENDS_ON_ENTRY_POSITIONS),
     // Evaluated against this object's record.

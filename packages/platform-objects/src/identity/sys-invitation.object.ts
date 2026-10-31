@@ -9,6 +9,20 @@ import {
   MEMBERSHIP_ROLE_MEMBER,
 } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES, RESEND_INVITATION_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
+import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
+
+/**
+ * The display label of each invitation status. Keyed by the spec enum, so a
+ * value the enum gains fails to compile here until it has a label. `rejected`
+ * reads "Declined": the invitee's action is Decline Invitation.
+ */
+const INVITATION_STATUS_LABELS: Record<InvitationStatus, string> = {
+  pending: 'Pending',
+  accepted: 'Accepted',
+  rejected: 'Declined',
+  expired: 'Expired',
+  canceled: 'Canceled',
+};
 
 /**
  * sys_invitation — System Invitation Object
@@ -90,8 +104,14 @@ export const SysInvitation = ObjectSchema.create({
         // (`INVITATION_ROLE_GRANTORS`), so a delegated_admin is offered
         // `member` alone. Declared on the param, not inherited from the
         // field, so the gate narrows this dialog and no other picker.
-        { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+        { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Invite a person by email address to join the current organization with a role (params: email, role). They join when they accept the invitation. Use when the user asks to invite someone who is not a member yet; the role options are only the roles the caller may grant.',
+      },
     },
     {
       name: 'cancel_invitation',
@@ -108,10 +128,24 @@ export const SysInvitation = ObjectSchema.create({
       confirmText: 'Cancel this invitation? The recipient will no longer be able to accept it.',
       successMessage: 'Invitation canceled',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Cancel a pending invitation (the record), so its recipient can no longer accept it. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'resend_invitation',
       label: 'Resend Invitation',
+      // A confirmation, not a form: the question rides `description` (one
+      // dialog, see `action-confirm-one-dialog.test.ts`) and both params are
+      // carried over from the row. invite-member renews a pending invitation
+      // with its stored role whatever role is sent, and another email would
+      // invite a different person, so neither is the user's to edit here.
+      description: 'Resend the invitation to ${record.email}? Its expiry date starts over.',
       icon: 'send',
       variant: 'secondary',
       locations: ['list_item'],
@@ -126,10 +160,18 @@ export const SysInvitation = ObjectSchema.create({
       // [#27843] A resend answers the same delivery `outcome` as an invite.
       outcomeMessages: { ...RESEND_INVITATION_OUTCOME_MESSAGES },
       refreshAfter: true,
+      // Both seeded from the row, so every list view that offers this action
+      // projects `email` and `role` (`invitation-screens-copy.test.ts`).
       params: [
-        { field: 'email', required: true, defaultFromRow: true },
-        { field: 'role', required: true, defaultFromRow: true },
+        { field: 'email', required: true, defaultFromRow: true, carryOver: true },
+        { field: 'role', required: true, defaultFromRow: true, carryOver: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Send a pending invitation (the record) again (params: its email and role, copied from the invitation; the stored role is kept). Its expiry date starts over. Use when the invitee lost the invitation or never received it.',
+      },
     },
     {
       // [#27843, ruling E on #27797] The pending invitation's accept link, for
@@ -194,6 +236,12 @@ export const SysInvitation = ObjectSchema.create({
       visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending'",
       successMessage: 'Invitation accepted',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address.',
+      },
     },
     {
       name: 'reject_invitation',
@@ -208,6 +256,14 @@ export const SysInvitation = ObjectSchema.create({
       confirmText: 'Decline this invitation? The inviter will be notified and you will need a new invitation to join.',
       successMessage: 'Invitation declined',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Decline an invitation addressed to the current user (the record). The inviter is notified, and joining later needs a new invitation. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 
@@ -247,7 +303,7 @@ export const SysInvitation = ObjectSchema.create({
       name: 'expired',
       label: 'Expired / Canceled',
       data: { provider: 'object', object: 'sys_invitation' },
-      columns: ['email', 'status', 'organization_id', 'expires_at'],
+      columns: ['email', 'status', 'role', 'organization_id', 'expires_at'],
       filter: [{ field: 'status', operator: 'in', value: ['expired', 'rejected', 'canceled'] }],
       sort: [{ field: 'expires_at', order: 'desc' }],
       pagination: { pageSize: 50 },
@@ -328,10 +384,14 @@ export const SysInvitation = ObjectSchema.create({
     // the enum stopped at four values and so rejected a canceled row). Reading
     // the options from the enum makes a repeat impossible rather than merely
     // discouraged; `sys-invitation.status-vocabulary.test.ts` pins the rest.
-    status: Field.select([...InvitationStatus.options], {
+    // Each value carries a display label (`INVITATION_STATUS_LABELS`): the
+    // bare-string shorthand labelled every option with its stored value, so
+    // the list drew `pending` / `canceled` beside title-case tabs.
+    status: Field.select({
       label: 'Status',
       required: true,
       defaultValue: 'pending',
+      options: InvitationStatus.options.map((value) => ({ value, label: INVITATION_STATUS_LABELS[value] })),
     }),
     
     inviter_id: Field.lookup('sys_user', {

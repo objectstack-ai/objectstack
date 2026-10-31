@@ -257,7 +257,7 @@ function renderPage(objects: any[], dataSource: any) {
     getItemsByType: () => [],
   } as any;
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}?tab=related`]}>
+    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}`]}>
       <MetadataCtx.Provider value={metadata}>
         <RecordDetailView
           dataSource={dataSource}
@@ -274,8 +274,10 @@ function renderPage(objects: any[], dataSource: any) {
 
 /**
  * The child object is queried TWICE on this page and the two reads are the two
- * halves of this card: the ROW query (windowed, `$top` = page size, no
- * `$count`) and the tab strip's BADGE probe (`$top: 1`, `$count: true`).
+ * halves of this card: the ROW query (windowed, `$top` = the related panel's
+ * rows, no `$count`) and the panel's COUNT probe (`$top: 1`, `$count: true`),
+ * asked up front by the record page's right column (objectstack#27056,
+ * objectstack#27524: the panel count is what the tab badge was).
  * Telling them apart explicitly is what keeps a half from passing because it
  * read the other one's query.
  */
@@ -299,12 +301,14 @@ async function renderAndCollect(relatedListFilter?: unknown) {
   };
 }
 
-/** The digits rendered inside the Related tab's count badge, or `null`. */
-async function relatedTabBadge(): Promise<string | null> {
-  const tab = await screen.findByRole('tab', { name: /Related/i });
-  // The badge is the only span in the trigger carrying an accessible name
-  // (the label span has none) — see `page:tabs` in components/layout.
-  return tab.querySelector('span[aria-label]')?.textContent?.trim() ?? null;
+/** The digits the related panel's header counts, or `null`. */
+async function relatedPanelCount(): Promise<string | null> {
+  const card = await waitFor(() => {
+    const el = document.querySelector('[data-related-card]');
+    expect(el).not.toBeNull();
+    return el as HTMLElement;
+  });
+  return card.querySelector('[data-related-card-count]')?.textContent?.trim() ?? null;
 }
 
 beforeEach(() => {
@@ -312,6 +316,9 @@ beforeEach(() => {
   // The count store is module-scoped and shared by every consumer in the
   // process, so a warm entry from a previous case would badge this one.
   RelatedCountStore._reset();
+  // No viewport: every related panel is in view, so it reads its first rows
+  // (`useSeenOnce`) once its count is in.
+  vi.stubGlobal('IntersectionObserver', undefined);
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -379,7 +386,7 @@ describe('derived related list — declared relatedListFilter on the wire (objec
     // 2, so a badge that ignored the filter would read '2' here — which is the
     // exact "badge says 7 above a list showing 3" defect, at fixture scale.
     await waitFor(async () => {
-      expect(await relatedTabBadge()).toBe('1');
+      expect(await relatedPanelCount()).toBe('1');
     });
     expect(String(FIXTURE_ARITHMETIC.parentScopeAlone)).not.toBe('1');
   });
@@ -396,7 +403,7 @@ describe('derived related list — declared relatedListFilter on the wire (objec
     // badge 2. Without this the case above could pass by fetching nothing.
     expect(await screen.findByText('Archived Item')).toBeTruthy();
     await waitFor(async () => {
-      expect(await relatedTabBadge()).toBe('2');
+      expect(await relatedPanelCount()).toBe('2');
     });
     // …and the other parent's row is still excluded, filter or no filter.
     expect(screen.queryByText('Other Parent Item')).toBeNull();

@@ -9,9 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // is removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. There
 // is no D2 conversion either: the platform cannot know the approvers, the key
 // or the value the author meant, and the runtime never ran such a node.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'flow-approval-node-config-contract-refused',
   surface:

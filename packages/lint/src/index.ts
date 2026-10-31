@@ -549,12 +549,16 @@ export type {
 // header query cannot order by (`min` / `max` refused for its type).
 // [#26719] Its SEVENTH: a list view whose `chart` binds a dataset declared
 // over another object than the one the list view lists.
+// [#28018] Its EIGHTH: a `kanban.lanes` entry that is not an option of the
+// group field, or a lane listed twice.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
+  LIST_VIEW_KANBAN_LANE_UNKNOWN,
+  LIST_VIEW_KANBAN_LANE_REPEATED,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,
@@ -1108,13 +1112,14 @@ export type {
 
 // The runtime publish gate over that registry. Also published as the
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.
-// That subpath narrows the EXPORT surface to these six names, not the module
+// That subpath narrows the EXPORT surface to these names, not the module
 // graph: measured, it reaches 70 of this entry's 72 modules and 93.8% of its
 // bundled bytes, and it does name the modules that reach the source parsers.
 // `runtime.ts`'s header carries the measurement and what the narrowing buys.
 export {
   buildRuntimeWriteSnapshots,
   narrowObjectsToPackageClosure,
+  resolvePackageClosure,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,

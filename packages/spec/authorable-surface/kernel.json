@@ -193,6 +193,7 @@
     "kernel/ExecutionContext:skipAutomations",
     "kernel/ExecutionContext:skipStateMachine",
     "kernel/ExecutionContext:skipTriggers",
+    "kernel/ExecutionContext:surface",
     "kernel/ExecutionContext:systemPermissions",
     "kernel/ExecutionContext:tabPermissions",
     "kernel/ExecutionContext:tenantId",

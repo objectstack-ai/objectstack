@@ -27,11 +27,11 @@
  * the bundled manifests (as `os serve` does) and registers
  * `lifecycleSettingsManifest` the way `ObjectQLPlugin` does at `kernel:ready`.
  *
- * Data Lifecycle is `@objectstack/objectql`'s manifest, and no bundle carries a
- * translated title for it, so its hub card reads "Data Lifecycle" in every
- * locale. That gap is pinned by name below ({@link HUB_UNTRANSLATED}), so a
- * translation added later turns the label comparison on for it rather than
- * leaving it unchecked.
+ * Every page the hub lists carries a translated title in each shipped locale,
+ * Data Lifecycle included: it is `@objectstack/objectql`'s manifest, and its
+ * copy lives in {@link settingsBuiltinTranslations} beside the bundled ones
+ * (the coverage test there holds it to the same rule), so the label comparison
+ * runs for every page and no page is exempt from it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -47,9 +47,6 @@ import { settingsBuiltinTranslations } from './translations/index.js';
 const SETTINGS_PAGE = /^\/apps\/setup\/system\/settings\/([a-z_]+)$/;
 
 const TRANSLATED_LOCALES = ['zh-CN', 'ja-JP', 'es-ES'] as const;
-
-/** Namespaces the hub lists with no translated title in any shipped locale. */
-const HUB_UNTRANSLATED = ['lifecycle'];
 
 interface NavItem { id?: string; type?: string; label?: string; url?: string; children?: NavItem[] }
 
@@ -145,8 +142,8 @@ describe('Setup sidebar and settings hub list the same pages under the same name
       expect(drift).toEqual([]);
     });
 
-    it(`${locale}: the hub pages with no translated title are exactly the named ones`, () => {
-      expect(manifests.filter((m) => hubTitle(locale, m) == null).map((m) => m.namespace).sort()).toEqual(HUB_UNTRANSLATED);
+    it(`${locale}: every hub page carries a translated title`, () => {
+      expect(manifests.filter((m) => hubTitle(locale, m) == null).map((m) => m.namespace)).toEqual([]);
     });
   }
 });

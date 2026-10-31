@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // child object carries the field the line order is kept in.
 export const entry: SemanticMigration = {
   id: 'object-master-detail-form-detail-sort-field-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'page.component.object-master-detail-form.details[].sortField — a detail entry\'s '
     + 'authored line-position field',
   replacement: 'Nothing on the entry: delete the key. The line grid stamps each line\'s position into '

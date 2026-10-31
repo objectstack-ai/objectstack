@@ -52,6 +52,18 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.saved': '{{count}} row saved',
   'table.saved_one': '{{count}} row saved',
   'table.saved_other': '{{count}} rows saved',
+  // The field rules an inline edit is checked against before it is sent
+  // (objectstack-ai/objectstack#27520), worded as the record form words them.
+  // Byte-identical to the `en` pack, which `defaults-maps-mirror-en-pack`
+  // enforces.
+  'validation.required': '{{field}} is required',
+  'validation.minLength': '{{field}} must be at least {{min}} characters',
+  'validation.maxLength': '{{field}} must be at most {{max}} characters',
+  'validation.min': '{{field}} must be at least {{min}}',
+  'validation.max': '{{field}} must be at most {{max}}',
+  'validation.email': 'Please enter a valid email address',
+  'validation.url': 'Please enter a valid URL',
+  'validation.pattern': '{{field}} format is invalid',
   // The heading of an authored `emptyState` that declares no `title`
   // (objectui#11068): the words the table's own empty row shows, so leaving the
   // member out changes nothing a user reads.

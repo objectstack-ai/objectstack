@@ -270,24 +270,50 @@ export interface ApprovalResumeSurface {
    */
   unresumableSuspensionCause?(runId: string): Promise<string | undefined>;
   /**
-   * [#15389] Where each suspended run is currently parked. Read by
-   * {@link ApprovalService.continueRestoredRun} to prove the pause it was asked
-   * to continue is the one THIS request's recorded outcome was issued at, and
-   * not merely some live pause on the same run — `hasSuspendedRun` answers a
-   * boolean and cannot tell the two apart. Which node that is depends on the signal, not
-   * only on the row: see {@link ApprovalService.expectedPauseNode}.
+   * [#15389] Where each suspended run is currently parked, durable-first.
    *
    * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
-   * (`listSuspendedRunsDurable`); it widens no engine surface. Durable-first,
-   * so it sees a pause parked by another replica or before a restart.
+   * (`listSuspendedRunsDurable`); it widens no engine surface. [#28271]
+   * {@link ApprovalService.continueRestoredRun} no longer reads it: on a
+   * DB-backed store it is one capped page, and it now asks
+   * {@link suspensionOf} for the one run instead.
+   */
+  listSuspendedRunsDurable?(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>>;
+  /**
+   * [#15389, #28271] Where the run `runId` is parked, or `undefined` when it
+   * is not suspended. Read by {@link ApprovalService.continueRestoredRun} to
+   * prove the pause it was asked to continue is the one THIS request's
+   * recorded outcome was issued at, and not merely some live pause on the
+   * same run — `hasSuspendedRun` answers a boolean and cannot tell the two
+   * apart. Which node that is depends on the signal, not only on the row:
+   * see {@link ApprovalService.expectedPauseNode}.
+   *
+   * ⚠️ Declares the method `AutomationEngine` implements publicly
+   * (`suspensionOf`): one keyed read of the store, so it sees a pause parked
+   * by another replica or before a restart however many runs are parked
+   * ahead of it — where {@link listSuspendedRunsDurable}, which this proof
+   * read until #28271, is one capped page of a DB-backed store. Read-only;
+   * rejects when the store cannot be read.
    *
    * Optional, and its absence is FAIL-CLOSED: a caller that cannot prove node
    * identity refuses the continuation rather than proceeding on the weaker
-   * check. The engine degrades a store outage to its in-memory list rather
-   * than throwing, and that degradation is safe HERE for the same reason — a
-   * pause it cannot see is a pause this verb will not act on.
+   * check.
    */
-  listSuspendedRunsDurable?(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>>;
+  suspensionOf?(runId: string): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined>;
+  /**
+   * [#28230] The run parked at a `map` node on the item run `itemRunId`, or
+   * `undefined` when there is none. Read by
+   * {@link ApprovalService.recall}'s revise-window branch BEFORE it cancels
+   * the item, so it can wake the batch above it afterwards: the engine
+   * answers from the item's own `$parentRunId` linkage with keyed reads,
+   * where {@link listSuspendedRunsDurable} reads one capped page of a
+   * DB-backed store and can miss the batch.
+   *
+   * ⚠️ Declares the method `AutomationEngine` implements publicly
+   * (`suspendedMapParentOf`). Read-only; rejects when the store cannot be
+   * read. Optional: without it no batch is woken, as before #28183.
+   */
+  suspendedMapParentOf?(itemRunId: string): Promise<BatchParent | undefined>;
   /**
    * [#15358] Whether the consumed suspension behind a `failed` run SURVIVES —
    * i.e. whether the engine's `restoreConsumedSuspension` would re-arm it.
@@ -351,6 +377,12 @@ export interface ApprovalResumeSurface {
    */
   takeSubflowParentStrand?(childRunId: string): { runId: string; repairable: boolean; error: string } | undefined;
 }
+
+/** A run parked at a `map` node on one item, as {@link ApprovalResumeSurface.suspendedMapParentOf} answers it. */
+type BatchParent = { runId: string; flowName: string; nodeId: string; correlation?: string };
+
+/** What the revise-window recall read about the batch above its item before cancelling it. */
+type BatchLookup = { parent?: BatchParent } | { lookupFailure: unknown };
 
 /** What {@link ApprovalResumeSurface.inspectConsumedSuspension} answers. */
 type ConsumedSuspensionVerdict =
@@ -5277,14 +5309,21 @@ export class ApprovalService implements IApprovalService {
       if (runId) {
         resumeError = this.missingRunCapability(runId, requestId, 'the recall', 'cancelRun');
         if (!resumeError) {
+          // [#28230] Read the batch above the item while the item's
+          // suspension still carries the linkage: `cancelRun` removes it.
+          const batch = await this.batchAboveItem(runId);
+          let cancelled: unknown;
           try {
-            await this.automation!.cancelRun!(runId, `approval request ${requestId} recalled during revision`);
+            cancelled = await this.automation!.cancelRun!(runId, `approval request ${requestId} recalled during revision`);
           } catch (err: any) {
             resumeError = err?.message ?? String(err);
             this.logger?.error?.('[approvals] cancelRun after revise-window recall failed — the run may be stranded', {
               request: requestId, run: runId, error: resumeError,
             });
           }
+          // [#28183] `cancelRun` never touches a parent, so a batch whose
+          // `map` item this was would stay parked with nothing to wake it.
+          if (cancelled === true) ({ resumeError, resumeFailure } = await this.resumeBatchOfRecalledItem(runId, requestId, batch));
         }
       }
     } else if (runId) {
@@ -5364,6 +5403,91 @@ export class ApprovalService implements IApprovalService {
       // reads presence with `'resumeFailure' in result` reads it correctly.
       ...(resumeFailure ? { resumeFailure } : {}),
     };
+  }
+
+  /**
+   * [#28230] The batch run parked on the revise-window item `itemRunId`, read
+   * before the recall cancels the item — {@link ApprovalResumeSurface.suspendedMapParentOf}
+   * reads the item's own `$parentRunId`, which `cancelRun` removes with the
+   * item's suspension. Never throws: a failed read is carried to
+   * {@link resumeBatchOfRecalledItem}, which tells it once the cancel is done,
+   * as it always told a failed lookup.
+   *
+   * It used to be the entry of `listSuspendedRunsDurable()` parked on
+   * `map:<itemRunId>`, read after the cancel. That listing reads one capped
+   * page of a DB-backed store, and a process adds only what it parked itself,
+   * so a batch another process parked behind more than 1000 runs was not
+   * found and stayed parked with nothing said.
+   */
+  private async batchAboveItem(itemRunId: string): Promise<BatchLookup> {
+    if (typeof this.automation?.suspendedMapParentOf !== 'function') return {};
+    try {
+      return { parent: await this.automation.suspendedMapParentOf(itemRunId) };
+    } catch (err) {
+      return { lookupFailure: err };
+    }
+  }
+
+  /**
+   * [#28183] Wake the batch above a run a revise-window recall just cancelled.
+   *
+   * On a batch sign-off the cancelled run is a `map` item, and its batch run is
+   * parked on `map:<itemRunId>`. `cancelRun` never touches that parent, so
+   * before this the batch waited for an operator's parent-id resume that
+   * nothing prompted. This issues that same resume: the engine reads the
+   * item's `cancelled` run history, records the item's slot as its cancelled
+   * marker (outside `count`) and moves the map on to its next item or its end
+   * — the shape the cancelled-item ruling (6523833308) set. No new shape and
+   * no new code: a resume the engine refuses or strands is told exactly as
+   * this door's own resume is.
+   *
+   * Only a run parked at the built-in `map` node on that item is woken: the
+   * engine records the marker for no other node, and re-running any other
+   * node would advance it past the item with nothing recorded. Whatever is
+   * missing to prove that — no `suspendedMapParentOf`, no `getFlow`, no
+   * such parent — leaves things exactly as they were before, which for a
+   * recall with no batch above it is the whole answer. The parent is the one
+   * {@link batchAboveItem} read before the cancel.
+   */
+  private async resumeBatchOfRecalledItem(
+    itemRunId: string,
+    requestId: string,
+    batch: BatchLookup,
+  ): Promise<{ resumeError?: string; resumeFailure?: ResumeFailureReport }> {
+    let batchRunId: string | undefined;
+    try {
+      if ('lookupFailure' in batch) throw batch.lookupFailure;
+      const parent = batch.parent;
+      if (!parent) return {};
+      if (typeof this.automation?.getFlow !== 'function') return {};
+      const flow: any = await this.automation.getFlow(parent.flowName);
+      const node = Array.isArray(flow?.nodes) ? flow.nodes.find((n: any) => n?.id === parent.nodeId) : undefined;
+      if (node?.type !== 'map') return {};
+      batchRunId = parent.runId;
+      const bubbleStrand = await this.serviceResume(batchRunId, {});
+      if (!bubbleStrand) return {};
+      // The batch advanced; a run above it (a subflow parent) did not.
+      return {
+        resumeError:
+          `RESUME_FAILED: the recall was recorded on request ${requestId} and cancelled its run '${itemRunId}', ` +
+          `and the batch run '${batchRunId}' above it resumed, but the subflow parent above that — run ` +
+          `'${bubbleStrand.runId}' — consumed its suspension and is now stranded: ${bubbleStrand.error}`,
+        resumeFailure: { code: 'RESUME_FAILED', runId: bubbleStrand.runId, status: 'stranded', repairable: bubbleStrand.repairable },
+      };
+    } catch (err: any) {
+      const message = err?.message ?? String(err);
+      this.logger?.error?.('[approvals] resuming the batch after a revise-window recall of its item failed — the batch may stay parked', {
+        request: requestId, run: itemRunId, batchRun: batchRunId, error: message,
+      });
+      const at = batchRunId ? `resuming the batch run '${batchRunId}' above it` : 'looking up the batch run above it';
+      return {
+        resumeError: `the recall was recorded on request ${requestId} and cancelled its run '${itemRunId}', but ${at} failed: ${message}`,
+        // Only the engine's own stranded exit is told in fields, as in `recall`.
+        ...(batchRunId && ApprovalService.resumeStatusOf(err) === 'stranded'
+          ? { resumeFailure: { code: 'RESUME_FAILED' as const, runId: batchRunId, status: 'stranded' as const, repairable: true } }
+          : {}),
+      };
+    }
   }
 
   // ── Record-delete lifecycle linkage (#13568) ─────────────────
@@ -7269,23 +7393,27 @@ export class ApprovalService implements IApprovalService {
     // node refused the one population the journal was built to serve, with a
     // message that named a cause the code had not taken.
     //
-    // FAIL-CLOSED in every direction: no reader, no listing, no matching entry,
-    // an entry at another node, or an expected node this service cannot derive
-    // — all refuse. The engine degrades a store outage to its in-memory list
-    // instead of throwing, so a pause this cannot see is a pause this verb
-    // declines to act on. A false refusal costs the operator a retry; a false
-    // admission advances a flow nobody decided.
+    // FAIL-CLOSED in every direction: no reader, no pause, a pause at another
+    // node, or an expected node this service cannot derive — all refuse. A
+    // store that cannot be read rejects the read, as GUARD 2's does. A false
+    // refusal costs the operator a retry; a false admission advances a flow
+    // nobody decided.
+    //
+    // [#28271] The read is KEYED by the run id. It used to be the run's entry
+    // in `listSuspendedRunsDurable()`, which on a DB-backed store is one page
+    // of 1000 parked runs plus what this process parked itself: a run another
+    // process parked behind more than 1000 others was on no page, so every
+    // retry was refused the same way and the recorded outcome never took effect.
     const expected = await this.expectedPauseNode(raw, signal, requestId, runId);
-    if (typeof this.automation?.listSuspendedRunsDurable !== 'function') {
+    if (typeof this.automation?.suspensionOf !== 'function') {
       throw new Error(
         `INVALID_STATE: this automation engine cannot report WHERE run '${runId}' is parked ` +
-        `(no listSuspendedRunsDurable), so the pause cannot be proved to be the one ${signal.what} on ` +
+        `(no suspensionOf), so the pause cannot be proved to be the one ${signal.what} on ` +
         `request ${requestId} was refused on — refusing, because continuing the wrong pause advances a ` +
         `flow with no decision behind it`,
       );
     }
-    const parkedAt = (await this.automation.listSuspendedRunsDurable())
-      .find(r => String(r.runId) === String(runId))?.nodeId;
+    const parkedAt = (await this.automation.suspensionOf(runId))?.nodeId;
     if (parkedAt !== expected.nodeId) {
       throw new Error(
         `INVALID_STATE: run '${runId}' is parked at ` +

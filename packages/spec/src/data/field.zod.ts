@@ -545,9 +545,23 @@ const CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE: Readonly<Record<string, string>> 
  * missing key; what the pointer NAMES is the object's to judge (object.zod.ts).
  */
 function refuseRecordModeKeyMismatch(
-  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string },
+  config: { currencyMode: 'dynamic' | 'fixed' | 'record'; defaultCurrency?: string; currencyField?: string; homeAmount?: unknown },
   ctx: z.RefinementCtx,
 ): void {
+  // [ADR-0144 D5] `homeAmount` converts a record's own currency into the home
+  // currency, so it has a reader only under `record`: a `fixed` amount has one
+  // currency for every row and a `dynamic` amount is already in the home
+  // currency, so the engine converts neither and the declaration would be inert.
+  if (config.currencyMode !== 'record' && config.homeAmount !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['homeAmount'],
+      message:
+        `\`homeAmount\` is read only under \`currencyMode: 'record'\`, and this config is \`${config.currencyMode}\`: `
+        + 'only an amount whose records each carry their own currency is converted into the home currency. '
+        + 'Set `currencyMode: \'record\'` with its `currencyField`, or delete `homeAmount`.',
+    });
+  }
   if (config.currencyMode === 'record' && config.defaultCurrency !== undefined) {
     ctx.addIssue({
       code: 'custom',
@@ -588,6 +602,58 @@ const CURRENCY_CONFIG_FIXED_WITHOUT_CODE =
   + 'give its ISO 4217 code (e.g. `defaultCurrency: \'USD\'`), or use `currencyMode: \'dynamic\'` '
   + 'to display amounts in the tenant default currency (the `localization.currency` setting). '
   + 'Since @objectstack/spec 18 nothing fills a code in; it used to be `\'CNY\'`.';
+
+/** The message an empty `homeAmount` pointer meets, naming the pointer and what it must name. */
+const homeAmountEmptyPointer = (key: string, names: string): string =>
+  `\`homeAmount.${key}\` names a field: an empty name points at nothing — name ${names} on this object.`;
+
+/**
+ * The message a missing (or non-string) `homeAmount` pointer meets. ADR-0144
+ * D5 requires all three whenever `homeAmount` is declared, and nothing fills
+ * one in, so the remedy is to name the field or to drop the declaration.
+ */
+const homeAmountPointerRequired = (key: string, names: string): (() => string) => () =>
+  `\`homeAmount\` needs \`${key}\`, the name of ${names} on this object: the engine has no default for it. `
+  + 'Name the field, or delete `homeAmount` if the amount needs no stored home-currency projection.';
+
+/**
+ * [ADR-0144 D5] `homeAmount` — a `record`-mode amount's stored home-currency
+ * projection, declared by three pointers into the same object. At write the
+ * engine converts the amount at the rate of the record's document date and
+ * stores the result in `field` and the rate it used in `rateField` (ruling
+ * 6465431966 D1: "STORED with the rate used"). Every pointer is required: D8
+ * rule 2 lets every currency-related field exist only as an author-declared
+ * field referenced by pointer, so the engine has no default to fall back on —
+ * no injected column, no fixed name, and no `created_at` as the document
+ * date. The names `rateDate` / `rateField` are this card's spelling (ADR-0144
+ * Open item 1); the ADR corrects the drafted optional `rateField?` to required.
+ *
+ * This shape sees only names. What each one names — a `dynamic`-mode stored
+ * `currency` field, a `date` / `datetime` field, a `number` field, the home
+ * and rate fields `readonly` — is the object's to judge
+ * (`refuseDishonestHomeAmount`, object.zod.ts), because only the object holds
+ * the field map. Nothing reads the declaration until the engine's write-time
+ * projection ships: the key ships in the same release as that engine (ADR-0144
+ * D9, release R2).
+ */
+const HomeAmountSchema = strictObject({
+  surface: "this amount's `homeAmount` declaration",
+  history:
+    'This shape was closed from the day it was declared — an unknown key here was never accepted, so a '
+    + 'misspelled pointer cannot parse and leave the home amount, its date or its rate unwritten.',
+  aliases: {
+    homeField: 'field', target: 'field', amountField: 'field',
+    date: 'rateDate', dateField: 'rateDate', documentDate: 'rateDate',
+    rate: 'rateField', exchangeRate: 'rateField', rateUsed: 'rateField',
+  },
+}, {
+  field: z.string({ error: homeAmountPointerRequired('field', 'the `dynamic`-mode `currency` field that stores the home amount') }).min(1, homeAmountEmptyPointer('field', 'the `dynamic`-mode `currency` field that stores the home amount'))
+    .describe('The field on the same object that stores the amount converted into the home currency: a stored `currency` field in `dynamic` mode (it displays in `localization.currency`, so metadata never names the home currency), declaring `readonly: true` — only the engine writes it. Conventionally `AMOUNT_home`.'),
+  rateDate: z.string({ error: homeAmountPointerRequired('rateDate', 'the `date` / `datetime` field whose value picks the rate') }).min(1, homeAmountEmptyPointer('rateDate', 'the `date` / `datetime` field whose value picks the rate'))
+    .describe('The field on the same object holding the record\'s document date, whose value picks the exchange rate: a `date` or `datetime` field. Required, with no default — the engine never guesses the date (not `created_at`).'),
+  rateField: z.string({ error: homeAmountPointerRequired('rateField', 'the `number` field that stores the rate used') }).min(1, homeAmountEmptyPointer('rateField', 'the `number` field that stores the rate used'))
+    .describe('The field on the same object that stores the exchange rate the conversion used: a `number` field declaring `readonly: true` — only the engine writes it. Required: the home amount is stored with the rate used. Conventionally `AMOUNT_rate`.'),
+});
 
 /** `fixed` ⇒ an authored `defaultCurrency`; `dynamic` reads none, so it needs none. */
 function refuseFixedCurrencyWithoutCode(
@@ -673,12 +739,18 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   // object.zod.ts) checks what it names, because only the object holds the
   // sibling field map.
   currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty.'),
+  // ADR-0144 D5 — the stored home-currency projection, declared by pointer.
+  // Optional; `refuseRecordModeKeyMismatch` below refuses it outside `record`,
+  // and the object's `superRefine` (`refuseDishonestHomeAmount`,
+  // object.zod.ts) checks what its three pointers name.
+  homeAmount: HomeAmountSchema.optional().describe('`record` mode only, optional: where the engine stores this amount converted into the organization\'s home currency (the `localization.currency` setting) at write, at the rate of the record\'s document date, and the rate it used. `field` names a `dynamic`-mode `currency` field, `rateDate` a `date` / `datetime` field and `rateField` a `number` field, all on the same object; all three are required, and the home and rate fields declare `readonly: true` because only the engine writes them. Consolidated totals aggregate the home field. Refused under `dynamic` and `fixed`.'),
   // #19992 — no `.overwrite()` here any more: the #7918 ISO 4217 contradiction
   // check and the #11423 default-materializing `.overwrite()` both existed only
   // for the removed `precision` key (see CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE
   // above). #27157 — `fixed` ⇒ a code; ADR-0144 D2 — `record` ⇔ a pointer and
-  // no code, both below. Parse output is `{ currencyMode }` plus the `defaultCurrency` and
-  // `currencyField` the author wrote.
+  // no code; ADR-0144 D5 — `homeAmount` under `record` only; all below. Parse
+  // output is `{ currencyMode }` plus the `defaultCurrency`, `currencyField`
+  // and `homeAmount` the author wrote.
 }).superRefine(refuseFixedCurrencyWithoutCode).superRefine(refuseRecordModeKeyMismatch));
 
 /**
@@ -1501,6 +1573,30 @@ export const FieldSchema = lazySchema(() => {
   useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 
   /**
+   * Presentation hint: how a `percent` value is drawn wherever the field is
+   * shown read-only — list-grid cells and the record page alike. The Studio
+   * UI's percent face draws a progress bar beside the number for every value,
+   * which reads right for progress (a task 60% done) and wrong for a rate or a
+   * probability (an opportunity's 25% win probability is not 25% of the way
+   * anywhere). `Field.format` cannot carry this — it declares no vocabulary —
+   * and `Field.widget` is the form's input override, not the read-only face.
+   *
+   * Same posture as `useGrouping` above: a flat, optional, per-type display
+   * hint with no declared default and no parse-time type restriction.
+   *   - **absent** — the renderer's default face, the progress bar today;
+   *   - **`'bar'`** — the author pins the progress bar;
+   *   - **`'plain'`** — the percentage as text alone (a stored 0.25 reads
+   *     `25%`, at the field's `scale`), no bar.
+   * Display only: it changes no stored value, no validation and no width.
+   *
+   * Read by the console's percent face (`PercentCellRenderer` under `ui/`) on
+   * every read-only host: list-grid cells, the record page's fields and its
+   * header chips. The liveness row is `live` and names the relay sites that
+   * carry the key to that renderer.
+   */
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
+
+  /**
    * Media Constraints (ADR-0104 D3 wave 2)
    *
    * Apply to the media family — `file`, `image`, `avatar`, `video`, `audio`.
@@ -1962,6 +2058,55 @@ export const FieldSchema = lazySchema(() => {
     param: z.string().optional(),
   })])).optional().describe("Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; {field,param} when the remote filter key differs — the {field,param} form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent."),
   allowCreate: z.boolean().optional().describe('Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field.'),
+
+  /**
+   * LOOKUP-PICK AUTOFILL — which fields of the record being edited a pick in
+   * this lookup fills, each from a named field of the picked record
+   * (`target ← lookup.source`): a quote line's `unit_price` from the picked
+   * product's `list_price`.
+   *
+   * ⭐ The FIELD is its one home, not a form view. A record form draws this
+   * field from its definition whichever form is showing it (a declared form
+   * view, a `formViews` entry, or the derived form an object without one
+   * gets), and the inline line-item grid hydrates its columns from the same
+   * child field definitions — so both read one declaration. A form-view key
+   * would be invisible to the grid and to every other form of the object.
+   *
+   * ⭐ The overwrite rule is part of the contract, stated in the describe: a
+   * pick never replaces a value somebody wrote unless the pair says
+   * `overwrite: true`.
+   *
+   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`),
+   * which is unchanged: that key governs only the grid's implicit SAME-NAMED
+   * copy (on by default, overwriting). A declared pair applies in the grid too,
+   * under this key's own overwrite rule, and takes its target out of the
+   * same-named copy, so one target never has two writers on one pick.
+   *
+   * Three doors judge it: the parse (this field's superRefine — a single-value
+   * relationship only), the object's parse (`refuseDishonestLookupAutofill` in
+   * `object.zod.ts` — each target a writable field of the same object, named
+   * once), and the stack's cross-reference pass (`collectLookupAutofillErrors`
+   * in `stack.zod.ts` — each source a readable field of the referenced object
+   * whose value the target can hold).
+   */
+  lookupAutofill: z.array(strictObject({
+    surface: 'this lookupAutofill entry',
+    history: 'A new shape, closed from its first release: a misspelt key in a pair would otherwise fill nothing and say nothing.',
+    aliases: {
+      field: 'target', to: 'target', targetField: 'target',
+      from: 'source', sourceField: 'source', lookupField: 'source',
+      replace: 'overwrite', force: 'overwrite',
+    },
+  }, {
+    target: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Field of THIS object the pick fills (snake_case machine name).'),
+    source: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe("Field of the picked record — a field of this lookup's `reference` object — whose value is copied (snake_case machine name)."),
+    overwrite: z.boolean().optional().describe('TRUE: the pick replaces whatever the target holds, a typed value included. Absent or FALSE: the pick fills the target only while it is empty or still holds the value an earlier pick filled in.'),
+  })).min(1).optional().describe(
+    "Fields a pick in this lookup fills on the record being edited: each `{ target, source }` pair copies the picked record's `source` field (a field of the `reference` object) into this object's `target` field — e.g. `[{ target: 'unit_price', source: 'list_price' }]` on a quote line's product lookup. Read wherever this field is picked: the record form, and a line-item grid column over it. "
+    + "OVERWRITE RULE — the default, `overwrite` absent or false: a pick never replaces a value somebody wrote. The target is filled only while it is empty or still holds the value an earlier pick filled in; a value the user typed, or one the record already stored, stays. Only a pair that declares `overwrite: true` replaces the target on every pick, whatever it holds. "
+    + 'Client-side only: it fills the form, and nothing on the write path reads it — the filled value is saved as an ordinary write, and an import or API write that sets the lookup fills nothing. '
+    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy and is unchanged; a declared pair takes its target out of that copy.",
+  ),
 
   /**
    * Calculation — CEL formula. Plain string accepted for back-compat; build emits canonical envelope.
@@ -2491,6 +2636,32 @@ export const FieldSchema = lazySchema(() => {
         "a field as holding a correspondent's address, matched against the participant addresses of " +
         'inbound mail, and only an `email` field stores an address to match. Change the field to ' +
         "`type: 'email'` if it holds an email address, or drop the key.",
+    });
+  }
+  // [#27945] `lookupAutofill` copies fields of the ONE record a pick chooses.
+  // Off a relationship there is no pick, and on a multi-value relationship a
+  // pick chooses several records with no single source to copy from — either
+  // way the declaration would parse and fill nothing. The target and source
+  // halves need the object's field map and the stack's objects, and are judged
+  // in `ObjectSchema`'s superRefine and the stack's cross-reference pass.
+  if (field.lookupAutofill !== undefined && field.type !== 'lookup' && field.type !== 'master_detail') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['lookupAutofill'],
+      message:
+        "`lookupAutofill` is only valid on `type: 'lookup'` or `type: 'master_detail'` (this field is " +
+        `\`${field.type}\`): it fills fields of the record being edited from the record a pick in this ` +
+        'field chooses, and only a relationship field has a pick. Declare it on the relationship field ' +
+        'whose pick should fill the form, or drop the key.',
+    });
+  } else if (field.lookupAutofill !== undefined && field.multiple === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['lookupAutofill'],
+      message:
+        '`lookupAutofill` is not valid on a multi-value relationship (`multiple: true`): a pick there ' +
+        'chooses several records, so there is no single record to copy each `source` from. Drop the key, ' +
+        'or make the field single-value if one record is picked.',
     });
   }
 

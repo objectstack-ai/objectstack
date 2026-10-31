@@ -10,7 +10,7 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest } from '@objectstack/spec/contracts';
 import type { MetadataActivationWriteOptions } from '@objectstack/core';
 import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
@@ -165,6 +165,7 @@ import {
     forgetSuspendedRun,
     evictConsumedSuspension,
     takeSubflowParentStrand,
+    type GatedResumeContinuation,
 } from './run-resume.js';
 // [#25222] The dispatch and suspension claims' bodies: claiming, settling and
 // reading a dispatch, pruning the expired in-process claims, minting a run id,
@@ -683,10 +684,15 @@ export interface RegisteredConnector {
  *    upstream refused (#27237);
  *  - `credential`: setting the stored credential `ref` again — a value stored
  *    through the credential door that the upstream refused (#27237).
+ *  - `connection`: an administrator connecting the instance — an
+ *    `authorization_code` instance never authorized, or whose grant the
+ *    authorization server refused (ADR-0143 D4).
  */
 export type ConnectorHold =
     | { readonly kind: 'declaration' }
-    | { readonly kind: 'credential'; readonly ref: string };
+    | { readonly kind: 'credential'; readonly ref: string }
+    // ADR-0143 D4 — an `authorization_code` instance with no working connection.
+    | { readonly kind: 'connection' };
 
 // The connector **provider** contract (ADR-0097) — ConnectorProviderFactory,
 // ConnectorProviderContext, ConnectorMaterialization — lives in
@@ -1547,7 +1553,7 @@ export function isRetryableResumeRefusal(code: AutomationResult['code']): boolea
 const ENGINE_BUILT_SIGNAL = Symbol('objectstack.automation.resume.engineBuilt');
 
 /** Tag a signal the engine constructed for its own continuation. */
-function engineBuilt(signal: ResumeSignal): ResumeSignal {
+export function engineBuilt(signal: ResumeSignal): ResumeSignal {
     return Object.assign(signal, { [ENGINE_BUILT_SIGNAL]: true });
 }
 
@@ -2576,6 +2582,19 @@ export interface ConnectorCredentialDoor {
 }
 
 /**
+ * ADR-0143 D3 / D5 — the connector connection door the automation plugin
+ * attaches: the four `IAutomationService` connection members, served where the
+ * declared instances, the connection store and the grant handles live. Every
+ * answer carries a status, never a token.
+ */
+export interface ConnectorConnectionDoor {
+    get(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState>;
+    begin(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin>;
+    complete(request: ConnectorConnectionCallbackRequest): Promise<ConnectorConnectionState>;
+    revoke(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState>;
+}
+
+/**
  * [#20790] One credential a registered flow holds, by class: a literal in its
  * definition (a packaged flow's source), or held by the credential channel.
  * What the clone door refuses on — never the value.
@@ -2724,6 +2743,8 @@ export class AutomationEngine implements IAutomationService {
     private connectorPullSource?: (request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>;
     /** [#27237] The connector credential door — see {@link setConnectorCredentialDoor}. */
     private connectorCredentialDoor?: ConnectorCredentialDoor;
+    /** ADR-0143 D5 — the connector connection door — see {@link setConnectorConnectionDoor}. */
+    private connectorConnectionDoor?: ConnectorConnectionDoor;
     /** [#22450] The lazy `i18n` service reader — see {@link setI18nServiceSource}. */
     private i18nServiceSource?: () => RefusalI18nService | undefined;
     /**
@@ -2843,6 +2864,8 @@ export class AutomationEngine implements IAutomationService {
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
     private connectorProviders = new Map<string, ConnectorProviderFactory>();
+    /** ADR-0143 D4 — provider keys registered with `credentialHandle: true`. */
+    private readonly credentialHandleProviders = new Set<string>();
     /** Bridge to the host function registry for `script`-node calls (#1870), if wired. */
     private functionResolver: FlowFunctionResolver | null = null;
     /** Bridge to the host object registry for schema-aware condition validation at
@@ -4198,14 +4221,32 @@ export class AutomationEngine implements IAutomationService {
      * factory at boot for every declarative `connectors:` entry naming that
      * provider, turning stack metadata into a live connector. Re-registering a
      * key replaces (mirrors {@link registerNodeExecutor}).
+     *
+     * ADR-0143 D4 — `options.credentialHandle: true` says the factory reads
+     * `ConnectorProviderContext.credentialHandle` and asks it on every
+     * upstream request. Only such a provider is handed a grant-bearing
+     * (`oauth2`) instance; any other keeps that instance degraded, naming the
+     * provider, so nothing is called upstream without its credential.
+     * Re-registering a key without it withdraws it.
      */
-    registerConnectorProvider(providerKey: string, factory: ConnectorProviderFactory): void {
+    registerConnectorProvider(
+        providerKey: string,
+        factory: ConnectorProviderFactory,
+        options?: { readonly credentialHandle?: boolean },
+    ): void {
         // The body lives in ./flow-definitions.ts (#25222).
         const host: ThisParameterType<typeof registerConnectorProvider> = {
             connectorProviders: this.connectorProviders,
             logger: this.logger,
         };
         registerConnectorProvider.call(host, providerKey, factory);
+        if (options?.credentialHandle === true) this.credentialHandleProviders.add(providerKey);
+        else this.credentialHandleProviders.delete(providerKey);
+    }
+
+    /** ADR-0143 D4 — whether the provider under `providerKey` was registered as asking the credential handle. */
+    providerAppliesCredentialHandle(providerKey: string): boolean {
+        return this.credentialHandleProviders.has(providerKey);
     }
 
     /** Unregister a connector provider factory (hot-unplug). */
@@ -4216,6 +4257,7 @@ export class AutomationEngine implements IAutomationService {
             logger: this.logger,
         };
         unregisterConnectorProvider.call(host, providerKey);
+        this.credentialHandleProviders.delete(providerKey);
     }
 
     /** Resolve a provider factory by key, or `undefined` when none is installed. */
@@ -4883,6 +4925,43 @@ export class AutomationEngine implements IAutomationService {
     /** [#27237] `IAutomationService.clearConnectorCredential` — remove one value, degrade its instances. */
     async clearConnectorCredential(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef> {
         return this.requireConnectorCredentialDoor(`clearConnectorCredential('${request.ref}')`).clear(request);
+    }
+
+    /** ADR-0143 D5 — attach (or detach) the connector connection door; the automation plugin does it at `init()`. */
+    setConnectorConnectionDoor(door: ConnectorConnectionDoor | undefined): void {
+        this.connectorConnectionDoor = door;
+    }
+
+    /** ADR-0143 D5 — the door, or the refusal a bare engine answers: nothing here can connect an instance. */
+    private requireConnectorConnectionDoor(verb: string): ConnectorConnectionDoor {
+        if (this.connectorConnectionDoor) return this.connectorConnectionDoor;
+        throw Object.assign(
+            new Error(
+                `[Automation] ${verb}: this automation engine has no connector connection door attached — it is attached by `
+                + 'AutomationServicePlugin at init(); a bare engine has no declared connectors and no connection store.',
+            ),
+            { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
+    }
+
+    /** ADR-0143 D3 — `IAutomationService.getConnectorConnection`: a status, never a token. */
+    async getConnectorConnection(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
+        return this.requireConnectorConnectionDoor(`getConnectorConnection('${request.connector}')`).get(request);
+    }
+
+    /** ADR-0143 D5 — `IAutomationService.beginConnectorConnection`: the authorization URL to send the browser to. */
+    async beginConnectorConnection(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin> {
+        return this.requireConnectorConnectionDoor(`beginConnectorConnection('${request.connector}')`).begin(request);
+    }
+
+    /** ADR-0143 D5 — `IAutomationService.completeConnectorConnection`: the redirect's code exchanged and stored. */
+    async completeConnectorConnection(request: ConnectorConnectionCallbackRequest): Promise<ConnectorConnectionState> {
+        return this.requireConnectorConnectionDoor('completeConnectorConnection()').complete(request);
+    }
+
+    /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`: the organization's connection removed. */
+    async revokeConnectorConnection(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
+        return this.requireConnectorConnectionDoor(`revokeConnectorConnection('${request.connector}')`).revoke(request);
     }
 
     /** [#20790] Does the credential channel hold the LIVE credential at this position? */
@@ -6467,6 +6546,13 @@ export class AutomationEngine implements IAutomationService {
      * still suspended answers a coded refusal naming that child's run id, and
      * nothing moves. Resuming the child is the door; the map continues when it
      * completes. See {@link refuseGatedResume}.
+     *
+     * **A cancelled item is recorded, never skipped (#27971).** When the item's
+     * run was cancelled (`cancelRun`, which leaves the parent parked), resuming
+     * the map's run advances it and the item keeps its slot in the results as
+     * `{ $status: 'cancelled', $itemRunId }`, outside `count`. An item whose
+     * suspension is gone WITHOUT a `cancelled` history row is refused with the
+     * same code: the map has nothing true to record for it.
      */
     resume(runId: string, signal?: ResumeSignal): Promise<AutomationResult> {
         // The body lives in ./run-resume.ts (#25222).
@@ -6503,7 +6589,10 @@ export class AutomationEngine implements IAutomationService {
      * Authority is judged first, so a service-owned item keeps its 403; an item
      * open to this route is refused with a coded 409 naming the child run id to
      * resume instead, before any state is touched. A `subflow` link is not a
-     * skip — the signal is delegated to the child — and is unchanged.
+     * skip — the signal is delegated to the child — and is unchanged. A map
+     * whose item row is gone answers by that item's run history (#27971):
+     * `cancelled` hands {@link resume} a continuation that records the item's
+     * marker; anything else is refused with the same code.
      *
      * **An UNDECLARED node type is refused, not deferred** (#5561 step two). It
      * used to be let through on the schema default's inherited `'any'`; a pause
@@ -6517,13 +6606,14 @@ export class AutomationEngine implements IAutomationService {
      * never declared — the failure mode this whole issue is about, restated as a
      * log line.
      */
-    private refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
+    private refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | GatedResumeContinuation | null> {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof refuseGatedResume> = {
             resolveSuspensionChain: (...a) => this.resolveSuspensionChain(...a),
             resolveSuspendedNodeType: (...a) => this.resolveSuspendedNodeType(...a),
             resolveResumeAuthority: (...a) => this.resolveResumeAuthority(...a),
             resolveDeclaredResumeAuthority: (...a) => this.resolveDeclaredResumeAuthority(...a),
+            getRun: (...a) => this.getRun(...a),
             logger: this.logger,
         };
         return refuseGatedResume.call(host, runId, signal);
@@ -6860,6 +6950,57 @@ export class AutomationEngine implements IAutomationService {
         if (!run) return undefined;
         const target = resolveResumeTarget(this.flows, runId, run);
         return 'cause' in target ? target.cause : undefined;
+    }
+
+    /**
+     * [#28230] The run parked at a `map` node on `itemRunId`, read through the
+     * item's own linkage: the `$parentRunId` / `$parentMapNode` the `map` node
+     * launched it with, then the parent's suspension by that id. Two keyed
+     * reads, never a listing — {@link listSuspendedRunsDurable} reads one
+     * capped page of a DB-backed store, so past 1000 parked runs a parent
+     * another process parked may not be on it.
+     *
+     * Answers the parent only while it is parked on `map:<itemRunId>` at the
+     * node the item names, and `undefined` otherwise: no suspension under
+     * `itemRunId`, an item no `map` launched, a parent that is gone or has
+     * moved on. Read it BEFORE {@link cancelRun}, which removes the item's
+     * suspension and with it the linkage.
+     *
+     * Read-only. THROWS when the store cannot be read, as
+     * {@link hasSuspendedRun} does: an outage means "unknown", never "no
+     * parent".
+     */
+    async suspendedMapParentOf(
+        itemRunId: string,
+    ): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined> {
+        const item = await this.loadSuspendedRunStrict(itemRunId);
+        const ctx = item?.context as Record<string, unknown> | undefined;
+        const parentRunId = ctx?.$parentRunId;
+        const mapNode = ctx?.$parentMapNode;
+        if (typeof parentRunId !== 'string' || !parentRunId) return undefined;
+        const parent = await this.loadSuspendedRunStrict(parentRunId);
+        if (!parent || parent.nodeId !== mapNode || parent.correlation !== `map:${itemRunId}`) return undefined;
+        return { runId: parent.runId, flowName: parent.flowName, nodeId: parent.nodeId, correlation: parent.correlation };
+    }
+
+    /**
+     * [#28271] Where `runId` is parked — its flow, node and correlation — or
+     * `undefined` when it is not suspended. One keyed read through the strict,
+     * store-authoritative loader {@link hasSuspendedRun} uses, never a listing:
+     * {@link listSuspendedRunsDurable} reads one capped page of a DB-backed
+     * store, so past 1000 parked runs a run another process parked may not be
+     * on it.
+     *
+     * Read-only. THROWS when the store cannot be read, as
+     * {@link hasSuspendedRun} does: an outage means "unknown", never "not
+     * parked".
+     */
+    async suspensionOf(
+        runId: string,
+    ): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined> {
+        const run = await this.loadSuspendedRunStrict(runId);
+        if (!run) return undefined;
+        return { runId: run.runId, flowName: run.flowName, nodeId: run.nodeId, correlation: run.correlation };
     }
 
     /**
@@ -9061,12 +9202,10 @@ export class AutomationEngine implements IAutomationService {
      * `assignments`
      * through `builtin/value-slot-map.ts`, the one per-slot resolver
      * (`resolveValueSlotMap`, `resolveValueSlot`, `resolveCollectionSlot`).
-     * One slot reaches it undeclared: a `connector_action`'s
-     * `connectorConfig.input` map (#27327), evaluated through the same
-     * resolver. The ledger addresses only `node.config`, and `connectorConfig`
-     * is a sibling block, so registration does not judge an envelope there
-     * yet — a malformed one registers and faults at run time — until #27968
-     * declares it.
+     * So does a `connector_action`'s `connectorConfig.input` map (#27327),
+     * evaluated through the same resolver — the one entry the ledger roots in
+     * a sibling block rather than `config` (#27968), so registration judges an
+     * envelope there like every other.
      * The two legacy
      * `assignment` shapes the executor still normalizes (the
      * `assignments: [{ variable, value }]` array and the bare

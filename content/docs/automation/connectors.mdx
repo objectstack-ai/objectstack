@@ -184,8 +184,19 @@ match.
 ```bash
 pnpm --filter @objectstack/connector-openapi normalize-openapi \
   --in https://example.com/openapi.yaml --out ./specs/crm-openapi.json \
-  --include-pattern '^GET /v1/customers'
+  --include-pattern '^GET /v1/customers' --trim
 ```
+
+With `--trim` the document it writes holds **only** the operations the
+patterns match: every other operation, every path item left with none, and
+`webhooks` are dropped before inlining, so nothing reachable only from a
+dropped operation is written, and the printed sha256 is the hash of those
+trimmed bytes. Package that output — a large vendor document shrinks to the
+operations the app calls (Stripe's 612 operations, 63 MB at the default
+depth, become about 1.9 MB for six). Without `--trim` the whole document is
+written and the patterns only compute `include`, so `include` can be widened
+later by editing config alone; with it, widening means re-running the script.
+`--trim` without an `--include-pattern` is refused.
 
 Inlining is bounded: a recursive schema, or one more than `--max-depth`
 (default 2) named schemas deep, becomes a typed stub whose description names
@@ -313,7 +324,24 @@ that names the reference, and a dispatch to it fails with the same reason.
 
 #### Setting a credential
 
-Three routes, each requiring the `manage_metadata` capability:
+**In the Console**, an administrator sets them in **Setup → Integrations →
+Connector Credentials**. The page lists every reference with its status, the
+connectors that name it, and when it last changed. Each writable reference has
+a masked input that starts empty, whatever is stored: typing a value and saving
+stores it, and leaving the input empty keeps the current one. A reference with
+a value stored here also has **Clear**. One that an environment variable
+supplies is read-only, since the variable wins, and a `rejected` one shows the
+upstream's reason. Where the routes below refuse (a multi-organization
+environment, or a server without them), the page shows the server's sentence
+instead of a list.
+
+Installing an app from the marketplace ends on the same inputs: once the
+install lands, the credentials its connectors still need are listed, each with
+**Skip for now**. A skipped one leaves its connectors degraded until it is set
+on the Setup page. The step comes after the install, not before it, because the
+routes below refuse a reference that no installed app declares.
+
+Over the API, three routes, each requiring the `manage_metadata` capability:
 
 ```http
 GET    /api/v1/automation/connectors/credential-refs
@@ -387,29 +415,243 @@ shape on a provider-bound instance —
 //    with `auth: { type, credentialRef }` instead (ADR-0097 §3)."
 authentication: { type: 'bearer', token: 'sk_live_9f…' },
 
-// ✓ a reference, resolved at boot:
+// ✓ a reference, resolved at materialization (unset, it degrades the instance):
 auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' },
 ```
 
 — fails validation, and `auth: { type: 'bearer', token: … }` is not even a
 legal shape (the declarative union has no `token` field to put a secret in).
 
-### Where is `oauth2`?
+### Grant-bearing kinds: `oauth2` and `app-credential`
 
-Deliberately absent from declarative instances — **not** an oversight to work
-around. The runtime auth shape has five variants (`none`, `bearer`,
-`api-key`, `basic`, `oauth2`); the declarative shape stops at four. Static
-credentials resolved from env/config are the open tier; the OAuth2
-authorization-code/refresh **lifecycle** — token acquisition, rotation,
-per-tenant connections — is the enterprise tier (ADR-0015). If your upstream
-needs OAuth2, use an enterprise credential resolver or register the connector
-from a plugin that manages its own tokens; don't try to emulate it by stuffing
-a short-lived access token behind a `bearer` ref.
+Some upstreams take no static credential: the token is obtained from a token
+endpoint and refreshed as it expires. Two more `auth` kinds declare that, in
+the open tier (ADR-0143). They are **grant-bearing**: the metadata carries the
+endpoints, the client id and a `credentialRef` for the client or app secret,
+never a token. Access and refresh tokens are runtime state and have no key here.
+
+```ts
+// OAuth 2.0 — a user grants access once (`authorization_code`, PKCE S256 always on):
+auth: {
+  type: 'oauth2',
+  grant: 'authorization_code',
+  authorizationUrl: 'https://vendor.example.com/oauth/authorize',
+  tokenUrl: 'https://vendor.example.com/oauth/token',
+  scopes: ['crm.read'],
+  clientId: 'objectstack-prod',
+  credentialRef: 'VENDOR_CLIENT_SECRET',   // omit for a public client
+}
+
+// OAuth 2.0 — server to server (`client_credentials`, a confidential client):
+auth: {
+  type: 'oauth2',
+  grant: 'client_credentials',
+  tokenUrl: 'https://vendor.example.com/oauth/token',
+  resource: 'https://api.vendor.example.com',
+  clientId: 'objectstack-prod',
+  credentialRef: 'VENDOR_CLIENT_SECRET',   // required for this grant
+}
+
+// A vendor app credential (Feishu, DingTalk, WeCom): app id + app secret → tenant token
+auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialRef: 'FEISHU_APP_SECRET' }
+```
+
+What the publish door checks, each refusal located at its key under `auth`:
+
+- **`oauth2`** needs `tokenUrl` and `clientId`, plus `authorizationUrl` on
+  `authorization_code`. The one exception is `provider: 'mcp'` over an `http`
+  transport, which may omit the endpoints and the client id: the MCP
+  authorization flow discovers the server's metadata and can register the
+  client. `client_credentials` has no authorization step, so
+  `authorizationUrl` is refused there, and it requires `credentialRef`.
+  A `credentialRef` without its `clientId` is refused. An inline
+  `clientSecret`, `refreshToken` or `accessToken` is refused by name, pointing
+  at `credentialRef`. There is no PKCE switch.
+- **`app-credential`** takes `vendor` (`feishu`, `dingtalk` or `wecom`), `appId`
+  and a required `credentialRef`. An inline `appSecret` is refused by name.
+
+**How the server serves them.** Both kinds are served through a
+**credential handle** the provider asks on every request. The built-in `rest`
+and `openapi` providers ask it; a provider says it does by registering with
+`registerConnectorProvider(…, { credentialHandle: true })`. For an `openapi`
+instance the document's `security` decides only where the token is *not*
+sent: an operation whose effective `security` is `[]` is anonymous and never
+carries it, and a header or query parameter an `apiKey` scheme names is the
+platform's to fill, so it is left out of the action's input schema, as
+`Authorization` is.
+
+An **`app-credential`** instance runs its vendor's exchange from the `appId`
+and the app secret its `credentialRef` names. The exchange is fixed per
+`vendor`, and nothing about it is authored:
+
+| `vendor` | Token request | Where the token rides on a call |
+|:---|:---|:---|
+| `feishu` | `POST https://accounts.feishu.cn/oauth/v3/token` (`client_credentials`) | `Authorization: Bearer` |
+| `dingtalk` | `POST https://api.dingtalk.com/v1.0/oauth2/accessToken` | header `x-acs-dingtalk-access-token` |
+| `wecom` | `GET https://qyapi.weixin.qq.com/cgi-bin/gettoken` | query parameter `access_token` |
+
+The token belongs to the app, so a run's organization selects nothing, and
+there is nothing to connect. It is kept in memory only, never stored (the app
+secret re-derives it at any time), and obtained afresh when it is within 30
+seconds of its expiry, or once when the upstream answers `401`. Concurrent
+requests share one exchange. WeCom can invalidate a token before it expires
+and says so inside an ordinary answer (`errcode` `40014` or `42001`) rather
+than with a `401`: such an answer obtains the token afresh once and repeats
+the call once, and a second such answer fails the call. No exchange follows a
+redirect. An exchange that gets no answer, a `429` or a `5xx` fails the
+dispatch `CONNECTOR_UPSTREAM_UNAVAILABLE`, retried on the existing backoff; a
+vendor that refuses the app id or secret fails it with `503`, naming the
+instance and at most the vendor's error code, never the vendor's text.
+
+An **`oauth2`** instance's access token is
+obtained from `tokenUrl` (the client authenticating with HTTP Basic, or by
+`client_id` alone as a public client), cached in memory only, refreshed when
+it is within 30 seconds of its expiry, and refreshed once more, with one
+retry, when the upstream answers `401`. Concurrent requests share one token
+request, and with a cluster service a refresh runs under the cluster lock, so
+a rotating refresh token is never spent twice.
+
+- **`client_credentials`** needs nothing more: the client secret its
+  `credentialRef` names re-derives the token at any time.
+- **`authorization_code`** needs an administrator to **connect** it, once per
+  organization. Until then the instance is **degraded** "not connected" (never
+  a failed boot). The connect is three calls, each needing the
+  organization-scoped `manage_connector_connections` capability (platform
+  administrators hold it by default; grant it to anyone else, an organization
+  administrator included, through a permission set):
+
+  ```http
+  POST /api/v1/automation/connectors/:name/connection     → { authorizationUrl, expiresAt }
+  GET  /api/v1/automation/connectors/oauth/callback?code=…&state=…   (the vendor redirects here)
+  DELETE /api/v1/automation/connectors/:name/connection   → revoke
+  ```
+
+  `GET …/:name/connection` answers the organization's status
+  (`not_connected`, `connected`, `reconnect_required`), never a token. The
+  `state` and the PKCE verifier are bound to the user and organization that
+  began the connect and are used once; a callback from anyone else is refused
+  before its code is exchanged. While the connect waits (ten minutes at most)
+  it is held in the cluster KV, or in process on a single node, **sealed**
+  under a key derived from the `state` itself, which the server never stores:
+  the KV holds only the state's digest and an AES-256-GCM envelope, so a party
+  that can read the KV learns no verifier, user or organization, and a value
+  edited or moved there opens as nothing and its code is never exchanged.
+  Write access to the cluster KV stays inside the platform's trust boundary,
+  as it is for the cluster lock: such a writer can still delete a waiting
+  connect. The redirect URI is the deployment's
+  (`OS_BASE_URL` or `OS_AUTH_URL` plus `/api/v1/automation/connectors/oauth/callback`,
+  or the automation plugin's `connectorOAuthRedirectUri`), never the
+  request's; register that URI with the vendor. The refresh token is kept
+  encrypted in `sys_connector_connection`, one row per organization; it is
+  not a sign-in account, and signing in never touches it. A run dispatches
+  with its own organization's connection; a run with no organization uses the
+  instance's only connection, and is refused when there are several. When the
+  vendor refuses the grant (`invalid_grant`), the connection is marked
+  **reconnect required** and the instance degraded until an administrator
+  connects it again. A refresh, and the mark "reconnect required", are each
+  written only over the revision they read, in one conditional write, so a
+  stale one never overwrites a newer connect on any replica. A revoke deletes
+  the stored connection only: the server does not revoke the refresh token at
+  the vendor (RFC 7009), because no revocation endpoint is known for the
+  instance yet — the auth declares none, and the discovery that would supply
+  one is ADR-0143 S2. The refresh token stays valid at the vendor until it
+  expires or is revoked in the vendor's console; revoke it there too when the
+  disconnect is a response to a leak.
+
+What is not served yet is held **degraded** with a reason that names it, and
+never called without its credential: an `oauth2` or `app-credential`
+instance on a provider that does not ask the credential handle (the built-in
+`mcp` provider does not yet, nor does a plugin's provider registered without
+`{ credentialHandle: true }`), an `mcp` instance that left its endpoints to
+discovery, and an `oauth2`
+instance whose `tokenUrl` or `authorizationUrl` is not `https://` (plain
+`http://` is accepted only to `localhost`, a `127.0.0.0/8` address or
+`[::1]` — not a `*.localhost` name, which the system resolver sends to DNS —
+so the client secret and the refresh token never cross a network in the
+clear; a token endpoint that answers with a redirect is refused rather than
+followed). A datasource
+that borrows from a grant-bearing instance (`external.connector`) is refused
+with `422`. Until then, declare a static kind (`bearer`, `api-key` or `basic`)
+to dispatch now; don't emulate a grant by putting a short-lived access token
+behind a `bearer` ref.
+
+### Request signing: `signed`
+
+Some upstreams take no token at all: every request carries a signature over its
+own method, path, query, headers and body, computed with a key the caller never
+sends. The `signed` kind declares that (ADR-0143 D2.3). The metadata names the
+**scheme** and the public **key id**; the signing key itself is a
+`credentialRef`, resolved through the same chain as every other kind.
+
+```ts
+// Alibaba Cloud OpenAPI, V3 signature (ACS3-HMAC-SHA256):
+auth: {
+  type: 'signed',
+  scheme: 'aliyun-acs3-hmac-sha256',
+  keyId: 'YourAccessKeyId',               // the AccessKey ID: public, stays in metadata
+  credentialRef: 'ALIYUN_ACCESS_KEY_SECRET',
+}
+
+// Tencent Cloud API 3.0, signature v3 (TC3-HMAC-SHA256):
+auth: {
+  type: 'signed',
+  scheme: 'tencentcloud-tc3-hmac-sha256',
+  keyId: 'YourSecretId',                  // the SecretId: public, stays in metadata
+  credentialRef: 'TENCENT_SECRET_KEY',
+}
+```
+
+What the platform does with it:
+
+- **Every request is signed, each attempt fresh.** A retry is signed again with
+  a new nonce and date, so a scheme that refuses a replayed nonce or a stale
+  timestamp accepts it.
+- **The key never reaches the provider.** The automation service binds the
+  resolved key to the scheme's signer at materialization and hands the
+  provider the signer only. A datasource cannot borrow a `signed` instance
+  (`external.connector` is refused with `422`): a driver cannot sign per
+  request.
+- **Schemes that sign their responses are verified** before a result is
+  returned; a response that does not verify fails the dispatch.
+- **`aliyun-acs3-hmac-sha256`** signs `host`, `content-type` and every
+  `x-acs-*` header, and sets `x-acs-date`, `x-acs-signature-nonce`,
+  `x-acs-content-sha256` and `Authorization`. The API's own action and version
+  are yours to send, as `x-acs-action` / `x-acs-version` in `defaultHeaders`
+  (rest) or in each call's headers.
+- **`tencentcloud-tc3-hmac-sha256`** signs `content-type` and `host`, and sets
+  `X-TC-Timestamp` and `Authorization`. The service in the signature's scope is
+  the first label of the endpoint host (`cvm.tencentcloudapi.com`, or a
+  regional `cvm.ap-guangzhou.tencentcloudapi.com`, is `cvm`), so point
+  `baseUrl` at the product's own endpoint. `X-TC-Action`, `X-TC-Version` and
+  `X-TC-Region` are yours to send and are not signed. A request without a body
+  is sent with `Content-Type: application/x-www-form-urlencoded`, the type it
+  is signed with.
+
+What the publish door refuses:
+
+- **An unknown `scheme`**, at `auth.scheme`, naming the scheme it got and the
+  ones this platform ships. A scheme joins the list only together with its
+  signer and its test vectors, so a scheme the server cannot run is never
+  accepted.
+- **An inline key**: `secret`, `privateKey`, `secretKey` or `accessKeySecret`
+  is refused by name, pointing at `credentialRef`. The vendors' words for the
+  key id (`accessKeyId`, `secretId`) are answered with `keyId`. An authored `signature` is
+  refused too: it is computed for every request.
+- **`provider: 'mcp'`**, at `auth.type`: an MCP server is not signed per
+  request. Declare `provider: 'rest'` or `provider: 'openapi'`.
+
+`signed` and a static credential do not combine: a request is authenticated
+one way. An `openapi` instance's remote `spec` URL is fetched unsigned, as
+before; only the API calls are signed. A third-party provider factory serves a
+`signed` instance only when it says it applies the signer
+(`requestSignerApplied` on its materialization); one that does not is refused at
+boot rather than allowed to call the upstream unsigned.
 
 ### The runtime shape: `authentication`
 
-The `authentication` field is the **runtime** auth config — it carries the
-resolved secret *inline* (`{ type: 'bearer', token }`), because it is supplied
+The `authentication` field is the **runtime** auth config, with four static
+variants (`none`, `bearer`, `api-key`, `basic`). It carries the resolved
+secret *inline* (`{ type: 'bearer', token }`), because it is supplied
 by **host code** (a plugin calling `engine.registerConnector`, or the
 executors' hand-wired instance options reading `process.env`). That is a
 different trust anchor than metadata: code review guards what enters it, and
@@ -417,6 +659,11 @@ it is never serialized into a versioned artifact. On declarative entries,
 leave `authentication` alone — provider-bound instances must use `auth`, and
 catalog descriptors documenting a planned integration must still never carry a
 live secret value.
+
+The runtime shape's `oauth2` variant was removed in `@objectstack/spec` 18
+(ADR-0143 D7): it held a client secret and a refresh token inline and nothing
+ran its lifecycle. `authentication: { type: 'oauth2' }` is refused with that
+prescription; declare the grant on an instance's `auth` instead, as above.
 
 ## Dispatching from a flow
 
@@ -449,6 +696,10 @@ retry):
 |:---|:---|
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
+| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a provider that does not ask the credential handle (the built-in `mcp` provider, for now) | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
+| An `authorization_code` instance nobody connected, or whose grant the vendor refused | **Not fatal**: the instance registers **degraded**, "not connected" or "reconnect required" — connect it (`POST …/connectors/:name/connection`), and it materializes without a restart |
+| The token endpoint is unreachable or answers `5xx` / `429` | **Not fatal**: the dispatch fails `CONNECTOR_UPSTREAM_UNAVAILABLE` and is retried on the existing backoff; the connection stays connected |
+| `auth` is `signed` on a provider that does not say it applies the request signer | **Hard boot error** naming the instance, the scheme and the provider: its calls would go out unsigned — declare it through `rest` or `openapi` |
 | `credentialRef` resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
 | The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
@@ -456,6 +707,7 @@ retry):
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
 | A retry of a degraded instance reaches the upstream and meets a configuration fault (an `include` naming a tool or operation the upstream does not offer) | **Not fatal**: the instance stays **degraded**, now with the configuration reason, and is **not retried** — dispatches fail saying to edit its declaration; an edit of the entry (or a restart) re-attempts it |
 | Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
+| A `connector_action` input that, once evaluated, breaks the action's `inputSchema` (a missing `required` parameter, a wrong `type`) | **The step fails before dispatch** with `VALIDATION_ERROR`, naming each parameter path, and nothing is sent; a `fault` edge or `try_catch` can route it. Supply the parameter or send the declared type: text is never converted, so cast it in a CEL envelope (`int()`, `double()`, `bool()`). `GET /api/v1/automation/connectors` lists the schema; `os validate` does not judge the input against the `inputSchema` yet |
 | A bad entry arrives via **runtime reload** (a Studio publish, a direct active save through `PUT /api/v1/meta/connector/:name`, or a delete, made on any replica — peers reconcile on [cluster lane 2](/docs/kernel/cluster#62-the-cluster-invalidation-family); or a dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
 
 ## Catalog descriptors: entries without a `provider`

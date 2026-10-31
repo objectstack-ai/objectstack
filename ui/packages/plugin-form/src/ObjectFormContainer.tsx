@@ -24,10 +24,24 @@
  * Both maps prepare the schema through `usePreparedFormSchema`, the one
  * preparation `ObjectForm` uses, so the labels, field-level security and
  * `{ group }` sections a container draws are the ones the layouts draw.
+ *
+ * As the caller, the block also gives the save its feedback
+ * (`ux-conventions.write-feedback`): a write the container makes toasts the
+ * record-named message the console's record dialogs and record page toast
+ * (`recordSaveMessage`, `Task "Quarterly review" updated`), before the author's
+ * `onSuccess` runs. A host that mounts `DrawerForm` / `ModalForm` itself owns
+ * its own feedback, so it never passes through here and is never toasted twice.
+ * It is the save's ONE toast (objectstack-ai/objectstack#28216): while the
+ * container is open it claims the answer warnings of the write it makes, as
+ * the record page and the console's record dialogs do, and the record-named
+ * toast carries them instead of the write-warning channel raising a second.
  */
 
-import React from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import type { ObjectFormSchema } from '@object-ui/types';
+import { toast } from '@object-ui/components';
+import { createSafeTranslation, recordSaveMessage, useObjectLabel } from '@object-ui/i18n';
+import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
 import { usePreparedFormSchema, ObjectForm, type ObjectFormComponentProps } from './ObjectForm';
 import { DrawerForm } from './DrawerForm';
 import { ModalForm } from './ModalForm';
@@ -54,11 +68,83 @@ export const ObjectFormContainer: React.FC<ObjectFormComponentProps> = ({ schema
   </RecordFieldAccessForForm>
 );
 
+/**
+ * The save message's copy. Falls back to the `en` pack's values when no i18n
+ * provider is mounted, so a provider-less host toasts English, not raw keys.
+ */
+const useSaveFeedbackTranslation = createSafeTranslation(
+  {
+    'form.createdNamed': '{{object}} "{{title}}" created',
+    'form.updatedNamed': '{{object}} "{{title}}" updated',
+    'form.createSuccess': '{{object}} created successfully',
+    'form.updateSuccess': '{{object}} updated successfully',
+    'common.record': 'Record',
+  },
+  'form.createdNamed',
+);
+
+/**
+ * The container's `onSuccess`: toast the save, then hand the record to the
+ * author's `onSuccess`. Only a write the container made is toasted — a
+ * `submitHandler` owns its own persistence and feedback, and an adapter-less
+ * inline-fields collector wrote nothing (its `onSuccess` IS the write).
+ *
+ * The toast carries the write's advisory warnings: while the container is
+ * open, the write-warning channel parks the answer warnings of the write it
+ * makes (this record's update, or a create of this object) on the claim below
+ * instead of toasting them. Keyed on primitives (ui/AGENTS.md #10).
+ */
+function useContainerSaveFeedback(
+  schema: ReturnType<typeof usePreparedFormSchema>['schema'],
+  dataSource: ObjectFormComponentProps['dataSource'],
+): (saved: unknown) => Promise<void> {
+  const { t } = useSaveFeedbackTranslation();
+  const { objectLabel } = useObjectLabel();
+  const { onSuccess, submitHandler, objectName, mode, recordId, successMessage } = schema;
+  const isOpen = schema.open !== false;
+  const writes = !!dataSource && !submitHandler && (mode === 'create' || mode === 'edit');
+  const answerWarningClaim = useRef<AnswerWarningClaim | null>(null);
+  useEffect(() => {
+    if (!dataSource || !writes || !isOpen || !objectName) return;
+    if (mode === 'edit' && !recordId) return;
+    const claim = claimAnswerWarnings(dataSource, mode === 'edit'
+      ? { operation: 'update', resource: objectName, id: recordId }
+      : { operation: 'create', resource: objectName });
+    answerWarningClaim.current = claim;
+    return () => {
+      if (answerWarningClaim.current === claim) answerWarningClaim.current = null;
+      claim.release();
+    };
+  }, [dataSource, writes, isOpen, mode, objectName, recordId]);
+
+  return useCallback(async (saved: unknown) => {
+    if (dataSource && writes) {
+      // Taken first, so nothing the label lookup below awaits can come
+      // between the write and its claim.
+      const feedback = answerWarningClaim.current?.take(saved);
+      let message = successMessage;
+      if (!message) {
+        // The adapter caches the definition the form body already read.
+        const objectDef = await Promise.resolve(dataSource.getObjectSchema?.(objectName)).catch(() => undefined);
+        message = recordSaveMessage(t, {
+          label: objectDef?.name ? objectLabel(objectDef) : t('common.record'),
+          objectDef,
+          saved,
+          mode,
+        });
+      }
+      toastRecordSave(toast, message, feedback);
+    }
+    await onSuccess?.(saved);
+  }, [writes, dataSource, mode, successMessage, objectName, onSuccess, objectLabel, t]);
+}
+
 const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({
   schema: rawSchema,
   dataSource,
 }) => {
   const { schema, tSec } = usePreparedFormSchema(rawSchema, dataSource);
+  const handleSuccess = useContainerSaveFeedback(schema, dataSource);
 
   if (schema.formType === 'drawer') {
     // `layout` passes through unfolded: it is `vertical | horizontal` on both
@@ -88,6 +174,7 @@ const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({
           })),
           open: schema.open,
           onOpenChange: schema.onOpenChange,
+          onSuccess: handleSuccess,
           drawerSide: schema.drawerSide,
           drawerWidth: schema.drawerWidth,
         }}
@@ -126,6 +213,7 @@ const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({
           })),
           open: schema.open,
           onOpenChange: schema.onOpenChange,
+          onSuccess: handleSuccess,
           modalSize: schema.modalSize,
           modalCloseButton: schema.modalCloseButton,
         }}

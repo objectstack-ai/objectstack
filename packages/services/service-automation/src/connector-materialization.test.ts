@@ -29,6 +29,7 @@ import {
     type CredentialResolver,
 } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
+import { computeAliyunAcs3Signature } from './request-signing/aliyun-acs3-hmac-sha256.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -89,6 +90,8 @@ function makeFakeProvider() {
 interface BootOptions {
     providerKey?: string;
     providerFactory?: ConnectorProviderFactory;
+    /** The registration options of {@link providerFactory} (ADR-0143 D4's credential-handle opt-in). */
+    providerOptions?: { credentialHandle?: boolean };
     /** Names registered as plugin connectors during init() (for the conflict rule). */
     registerLivePlugin?: string[];
     credentialResolver?: CredentialResolver;
@@ -119,7 +122,7 @@ async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKe
             });
             const automation = ctx.getService('automation');
             if (opts.providerFactory) {
-                automation.registerConnectorProvider(opts.providerKey ?? 'fake', opts.providerFactory);
+                automation.registerConnectorProvider(opts.providerKey ?? 'fake', opts.providerFactory, opts.providerOptions);
             }
             for (const name of opts.registerLivePlugin ?? []) {
                 automation.registerConnector(
@@ -1041,6 +1044,265 @@ describe('ADR-0097 — the entry\'s resilience policy on ConnectorProviderContex
         await reload([{ ...providerConnector('billing'), retryConfig: { maxAttempts: 4 } }]);
         expect(calls).toHaveLength(2);
 
+        await kernel.shutdown();
+    });
+});
+
+// ADR-0143 D2.2, D4 — a grant-bearing instance is served only through the
+// per-dispatch credential handle, by a provider registered as asking it on
+// every request. Anything this server cannot serve yet is held degraded with a
+// named reason and its factory is never invoked — never materialized without
+// its credential, never called upstream unauthenticated. A boot does not fail
+// on it: it is not an authoring fault.
+describe('ADR-0143 D4 — a grant-bearing instance is served through its credential handle, or held degraded', () => {
+    const CLIENT_CREDENTIALS: ConnectorInstanceAuth = {
+        type: 'oauth2', grant: 'client_credentials', tokenUrl: 'https://idp.example.com/token', clientId: 'c', credentialRef: 'SECRET',
+    };
+    const AUTHORIZATION_CODE: ConnectorInstanceAuth = {
+        type: 'oauth2',
+        grant: 'authorization_code',
+        authorizationUrl: 'https://idp.example.com/authorize',
+        tokenUrl: 'https://idp.example.com/token',
+        clientId: 'c',
+        credentialRef: 'SECRET',
+    };
+
+    function expectHeld(engine: AutomationEngine, calls: unknown[], ...reason: string[]) {
+        expect(calls).toHaveLength(0);
+        const desc = engine.getConnectorDescriptors().find((d) => d.name === 'vendor');
+        expect(desc?.state).toBe('degraded');
+        expect(desc?.actions).toEqual([]);
+        for (const r of reason) expect(engine.getConnectorDegradedReason('vendor')).toContain(r);
+        expect(engine.resolveConnectorAction('vendor', 'ping')).toBeUndefined();
+    }
+
+    it('serves an `app-credential` instance through its credential handle on an opted-in provider, with no static auth (ADR-0143 D2.2)', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_x', credentialRef: 'SECRET' } })],
+            { providerFactory: factory, providerOptions: { credentialHandle: true }, credentialResolver: () => 'resolved-secret' },
+        );
+        const engine = automationOf(kernel);
+        expect(calls).toHaveLength(1);
+        expect(calls[0].auth).toBeUndefined();
+        expect(calls[0].credentialHandle).toMatchObject({ connector: 'vendor' });
+        expect(engine.getConnectorDegradedReason('vendor')).toBeUndefined();
+        // ⛔ The app secret never reaches the provider: only the handle does.
+        expect(JSON.stringify(calls[0])).not.toContain('resolved-secret');
+        await kernel.shutdown();
+    });
+
+    it('⛔ holds an `app-credential` instance degraded on a provider that does not ask the credential handle', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'app-credential', vendor: 'wecom', appId: 'ww_x', credentialRef: 'SECRET' } })],
+            { providerFactory: factory, credentialResolver: () => 'resolved-secret' },
+        );
+        expectHeld(automationOf(kernel), calls, "auth type 'app-credential', but provider 'fake' does not yet ask the per-dispatch credential handle", 'never called without its credential');
+        await kernel.shutdown();
+    });
+
+    it('holds an `app-credential` instance whose app secret does not resolve, naming the reference', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'app-credential', vendor: 'dingtalk', appId: 'ding_x', credentialRef: 'DING_SECRET' } })],
+            { providerFactory: factory, providerOptions: { credentialHandle: true }, credentialResolver: () => undefined },
+        );
+        expect(calls).toHaveLength(0);
+        expect(automationOf(kernel).getConnectorDegradedReason('vendor')).toContain('DING_SECRET');
+        await kernel.shutdown();
+    });
+
+    it('holds an `oauth2` instance degraded on a provider that does not ask the credential handle', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: CLIENT_CREDENTIALS })], {
+            providerFactory: factory,
+            credentialResolver: () => 'resolved-secret',
+        });
+        expectHeld(automationOf(kernel), calls, "provider 'fake' does not yet ask the per-dispatch credential handle", 'never called without its credential');
+        await kernel.shutdown();
+    });
+
+    it('holds an `oauth2` instance degraded when it declares no endpoints or client to send a token request with', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'oauth2', grant: 'authorization_code', credentialRef: 'SECRET' } })],
+            { providerFactory: factory, providerOptions: { credentialHandle: true }, credentialResolver: () => 'resolved-secret' },
+        );
+        expectHeld(automationOf(kernel), calls, '`tokenUrl`, `clientId`, `authorizationUrl`', 'not served');
+        await kernel.shutdown();
+    });
+
+    it.each([
+        ['tokenUrl', { tokenUrl: 'http://idp.example.com/token' }],
+        ['authorizationUrl', { authorizationUrl: 'http://idp.example.com/authorize' }],
+        ['tokenUrl', { tokenUrl: 'ftp://idp.example.com/token' }],
+    ] as const)('⛔ holds an `oauth2` instance degraded when its `%s` is not https off loopback, naming the field', async (field, over) => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: { ...AUTHORIZATION_CODE, ...over } as ConnectorInstanceAuth })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expectHeld(automationOf(kernel), calls, `\`${field}\` not over https`, 'not served');
+        // The reason names the field, never the URL it was given.
+        expect(automationOf(kernel).getConnectorDegradedReason('vendor')).not.toContain('idp.example.com');
+        await kernel.shutdown();
+    });
+
+    it('serves an `oauth2` instance whose token endpoint is plain http on a loopback host', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: { ...CLIENT_CREDENTIALS, tokenUrl: 'http://127.0.0.1:8080/token' } as ConnectorInstanceAuth })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expect(calls).toHaveLength(1);
+        expect(automationOf(kernel).getConnectorDescriptors().find((d) => d.name === 'vendor')?.state).toBe('ready');
+        await kernel.shutdown();
+    });
+
+    it('serves a `client_credentials` instance on an opted-in provider: a credential handle, and no static auth', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: CLIENT_CREDENTIALS })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expect(calls).toHaveLength(1);
+        expect(calls[0].auth).toBeUndefined();
+        expect(calls[0].credentialHandle).toMatchObject({ connector: 'vendor' });
+        expect(typeof calls[0].credentialHandle?.get).toBe('function');
+        expect(automationOf(kernel).getConnectorDescriptors().find((d) => d.name === 'vendor')?.state).toBe('ready');
+        await kernel.shutdown();
+    });
+
+    it("holds an `authorization_code` instance nobody connected degraded \"not connected\" — the boot does not fail", async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: AUTHORIZATION_CODE })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expectHeld(automationOf(kernel), calls, "connector instance 'vendor' is not connected", '/connectors/vendor/connection');
+        await kernel.shutdown();
+    });
+
+    it('CONTROL: the four static kinds still materialize, each handed its resolved credential', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [
+                providerConnector('k_none', { auth: { type: 'none' } }),
+                providerConnector('k_bearer', { auth: { type: 'bearer', credentialRef: 'TOKEN' } }),
+                providerConnector('k_key', { auth: { type: 'api-key', credentialRef: 'TOKEN' } }),
+                providerConnector('k_basic', { auth: { type: 'basic', username: 'u', credentialRef: 'TOKEN' } }),
+            ],
+            { providerFactory: factory, credentialResolver: () => 'resolved-secret' },
+        );
+        expect(Object.fromEntries(calls.map((c) => [c.name, c.auth?.type]))).toEqual({
+            k_none: 'none', k_bearer: 'bearer', k_key: 'api-key', k_basic: 'basic',
+        });
+        expect(automationOf(kernel).getConnectorDescriptors().filter((d) => d.state === 'degraded')).toEqual([]);
+        await kernel.shutdown();
+    });
+});
+
+// ADR-0143 D2.3, D4 — a `signed` instance's key is bound to the signer its
+// scheme names by the host, and the provider receives only the signer. It is
+// served only by a provider that says it applies the signer to every request;
+// any other is a configuration fault, so the instance is never called unsigned.
+describe('ADR-0143 D2.3 — a `signed` instance is handed a request signer, never its key', () => {
+    const SIGNING_KEY = 'resolved-signing-key';
+    const signed: ConnectorInstanceAuth = {
+        type: 'signed',
+        scheme: 'aliyun-acs3-hmac-sha256',
+        keyId: 'YourAccessKeyId',
+        credentialRef: 'ALIYUN_SECRET',
+    };
+
+    /** A provider that applies the signer it is handed (and says so), recording each ctx. */
+    function makeSigningProvider(applied: boolean | undefined) {
+        const calls: ConnectorProviderContext[] = [];
+        const closed: string[] = [];
+        const factory: ConnectorProviderFactory = (ctx) => {
+            calls.push(ctx);
+            return {
+                def: {
+                    name: ctx.name,
+                    label: ctx.label,
+                    type: 'api',
+                    authentication: { type: 'none' },
+                    actions: [{ key: 'ping', label: 'Ping' }],
+                } as unknown as Connector,
+                handlers: { ping: async () => ({ ok: true }) },
+                close: async () => { closed.push(ctx.name); },
+                ...(applied === undefined ? {} : { requestSignerApplied: applied }),
+            };
+        };
+        return { factory, calls, closed };
+    }
+
+    it('materializes it with `requestSigner` bound to the resolved key, `auth` unset, and no key in the context', async () => {
+        const { factory, calls } = makeSigningProvider(true);
+        const kernel = await boot([providerConnector('aliyun_ecs', { auth: signed })], {
+            providerFactory: factory,
+            credentialResolver: (ref) => (ref === 'ALIYUN_SECRET' ? SIGNING_KEY : undefined),
+        });
+        expect(calls).toHaveLength(1);
+        const ctx = calls[0]!;
+        expect(ctx.auth).toBeUndefined();
+        expect([ctx.requestSigner?.connector, ctx.requestSigner?.scheme]).toEqual(['aliyun_ecs', 'aliyun-acs3-hmac-sha256']);
+        expect(JSON.stringify(ctx)).not.toContain(SIGNING_KEY);
+
+        // The signer signs with the key the reference resolved to: recompute
+        // its signature from the instant and nonce it chose.
+        const request = { method: 'GET', url: 'https://ecs.cn-shanghai.aliyuncs.com/?RegionId=cn-shanghai', headers: {} };
+        const signature = await ctx.requestSigner!.sign(request);
+        const expected = computeAliyunAcs3Signature(request, 'YourAccessKeyId', SIGNING_KEY, {
+            date: signature.headers['x-acs-date']!,
+            nonce: signature.headers['x-acs-signature-nonce']!,
+        });
+        expect(signature.headers.authorization).toBe(expected.headers.authorization);
+
+        const engine = automationOf(kernel);
+        expect(engine.getConnectorDescriptors().find((d) => d.name === 'aliyun_ecs')?.state).not.toBe('degraded');
+        expect(engine.resolveConnectorAction('aliyun_ecs', 'ping')).toBeDefined();
+        await kernel.shutdown();
+    });
+
+    it.each([
+        ['does not say it applies the signer', undefined],
+        ['says it does not apply the signer', false],
+    ] as const)('fails boot when the provider %s, and lets its connection go', async (_why, applied) => {
+        const { factory, closed } = makeSigningProvider(applied);
+        await expect(boot([providerConnector('aliyun_ecs', { auth: signed })], {
+            providerFactory: factory,
+            credentialResolver: () => SIGNING_KEY,
+        })).rejects.toThrow(/auth type 'signed'.*did not say it signs every request.*unsigned/s);
+        expect(closed).toEqual(['aliyun_ecs']);
+    });
+
+    it('degrades the instance naming the reference when the signing key does not resolve, without calling its factory', async () => {
+        const { factory, calls } = makeSigningProvider(true);
+        const kernel = await boot([providerConnector('aliyun_ecs', { auth: signed })], {
+            providerFactory: factory,
+            credentialResolver: () => undefined,
+        });
+        expect(calls).toHaveLength(0);
+        const engine = automationOf(kernel);
+        expect(engine.getConnectorDescriptors().find((d) => d.name === 'aliyun_ecs')?.state).toBe('degraded');
+        expect(engine.getConnectorDegradedReason('aliyun_ecs')).toContain('ALIYUN_SECRET');
+        await kernel.shutdown();
+    });
+
+    it('CONTROL: a static kind is handed its credential and no signer', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('k_bearer', { auth: { type: 'bearer', credentialRef: 'TOKEN' } })], {
+            providerFactory: factory,
+            credentialResolver: () => 'resolved-secret',
+        });
+        expect(calls[0]!.auth).toEqual({ type: 'bearer', token: 'resolved-secret' });
+        expect(calls[0]!.requestSigner).toBeUndefined();
         await kernel.shutdown();
     });
 });

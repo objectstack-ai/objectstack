@@ -73,6 +73,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
+import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -1396,7 +1397,7 @@ export function buildApiActionRequest(
             body[recordIdParam] = value;
         }
     }
-    if (/\/api\/v1\/auth\//.test(path) && body.organizationId === undefined && organizationId) {
+    if (isIdentityRouteTarget(path) && body.organizationId === undefined && organizationId) {
         body.organizationId = organizationId;
     }
     if (action?.bodyExtra && typeof action.bodyExtra === 'object' && !Array.isArray(action.bodyExtra)) {
@@ -1406,6 +1407,40 @@ export function buildApiActionRequest(
     // ── 3. the method ──
     const method = String(action?.method || 'POST').toUpperCase();
     return method === 'GET' || method === 'DELETE' ? { method, path } : { method, path, body };
+}
+
+/**
+ * Is this forward `path` an identity route — one under the auth mount
+ * (`/api/v1/auth/…`)? That mount reads its caller from its OWN signed-in
+ * session (a session bearer or cookie) and admits no API key, so a principal
+ * the door admitted by key reaches it as nobody. Read once, here, for the two
+ * rules that depend on it: the `organizationId` stamp in
+ * {@link buildApiActionRequest} and the key refusal in {@link forwardApiAction}.
+ */
+function isIdentityRouteTarget(path: string): boolean {
+    return /\/api\/v1\/auth\//.test(path);
+}
+
+/**
+ * The refusal a door answers, before any forward, when an API-key caller runs
+ * an action whose `target` is an identity route ({@link isIdentityRouteTarget}).
+ *
+ * The forward carries the caller's own credentials so the target authorizes
+ * the SAME principal the door admitted. An identity route cannot read a key,
+ * so it would authorize no one: the request would leave the door and come
+ * back as the target's anonymous 401 ("Sign in first"), telling a caller who
+ * did authenticate to sign in. This says what actually happened. Which
+ * credentials the identity route accepts is unchanged: a signed-in session
+ * still reaches it through the door exactly as before, and a key still
+ * reaches every other target.
+ */
+export function apiActionIdentityRouteKeyRefusal(action: any, target: string): string {
+    return (
+        `Action '${action?.name ?? 'unknown'}' forwards to an identity endpoint ('${target}') that accepts a ` +
+        `signed-in session only, and this request was authenticated with an API key, which that endpoint ` +
+        `cannot read. The action was not run. Run it from a signed-in session (a session token or the ` +
+        `Console's sign-in cookie) instead of an API key.`
+    );
 }
 
 /** What the in-process forward answered — status, parsed JSON body, relayed headers. */
@@ -1516,6 +1551,8 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * ({@link API_FORWARD_HEADER_ALLOWLIST}); `Content-Length` / `Host` are the
  * injector's to set. The forward is marked ({@link API_FORWARD_MARK_HEADER})
  * so a door reached by it refuses instead of looping.
+ * One caller is never forwarded: an API-key caller of an identity route,
+ * which cannot read a key ({@link apiActionIdentityRouteKeyRefusal}).
  *
  * Relayed back: the status, the JSON body, and the credential-rotation
  * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
@@ -1532,6 +1569,24 @@ export async function forwardApiAction(
     req: ApiActionRequest,
     mark: { objectName: string; actionName: string },
 ): Promise<ApiActionForwardAnswer> {
+    // An API-key caller cannot be carried to an identity route (see
+    // {@link apiActionIdentityRouteKeyRefusal}): refused here, before the
+    // target is called, with the status the target would have answered and
+    // the sentence that says why. Both doors relay it as they relay a target's
+    // refusal.
+    if (requestContext?.admission?.credential === 'api_key' && isIdentityRouteTarget(req.path)) {
+        return {
+            status: 401,
+            body: {
+                success: false,
+                error: {
+                    code: standardErrorCodeForHttpStatus(401),
+                    message: apiActionIdentityRouteKeyRefusal({ name: mark.actionName }, req.path.split('?')[0]!),
+                },
+            },
+            headers: {},
+        };
+    }
     const incoming: Record<string, unknown> =
         requestContext?.request?.headers && typeof requestContext.request.headers === 'object'
             ? requestContext.request.headers
@@ -2077,6 +2132,10 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
+        // [#28099] The caller's already-resolved posture rung, the trigger
+        // door's twin (`buildAutomationContext`): never re-derived or raised,
+        // absent when the request carries none. See `AutomationContext.posture`.
+        ...(typeof ec?.posture === 'string' && ec.posture.length > 0 ? { posture: ec.posture } : {}),
         // [#22450] The caller's already-resolved language, the trigger door's
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
@@ -3458,6 +3517,62 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // `/actions` door emit the same `recordLoadDenied` signal to handlers.
     const subject = await loadActionSubjectRecord(objectName, recordId, () =>
         callData('get', { object: objectName, id: recordId }, driver, envId, ec));
+
+    // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW.
+    // Every call that cleared the gates above reaches its branch below; one
+    // `action_invocation` row is written for it whether the branch answers or
+    // throws (the subject-record verdict, a target's refusal, a body's throw),
+    // naming this door (`surface: 'mcp'`, set from the door's identity on a
+    // copy of the caller's envelope; nothing on the request can move it). A
+    // call a gate above refused ran nothing and writes no row. The REST
+    // `/actions` door writes the same row with `surface: 'rest'`. See
+    // `action-invocation-audit.ts`.
+    const invocation = {
+        context: withActionSurface(ec, 'mcp'),
+        actionName: typeof action?.name === 'string' && action.name ? action.name : name,
+        objectName: isObjectLessActionKey(objectName) ? undefined : objectName,
+        recordId,
+        branch: actionInvocationBranch(action, isDeclarativeUpdateAction(action)),
+        target: actionInvocationTarget(action, isDeclarativeUpdateAction(action)), // #28281: the outer row names where an api forward went
+    };
+    let answer: any;
+    try {
+        answer = await dispatchAdmittedBusinessAction(deps, requestContext, name, {
+            action, objectName, recordId, params, subject, ec, driver, envId, callData,
+        });
+    } catch (err) {
+        await recordActionInvocation(deps, requestContext, envId, {
+            ...invocation, outcome: 'failed', ...actionInvocationFailure(err),
+        });
+        throw err;
+    }
+    await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
+    return answer;
+}
+
+/**
+ * The MCP `run_action` dispatch, once every admission gate in
+ * {@link invokeBusinessAction} has passed: the declarative update, the
+ * subject-record verdict, the api forward, the flow dispatch and the
+ * script/body dispatch. Split out so the door can write the invocation row
+ * for whatever this answers or throws (#27908); the code is unchanged.
+ */
+async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    name: string,
+    admitted: {
+        action: any;
+        objectName: string;
+        recordId: string | undefined;
+        params: Record<string, unknown>;
+        subject: ActionSubjectRecordLoad;
+        ec: any;
+        driver: any;
+        envId?: string;
+        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+    },
+): Promise<any> {
+    const { action, objectName, recordId, params, subject, ec, driver, envId, callData } = admitted;
     const record = subject.record;
 
     // ── declarative update ── [#15079] BEFORE the `type` switch below, and

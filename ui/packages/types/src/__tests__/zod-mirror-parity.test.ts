@@ -5721,8 +5721,8 @@ const SPEC_ONLY_KEY_ROWS: Record<string, { disposition: SpecOnlyDisposition; why
     why: '`normalizeSectionField` writes it as the runtime `description`, which the form renders under the control',
   },
   'FormFieldSchema.immutable': {
-    disposition: 'carried, not rendered',
-    why: '`normalizeSectionField` copies it onto the runtime field; no form renderer reads `immutable`, so an edit-mode form leaves the control editable',
+    disposition: 'translated',
+    why: '`normalizeSectionField` writes it as the runtime `disabled` when the form edits an existing record (`isCreateFormMode` false), which the form renders as a locked control; a create form leaves it editable (objectstack#25923)',
   },
   'FormFieldSchema.keyField': {
     disposition: 'carried, not rendered',

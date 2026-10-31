@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'import-run-automations-declared-default-corrected',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell (see the note on `spec-type-alias-input-suffix-retired`).
   surface:
     'api.ImportRequest runAutomations — the declared default of the key on BOTH import '
     + 'bodies, POST /api/v1/data/:object/import (ImportRequest) and its async twin POST '

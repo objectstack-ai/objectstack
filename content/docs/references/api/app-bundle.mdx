@@ -1,0 +1,198 @@
+---
+title: App Bundle schema — API Protocol reference
+navTitle: App Bundle
+description: "App metadata bundle — GET /api/v1/meta/app/{appId}/bundle. Reference for AppMetadataBundleResponse: every property with its type and default."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+App metadata bundle — `GET /api/v1/meta/app/{appId}/bundle`.
+
+One request that answers the metadata a console asks for while it works
+inside one app: the app with its navigation, every object that navigation
+reaches and the objects that point at those through a relationship, and the
+views, pages and dashboards they draw. A console loads it once per session and
+revalidates it with `If-None-Match` after that.
+
+Every member is the answer of the item read it replaces, asked as the same
+caller: the app is `GET /meta/app/{appId}`, and each entry of `objects`,
+`views`, `pages` and `dashboards` is `GET /meta/{type}/{name}` for that
+entry's own `type` and `name`, envelope included. Audience gates, list-view
+and dashboard permissions, the field-visibility mask, the translation to the
+request's locale and the per-caller `sortability` therefore apply exactly as
+they apply to those reads. An item whose read refuses the caller is ABSENT:
+the bundle carries no entry, no name and no placeholder for it. An app the
+caller cannot read refuses the whole request with the app read's own answer,
+so the bundle never discloses an app the caller could not open.
+
+Which items the bundle holds is derived on the server, from the app the
+caller is served (navigation already pruned to that caller):
+
+- `objects` — every object an `object` navigation entry names (top-level
+  `navigation`, each area's `navigation`, and `children` at any depth), in
+  navigation order; then every object with a `lookup` or `master_detail`
+  field whose `reference` is one of those, in registry order. One hop: an
+  object related only to a related object is not included.
+- `views` — every view a navigation entry names by `viewName`, and every view
+  bound to an object in `objects`.
+- `pages` — every page a `page` navigation entry names, and every page bound
+  to an object in `objects` by its `object`.
+- `dashboards` — every dashboard a `dashboard` navigation entry names.
+
+A name appears once per list, at its first position. Items outside the
+bundle stay on their own `GET /meta/{type}/{name}` read.
+
+The response carries a weak `ETag` that identifies the body served to
+THIS caller, under `Cache-Control: private, no-cache` (the item reads' own
+cache posture), and `Vary: Accept-Language`; a request whose `If-None-Match`
+names it is answered `304` with no body. Two callers are answered one
+validator only when they are served the same body. When any member's field
+visibility could not be determined, the bundle is served under
+`Cache-Control: private, no-store` with no `ETag`, as that item's read is.
+
+<Callout type="info">
+**Source:** `packages/spec/src/api/app-bundle.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AppMetadataBundleResponseSchema } from '@objectstack/spec/api';
+import type { AppMetadataBundleResponse } from '@objectstack/spec/api';
+
+// Validate data
+const result = AppMetadataBundleResponseSchema.parse(data);
+```
+
+---
+
+## AppMetadataBundleResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **app** | `{ type: string; name: string; item: any; sortability?: object; … }` | ✅ | The app, as `GET /meta/app/{appId}` answers it to this caller (its navigation pruned to what the caller may open). |
+| **objects** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The objects the app's navigation reaches, then the objects whose relationship fields reference them, each as `GET /meta/object/{name}` answers it. An object the caller may not read is absent. |
+| **views** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The views the navigation names and the views bound to the bundled objects, each as `GET /meta/view/{name}` answers it. A view the caller may not read is absent. |
+| **pages** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The pages the navigation names and the pages bound to the bundled objects, each as `GET /meta/page/{name}` answers it. A page the caller may not read is absent. |
+| **dashboards** | `{ type: string; name: string; item: any; sortability?: object; … }[]` | ✅ | The dashboards the navigation names, each as `GET /meta/dashboard/{name}` answers it. A dashboard the caller may not read is absent. |
+
+### Nested Shape: `AppMetadataBundleResponse.app`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type name |
+| **name** | `string` | ✅ | Item name |
+| **item** | `any` | ✅ | Metadata item definition |
+| **sortability** | `{ fields: Record<string, object> }` | optional | Per-column sortability projection — present exactly when `type` is `object`, on every serving branch. Computed at serve time from the served document via the spec's own storage predicates; consumers render sort affordances from this signal and never re-derive it from field `type`. See `ObjectSortabilitySchema` for the closed category set. |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; `no-overlay` / `no-delete` / `full` mean the write doors refuse the corresponding write with 403. Joins two refusals: the document's own `_lock` (`ITEM_LOCKED`; the packaged artifact wins over any overlay), and the locked packaged base — an item a code package ships, on a type with no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the write names the read-only package). |
+| **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
+| **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
+| **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
+| **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
+| **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
+| **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
+| **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
+| **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. A `null` beside `editable: false` is no such invitation: that item takes no save at this address, so no pin is prescribed for it. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
+| **disabledActions** | `string[]` | optional | The names in `item.actions` that this deployment's activation ledger switches off (an administrator turned them off under Setup › Packaged automation): a call to any of them is refused 409 `ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an activation ledger attached, and then `[]` when none of this object's actions is switched off. Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike the protection keys it is published by the cached branch too, read live and folded into the ETag, so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on a draft read. The ledger is the answering process's engine's. Beside `item`, never inside it: `item.actions` is served as declared, a switched-off action included. |
+| **draftChanges** | `{ path: string[]; by: Enum<'copilot' \| 'mcp' \| 'studio' \| 'api'>; actor: string \| null; client?: object; … }[]` | optional | Per-key provenance of the pending draft: which authoring surface last changed each key path of `item`, under which actor, and when. The draft save records it: each draft save is compared with the body that save replaced (the previous draft, or the stored published row for the draft's first save; a draft of an item with no stored published row is recorded as `[]`, the whole body). A `migrate-stored` rewrite of a draft row records nothing, since it is not authoring. The entries are kept from the first recorded save until the draft is published or discarded, which remove the draft row and the entries with it; and no two entries share a path: a save replaces every entry at or under each path it changes, so the last write to change a key is the entry whose `path` is the longest prefix of that key's path, and entries under a key's path are changes inside it. The entries name which writes changed what; they are not a list of every difference from the published body (compare the two bodies for that). Served only on a `?state=draft` read that answers a stored draft row. ABSENT on the active read, the cached branch and a `?preview=draft` read, and for a draft row whose saves recorded none: absence means "not recorded", never "no changes". |
+
+### Nested Shape: `AppMetadataBundleResponse.objects[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type name |
+| **name** | `string` | ✅ | Item name |
+| **item** | `any` | ✅ | Metadata item definition |
+| **sortability** | `{ fields: Record<string, object> }` | optional | Per-column sortability projection — present exactly when `type` is `object`, on every serving branch. Computed at serve time from the served document via the spec's own storage predicates; consumers render sort affordances from this signal and never re-derive it from field `type`. See `ObjectSortabilitySchema` for the closed category set. |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; `no-overlay` / `no-delete` / `full` mean the write doors refuse the corresponding write with 403. Joins two refusals: the document's own `_lock` (`ITEM_LOCKED`; the packaged artifact wins over any overlay), and the locked packaged base — an item a code package ships, on a type with no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the write names the read-only package). |
+| **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
+| **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
+| **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
+| **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
+| **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
+| **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
+| **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
+| **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. A `null` beside `editable: false` is no such invitation: that item takes no save at this address, so no pin is prescribed for it. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
+| **disabledActions** | `string[]` | optional | The names in `item.actions` that this deployment's activation ledger switches off (an administrator turned them off under Setup › Packaged automation): a call to any of them is refused 409 `ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an activation ledger attached, and then `[]` when none of this object's actions is switched off. Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike the protection keys it is published by the cached branch too, read live and folded into the ETag, so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on a draft read. The ledger is the answering process's engine's. Beside `item`, never inside it: `item.actions` is served as declared, a switched-off action included. |
+| **draftChanges** | `{ path: string[]; by: Enum<'copilot' \| 'mcp' \| 'studio' \| 'api'>; actor: string \| null; client?: object; … }[]` | optional | Per-key provenance of the pending draft: which authoring surface last changed each key path of `item`, under which actor, and when. The draft save records it: each draft save is compared with the body that save replaced (the previous draft, or the stored published row for the draft's first save; a draft of an item with no stored published row is recorded as `[]`, the whole body). A `migrate-stored` rewrite of a draft row records nothing, since it is not authoring. The entries are kept from the first recorded save until the draft is published or discarded, which remove the draft row and the entries with it; and no two entries share a path: a save replaces every entry at or under each path it changes, so the last write to change a key is the entry whose `path` is the longest prefix of that key's path, and entries under a key's path are changes inside it. The entries name which writes changed what; they are not a list of every difference from the published body (compare the two bodies for that). Served only on a `?state=draft` read that answers a stored draft row. ABSENT on the active read, the cached branch and a `?preview=draft` read, and for a draft row whose saves recorded none: absence means "not recorded", never "no changes". |
+
+### Nested Shape: `AppMetadataBundleResponse.views[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type name |
+| **name** | `string` | ✅ | Item name |
+| **item** | `any` | ✅ | Metadata item definition |
+| **sortability** | `{ fields: Record<string, object> }` | optional | Per-column sortability projection — present exactly when `type` is `object`, on every serving branch. Computed at serve time from the served document via the spec's own storage predicates; consumers render sort affordances from this signal and never re-derive it from field `type`. See `ObjectSortabilitySchema` for the closed category set. |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; `no-overlay` / `no-delete` / `full` mean the write doors refuse the corresponding write with 403. Joins two refusals: the document's own `_lock` (`ITEM_LOCKED`; the packaged artifact wins over any overlay), and the locked packaged base — an item a code package ships, on a type with no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the write names the read-only package). |
+| **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
+| **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
+| **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
+| **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
+| **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
+| **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
+| **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
+| **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. A `null` beside `editable: false` is no such invitation: that item takes no save at this address, so no pin is prescribed for it. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
+| **disabledActions** | `string[]` | optional | The names in `item.actions` that this deployment's activation ledger switches off (an administrator turned them off under Setup › Packaged automation): a call to any of them is refused 409 `ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an activation ledger attached, and then `[]` when none of this object's actions is switched off. Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike the protection keys it is published by the cached branch too, read live and folded into the ETag, so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on a draft read. The ledger is the answering process's engine's. Beside `item`, never inside it: `item.actions` is served as declared, a switched-off action included. |
+| **draftChanges** | `{ path: string[]; by: Enum<'copilot' \| 'mcp' \| 'studio' \| 'api'>; actor: string \| null; client?: object; … }[]` | optional | Per-key provenance of the pending draft: which authoring surface last changed each key path of `item`, under which actor, and when. The draft save records it: each draft save is compared with the body that save replaced (the previous draft, or the stored published row for the draft's first save; a draft of an item with no stored published row is recorded as `[]`, the whole body). A `migrate-stored` rewrite of a draft row records nothing, since it is not authoring. The entries are kept from the first recorded save until the draft is published or discarded, which remove the draft row and the entries with it; and no two entries share a path: a save replaces every entry at or under each path it changes, so the last write to change a key is the entry whose `path` is the longest prefix of that key's path, and entries under a key's path are changes inside it. The entries name which writes changed what; they are not a list of every difference from the published body (compare the two bodies for that). Served only on a `?state=draft` read that answers a stored draft row. ABSENT on the active read, the cached branch and a `?preview=draft` read, and for a draft row whose saves recorded none: absence means "not recorded", never "no changes". |
+
+### Nested Shape: `AppMetadataBundleResponse.pages[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type name |
+| **name** | `string` | ✅ | Item name |
+| **item** | `any` | ✅ | Metadata item definition |
+| **sortability** | `{ fields: Record<string, object> }` | optional | Per-column sortability projection — present exactly when `type` is `object`, on every serving branch. Computed at serve time from the served document via the spec's own storage predicates; consumers render sort affordances from this signal and never re-derive it from field `type`. See `ObjectSortabilitySchema` for the closed category set. |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; `no-overlay` / `no-delete` / `full` mean the write doors refuse the corresponding write with 403. Joins two refusals: the document's own `_lock` (`ITEM_LOCKED`; the packaged artifact wins over any overlay), and the locked packaged base — an item a code package ships, on a type with no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the write names the read-only package). |
+| **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
+| **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
+| **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
+| **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
+| **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
+| **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
+| **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
+| **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. A `null` beside `editable: false` is no such invitation: that item takes no save at this address, so no pin is prescribed for it. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
+| **disabledActions** | `string[]` | optional | The names in `item.actions` that this deployment's activation ledger switches off (an administrator turned them off under Setup › Packaged automation): a call to any of them is refused 409 `ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an activation ledger attached, and then `[]` when none of this object's actions is switched off. Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike the protection keys it is published by the cached branch too, read live and folded into the ETag, so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on a draft read. The ledger is the answering process's engine's. Beside `item`, never inside it: `item.actions` is served as declared, a switched-off action included. |
+| **draftChanges** | `{ path: string[]; by: Enum<'copilot' \| 'mcp' \| 'studio' \| 'api'>; actor: string \| null; client?: object; … }[]` | optional | Per-key provenance of the pending draft: which authoring surface last changed each key path of `item`, under which actor, and when. The draft save records it: each draft save is compared with the body that save replaced (the previous draft, or the stored published row for the draft's first save; a draft of an item with no stored published row is recorded as `[]`, the whole body). A `migrate-stored` rewrite of a draft row records nothing, since it is not authoring. The entries are kept from the first recorded save until the draft is published or discarded, which remove the draft row and the entries with it; and no two entries share a path: a save replaces every entry at or under each path it changes, so the last write to change a key is the entry whose `path` is the longest prefix of that key's path, and entries under a key's path are changes inside it. The entries name which writes changed what; they are not a list of every difference from the published body (compare the two bodies for that). Served only on a `?state=draft` read that answers a stored draft row. ABSENT on the active read, the cached branch and a `?preview=draft` read, and for a draft row whose saves recorded none: absence means "not recorded", never "no changes". |
+
+### Nested Shape: `AppMetadataBundleResponse.dashboards[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type name |
+| **name** | `string` | ✅ | Item name |
+| **item** | `any` | ✅ | Metadata item definition |
+| **sortability** | `{ fields: Record<string, object> }` | optional | Per-column sortability projection — present exactly when `type` is `object`, on every serving branch. Computed at serve time from the served document via the spec's own storage predicates; consumers render sort affordances from this signal and never re-derive it from field `type`. See `ObjectSortabilitySchema` for the closed category set. |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; `no-overlay` / `no-delete` / `full` mean the write doors refuse the corresponding write with 403. Joins two refusals: the document's own `_lock` (`ITEM_LOCKED`; the packaged artifact wins over any overlay), and the locked packaged base — an item a code package ships, on a type with no per-org overlay channel (`NOT_OVERRIDABLE`, or `ITEM_LOCKED` when the write names the read-only package). |
+| **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
+| **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
+| **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
+| **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
+| **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
+| **deletable** | `boolean` | optional | Whether deleting the overlay is permitted — false iff `lock` is `no-delete` or `full`. |
+| **resettable** | `boolean` | optional | Whether the item can be reset to its packaged default — true iff it is artifact-backed, i.e. there is a baseline to reset TO. |
+| **version** | `string \| null` | optional | ADR-0008 version token of the STORED row a save to this item compares against, at this read's scope (the environment's partition and `?package=`) and lifecycle (`?state=draft` reads the draft row, the plain read the active row). The same keyed token a save receipt's `version` serves for that row: send it back as the `If-Match` request header on `PUT /meta/:type/:name` (with `?mode=draft` for the draft) and a concurrent edit is refused 409 `METADATA_CONFLICT` instead of overwritten. `null` when no stored row is there — an item served from code or a package artifact, or from a row in another scope (a package-less row a package read falls back to) — so the next save creates one: pin it with `If-None-Match: *`. A `null` beside `editable: false` is no such invitation: that item takes no save at this address, so no pin is prescribed for it. ABSENT on the cached published-value branch and on a `?preview=draft` read, which publish no version: absence means "not published here", never "no row". Opaque — echo it verbatim, never parse it. |
+| **registration** | `{ state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }` | optional | The automation engine's verdict on this flow (see `FlowRegistrationSchema`): `registered`, or `refused` with the engine's `reason` verbatim, or `unregistered`. Present only on a `flow` read answered by a process that runs an automation service; absent otherwise, and absence means no engine judged it, never `registered`. Unlike the protection keys it is published by the cached branch too, read live and never part of the ETag, so a cached read that carries it is never answered 304; it is absent on a draft read, whose pending body no engine holds. The verdict is the answering process's engine. Beside `item`, never inside it: the item's `status` stays what its author declared. |
+| **disabledActions** | `string[]` | optional | The names in `item.actions` that this deployment's activation ledger switches off (an administrator turned them off under Setup › Packaged automation): a call to any of them is refused 409 `ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an activation ledger attached, and then `[]` when none of this object's actions is switched off. Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike the protection keys it is published by the cached branch too, read live and folded into the ETag, so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on a draft read. The ledger is the answering process's engine's. Beside `item`, never inside it: `item.actions` is served as declared, a switched-off action included. |
+| **draftChanges** | `{ path: string[]; by: Enum<'copilot' \| 'mcp' \| 'studio' \| 'api'>; actor: string \| null; client?: object; … }[]` | optional | Per-key provenance of the pending draft: which authoring surface last changed each key path of `item`, under which actor, and when. The draft save records it: each draft save is compared with the body that save replaced (the previous draft, or the stored published row for the draft's first save; a draft of an item with no stored published row is recorded as `[]`, the whole body). A `migrate-stored` rewrite of a draft row records nothing, since it is not authoring. The entries are kept from the first recorded save until the draft is published or discarded, which remove the draft row and the entries with it; and no two entries share a path: a save replaces every entry at or under each path it changes, so the last write to change a key is the entry whose `path` is the longest prefix of that key's path, and entries under a key's path are changes inside it. The entries name which writes changed what; they are not a list of every difference from the published body (compare the two bodies for that). Served only on a `?state=draft` read that answers a stored draft row. ABSENT on the active read, the cached branch and a `?preview=draft` read, and for a draft row whose saves recorded none: absence means "not recorded", never "no changes". |
+
+
+---
+

@@ -10,6 +10,7 @@ import type {
     INotificationOutbox,
     NotificationDeliveryRecord,
     ReapOptions,
+    DueWorkOptions,
 } from './outbox.js';
 import {
     NotificationAckError,
@@ -70,6 +71,15 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
 
     async reap(opts: ReapOptions): Promise<void> {
         this.reapExpired(opts.now ?? this.clock(), opts.claimTtlMs);
+    }
+
+    /** [#28383] Any `pending` row due by `now` — what claim() or claimDigest() would take. */
+    async hasDueWork(opts: DueWorkOptions): Promise<boolean> {
+        const now = opts.now ?? this.clock();
+        for (const r of this.rows.values()) {
+            if (r.status === 'pending' && (r.nextAttemptAt == null || r.nextAttemptAt <= now)) return true;
+        }
+        return false;
     }
 
     async claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {

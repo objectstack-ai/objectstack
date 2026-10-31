@@ -14,15 +14,13 @@ import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
-import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock } from '@object-ui/react';
+import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
-import { getRecordDisplayName } from '@object-ui/core';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
-import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '../providers/writeWarningToast.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
 import {
@@ -388,6 +386,18 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // the same app, and the recent-items tracker below matches it against the URL
   // (objectui#11818).
   const appSegment = appAddressSegment(apps, matchedApp) ?? appName ?? appRouteSegment(activeApp);
+
+  // objectstack#27627 — entering an app loads its metadata bundle, and
+  // re-entering it revalidates the one held (`loadAppBundle`): from then on the
+  // by-name metadata reads of everything the app reaches are answered from it.
+  // Only the app the URL names: a pseudo-route's fallback app is not entered.
+  // A host adapter without the bundle keeps every by-name read.
+  const bundleAppName: string | undefined = typeof matchedApp?.name === 'string' ? matchedApp.name : undefined;
+  useEffect(() => {
+    const load = dataSource?.loadAppBundle;
+    if (!bundleAppName || typeof load !== 'function') return;
+    void load.call(dataSource, bundleAppName);
+  }, [dataSource, bundleAppName]);
 
   // objectstack-ai/objectstack#26183 — a URL that reached the app through its
   // NAME alias moves to the app's one address, path, search, hash and history
@@ -765,9 +775,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     runner.registerHandler('crud_success', async (action: any) => {
       closeRecordForm();
       setRefreshKey(k => k + 1);
-      // `warnings`: the save's own advisory warning lines, which this one
-      // toast carries (objectstack-ai/objectstack#27999).
-      toastRecordSave(toast, action.params?.message ?? 'Record saved successfully', action.params?.warnings);
+      // `warnings` / `notice`: the save's own advisory warning lines and its
+      // hook's notice, which this one toast carries
+      // (objectstack-ai/objectstack#27999, objectstack-ai/objectstack#28252).
+      toastRecordSave(toast, action.params?.message ?? 'Record saved successfully', {
+        warnings: action.params?.warnings,
+        notice: action.params?.notice,
+      });
       return { success: true, reload: true };
     });
 
@@ -881,28 +895,15 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
 
   // objectstack-ai/objectstack#26172 — a record save names the record it wrote
   // (`ux-conventions.write-feedback`): `Task "Quarterly review" created`. The
-  // name is the saved record's display name from the ONE ADR-0079 resolver,
-  // read through the object being saved. The resolver's floor (`Record #<id>`,
-  // or the empty fallback for an id-less row) is not a name, so a record with
-  // nothing nameable keeps the object-label toast it always had.
-  const recordSaveMessage = useCallback((saved: any): string => {
-    const label = formObjectDef ? objectLabel(formObjectDef as any) : t('common.record', { defaultValue: 'Record' });
-    const resolved = saved && typeof saved === 'object'
-      ? getRecordDisplayName(formObjectDef, saved, { fallback: '' })
-      : '';
-    const id = saved?.id ?? saved?._id;
-    const title = resolved && !(id !== null && id !== undefined && resolved === `Record #${id}`)
-      ? resolved
-      : undefined;
-    if (editingRecord) {
-      return title
-        ? t('form.updatedNamed', { object: label, title, defaultValue: `${label} "${title}" updated` })
-        : t('form.updateSuccess', { object: label, defaultValue: `${label} updated successfully` });
-    }
-    return title
-      ? t('form.createdNamed', { object: label, title, defaultValue: `${label} "${title}" created` })
-      : t('form.createSuccess', { object: label, defaultValue: `${label} created successfully` });
-  }, [editingRecord, formObjectDef, objectLabel, t]);
+  // message is the ONE builder every record save surface shares
+  // (`recordSaveMessage` in `@object-ui/i18n`), read through the object being
+  // saved.
+  const recordSaveMessage = useCallback((saved: any): string => buildRecordSaveMessage(t, {
+    label: formObjectDef ? objectLabel(formObjectDef as any) : t('common.record', { defaultValue: 'Record' }),
+    objectDef: formObjectDef,
+    saved,
+    mode: editingRecord ? 'edit' : 'create',
+  }), [editingRecord, formObjectDef, objectLabel, t]);
 
   // objectstack-ai/objectstack#27999 — the open record form reports its own
   // write's advisory warnings: while the overlay is open, the write-warning
@@ -924,10 +925,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     };
   }, [dataSource, recordFormParam, formObjectName]);
 
-  const handleCrudSuccess = useCallback((saved?: any, warnings?: string[]) => {
+  const handleCrudSuccess = useCallback((saved?: any, feedback?: RecordSaveFeedback) => {
     executeAction({
       type: 'crud_success',
-      params: { message: recordSaveMessage(saved), warnings },
+      params: { message: recordSaveMessage(saved), warnings: feedback?.warnings, notice: feedback?.notice },
     });
   }, [executeAction, recordSaveMessage]);
 
@@ -948,13 +949,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     // the child's open related lists refetch on their own via the
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
-    const warnings = answerWarningClaim.current?.take(saved) ?? [];
+    const feedback = answerWarningClaim.current?.take(saved);
     if (isChildFormTask) {
-      toastRecordSave(toast, recordSaveMessage(saved), warnings);
+      toastRecordSave(toast, recordSaveMessage(saved), feedback);
       closeRecordForm();
       return;
     }
-    handleCrudSuccess(saved, warnings);
+    handleCrudSuccess(saved, feedback);
     if (editingRecord || !currentObjectDef) return;
     const target = resolvePostCreateTarget({
       objectName: currentObjectDef.name,

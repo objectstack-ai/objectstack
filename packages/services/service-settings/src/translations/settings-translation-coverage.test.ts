@@ -22,18 +22,32 @@
 
 import { describe, it, expect } from 'vitest';
 import type { SettingsManifest } from '@objectstack/spec/system';
+import { lifecycleSettingsManifest } from '@objectstack/objectql';
 import * as manifestsModule from '../manifests/index.js';
 import { en, zhCN, jaJP, esES } from './index.js';
 
 // The manifests barrel also exports action handlers and the aggregate array;
 // keep only the manifest objects.
-const manifests = Object.values(manifestsModule).filter(
+const bundledManifests = Object.values(manifestsModule).filter(
   (v): v is SettingsManifest =>
     !!v &&
     typeof v === 'object' &&
     'namespace' in v &&
     Array.isArray((v as SettingsManifest).specifiers),
 );
+
+/**
+ * Platform manifests another package registers into the same settings hub,
+ * whose copy this bundle carries because that package ships no translation
+ * bundle of its own. `@objectstack/objectql` registers `lifecycle` (Data
+ * Lifecycle) at `kernel:ready`. Each one listed here is held to the same full
+ * coverage as a bundled manifest, and its namespace is a declared one for the
+ * no-undeclared-copy check below.
+ */
+const hostedManifests: SettingsManifest[] = [lifecycleSettingsManifest];
+
+/** Every manifest whose `settings.<namespace>.…` copy lives in this bundle. */
+const manifests = [...bundledManifests, ...hostedManifests];
 
 const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
   ['zh-CN', zhCN],
@@ -112,7 +126,13 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
 
 describe('settings translation coverage', () => {
   it('covers every built-in settings manifest', () => {
-    expect(manifests.length).toBeGreaterThanOrEqual(10);
+    expect(bundledManifests.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('covers the hosted platform manifests by namespace', () => {
+    expect(manifests.map((m) => m.namespace)).toContain('lifecycle');
+    const namespaces = manifests.map((m) => m.namespace);
+    expect(new Set(namespaces).size, 'a namespace is declared twice').toBe(namespaces.length);
   });
 
   for (const [locale, data] of LOCALES) {

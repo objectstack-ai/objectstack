@@ -29,12 +29,29 @@ export const ReportType = z.enum([
  * bound-dataset **dimension** and **measure** (NOT raw object fields) — the
  * Studio inspector picks them from the dataset's dimension/measure catalogs
  * and objectui's `DatasetReportRenderer` plots them via `useDatasetRows`.
+ *
+ * `seriesBy` names a SECOND dataset dimension that splits the one `yAxis`
+ * measure into a series per value of that dimension — a bar per owner, split
+ * by stage. It is the report's spelling of the dashboard's two-entry
+ * `dimensions` selection (`[xAxis, seriesBy]` × `[yAxis]`), which the
+ * dataset path already pivots into grouped series. It is its own key, not
+ * the inherited `series`: `series` is the per-series presentation override
+ * array, and with `seriesBy` set an entry's `name` names a VALUE of this
+ * dimension, since that is what each derived series is.
  */
 export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
   /** Dataset **dimension** name for the X-axis (from the report's bound dataset). */
   xAxis: z.string().describe('Dataset dimension name for the X-axis (bound-dataset dimension, not a raw field)'),
   /** Dataset **measure** name for the Y-axis (from the report's bound dataset). */
   yAxis: z.string().describe('Dataset measure name for the Y-axis (bound-dataset measure, not a raw field)'),
+  /**
+   * Dataset **dimension** name whose values split the `yAxis` measure into one
+   * series each (from the report's bound dataset). Omitted = one series.
+   */
+  seriesBy: z.string().optional().describe(
+    'Dataset dimension name that splits the yAxis measure into one series per value of it '
+    + '(bound-dataset dimension, not a raw field); with it set, `series[].name` names a value of this dimension',
+  ),
 }));
 
 /**

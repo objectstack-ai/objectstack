@@ -302,6 +302,10 @@ import {
 } from './export-format.js';
 // [#23050 slice 1] The data-action routes' body moved to its own module — see its header.
 import { registerDataActionEndpoints, type DataActionRouteHost } from './data-action-routes.js';
+// [#27627] The record page payload route — see its module header.
+import { registerRecordPageEndpoints, type RecordPageRouteHost } from './record-page-routes.js';
+// [#27627] The app metadata bundle route — see its module header.
+import { registerMetaAppBundleRoute, type MetaAppBundleRouteHost } from './meta-app-bundle-routes.js';
 // [#23050 slice 2] The batch routes' body moved to its own module — see its header.
 import { registerBatchEndpoints, type BatchRouteHost } from './batch-routes.js';
 // [#23050 slice 3] The approval routes' body moved to its own module — see its header.
@@ -4185,12 +4189,17 @@ export class RestServer {
      * exemption, as {@link metaItemReadGate} builds them), {@link extractLocale},
      * and the body through {@link translateMetaEnvelope}, handed the RAW
      * segment exactly as the plain read always called it.
+     *
+     * [#27627] `type` is that segment, `req.params.type` unless the door
+     * names it: the app metadata bundle answers several types on one request
+     * whose path has no `:type`, and hands each member's own.
      */
     private metaItemAnswerSources(
         environmentId: string | undefined,
         req: any,
         p: RestProtocol,
         policy: MetaReadGatePolicy,
+        type: string = req.params.type,
     ): metaReadGate.MetaItemAnswerSources {
         return {
             ...this.metaItemReadGateSources(environmentId, req, p, policy.app === 'author-exempt'),
@@ -4199,8 +4208,8 @@ export class RestServer {
             // reason the cached arm states (`GET /meta/:type/:name`).
             translateEnvelope: async (envelope, document, runtimeDocument) =>
                 this.translateMetaEnvelope(
-                    req, req.params.type, environmentId, envelope as Record<string, any>,
-                    RestServer.metaTypeSingular(req.params.type) === 'view'
+                    req, type, environmentId, envelope as Record<string, any>,
+                    RestServer.metaTypeSingular(type) === 'view'
                         ? stampAnonymousFormIntakeWarnings(
                             document, await this.anonymousFormIntakeWarnings(environmentId, req, p, document),
                         )
@@ -4896,6 +4905,9 @@ export class RestServer {
             // deeper `:id/clone`, `:id/shares` paths), so it cannot shadow any
             // CRUD literal.
             this.registerDataActionEndpoints(bp);
+            // [#27627] `POST /data/:object/:id/page` — a deeper literal under
+            // `:id`, like `:id/clone`, so it shadows no CRUD route either way.
+            this.registerRecordPageEndpoints(bp);
             if (this.config.api.enableCrud) {
                 this.registerCrudEndpoints(bp);
             }
@@ -5427,6 +5439,20 @@ export class RestServer {
         };
         registerMetaItemReadRoutes.call(itemReadHost, scope);
 
+        // [#27627] The app metadata bundle (`GET {metaPath}/app/:appId/bundle`), in
+        // `meta-app-bundle-routes.ts`: every member is the item read's own answer,
+        // so it registers beside the item reads, through the per-item registrar
+        // (their switch, inside this umbrella). A deeper literal under `:name`
+        // than any per-item sub-resource, so it shadows none of them.
+        const appBundleHost: MetaAppBundleRouteHost = {
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveObjectMasker: (...a) => this.resolveObjectMasker(...a),
+            metaItemAnswerSources: (...a) => this.metaItemAnswerSources(...a),
+            metaListSource: (...a) => this.metaListSource(...a),
+            sendMetaReadRefusal: (...a) => RestServer.sendMetaReadRefusal(...a),
+        };
+        registerMetaAppBundleRoute.call(appBundleHost, scope);
+
         // [#23050 slice 13c] The per-item writes (`PUT` and `DELETE {metaPath}/:type/:name`,
         // the item save and the reset) moved to `meta-item-write-routes.ts`, and are
         // registered HERE so they keep their place in the order: after the per-item reads,
@@ -5641,6 +5667,32 @@ export class RestServer {
             answerImportTemplate: (...a) => this.answerImportTemplate(...a),
         };
         registerDataActionEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#27627] `POST {basePath}/data/:object/:id/page` — the record page
+     * payload: the record, its related lists' counts and first rows, its field
+     * projection, access verdicts and approval state in one request, each part
+     * the answer of the read it replaces (`record-page-routes.ts`).
+     */
+    private registerRecordPageEndpoints(basePath: string): void {
+        const readApprovalsServiceProvider = () => this.approvalsServiceProvider;
+        const host: RecordPageRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
+            loadObjectItem: (p, environmentId, name) => {
+                const listSource = this.metaListSource(p, environmentId);
+                const getObjectItem = this.objectItemReader(p, environmentId);
+                return metaReadGate.loadObjectItem(getObjectItem ? { ...listSource, getObjectItem } : listSource, name);
+            },
+        };
+        registerRecordPageEndpoints.call(host, basePath);
     }
 
     /**

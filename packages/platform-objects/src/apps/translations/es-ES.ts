@@ -59,6 +59,8 @@ export const esES: TranslationData = {
         nav_teams: { label: 'Equipos' },
         nav_organizations: { label: 'Organizaciones' },
         nav_invitations: { label: 'Invitaciones' },
+        nav_position_holders: { label: 'Titulares de posiciones' },
+        nav_permission_set_assignment: { label: 'Asignación de conjuntos de permisos' },
 
         nav_positions: { label: 'Posiciones' },
         nav_capabilities: { label: 'Capacidades' },
@@ -106,6 +108,7 @@ export const esES: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'Entregas HTTP' },
         nav_datasources: { label: 'Fuentes de datos' },
+        nav_connector_credentials: { label: 'Credenciales de conectores' },
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
       },

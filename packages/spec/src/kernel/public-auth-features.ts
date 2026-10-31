@@ -305,8 +305,15 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * invitee, so hiding the form would dead-end invited users), while this value
  * lets the login surface render honest messaging ("registration is by
  * invitation") instead of a form the server will refuse.
+ *
+ * `turnstileSiteKey` is the PUBLIC Cloudflare Turnstile site key, served only
+ * while the opt-in sign-up challenge is wired (the deployment set both
+ * `OS_TURNSTILE_SITE_KEY` and `OS_TURNSTILE_SECRET_KEY`). Its presence is the
+ * signal: the sign-up form renders the widget and sends its token, because the
+ * sign-up door then refuses a request without one. Absent ⇒ no challenge. The
+ * secret is never served.
  */
-export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture'] as const;
+export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture', 'audiencePosture', 'turnstileSiteKey'] as const;
 
 /**
  * Capabilities that are RESERVED but deliberately **not advertised** — the
