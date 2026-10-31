@@ -87,6 +87,16 @@ export interface RecordChangeDataEngine {
         object: string,
         options: { where?: Record<string, unknown>; fields?: string[]; context?: unknown },
     ): Promise<Record<string, unknown> | null | undefined>;
+    /**
+     * [#28117] Optional schema-registry accessor (the ObjectQL engine's
+     * `registry`, whose `isObjectPackageDisabled` is the question the data
+     * plane's `OBJECT_PACKAGE_DISABLED` refusal asks). When present,
+     * {@link RecordChangeTrigger} does not dispatch a flow for a write to an
+     * object whose OWNING package is disabled. Typed structurally so this
+     * plugin keeps its zero build-time dependency on objectql; an engine
+     * without it dispatches as before.
+     */
+    registry?: { isObjectPackageDisabled?(name: string): boolean };
 }
 
 /** Minimal logger surface (matches core's `ctx.logger`). */
@@ -289,6 +299,17 @@ export class RecordChangeTrigger implements FlowTrigger {
                 // self-trigger loop that wedged first-boot. Lifecycle hooks still
                 // ran (they are separate); only the flow dispatch is skipped here.
                 if ((ctx.session as { skipTriggers?: boolean } | undefined)?.skipTriggers) {
+                    return;
+                }
+                // [#28117] A disabled package's object: "disabled" has one
+                // meaning (hidden + refused on the data plane + data kept), and
+                // a write that reaches the engine in-process (an app hook's
+                // `ctx.api.object(...)`, another flow, a service) still fires the
+                // object's lifecycle hooks. The write itself is untouched, so the
+                // data is kept; only the flow dispatch is withheld, asked per
+                // write, so an enable resumes it with nothing to re-bind.
+                const written = binding.object ?? ctx.object;
+                if (written && this.engine.registry?.isObjectPackageDisabled?.(written) === true) {
                     return;
                 }
                 const automationCtx = await this.buildContext(binding, ctx);

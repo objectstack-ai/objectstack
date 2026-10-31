@@ -36,7 +36,7 @@ import * as React from 'react';
 import { render, screen, act } from '@testing-library/react';
 
 import { SourcePageEditor } from './previews/SourcePageEditor';
-import { JsonSourceEditor } from './JsonSourceEditor';
+import { JsonSourceEditor } from '../item-tools/JsonSourceEditor';
 
 const LOADER_SCRIPT = /\/vs\/loader\.js$/;
 const CHUNK_URL = 'http://localhost/_console/assets/editor.api2-hash.js';

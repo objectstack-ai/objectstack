@@ -21,7 +21,7 @@ export { MetadataResourceListPage } from './ResourceListPage.js';
 export { MetadataResourceEditPage } from './ResourceEditPage.js';
 export { RelatedPanel } from './RelatedPanel.js';
 export { MetadataDetailDrawer } from './MetadataDetailDrawer.js';
-export { MetadataResourceHistoryPage } from './ResourceHistoryPage.js';
+export { MetadataResourceHistoryPage } from '../item-tools/ResourceHistoryPage.js';
 export { MetadataDiagnosticsPage } from './DiagnosticsPage.js';
 export { MetadataQuickFind } from './QuickFind.js';
 export { PageShell as MetadataPageShell } from './PageShell.js';
@@ -41,7 +41,7 @@ export { SchemaForm } from './SchemaForm.js';
  * directory. Type-only: erased at build, so nothing is added to the bundle.
  */
 export type { FormFieldSpec, FormSectionSpec, FormViewSpec } from './form-spec.js';
-export { LayeredDiff } from './LayeredDiff.js';
+export { LayeredDiff } from '../item-tools/LayeredDiff.js';
 export { PermissionMatrixEditPage } from './PermissionMatrixEditor.js';
 export {
   translateMetadataType,

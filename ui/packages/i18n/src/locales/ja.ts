@@ -1177,9 +1177,12 @@ const ja = {
     new: "新規",
     add: "追加",
     activity: "アクティビティ",
-    timeline: "タイムライン",
-    timelineFolded: "アクティビティ",
-    relatedColumn: "関連列",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "アクティビティ",
+    relatedColumn: "右側の列",
+    timelineComposer: "メモを書く… @ でメンション",
     // objectstack#27055 — the record page v3.
     emptySections: "空のセクション {{count}} 件",
     emptySections_one: "空のセクション {{count}} 件",
@@ -2172,8 +2175,7 @@ const ja = {
       newChat: "新しいチャット",
       toggleChatsList: "チャット一覧を切り替え",
       goHome: "ホームに戻る",
-      toggleTimeline: "タイムラインの表示 / 非表示",
-      toggleRelated: "関連の表示 / 非表示",
+      toggleRelated: "右側の列の表示 / 非表示",
     },
     reportIndex: {
       title: "レポート",
@@ -4789,6 +4791,28 @@ const ja = {
     skippedTitle: "スキップ済み",
     skippedBody: "これらを使うコネクタは、それぞれが設定されるまで切断されたままです。",
     openPage: "コネクタ認証情報で設定する",
+  },
+  setupAssignments: {
+    positionsTitle: "役職の保持者",
+    positionsSubtitle: "役職を選んで保持者を確認し、保持者を追加または削除します。役職が付与する内容は役職そのものに定義されています。",
+    positionsList: "役職",
+    positionsFilter: "役職を絞り込む",
+    positionsEmptyTitle: "役職がありません",
+    positionsEmptyBody: "この環境にはまだ役職が定義されていません。",
+    positionsPick: "役職を選ぶと保持者が表示されます。",
+    positionsLoadFailed: "役職を読み込めませんでした。",
+    setsTitle: "権限セットの割り当て",
+    setsSubtitle: "権限セットを選んで、直接または役職を通じて保持しているユーザーを確認し、ユーザーを割り当てまたは割り当て解除します。セットが付与する内容はセットそのものに定義されています。",
+    setsList: "権限セット",
+    setsFilter: "権限セットを絞り込む",
+    setsEmptyTitle: "権限セットがありません",
+    setsEmptyBody: "この環境にはまだ権限セットが定義されていません。",
+    setsPick: "権限セットを選ぶとユーザーが表示されます。",
+    setsLoadFailed: "権限セットを読み込めませんでした。",
+    noMatch: "絞り込み条件に一致する項目はありません。",
+    notFound: "「{{name}}」はこの一覧にありません。",
+    retry: "再試行",
+    refresh: "更新",
   },
   element: {
     number: {

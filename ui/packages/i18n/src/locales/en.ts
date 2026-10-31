@@ -1532,9 +1532,12 @@ const en = {
     new: 'New',
     add: 'Add',
     activity: 'Activity',
-    timeline: 'Timeline',
-    timelineFolded: 'Activity',
-    relatedColumn: 'Related column',
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: 'Activity',
+    relatedColumn: 'Right column',
+    timelineComposer: 'Write a note… @ to mention',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} empty sections',
     emptySections_one: '{{count}} empty section',
@@ -2343,8 +2346,7 @@ const en = {
       newChat: 'New chat',
       toggleChatsList: 'Toggle conversations list',
       goHome: 'Back to home',
-      toggleTimeline: 'Show / hide timeline',
-      toggleRelated: 'Show / hide related',
+      toggleRelated: 'Show / hide the right column',
     },
     reportIndex: {
       title: 'Reports',
@@ -5607,6 +5609,30 @@ const en = {
     skippedTitle: 'Skipped for now',
     skippedBody: 'The connectors that use them stay disconnected until each one is set.',
     openPage: 'Set them in Connector credentials',
+  },
+  // Setup → People & organization: Position holders and Permission set
+  // assignment (ADR-0146 D7).
+  setupAssignments: {
+    positionsTitle: 'Position holders',
+    positionsSubtitle: 'Pick a position to see who holds it, and add or remove holders. What a position grants is defined on the position itself.',
+    positionsList: 'Positions',
+    positionsFilter: 'Filter positions',
+    positionsEmptyTitle: 'No positions',
+    positionsEmptyBody: 'No position is defined in this environment yet.',
+    positionsPick: 'Pick a position to see its holders.',
+    positionsLoadFailed: 'Could not read the positions.',
+    setsTitle: 'Permission set assignment',
+    setsSubtitle: 'Pick a permission set to see who holds it, directly or through a position, and assign or unassign users. What a set grants is defined on the set itself.',
+    setsList: 'Permission sets',
+    setsFilter: 'Filter permission sets',
+    setsEmptyTitle: 'No permission sets',
+    setsEmptyBody: 'No permission set is defined in this environment yet.',
+    setsPick: 'Pick a permission set to see its users.',
+    setsLoadFailed: 'Could not read the permission sets.',
+    noMatch: 'Nothing matches the filter.',
+    notFound: '"{{name}}" is not in this list.',
+    retry: 'Try again',
+    refresh: 'Refresh',
   },
   element: {
     // objectui#10951 — `element:number` authored with an aggregate and no

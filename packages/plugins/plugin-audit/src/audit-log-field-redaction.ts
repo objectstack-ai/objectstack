@@ -49,7 +49,7 @@
  *    key by key, so it is dropped whole (fail closed).
  *  - A row of any other action is served as written. Measured per writer on
  *    the tree this landed on: `read`, `login`, `logout`, `login_failed`,
- *    `account_locked` and `import` rows write no snapshot; a `config_change` row's snapshot is a DIGEST of the
+ *    `account_locked`, `import` and `action_invocation` rows write no snapshot; a `config_change` row's snapshot is a DIGEST of the
  *    setting, never its value (`service-settings`' `config-change-audit.ts`);
  *    a `platform_admin_standing_change` row's is the deployment's
  *    administrator roster (`plugin-security`). None is a parent record's field

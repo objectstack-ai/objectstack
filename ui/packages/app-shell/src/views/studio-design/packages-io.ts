@@ -144,6 +144,46 @@ export async function fetchListedPackageIds(): Promise<ReadonlySet<string>> {
 }
 
 /**
+ * [objectstack#28240] One row of `GET /api/v1/packages` as the package-closure
+ * walk reads it: the manifest whole (its `dependencies` are what the walk
+ * follows), plus the name and writability the object picker shows beside it.
+ */
+export interface ListedPackageManifest {
+  id: string;
+  name: string;
+  writable: boolean;
+  manifest: Record<string, unknown>;
+}
+
+/**
+ * Every listed package by id, the kernel packages {@link parsePackages} hides
+ * from the switcher included: a package may declare a dependency on one, and
+ * the walk must be able to read it.
+ */
+export function parseListedPackageManifests(payload: unknown): ReadonlyMap<string, ListedPackageManifest> {
+  const root = (payload as { data?: unknown })?.data ?? payload;
+  const raw = Array.isArray(root) ? root : ((root as { packages?: unknown[] })?.packages ?? []);
+  const out = new Map<string, ListedPackageManifest>();
+  for (const p of raw as Array<Record<string, unknown>>) {
+    if (!p || typeof p !== 'object') continue;
+    const m = (p.manifest && typeof p.manifest === 'object' ? p.manifest : {}) as Record<string, unknown>;
+    const id = String(m.id ?? p.id ?? '');
+    if (!id || out.has(id)) continue;
+    const scope = typeof m.scope === 'string' ? m.scope : '';
+    // The verdict rule of `parsePackages`: the server's, else the heuristic.
+    const writable = typeof p.writable === 'boolean' ? p.writable : scope !== 'project';
+    const name = typeof m.name === 'string' && m.name.trim() ? m.name : id;
+    out.set(id, { id, name, writable, manifest: m });
+  }
+  return out;
+}
+
+/** {@link parseListedPackageManifests}, read from the request {@link fetchPackages} shares. */
+export async function fetchListedPackageManifests(): Promise<ReadonlyMap<string, ListedPackageManifest>> {
+  return parseListedPackageManifests(await readPackagesPayload());
+}
+
+/**
  * The package list every Studio surface reads — the switcher, the writability
  * courtesy gate, the namespace lookup and the builder landing page.
  *

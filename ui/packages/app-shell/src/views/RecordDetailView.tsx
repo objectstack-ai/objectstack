@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageColumnDefaults, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, Activity, PanelRight } from 'lucide-react';
+import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -77,7 +77,6 @@ import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValu
 import { useFavorites } from '../hooks/useFavorites.js';
 import {
   RECORD_RELATED_COLUMN_PREFERENCE,
-  RECORD_TIMELINE_COLUMN_PREFERENCE,
   RECORD_RELATED_ARRANGEMENT_PREFERENCE,
   objectPreferenceScope,
   useWorkspacePreference,
@@ -115,22 +114,15 @@ interface RecordDetailViewProps {
 const FALLBACK_USER = { id: 'current-user', name: 'Demo User' };
 
 /**
- * `⌘⇧.` / `Ctrl+Shift+.` — show or hide the record page's timeline column
- * (objectstack#27052). The record page owns the listener and advertises this
- * beside it, under the same gate: a full record page in a column tier.
+ * `⌘⇧,` / `Ctrl+Shift+,` — show or hide the record page's right column, the
+ * reader's ⊟ (objectstack#27052; objectstack#27524, Target 4). The record
+ * page owns the listener and advertises this beside it, under the same gate:
+ * a synthesized record page in a tier with a right column.
  *
- * Not `⌘⇧T` / `⌘⇧R`: Chromium and Firefox keep Ctrl/⌘+Shift+T (reopen the
- * closed tab) and Ctrl/⌘+Shift+R (hard reload) for themselves, and the page
- * never receives them.
+ * Not `⌘⇧R`: Chromium and Firefox keep Ctrl/⌘+Shift+R (hard reload) for
+ * themselves, and the page never receives it. (`⌘⇧.`, the timeline column's
+ * switch, retired with the column.)
  */
-const TOGGLE_TIMELINE_SHORTCUT: AdvertisedShortcut = {
-  id: 'record-toggle-timeline',
-  group: 'general',
-  chord: { key: '.', mod: true, shift: true },
-  label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleTimeline'),
-};
-
-/** `⌘⇧,` / `Ctrl+Shift+,` — show or hide the record page's related column (objectstack#27052). */
 const TOGGLE_RELATED_SHORTCUT: AdvertisedShortcut = {
   id: 'record-toggle-related',
   group: 'general',
@@ -147,7 +139,6 @@ const TOGGLE_RELATED_SHORTCUT: AdvertisedShortcut = {
  * remote desktops) still names the key it typed.
  */
 const PANEL_CHORD_KEYS: Readonly<Record<string, { code: string; keys: readonly string[] }>> = {
-  '.': { code: 'Period', keys: ['.', '>'] },
   ',': { code: 'Comma', keys: [',', '<'] },
 };
 
@@ -172,6 +163,20 @@ function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target instanceof HTMLElement && target.isContentEditable) return true;
   return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
+}
+
+/**
+ * Whether this record view is the topmost one, the one a page-wide chord is
+ * for. A record page keeps its own tree mounted under the drawer its rows and
+ * lookups open (`RecordPageDrawerHost`), and the drawer's sheet is portaled
+ * after it, to the end of the body; once the drawer is wide enough for a right
+ * column its view listens too (objectstack#27524). The last record root in
+ * document order is the one on top.
+ */
+function isTopmostRecordView(root: Element | null): boolean {
+  if (!root) return false;
+  const roots = root.ownerDocument.querySelectorAll('[data-record-page-root]');
+  return roots[roots.length - 1] === root;
 }
 
 /** `aria-keyshortcuts` spelling of a chord, for the platform the page runs on. */
@@ -943,72 +948,62 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     return buildDefaultPageSchema(objectDef as any, assignedSlots ? { slots: assignedSlots } : undefined);
   }, [assignedPage, assignedSlots, objectDef, namedPageBlocked]);
   const effectivePage = assignedPage || synthesizedPage;
-  // ─── One page at two widths (objectstack#26678) ──────────────────────
+  // ─── One page, laid out by its width (objectstack#26678, #27524) ─────
   // The synthesized default page — and a slotted page, which always keeps the
-  // default tab strip — is laid out by the width of the container it occupies:
-  // three resident columns from 1280 px, two from 1024 px, the tab strip below
-  // that and whenever this view is embedded (drawer / split pane), whatever the
-  // screen. Measured on this view's root, never the viewport. An authored full
-  // page is drawn as authored, so it never measures (the slotted `tabs` slot
-  // that once opted a page out too retired, objectstack#27053). `null` until
-  // the first reading lands (a layout effect, so never painted): the page body
-  // is held for that one commit rather than mounting the tab strip only to
-  // replace it.
+  // default tab strip — is laid out by the width of the container it occupies,
+  // by one rule wherever this view is drawn (the page, the split pane, the
+  // overlay drawer, the maximized pane): details | the right column from
+  // 760 px (wide from 1120), one column below that (`recordPageTierFor`).
+  // There is no tabbed tier (objectstack#27524, Target 6). Measured on this
+  // view's root, never the viewport. An authored full page is drawn as
+  // authored, so it never measures (the slotted `tabs` slot that once opted a
+  // page out too retired, objectstack#27053). `null` until the first reading
+  // lands (a layout effect, so never painted): the page body is held for that
+  // one commit rather than drawn at a width it does not have.
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
   const pageColumnsEligible = !assignedPage && !namedPageBlocked;
-  const recordPageTier = useRecordPageTier(pageRootEl, { embedded: !!embedded, enabled: pageColumnsEligible });
-  const pageInColumnTier = recordPageTier === 'two-column' || recordPageTier === 'three-column';
-  // ─── The reader's column switches (objectstack#27052) ────────────────
-  // Whether the timeline and the related column take part in a column tier
-  // is each reader's choice, per object, kept in the console's
-  // workspace-preference store — never metadata. A reader who never chose
-  // gets the object's derived default: the timeline for a worked object
-  // (`recordPageColumnDefaults`), the related column always. The tabbed tier
-  // does not read them; the choice is kept for when the page widens.
-  const columnDefaults = recordPageColumnDefaults(objectDef as never);
+  const recordPageTier = useRecordPageTier(pageRootEl, { enabled: pageColumnsEligible });
+  const pageLaidOut = recordPageTier !== null;
+  const pageHasRightColumn = recordPageTierHasRightColumn(recordPageTier);
+  // ─── The reader's right-column switch ⊟ (objectstack#27052, #27524) ──
+  // Whether the right column (the 动态 panel and the related panels) is drawn
+  // beside the details is each reader's choice, per object, kept in the
+  // console's workspace-preference store — never metadata. A reader who never
+  // chose sees it. The stack does not read it (its panels follow the details);
+  // the choice is kept for when the page widens.
   const columnScope = objectPreferenceScope(objectName ?? '');
-  const [timelineSwitch, setTimelineSwitch] = useWorkspacePreference(
-    RECORD_TIMELINE_COLUMN_PREFERENCE,
-    columnScope,
-    columnDefaults.timeline ? 'on' : 'off',
-  );
   const [relatedSwitch, setRelatedSwitch] = useWorkspacePreference(
     RECORD_RELATED_COLUMN_PREFERENCE,
     columnScope,
-    columnDefaults.related ? 'on' : 'off',
+    'on',
   );
-  const columnSwitches = { timeline: timelineSwitch === 'on', related: relatedSwitch === 'on' };
   // objectstack#27055 — the reader's arrangement of the related cards (order,
-  // collapsed, hidden), per object, in the same store as the switches. Laid
-  // over the default order by `RelatedCardStack`; never metadata.
+  // hidden), per object, in the same store as the switch. Laid over the
+  // default order by `RelatedCardStack`; never metadata.
   const [relatedArrangement, setRelatedArrangement] = useWorkspacePreference(
     RECORD_RELATED_ARRANGEMENT_PREFERENCE,
     columnScope,
     EMPTY_RELATED_ARRANGEMENT,
   );
-  // Which switches the toolbar draws — the columns the page has content for —
-  // set at render below and read by the shortcuts, so a shortcut never flips
-  // a switch the reader cannot see.
-  const drawnPanelSwitches = useRef<{ timeline: boolean; related: boolean }>({ timeline: false, related: false });
+  // Whether the toolbar draws ⊟ — a right column the page has content for —
+  // set at render below and read by the shortcut, so a shortcut never flips a
+  // switch the reader cannot see: not this page's under a drawer either.
+  const drawnPanelSwitch = useRef(false);
   useEffect(() => {
-    if (!pageInColumnTier) return undefined;
+    if (!pageHasRightColumn) return undefined;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
-      const timeline = matchesPanelChord(e, TOGGLE_TIMELINE_SHORTCUT.chord);
-      const related = !timeline && matchesPanelChord(e, TOGGLE_RELATED_SHORTCUT.chord);
-      if (!timeline && !related) return;
+      if (!matchesPanelChord(e, TOGGLE_RELATED_SHORTCUT.chord)) return;
       if (isTypingTarget(e.target)) return;
-      if (timeline && !drawnPanelSwitches.current.timeline) return;
-      if (related && !drawnPanelSwitches.current.related) return;
+      if (!drawnPanelSwitch.current) return;
+      if (!isTopmostRecordView(pageRootEl)) return;
       e.preventDefault();
-      if (timeline) setTimelineSwitch(timelineSwitch === 'on' ? 'off' : 'on');
-      else setRelatedSwitch(relatedSwitch === 'on' ? 'off' : 'on');
+      setRelatedSwitch(relatedSwitch === 'on' ? 'off' : 'on');
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [pageInColumnTier, timelineSwitch, relatedSwitch, setTimelineSwitch, setRelatedSwitch]);
-  useAdvertiseShortcut(TOGGLE_TIMELINE_SHORTCUT, pageInColumnTier);
-  useAdvertiseShortcut(TOGGLE_RELATED_SHORTCUT, pageInColumnTier);
+  }, [pageHasRightColumn, pageRootEl, relatedSwitch, setRelatedSwitch]);
+  useAdvertiseShortcut(TOGGLE_RELATED_SHORTCUT, pageHasRightColumn);
   const [pageRecord, setPageRecord] = useState<any>(null);
   // 'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed' —
   // distinguishes "haven't tried yet" from each way the read can end. The
@@ -2408,14 +2403,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     () => (feedsEnabled ? effectivePage : stripDiscussionNodes(effectivePage)),
     [feedsEnabled, effectivePage],
   );
-  // In a column tier the page has no tab strip: every block it composes is
-  // on screen at open, so a feed block anywhere in it is (objectstack#26678).
+  // A laid-out page has no tab strip: every block it composes is on screen
+  // at open — the 动态 panel included — so a feed block anywhere in it is
+  // (objectstack#26678, objectstack#27524).
   const feedConsumerOnScreen = useMemo(
     () =>
       feedPage != null
-      && ((pageInColumnTier && buildDefaultPageColumns(feedPage) !== null)
+      && ((pageLaidOut && buildDefaultPageColumns(feedPage) !== null)
         || pageShowsNodeOnOpen(feedPage, FEED_CONSUMER_TYPES, activeTabParam)),
-    [feedPage, activeTabParam, pageInColumnTier],
+    [feedPage, activeTabParam, pageLaidOut],
   );
   const [feedConsumerShown, setFeedConsumerShown] = useState(false);
   // Recorded during render, React's pattern for state derived from an earlier
@@ -2453,18 +2449,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // is rendered as authored, and its `record:history` reads its own source.
   // So, like the feed above, the read goes out when the stream is on screen,
   // judged by `pageShowsNodeOnOpen` on the page this view synthesizes: at open
-  // when the page opens on it (the column tiers, or `?tab=timeline`), else on
+  // when the page opens on it (a laid-out page, or `?tab=timeline`), else on
   // the tab switch that mounts it. Latched for the view's life for the feed's
   // reason.
   const historyPage = historyEnabled && !assignedPage && !namedPageBlocked && objectDef ? synthesizedPage : null;
-  // In a column tier the stream is a resident block of the timeline column, so
-  // its read goes out at open (objectstack#26678).
+  // On a laid-out page the stream is the 动态 panel, so its read goes out at
+  // open (objectstack#26678, objectstack#27524).
   const historyConsumerOnScreen = useMemo(
     () =>
       historyPage != null
-      && ((pageInColumnTier && buildDefaultPageColumns(historyPage) !== null)
+      && ((pageLaidOut && buildDefaultPageColumns(historyPage) !== null)
         || pageShowsNodeOnOpen(historyPage, HISTORY_CONSUMER_TYPES, activeTabParam)),
-    [historyPage, activeTabParam, pageInColumnTier],
+    [historyPage, activeTabParam, pageLaidOut],
   );
   const [historyConsumerShown, setHistoryConsumerShown] = useState(false);
   if (historyConsumerOnScreen && !historyConsumerShown) setHistoryConsumerShown(true);
@@ -3590,10 +3586,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `buildDefaultPageSchema`'s `related` shape. `relationshipField` is
     // the FK field on the child pointing back to this record — passed so
     // the related-list renderer can hide the redundant parent-ID column.
-    // Nothing is preloaded here: in the tabbed tier each list reads when its
-    // tab is shown; in the column tiers the related column counts its cards
-    // up front, in one request set, and a card reads its first rows once it
-    // is in view (`RelatedCardStack`, objectstack#27056). Header/row
+    // Nothing is preloaded here: the right column counts its panels up
+    // front, in one request set, and a panel reads its first rows once it is
+    // in view (`RelatedCardStack`, objectstack#27056); a page drawn as its
+    // tab strip reads each list when its tab is shown. Header/row
     // affordances (+ New / View All / row navigation) are wired downstream
     // by `RelatedRecordActionsBridge`.
     // The DEFAULT order of the related lists (objectstack#27055,
@@ -4149,58 +4145,47 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // that tree would double-render the panel (tab + bottom fallback).
   const hasApprovalsNode = hasExplicitApprovals(renderedPage as any);
 
-  // objectstack#26678 — the page as its column tier draws it: the record
-  // header, then details | timeline | related, read off `renderedPage` itself
-  // so the columns hold exactly the blocks the tab strip would (pruning
-  // included). `null` in the tabbed tier, and for a page whose strip the
-  // partition cannot read, which then keeps its tabs.
-  const pageColumns = pageInColumnTier ? buildDefaultPageColumns(renderedPage) : null;
+  // objectstack#26678 / objectstack#27524 — the page as its tier lays it out:
+  // the record header, then the details and the right column (动态, then the
+  // related panels), read off `renderedPage` itself so they hold exactly the
+  // blocks the tab strip would (pruning included). `null` for an authored
+  // page and for a page whose strip the partition cannot read, which is drawn
+  // as written, tabs and all.
+  const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(renderedPage) : null;
   // The child objects' field definitions this view already holds, for the
   // related counts asked up front (objectstack#27056): the relationship's
   // arity is read off them instead of a schema read first.
   const childFieldsOf = (childObject: string) =>
     (objects?.find((o: any) => o?.name === childObject) as { fields?: any } | undefined)?.fields;
   // objectstack#27055, Target 8 — the related lists the synthesized page
-  // places in its Details tab are the record's body tables (the tabbed tier;
-  // the column tiers read the same off their details column).
+  // places in its Details tab are the record's body tables (a page drawn as
+  // its strip; the laid-out page reads the same off its details column).
   // A plain computation: this point is below the view's early returns, where
   // no hook may run.
   const bodyTableIds = assignedPage || namedPageBlocked ? new Set<string>() : bodyTableIdsOf(renderedPage);
 
-  // objectstack#27052 / objectstack#27241 — the panel switches: ONE segmented
-  // control, one segment per column the page has content for, drawn at the end
-  // of the record header's action row (`PageHeaderTrailingContext`), only
-  // where the columns are (never in the drawer / split pane, never in the
-  // tabbed tier), in both column tiers.
+  // objectstack#27052 / objectstack#27524, Target 4 — the right-column switch:
+  // ONE ⊟ icon (「右栏」), drawn at the end of the record header's action row
+  // (`PageHeaderTrailingContext`; the top bar takes it in a later slice of
+  // #27524), only where the tier has a right column and the page has a panel
+  // for it — never in the stack.
   const panelToggleItems: PanelToggleItem[] = [];
-  if (pageColumns && pageColumns.timeline.length > 0) {
-    panelToggleItems.push({
-      id: 'timeline',
-      label: t('detail.timeline', { defaultValue: 'Timeline' }),
-      icon: Activity,
-      pressed: columnSwitches.timeline,
-      onPressedChange: (pressed) => setTimelineSwitch(pressed ? 'on' : 'off'),
-      shortcut: shortcutKeycaps(TOGGLE_TIMELINE_SHORTCUT.chord),
-      ariaKeyShortcuts: ariaKeyShortcutsOf(TOGGLE_TIMELINE_SHORTCUT.chord),
-    });
-  }
-  if (pageColumns && pageColumns.related.length > 0) {
+  if (
+    pageColumns
+    && pageHasRightColumn
+    && (pageColumns.timeline.length > 0 || pageColumns.related.length > 0)
+  ) {
     panelToggleItems.push({
       id: 'related',
-      // Not `detail.related`: the rail toggle and the Related tab carry that
-      // name, and a second control with the same name would announce as them.
-      label: t('detail.relatedColumn', { defaultValue: 'Related column' }),
+      label: t('detail.relatedColumn', { defaultValue: 'Right column' }),
       icon: PanelRight,
-      pressed: columnSwitches.related,
+      pressed: relatedSwitch === 'on',
       onPressedChange: (pressed) => setRelatedSwitch(pressed ? 'on' : 'off'),
       shortcut: shortcutKeycaps(TOGGLE_RELATED_SHORTCUT.chord),
       ariaKeyShortcuts: ariaKeyShortcutsOf(TOGGLE_RELATED_SHORTCUT.chord),
     });
   }
-  drawnPanelSwitches.current = {
-    timeline: panelToggleItems.some((item) => item.id === 'timeline'),
-    related: panelToggleItems.some((item) => item.id === 'related'),
-  };
+  drawnPanelSwitch.current = panelToggleItems.length > 0;
   const panelToggles =
     panelToggleItems.length > 0 ? (
       <PanelToggles label={t('detail.panelToggles', { defaultValue: 'Panels' })} items={panelToggleItems} />
@@ -4493,16 +4478,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 parentRecord={pageRecord}
                 parentObjectFields={predicateFields}
               >
-                {/* objectstack#26678 — the column tiers draw the same page's
-                    blocks as resident columns; `?tab=` addresses the strip,
-                    so it is read in the tabbed tier only. Nothing is drawn
-                    while the tier is unmeasured (one unpainted commit). */}
-                {pageColumns && (recordPageTier === 'two-column' || recordPageTier === 'three-column') ? (
+                {/* objectstack#26678 / objectstack#27524 — the synthesized
+                    page's blocks laid out by its width; `?tab=` addresses a
+                    strip, so it is read only where the page is drawn as one.
+                    Nothing is drawn while the tier is unmeasured (one
+                    unpainted commit). */}
+                {pageColumns && recordPageTier ? (
                   <PageHeaderTrailingContext.Provider value={panelToggles}>
                   <RecordPageColumns
                     tier={recordPageTier}
                     columns={pageColumns}
-                    switches={columnSwitches}
+                    rightColumn={relatedSwitch === 'on'}
                     relatedArrangement={relatedArrangement}
                     onRelatedArrangementChange={setRelatedArrangement}
                     enlargedRelated={enlargedRelatedParam}
@@ -4518,11 +4504,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     }
                   />
                   </PageHeaderTrailingContext.Provider>
-                ) : recordPageTier === null ? null : (
-                  // objectstack#27055 — the synthesized default page is the
-                  // record page v3 in its tabbed tier too (frameless sections,
-                  // the empty-sections line, the highlight grid); an authored
-                  // page keeps its own face.
+                ) : pageColumns ? null : (
+                  // objectstack#27055 — a synthesized page whose strip cannot
+                  // be laid out keeps the record page v3 face as its tab strip
+                  // (frameless sections, the empty-sections line, the
+                  // highlight grid); an authored page keeps its own face.
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
                       {assignedPage || namedPageBlocked ? (
@@ -4586,7 +4572,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   so it does not move with the active tab. `readablePageRecord`
                   is the row every block on the page reads, and the footer
                   renders nothing when the record carries no audit field. */}
-              {/* In a column tier the columns draw it (objectstack#26678). */}
+              {/* A laid-out page draws it at the details' foot (objectstack#26678). */}
               {!pageColumns && (
                 <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                   <RecordMetaFooter

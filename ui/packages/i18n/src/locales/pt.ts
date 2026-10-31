@@ -1381,9 +1381,12 @@ const pt = {
     concurrentUpdateRecordLabel: "este registro",
     openInNewTab: "Abrir em nova aba",
     activity: "Atividade",
-    timeline: "Linha do tempo",
-    timelineFolded: "Atividade",
-    relatedColumn: "Coluna relacionada",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Atividade",
+    relatedColumn: "Coluna direita",
+    timelineComposer: "Escreva uma nota… @ para mencionar",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} seções vazias",
     emptySections_one: "{{count}} seção vazia",
@@ -2223,8 +2226,7 @@ const pt = {
       newChat: "Nova conversa",
       toggleChatsList: "Alternar lista de conversas",
       goHome: "Voltar ao início",
-      toggleTimeline: "Mostrar / ocultar a linha do tempo",
-      toggleRelated: "Mostrar / ocultar relacionados",
+      toggleRelated: "Mostrar / ocultar a coluna direita",
     },
     reportIndex: {
       title: "Relatórios",
@@ -4904,6 +4906,28 @@ const pt = {
     skippedTitle: "Puladas por enquanto",
     skippedBody: "Os conectores que as usam continuam desconectados até que cada uma seja definida.",
     openPage: "Defina-as em Credenciais de conectores",
+  },
+  setupAssignments: {
+    positionsTitle: "Titulares de cargos",
+    positionsSubtitle: "Escolha um cargo para ver quem o ocupa e adicionar ou remover titulares. O que um cargo concede é definido no próprio cargo.",
+    positionsList: "Cargos",
+    positionsFilter: "Filtrar cargos",
+    positionsEmptyTitle: "Nenhum cargo",
+    positionsEmptyBody: "Ainda não há nenhum cargo definido neste ambiente.",
+    positionsPick: "Escolha um cargo para ver seus titulares.",
+    positionsLoadFailed: "Não foi possível ler os cargos.",
+    setsTitle: "Atribuição de conjuntos de permissões",
+    setsSubtitle: "Escolha um conjunto de permissões para ver quem o possui, diretamente ou por meio de um cargo, e atribuir ou remover usuários. O que um conjunto concede é definido no próprio conjunto.",
+    setsList: "Conjuntos de permissões",
+    setsFilter: "Filtrar conjuntos de permissões",
+    setsEmptyTitle: "Nenhum conjunto de permissões",
+    setsEmptyBody: "Ainda não há nenhum conjunto de permissões definido neste ambiente.",
+    setsPick: "Escolha um conjunto de permissões para ver seus usuários.",
+    setsLoadFailed: "Não foi possível ler os conjuntos de permissões.",
+    noMatch: "Nada corresponde ao filtro.",
+    notFound: "\"{{name}}\" não está nesta lista.",
+    retry: "Tentar novamente",
+    refresh: "Atualizar",
   },
   element: {
     number: {

@@ -1264,9 +1264,12 @@ const zh = {
     new: '新建',
     add: '添加',
     activity: '活动',
-    timeline: '时间线',
-    timelineFolded: '动态',
-    relatedColumn: '关联',
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: '动态',
+    relatedColumn: '右栏',
+    timelineComposer: '写一条备注… @ 提到同事',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} 个空分区',
     emptySections_one: '{{count}} 个空分区',
@@ -1958,8 +1961,7 @@ const zh = {
       newChat: '新建对话',
       toggleChatsList: '切换对话列表',
       goHome: '返回首页',
-      toggleTimeline: '显示 / 隐藏时间线',
-      toggleRelated: '显示 / 隐藏相关',
+      toggleRelated: '显示 / 隐藏右栏',
     },
     reportIndex: {
       title: '报表',
@@ -4846,6 +4848,28 @@ const zh = {
     skippedTitle: "已暂时跳过",
     skippedBody: "在各自设置之前，使用它们的连接器保持断开。",
     openPage: "在连接器凭据页面中设置",
+  },
+  setupAssignments: {
+    positionsTitle: '岗位持有人',
+    positionsSubtitle: '选择一个岗位，查看谁持有它，并添加或移除持有人。岗位授予什么，在岗位本身中定义。',
+    positionsList: '岗位',
+    positionsFilter: '筛选岗位',
+    positionsEmptyTitle: '没有岗位',
+    positionsEmptyBody: '此环境尚未定义任何岗位。',
+    positionsPick: '选择一个岗位以查看其持有人。',
+    positionsLoadFailed: '无法读取岗位。',
+    setsTitle: '权限集分配',
+    setsSubtitle: '选择一个权限集，查看谁直接或通过岗位持有它，并分配或取消分配用户。权限集授予什么，在权限集本身中定义。',
+    setsList: '权限集',
+    setsFilter: '筛选权限集',
+    setsEmptyTitle: '没有权限集',
+    setsEmptyBody: '此环境尚未定义任何权限集。',
+    setsPick: '选择一个权限集以查看其用户。',
+    setsLoadFailed: '无法读取权限集。',
+    noMatch: '没有与筛选条件匹配的项。',
+    notFound: '“{{name}}”不在此列表中。',
+    retry: '重试',
+    refresh: '刷新',
   },
   element: {
     number: {

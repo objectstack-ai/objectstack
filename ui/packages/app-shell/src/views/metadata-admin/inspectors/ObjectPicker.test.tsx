@@ -41,6 +41,15 @@ vi.mock('../useMetadata', () => ({ useMetadataClient: () => h.client }));
 import { ObjectPicker, type ObjectPickerProps } from './ObjectPicker';
 import { t } from '../i18n';
 
+// objectstack#28240 — editing a package, the picker reads `GET /api/v1/packages`
+// for the package's closure. No package is listed here, so nothing is narrowed
+// and this file's offers are the whole catalog. Up for the whole file: the read
+// is fire-and-forget on mount.
+vi.stubGlobal(
+  'fetch',
+  vi.fn(async () => new Response(JSON.stringify({ success: true, data: [] }), { status: 200 })),
+);
+
 afterEach(cleanup);
 beforeEach(() => {
   h.previewList.mockClear();

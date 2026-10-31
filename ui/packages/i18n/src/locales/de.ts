@@ -1343,9 +1343,12 @@ const de = {
     concurrentUpdateRecordLabel: "diesem Datensatz",
     openInNewTab: "In neuem Tab öffnen",
     activity: "Aktivität",
-    timeline: "Zeitleiste",
-    timelineFolded: "Aktivität",
-    relatedColumn: "Verknüpfte Spalte",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Aktivität",
+    relatedColumn: "Rechte Spalte",
+    timelineComposer: "Notiz schreiben… @ zum Erwähnen",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} leere Abschnitte",
     emptySections_one: "{{count}} leerer Abschnitt",
@@ -2170,8 +2173,7 @@ const de = {
       newChat: "Neuer Chat",
       toggleChatsList: "Chatliste umschalten",
       goHome: "Zurück zur Startseite",
-      toggleTimeline: "Zeitleiste ein- / ausblenden",
-      toggleRelated: "Verknüpfte ein- / ausblenden",
+      toggleRelated: "Rechte Spalte ein- / ausblenden",
     },
     reportIndex: {
       title: "Berichte",
@@ -4788,6 +4790,28 @@ const de = {
     skippedTitle: "Vorerst übersprungen",
     skippedBody: "Die Connectors, die sie verwenden, bleiben getrennt, bis jeder Wert gesetzt ist.",
     openPage: "Unter Connector-Zugangsdaten festlegen",
+  },
+  setupAssignments: {
+    positionsTitle: "Positionsinhaber",
+    positionsSubtitle: "Wählen Sie eine Position, um zu sehen, wer sie innehat, und fügen Sie Inhaber hinzu oder entfernen Sie sie. Was eine Position gewährt, ist in der Position selbst festgelegt.",
+    positionsList: "Positionen",
+    positionsFilter: "Positionen filtern",
+    positionsEmptyTitle: "Keine Positionen",
+    positionsEmptyBody: "In dieser Umgebung ist noch keine Position definiert.",
+    positionsPick: "Wählen Sie eine Position, um ihre Inhaber zu sehen.",
+    positionsLoadFailed: "Die Positionen konnten nicht gelesen werden.",
+    setsTitle: "Berechtigungssatz-Zuweisung",
+    setsSubtitle: "Wählen Sie einen Berechtigungssatz, um zu sehen, wer ihn direkt oder über eine Position innehat, und weisen Sie Benutzer zu oder heben Sie die Zuweisung auf. Was ein Satz gewährt, ist im Satz selbst festgelegt.",
+    setsList: "Berechtigungssätze",
+    setsFilter: "Berechtigungssätze filtern",
+    setsEmptyTitle: "Keine Berechtigungssätze",
+    setsEmptyBody: "In dieser Umgebung ist noch kein Berechtigungssatz definiert.",
+    setsPick: "Wählen Sie einen Berechtigungssatz, um seine Benutzer zu sehen.",
+    setsLoadFailed: "Die Berechtigungssätze konnten nicht gelesen werden.",
+    noMatch: "Nichts entspricht dem Filter.",
+    notFound: "„{{name}}“ ist nicht in dieser Liste.",
+    retry: "Erneut versuchen",
+    refresh: "Aktualisieren",
   },
   element: {
     number: {

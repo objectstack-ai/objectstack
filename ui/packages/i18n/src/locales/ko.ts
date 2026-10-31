@@ -1343,9 +1343,12 @@ const ko = {
     concurrentUpdateRecordLabel: "이 레코드",
     openInNewTab: "새 탭에서 열기",
     activity: "활동",
-    timeline: "타임라인",
-    timelineFolded: "활동",
-    relatedColumn: "관련 열",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "활동",
+    relatedColumn: "오른쪽 열",
+    timelineComposer: "메모 작성… @로 멘션",
     // objectstack#27055 — the record page v3.
     emptySections: "빈 섹션 {{count}}개",
     emptySections_one: "빈 섹션 {{count}}개",
@@ -2170,8 +2173,7 @@ const ko = {
       newChat: "새 채팅",
       toggleChatsList: "채팅 목록 전환",
       goHome: "홈으로 돌아가기",
-      toggleTimeline: "타임라인 표시 / 숨기기",
-      toggleRelated: "관련 표시 / 숨기기",
+      toggleRelated: "오른쪽 열 표시 / 숨기기",
     },
     reportIndex: {
       title: "보고서",
@@ -4786,6 +4788,28 @@ const ko = {
     skippedTitle: "건너뜀",
     skippedBody: "이를 사용하는 커넥터는 각각 설정될 때까지 연결이 끊긴 상태로 유지됩니다.",
     openPage: "커넥터 자격 증명에서 설정",
+  },
+  setupAssignments: {
+    positionsTitle: "직책 보유자",
+    positionsSubtitle: "직책을 선택해 보유자를 확인하고 보유자를 추가하거나 제거하세요. 직책이 부여하는 권한은 직책 자체에 정의되어 있습니다.",
+    positionsList: "직책",
+    positionsFilter: "직책 필터",
+    positionsEmptyTitle: "직책 없음",
+    positionsEmptyBody: "이 환경에는 아직 정의된 직책이 없습니다.",
+    positionsPick: "직책을 선택하면 보유자가 표시됩니다.",
+    positionsLoadFailed: "직책을 읽을 수 없습니다.",
+    setsTitle: "권한 집합 할당",
+    setsSubtitle: "권한 집합을 선택해 직접 또는 직책을 통해 보유한 사용자를 확인하고 사용자를 할당하거나 할당 해제하세요. 집합이 부여하는 권한은 집합 자체에 정의되어 있습니다.",
+    setsList: "권한 집합",
+    setsFilter: "권한 집합 필터",
+    setsEmptyTitle: "권한 집합 없음",
+    setsEmptyBody: "이 환경에는 아직 정의된 권한 집합이 없습니다.",
+    setsPick: "권한 집합을 선택하면 사용자가 표시됩니다.",
+    setsLoadFailed: "권한 집합을 읽을 수 없습니다.",
+    noMatch: "필터와 일치하는 항목이 없습니다.",
+    notFound: "\"{{name}}\"은(는) 이 목록에 없습니다.",
+    retry: "다시 시도",
+    refresh: "새로 고침",
   },
   element: {
     number: {

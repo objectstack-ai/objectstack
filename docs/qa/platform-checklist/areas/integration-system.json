@@ -771,7 +771,7 @@
       "title": "Job metadata schedules through every ScheduleSchema variant, executes with retry/timeout enforced, records sys_job/sys_job_run truth, and refuses the closed doors (id key, runtime create, missing handler)",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -832,7 +832,7 @@
           "evidence": "log excerpts + absence of runs"
         },
         {
-          "clause": "the closed doors refuse loudly: authoring `id` errors with the #4667 prescription ('`job.id` was removed … `name` IS the job's identity everywhere … os migrate meta --from 16'); a stray key errors naming the key (aliases steer cron/interval→schedule, fn→handler); runtime create is refused (allowRuntimeCreate:false — handler strings cannot resolve outside the compiled bundle, #4509)",
+          "clause": "the closed doors refuse loudly: authoring `id` errors with the #4667 prescription ('`job.id` was removed … `name` IS the job's identity everywhere … This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion …' — packages/spec/src/system/job.zod.ts, JOB_ID_RETIRED; the 16.x conversion has aged out of the tool, so the text no longer names `os migrate meta --from 16`); a stray key errors naming the key (aliases steer cron/interval→schedule, fn→handler); runtime create is refused (allowRuntimeCreate:false — handler strings cannot resolve outside the compiled bundle, #4509)",
           "oracle": "build",
           "verify": "the parse errors + the runtime-create refusal",
           "evidence": "the error texts"
@@ -883,6 +883,12 @@
           "date": "2026-10-20",
           "change": "checklist-accuracy findings of QA run #24575 (18.0 sweep, 5b14b7f3; wave anchor #24579 §3, whose dashboards/search bullet says the job timeout probe needs a retryPolicy). steps[4]'s timeout probe carried no retryPolicy, so it could not show acceptance[3]'s 'timeouts COUNT as failures' half; a second probe with a policy now does, and acceptance[3]'s verify and evidence read both. fixtures.requires[1] carries the writable-copy recipe #24575 used and says the shipped cron fixture fires only at 01:00 UTC. steps[6] builds each refused shape on its own, since a build stops at the first refused job. Not loosened: no clause changed",
           "ref": "#24717"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "acceptance[5] quoted the job.id prescription as ending 'os migrate meta --from 16'. QA run #27441 found the live message no longer contains it. job.zod.ts JOB_ID_RETIRED now closes with the house aged-out sentence: the edit left `os migrate meta` with the protocol-16.x conversions, so apply it by hand. The quote now matches. The clause is unchanged: authoring `id` still errors with that prescription. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27441"
         }
       ]
     },
@@ -891,7 +897,7 @@
       "title": "Email templates resolve from the registry (no sys_email_template row since ADR-0131 D6/D10), resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, requires manage_platform_settings, bounds sentBy, from, headers, organizationId and identityMail, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -921,7 +927,7 @@
         "drive a send MISSING the required `title`; capture the fast failure",
         "make the template inactive (a Studio save of the item with active:false, or a scratch template authored active:false) and send; capture the TEMPLATE_INACTIVE error",
         "author the zh-CN twin; send to a zh-CN-locale recipient and to an unmatched-locale recipient; capture which row rendered each",
-        "author a template with fromOverride + replyTo and verify both on the outbound message",
+        "author a template with fromOverride + replyTo and verify both on the outbound message. fromOverride is an object { name?, address } with address an email (EmailAddressInlineSchema, packages/spec/src/system/email-template.zod.ts) and replyTo a plain address string; a string fromOverride is refused at save, 422 INVALID_METADATA 'expected object'",
         "edit the template wording as an admin in Studio (an environment overlay over the declared item), redeploy/reboot, and re-read the served item over GET /api/v1/meta/email_template/showcase_task_done_email — the admin's wording must still be served",
         "on the WRITABLE showcase copy (fixtures.requires[3]), edit the DECLARED source template and metadata-reload WITHOUT a reboot, then GET /api/v1/meta/email_template/<name> — the registry serves the edited item (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes). On the stock read-only showcase this half is not drivable: record it partial, as QA run #23166 did",
         "build the two rejection probes (stray key `body`; name 'BadName') and capture the errors",
@@ -937,14 +943,14 @@
         },
         {
           "clause": "a send missing a REQUIRED variable fails fast with a located error naming the variable (requireVars, email-service.ts) — never a silently-empty substitution; the optional variable's absence does not fail the send",
-          "oracle": "log",
-          "verify": "the missing-title send errors; a missing-project send renders",
+          "oracle": "api",
+          "verify": "the missing-title send's sys_notification_delivery row (GET /api/v1/data/sys_notification_delivery) reads status 'dead' with error 'MISSING_VARIABLES: title': the email channel grades MISSING_VARIABLES permanent, so the dispatcher dead-letters the delivery instead of retrying it (packages/services/service-messaging/src/email-channel.ts). The served log is no oracle: the failure is recorded on the delivery row, not printed. A missing-project send renders",
           "evidence": "the two outcomes"
         },
         {
           "clause": "active:false is a real gate: sendTemplate returns TEMPLATE_INACTIVE",
-          "oracle": "log",
-          "verify": "the inactive send's error code",
+          "oracle": "api",
+          "verify": "the inactive send's sys_notification_delivery row reads status 'dead' with error 'TEMPLATE_INACTIVE: <template name>' (email-service.ts throws it; the email channel grades it permanent), read over GET /api/v1/data/sys_notification_delivery, not the served log",
           "evidence": "the error"
         },
         {
@@ -972,7 +978,7 @@
           "evidence": "the error texts"
         },
         {
-          "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates, authorizes and validates: an AUTHED well-formed message from a caller holding manage_platform_settings — { to, subject } plus AT LEAST ONE of `html` / `text` — lands at the dev transport (200 with result.status 'sent'), sent from the configured sender, attributed (sent_by) to the caller and recorded (organization_id) under the caller's active organization; an authenticated caller WITHOUT that capability is refused 403 PERMISSION_DENIED and nothing is sent; a `sentBy` naming another user, a `from` naming an address other than the configured sender, a `headers` value that is not a plain object mapping header names to single-line strings, a custom From / Sender / Return-Path header, an `organizationId` other than the caller's active organization, and an `identityMail` other than false are each refused 403 PERMISSION_DENIED before any send; an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
+          "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates, authorizes and validates: an AUTHED well-formed message from a caller holding manage_platform_settings — { to, subject } plus AT LEAST ONE of `html` / `text` — lands at the dev transport (200 whose body IS the send result, top level — { id, status: 'sent', messageId } — with no `result` wrapper and no success envelope; packages/rest/src/email-routes.ts answers res.json(result); its own refusals are flat { code, error }, e.g. { code: 'INVALID_REQUEST', error: 'JSON body required' }), sent from the configured sender, attributed (sent_by) to the caller and recorded (organization_id) under the caller's active organization; an authenticated caller WITHOUT that capability is refused 403 PERMISSION_DENIED and nothing is sent; a `sentBy` naming another user, a `from` naming an address other than the configured sender, a `headers` value that is not a plain object mapping header names to single-line strings, a custom From / Sender / Return-Path header, an `organizationId` other than the caller's active organization, and an `identityMail` other than false are each refused 403 PERMISSION_DENIED before any send; an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
           "oracle": "api",
           "verify": "the POST /api/v1/email/send responses: admin 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code, member 403 PERMISSION_DENIED, foreign from / sentBy / organizationId, off-shape headers and identityMail 403 PERMISSION_DENIED with no new mail-log row, and the admin's row stamped with the admin's active organization (email-routes.ts registerEmailEndpoints: enforceAuth, the capability / sentBy / sender / tenant bounds → 403 PERMISSION_DENIED, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider). ⚠ WIRE KEYS (corrected, run #7690): the send input is SendEmailInput { to, subject, text?, html?, from?, cc?, bcc?, replyTo?, … } (packages/spec/src/contracts/email-service.ts) — NOT `bodyHtml`. `bodyHtml`/`bodyText` are the email-TEMPLATE authoring fields (this item's own variants list at the `body:` and alias lines says so); posting them to this door is refused 400 'VALIDATION_FAILED: at least one of text or html is required' (packages/plugins/plugin-email/src/email-service.ts). A 400 here is the run using the wrong vocabulary, not a product defect — re-send with `html` before filing anything",
           "evidence": "the responses + the dev-transport landing (plus the wrong-vocabulary refusal, if the probe was driven)"
@@ -1060,6 +1066,12 @@
           "date": "2026-10-29",
           "change": "acceptance[7] gains the send door's authorization bounds: the door now requires manage_platform_settings, records the caller as sent_by and the caller's active organization as organization_id, bounds from to the configured sender, accepts headers only as a plain object of single-line strings, and refuses identityMail (each refused 403 PERMISSION_DENIED before any send). Step (a) drives the door as an admin, a new step (d) drives the refusals and the organization stamp, and automated.ref names the REST-layer pin",
           "ref": "claude/harden-email-send-door"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "three checklist-accuracy findings of QA run #27438. acceptance[7]: the admin's 200 body is the SendEmailResult at top level, {id, status:'sent', messageId}, with no result wrapper or success envelope. email-routes.ts answers res.status(200).json(result), and its 400s are flat {code, error}. steps[5]: fromOverride is an object {name?, address} (EmailAddressInlineSchema), and a string is refused 422 INVALID_METADATA 'expected object'. acceptance[1] and [2]: the failure is recorded on sys_notification_delivery (status 'dead', error 'MISSING_VARIABLES: title' or 'TEMPLATE_INACTIVE: NAME'), not in the served log. email-channel.ts grades both permanent, so the row is dead-lettered. Their oracle moves from log to api. The assertions are unchanged, read where the evidence lives. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27438"
         }
       ]
     },
@@ -1068,7 +1080,7 @@
       "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1096,7 +1108,7 @@
         "channels push/slack/teams/webhook — unimplemented, dead-letter (#3197): negative-only"
       ],
       "steps": [
-        "as admin, reassign a showcase_task to the assignee persona (assignee != previous.assignee fires the flow trigger)",
+        "as admin, reassign a showcase_task to the assignee persona (assignee != previous.assignee fires the flow trigger). showcase_task.assignee is a plain text field holding an email address, not a lookup (examples/app-showcase/src/data/objects/task.object.ts, Field.text): write the persona's EMAIL into it. The notify node hands that text on as the recipient, and the messaging recipient resolver maps an email-shaped recipient to the sys_user holding it (packages/services/service-messaging/src/recipient-resolver.ts)",
         "as the ASSIGNEE, GET /api/v1/notifications (route ledger: notifications.list); locate the new row (title 'New task assigned: <title>', the actionUrl deep link)",
         "as the THIRD member, GET /api/v1/notifications and confirm the notification is absent",
         "unauthenticated GET /api/v1/notifications; capture the 401",
@@ -1187,6 +1199,12 @@
           "date": "2026-10-26",
           "change": "fixtures.knownGaps[2] says the app-todo scratch copy needs its node_modules — checklist-accuracy finding of QA run #25817 (18.2.0 sweep, release-18.2.0-manual-set, 6679644a; wave anchor #25807; card #25844): a symlink to the tree's copy works. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-31",
+          "change": "steps[0] did not say what to write into showcase_task.assignee. QA run #27441 noted it is an email text field. task.object.ts declares it Field.text; the flow's notify recipient is that value, and recipient-resolver.ts resolves an email-shaped recipient against sys_user. The step now says to write the persona's email. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27441"
         }
       ]
     },
@@ -1431,7 +1449,7 @@
       "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1445,7 +1463,7 @@
           "os dev wiring: ExternalDatasourceServicePlugin AND registerDatasourceAdminRoutes are both wired unconditionally by packages/cli/src/commands/serve.ts (+), so both route spellings are live on a stock boot"
         ],
         "knownGaps": [
-          "live ?schema= NARROWING is not observable on the stock fixture: SQLite introspection returns bare, unqualified table names (sql-driver.ts introspectSchema reads sqlite_master), so no table carries an attributable schema and the service filter (external-datasource-service.ts — skips only when `tableSchema && tableSchema !== opts.schema`) has nothing to exclude. A live ?schema=<x> therefore returns the SAME full set as no filter — indistinguishable from the pre-#7955 dropped-query bug — so the narrowing clause is scored by the pinned twin-equivalence test (schema-qualified postgres fake), never by the live SQLite read. A Postgres external fixture does NOT make it live-scoreable either (QA run #24615, on a real PostgreSQL 16 holding public.widgets, public.gadgets and sales.invoices): the SQL driver's Postgres branch lists only the tables of the session's current_schemas(false), with bare names (packages/drivers/driver-sql/src/sql-driver.ts#introspectSchema), so ?schema=sales answered the public tables and never sales.invoices. Live narrowing is unobservable on every in-tree SQL driver, which is the product defect #24664 (#24619 row c); only the pinned fake, which returns qualified names, exercises the filter",
+          "live ?schema= NARROWING is not observable on the stock fixture: SQLite introspection returns bare, unqualified table names (sql-driver.ts introspectSchema reads sqlite_master), so no table carries an attributable schema and the service filter (external-datasource-service.ts — skips only when `tableSchema && tableSchema !== opts.schema`) has nothing to exclude. Since the #24664 fix a live ?schema=<x> there is REFUSED rather than answered: 400 EXTERNAL_DATASOURCE_ERROR 'Cannot narrow the remote tables … named no schema for N of its N table(s) …' on both spellings (listRemoteTables refuses a filter it cannot judge a bare-named table by), where before the fix it returned the same full set as no filter, indistinguishable from the pre-#7955 dropped-query bug. Either way nothing is narrowed, so the narrowing clause is scored by the pinned twin-equivalence test (schema-qualified postgres fake), never by the live SQLite read. A Postgres external fixture does NOT make it live-scoreable either (QA run #24615, on a real PostgreSQL 16 holding public.widgets, public.gadgets and sales.invoices): the SQL driver's Postgres branch lists only the tables of the session's current_schemas(false), with bare names (packages/drivers/driver-sql/src/sql-driver.ts#introspectSchema), so ?schema=sales answered the public tables and never sales.invoices (before the #24664 fix; with bare names it now gets the same 400 refusal). Live narrowing is unobservable on every in-tree SQL driver (#24664, #24619 row c): the fix makes an unattributable table refuse the filter instead of slipping through it; only the pinned fake, which returns qualified names, exercises the filter",
           "the stock fixture's clean text/number/date columns may legitimately produce an EMPTY draft.review[] (notes fire only for unrecognised or lossy type mappings, external-datasource-service.ts) — an empty array is a pass, not a missing feature"
         ]
       },
@@ -1469,7 +1487,7 @@
         {
           "clause": "?schema= is HONOURED, not silently dropped — the #7955 fix (assert the FIXED behavior; do not re-file the old bug): ?schema= narrows to that remote schema, an empty/absent ?schema= is no filter, a repeated ?schema=a&schema=b reaches the handler as an array and degrades to NO FILTER (never a 500, never filtering by an arbitrary one of the two) — identically on both spellings",
           "oracle": "test",
-          "verify": "remote-tables-twin.equivalence.test.ts '#7955' describe: ?schema=public narrows to public.* on both spellings, absent/empty = unfiltered, repeated key = unfiltered, all statuses equal. Live on the SQLite fixture assert only the degradation contract (?schema=<x> and repeated ?schema both answer 200 with the full set) and record that live narrowing is unobservable here (knownGaps)",
+          "verify": "remote-tables-twin.equivalence.test.ts '#7955' describe: ?schema=public narrows to public.* on both spellings, absent/empty = unfiltered, repeated key = unfiltered, all statuses equal. Live on the SQLite fixture: ?schema=<x> (e.g. main) answers 400 EXTERNAL_DATASOURCE_ERROR 'Cannot narrow the remote tables of datasource … named no schema for N of its N table(s) …' on both spellings — the #24664 refusal (packages/services/service-datasource/src/external-datasource-service.ts, listRemoteTables and unattributedSchemaFilterError), never 200 with the full set — while an empty ?schema= and the repeated key answer 200 with the full set; record that live narrowing is unobservable here (knownGaps)",
           "evidence": "the test run output + the live ?schema= responses"
         },
         {
@@ -1555,6 +1573,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the service unit pin under acceptance[0]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26450, release-18.2.0-w2-tier1-b, at 756220c4; wave anchor #25807, slice A): the mapping pass scored acceptance[0] partial from external-datasource-service.test.ts, not in the ref. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "acceptance[1].verify and fixtures.knownGaps[0] said a live ?schema=<x> on the SQLite fixture answers 200 with the full set. QA run #27438 measured 400 EXTERNAL_DATASOURCE_ERROR 'Cannot narrow the remote tables … named no schema for 2 of its 2 table(s)' on both spellings, and the empty and repeated forms still 200 with the full set. external-datasource-service.ts listRemoteTables throws unattributedSchemaFilterError (the #24664 fix) when a filter is in force and a table has no schema; the route reads only a string ?schema=, so a repeated key is no filter. Stronger: the verify now requires the refusal, and the full set no longer passes. Narrowing stays scored by the twin pin. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27438"
         }
       ]
     },
@@ -1563,7 +1587,7 @@
       "title": "Boot-time external-schema drift gate (ADR-0015 §5.2 Gate 2): onMismatch defaults to 'fail' and refuses boot naming the object and mismatched column; 'warn' proceeds logging the diff; 'ignore' is silent; checkOnBoot:false skips a datasource with a loud info line (boot step only — the interval sweep is unaffected); a partial metadata read withholds the all-clear instead of faking one",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "cli",
       "personas": [
@@ -1585,17 +1609,18 @@
       "steps": [
         "boot stock showcase with --log-level info, as every boot of this item: the CLI's default kernel level is `warn`, and the all-clear here, steps[4]'s SKIPPED line and steps[5]'s armed-timer line are all info-level (packages/runtime/src/external-validation-plugin.ts), so a default boot prints none of them (QA run #24615); capture the in-sync all-clear info line '[external-validation] all federated objects match their remote schema' with its objects count",
         "in a scratch copy, induce a surviving drift (see knownGaps) under the stock 'warn' policy; boot; capture the '[external-validation] external schema drift' warn (datasource/object/diffs) and that boot COMPLETES",
-        "same drift with the scratch datasource's external.validation.onMismatch OMITTED (and again with explicit 'fail'); boot; capture the abort — ExternalSchemaMismatchError, message 'Object '<o>' does not match its remote table on datasource '<d>':' plus per-diff lines naming the column",
+        "same drift with the scratch datasource's external.validation.onMismatch OMITTED (and again with explicit 'fail'); boot; capture the abort — the served boot logs the kernel's 'Bootstrap failed after plugins started — rolling back started plugins...' warn, then prints the error's message, renderDiffMessage's text: '✗ Object '<o>' does not match its remote table on datasource '<d>':' plus one line per diff naming the column (e.g. '✗ missing_column: customers.qa_drift_col'), and exits 1 with no serving line. The class name ExternalSchemaMismatchError is not printed (packages/cli/src/commands/serve.ts prints the message; only DEBUG adds the stack), so match the text, never the class name",
         "same drift under onMismatch:'ignore'; boot; confirm completion with NO drift warn",
         "set external.validation.checkOnBoot:false on the drifted scratch datasource (onMismatch 'fail' or omitted) and boot: since #13149 the gate HONOURS the skip — boot COMPLETES, that datasource's rows are dropped before any verdict, and the info line '[external-validation] boot schema validation SKIPPED for datasource(s) that set `external.validation.checkOnBoot: false` …' names it; a second in-sync datasource in the same boot is still judged (the gate is per-datasource)",
         "declare external.validation.checkIntervalMs on a datasource and confirm the armed-timer log '[external-validation] armed background drift check' (the event-emission arm is unit-pinned); declare it TOGETHER with checkOnBoot:false and confirm the checker still arms — the skip is the boot step's only (maintainer ruling 2026-08-29)",
-        "run the pins: packages/runtime/src/external-validation-plugin.test.ts, packages/runtime/src/external-validation-checkonboot.test.ts (#13037/#13149 — skip honoured, per-datasource scope, unreadable-def validates, alias spellings rejected, drift checker still arms), and the '#6504 … boot gate' describe in packages/runtime/src/list-diagnosed-consumer-sweep.test.ts"
+        "run the pins: packages/runtime/src/external-validation-plugin.test.ts, packages/runtime/src/external-validation-checkonboot.test.ts (#13037/#13149 — skip honoured, per-datasource scope, unreadable-def validates, alias spellings rejected, drift checker still arms), and the '#6504 … boot gate' describe in packages/runtime/src/list-diagnosed-consumer-sweep.test.ts",
+        "negative[5]'s federation-free boot: boot stock examples/app-todo, which declares no external datasource (`pnpm dev:todo -- --fresh -p PORT --log-level info`), let it reach its serving line, and grep its log for '[external-validation]': no warn, no error, no abort. The CLI composes the external-datasource service unconditionally (packages/cli/src/commands/serve.ts#ExternalDatasourceServicePlugin), so this boot reaches the gate with the service present and nothing federated: expect, at most, the info all-clear with objects 0. The debug-only 'service not registered; skipping' arm needs a host that does not compose the service, and stays the pin's (external-validation-plugin.test.ts 'is a no-op when the external-datasource service is absent'). Kill the boot you started"
       ],
       "acceptance": [
         {
-          "clause": "the DEFAULT is 'fail' and it refuses boot: with drift present and onMismatch undeclared (or explicit 'fail'), boot aborts with ExternalSchemaMismatchError whose message names the object, the datasource, and the mismatched column per diff line (renderDiffMessage) — the highest-consequence branch here: a mis-typed federation must not come up serving garbage",
+          "clause": "the DEFAULT is 'fail' and it refuses boot: with drift present and onMismatch undeclared (or explicit 'fail'), boot aborts — the gate throws ExternalSchemaMismatchError, and the served boot exits 1 before serving, printing that error's message: renderDiffMessage's text, naming the object, the datasource, and the mismatched column per diff line. The class name is not printed — the highest-consequence branch here: a mis-typed federation must not come up serving garbage",
           "oracle": "log",
-          "verify": "the induced-drift boot's abort output against external-errors.ts; the default pinned at external-validation-plugin.ts (resolveOnMismatch `?? 'fail'`; an unreadable datasource definition ALSO lands on it — the memoized def loader answers undefined on a failed read). Only MEASURED diffs reach this throw — an 'unreachable' row warns and continues by ruling (#11166), see knownGaps. The unit pins external-validation-plugin.test.ts 'throws … default (fail) policy' and 'defaults to fail when the datasource definition is unavailable' drive runValidation over stubbed services and assert the error class, not this message: plugin-layer evidence, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives). Without an induced-drift boot the clause is blocked(fixture) (knownGaps[0], [1])",
+          "verify": "the induced-drift boot's abort output against external-errors.ts: after 'Bootstrap failed after plugins started', the '✗ Object '<o>' does not match its remote table on datasource '<d>':' header and one '✗ <kind>: <table>.<column>' line per diff, exit 1, no serving line (match the message, never the class name: serve.ts prints the message only); the default pinned at external-validation-plugin.ts (resolveOnMismatch `?? 'fail'`; an unreadable datasource definition ALSO lands on it — the memoized def loader answers undefined on a failed read). Only MEASURED diffs reach this throw — an 'unreachable' row warns and continues by ruling (#11166), see knownGaps. The unit pins external-validation-plugin.test.ts 'throws … default (fail) policy' and 'defaults to fail when the datasource definition is unavailable' drive runValidation over stubbed services and assert the error class, not this message: plugin-layer evidence, never this clause's pass (RUNNER rule 6, a pin scores only the layer it drives). Without an induced-drift boot the clause is blocked(fixture) (knownGaps[0], [1])",
           "evidence": "the boot abort log; when the live arm is blocked(fixture), that verdict with its fixture cited, the unit-test output beside it as lower-layer evidence"
         },
         {
@@ -1689,6 +1714,12 @@
           "date": "2026-10-26",
           "change": "acceptance[4] and [6] (verify, evidence) score from their pins, and automated.ref scopes negative[3] and [5] — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a4/a6: the oracle is 'test' and the pins assert both, but each verify/evidence also asked for the live armed-timer log line; that line is now a separate boot leg. n3: the fail-default case asserts rejects.toBeInstanceOf only; renderDiffMessage's text is pinned, but only as a pure function in spec's external-errors.test.ts, outside the ref, so the boot abort message stays a live reading. n5: the no-op case asserts resolves undefined, not the absence of warn/error logs. Read on main 9753d163. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "acceptance[0] and steps[2] said the boot 'aborts with ExternalSchemaMismatchError'. QA run #27438 measured the served boot printing renderDiffMessage's lines after 'Bootstrap failed after plugins started', with no class name. serve.ts's boot catch prints the error's message through printError, and only DEBUG adds the stack. The step and clause now name the printed text and exit 1. Also, a gap #27438 parked: negative[5]'s federation-free boot was not driven. steps[7] (new, after the pins step) gives the recipe: a stock app-todo boot at --log-level info, read for zero [external-validation] warn or error lines. The CLI always composes the external-datasource service, so the debug no-op arm stays the pin's. Not loosened: a drifted boot that serves still fails. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27438"
         }
       ]
     },
@@ -2313,7 +2344,7 @@
       "title": "Messaging and integration answers on v18: a notify from a system-context run stores the organization of the record it is about (never NULL), mark-read writes a receipt only for notifications delivered to the caller, redelivering for an inactive or deleted webhook subscription is 409 DELIVERY_NOT_ELIGIBLE, and a declarative MCP stdio connector with a relative command boots healthy from another directory",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2325,7 +2356,7 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a showcase notify flow (integration-system.notify-inbox-delivery names one)",
-          "a webhook delivery in a TERMINAL state for a webhook that is then switched off. The shipped showcase_task_changed (examples/app-showcase/src/automation/webhooks/index.ts#TaskChangedWebhook, isActive: false) can supply none: the dispatcher skips an inactive webhook, so it never has a delivery (packages/plugins/plugin-webhooks/src/redeliver-guard.ts — the guard asks the dispatcher's own `active === true` predicate). Recipe (QA run #24558): create an ACTIVE webhook pointing at a local sink the server can reach (POST /api/v1/data/sys_webhook), let one delivery reach success, failed or dead, then deactivate or delete the webhook"
+          "a webhook delivery in a TERMINAL state for a webhook that is then switched off. The shipped showcase_task_changed (examples/app-showcase/src/automation/webhooks/index.ts#TaskChangedWebhook, isActive: false) can supply none: the dispatcher skips an inactive webhook, so it never has a delivery (packages/plugins/plugin-webhooks/src/redeliver-guard.ts — the guard asks the dispatcher's own `active === true` predicate). Recipe (QA run #24558): create an ACTIVE webhook pointing at a local sink the server can reach (POST /api/v1/data/sys_webhook; the body needs method in its lower-case option spelling, 'post', since sys_webhook.method is a select whose values are lower-case, and the required definition_json, e.g. '{\"timeoutMs\":5000}': without them the create is refused 400 VALIDATION_FAILED — packages/plugins/plugin-webhooks/src/sys-webhook.object.ts), let one delivery reach success, failed or dead, then deactivate or delete the webhook"
         ]
       },
       "steps": [
@@ -2394,6 +2425,12 @@
           "date": "2026-10-29",
           "change": "steps[2] names its persona: the redeliver door is now gated on webhook-administration access, so the inactive-webhook redeliver is driven as the seeded admin (an unentitled caller is refused 403 before any row-specific detail). automated.ref adds webhook-redeliver-entitlement.test.ts, which pins both sides of that gate. The admin-driven clause is unchanged",
           "ref": "claude/harden-webhook-redeliver-door"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[2]'s recipe said to create an ACTIVE webhook with POST /api/v1/data/sys_webhook and gave no body. QA run #27438 found the create needs method in lower case ('post') and definition_json, or it answers 400 VALIDATION_FAILED. sys-webhook.object.ts declares method a select with lower-case option values and definition_json a required textarea. The recipe now names both. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27438"
         }
       ]
     }

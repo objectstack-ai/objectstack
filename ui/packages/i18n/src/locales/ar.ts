@@ -1501,9 +1501,12 @@ const ar = {
     concurrentUpdateRecordLabel: "هذا السجل",
     openInNewTab: "فتح في علامة تبويب جديدة",
     activity: "النشاط",
-    timeline: "الخط الزمني",
-    timelineFolded: "النشاط",
-    relatedColumn: "عمود العناصر ذات الصلة",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "النشاط",
+    relatedColumn: "العمود الجانبي",
+    timelineComposer: "اكتب ملاحظة… @ للإشارة",
     // objectstack#27055 — the record page v3.
     emptySections: "أقسام فارغة: {{count}}",
     emptySections_zero: "أقسام فارغة: {{count}}",
@@ -2393,8 +2396,7 @@ const ar = {
       newChat: "محادثة جديدة",
       toggleChatsList: "تبديل قائمة المحادثات",
       goHome: "العودة إلى الرئيسية",
-      toggleTimeline: "إظهار / إخفاء الخط الزمني",
-      toggleRelated: "إظهار / إخفاء العناصر ذات الصلة",
+      toggleRelated: "إظهار / إخفاء العمود الجانبي",
     },
     reportIndex: {
       title: "التقارير",
@@ -5274,6 +5276,28 @@ const ar = {
     skippedTitle: "تم التخطي مؤقتًا",
     skippedBody: "تبقى الموصلات التي تستخدمها غير متصلة حتى يُعيَّن كل منها.",
     openPage: "عيّنها في بيانات اعتماد الموصلات",
+  },
+  setupAssignments: {
+    positionsTitle: "شاغلو المناصب",
+    positionsSubtitle: "اختر منصبًا لترى من يشغله، وأضف شاغلين أو أزلهم. ما يمنحه المنصب محدد في المنصب نفسه.",
+    positionsList: "المناصب",
+    positionsFilter: "تصفية المناصب",
+    positionsEmptyTitle: "لا توجد مناصب",
+    positionsEmptyBody: "لم يُعرَّف أي منصب في هذه البيئة بعد.",
+    positionsPick: "اختر منصبًا لعرض شاغليه.",
+    positionsLoadFailed: "تعذّرت قراءة المناصب.",
+    setsTitle: "إسناد مجموعات الأذونات",
+    setsSubtitle: "اختر مجموعة أذونات لترى من يملكها، مباشرةً أو عبر منصب، وأسندها إلى المستخدمين أو ألغِ إسنادها. ما تمنحه المجموعة محدد في المجموعة نفسها.",
+    setsList: "مجموعات الأذونات",
+    setsFilter: "تصفية مجموعات الأذونات",
+    setsEmptyTitle: "لا توجد مجموعات أذونات",
+    setsEmptyBody: "لم تُعرَّف أي مجموعة أذونات في هذه البيئة بعد.",
+    setsPick: "اختر مجموعة أذونات لعرض مستخدميها.",
+    setsLoadFailed: "تعذّرت قراءة مجموعات الأذونات.",
+    noMatch: "لا شيء يطابق عامل التصفية.",
+    notFound: "\"{{name}}\" ليس في هذه القائمة.",
+    retry: "إعادة المحاولة",
+    refresh: "تحديث",
   },
   element: {
     number: {

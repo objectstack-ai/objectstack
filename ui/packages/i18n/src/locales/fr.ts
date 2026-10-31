@@ -1381,9 +1381,12 @@ const fr = {
     concurrentUpdateRecordLabel: "cet enregistrement",
     openInNewTab: "Ouvrir dans un nouvel onglet",
     activity: "Activité",
-    timeline: "Chronologie",
-    timelineFolded: "Activité",
-    relatedColumn: "Colonne associée",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Activité",
+    relatedColumn: "Colonne de droite",
+    timelineComposer: "Écrire une note… @ pour mentionner",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} sections vides",
     emptySections_one: "{{count}} section vide",
@@ -2224,8 +2227,7 @@ const fr = {
       newChat: "Nouvelle discussion",
       toggleChatsList: "Basculer la liste des discussions",
       goHome: "Retour à l'accueil",
-      toggleTimeline: "Afficher / masquer la chronologie",
-      toggleRelated: "Afficher / masquer les éléments associés",
+      toggleRelated: "Afficher / masquer la colonne de droite",
     },
     reportIndex: {
       title: "Rapports",
@@ -4905,6 +4907,28 @@ const fr = {
     skippedTitle: "Ignorés pour le moment",
     skippedBody: "Les connecteurs qui les utilisent restent déconnectés tant que chacun n'est pas défini.",
     openPage: "Les définir dans Identifiants des connecteurs",
+  },
+  setupAssignments: {
+    positionsTitle: "Titulaires de postes",
+    positionsSubtitle: "Choisissez un poste pour voir qui l’occupe, et ajoutez ou retirez des titulaires. Ce qu’un poste accorde est défini sur le poste lui-même.",
+    positionsList: "Postes",
+    positionsFilter: "Filtrer les postes",
+    positionsEmptyTitle: "Aucun poste",
+    positionsEmptyBody: "Aucun poste n’est encore défini dans cet environnement.",
+    positionsPick: "Choisissez un poste pour voir ses titulaires.",
+    positionsLoadFailed: "Impossible de lire les postes.",
+    setsTitle: "Attribution des ensembles d’autorisations",
+    setsSubtitle: "Choisissez un ensemble d’autorisations pour voir qui le détient, directement ou par un poste, et attribuez-le ou retirez-le à des utilisateurs. Ce qu’un ensemble accorde est défini sur l’ensemble lui-même.",
+    setsList: "Ensembles d’autorisations",
+    setsFilter: "Filtrer les ensembles d’autorisations",
+    setsEmptyTitle: "Aucun ensemble d’autorisations",
+    setsEmptyBody: "Aucun ensemble d’autorisations n’est encore défini dans cet environnement.",
+    setsPick: "Choisissez un ensemble d’autorisations pour voir ses utilisateurs.",
+    setsLoadFailed: "Impossible de lire les ensembles d’autorisations.",
+    noMatch: "Rien ne correspond au filtre.",
+    notFound: "« {{name}} » ne figure pas dans cette liste.",
+    retry: "Réessayer",
+    refresh: "Actualiser",
   },
   element: {
     number: {

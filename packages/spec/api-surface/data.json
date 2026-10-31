@@ -99,6 +99,7 @@
     "CROSS_FIELD_COMPARISON_CLASSES (const)",
     "CROSS_FIELD_COMPARISON_TYPE_CLASSES (const)",
     "CROSS_FIELD_NO_CLASS_REASONS (const)",
+    "CURRENCY_FRACTION_DIGITS (const)",
     "CalendarDateValue (type)",
     "CalendarDateValueSchema (const)",
     "ClockTimeValue (type)",

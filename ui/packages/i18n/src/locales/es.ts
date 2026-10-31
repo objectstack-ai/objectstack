@@ -1384,9 +1384,12 @@ const es = {
     concurrentUpdateRecordLabel: "este registro",
     openInNewTab: "Abrir en nueva pestaña",
     activity: "Actividad",
-    timeline: "Cronología",
-    timelineFolded: "Actividad",
-    relatedColumn: "Columna relacionada",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Actividad",
+    relatedColumn: "Columna derecha",
+    timelineComposer: "Escribe una nota… @ para mencionar",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} secciones vacías",
     emptySections_one: "{{count}} sección vacía",
@@ -2228,8 +2231,7 @@ const es = {
       newChat: "Nuevo chat",
       toggleChatsList: "Alternar lista de chats",
       goHome: "Volver al inicio",
-      toggleTimeline: "Mostrar / ocultar la cronología",
-      toggleRelated: "Mostrar / ocultar relacionados",
+      toggleRelated: "Mostrar / ocultar la columna derecha",
     },
     reportIndex: {
       title: "Informes",
@@ -4909,6 +4911,28 @@ const es = {
     skippedTitle: "Omitidas por ahora",
     skippedBody: "Los conectores que las usan siguen desconectados hasta que se configure cada una.",
     openPage: "Configúralas en Credenciales de conectores",
+  },
+  setupAssignments: {
+    positionsTitle: "Titulares de puestos",
+    positionsSubtitle: "Elija un puesto para ver quién lo ocupa y añadir o quitar titulares. Lo que concede un puesto se define en el propio puesto.",
+    positionsList: "Puestos",
+    positionsFilter: "Filtrar puestos",
+    positionsEmptyTitle: "No hay puestos",
+    positionsEmptyBody: "Aún no hay ningún puesto definido en este entorno.",
+    positionsPick: "Elija un puesto para ver sus titulares.",
+    positionsLoadFailed: "No se pudieron leer los puestos.",
+    setsTitle: "Asignación de conjuntos de permisos",
+    setsSubtitle: "Elija un conjunto de permisos para ver quién lo tiene, directamente o a través de un puesto, y asignar o desasignar usuarios. Lo que concede un conjunto se define en el propio conjunto.",
+    setsList: "Conjuntos de permisos",
+    setsFilter: "Filtrar conjuntos de permisos",
+    setsEmptyTitle: "No hay conjuntos de permisos",
+    setsEmptyBody: "Aún no hay ningún conjunto de permisos definido en este entorno.",
+    setsPick: "Elija un conjunto de permisos para ver sus usuarios.",
+    setsLoadFailed: "No se pudieron leer los conjuntos de permisos.",
+    noMatch: "Nada coincide con el filtro.",
+    notFound: "\"{{name}}\" no está en esta lista.",
+    retry: "Reintentar",
+    refresh: "Actualizar",
   },
   element: {
     number: {

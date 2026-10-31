@@ -7,10 +7,10 @@
  */
 
 /**
- * objectstack#27052 / objectstack#27241 — `PanelToggles`: ONE named segmented
- * control, each segment an icon and its label, announcing whether its panel
- * is shown (`aria-pressed`), filled with the accent tint when it is, and
- * naming its shortcut in the tooltip.
+ * objectstack#27052 / objectstack#27241 / objectstack#27524 — `PanelToggles`:
+ * a named group of icon toggles (the record page's one ⊟), each announcing
+ * whether its panel is shown (`aria-pressed`), filled with the accent tint
+ * when it is, named by its panel, and naming its shortcut in the tooltip.
  */
 
 import * as React from 'react';
@@ -61,14 +61,17 @@ describe('PanelToggles (objectstack#27052)', () => {
     expect(related.className).toContain('text-muted-foreground');
   });
 
-  it('each segment draws its icon and its label as visible text (objectstack#27241)', () => {
+  it('each toggle is its icon alone, named by its panel (objectstack#27524, Target 4)', () => {
     render(<Host />);
     const timeline = screen.getByRole('button', { name: 'Timeline' });
-    expect(timeline.textContent).toBe('Timeline');
+    // No visible text: the segmented text control retired for the one ⊟ icon.
+    expect(timeline.textContent).toBe('');
+    expect(timeline.getAttribute('aria-label')).toBe('Timeline');
     expect(timeline.querySelector('[data-testid="icon"]')).not.toBeNull();
-    // One control: both segments in the one group.
     const group = screen.getByRole('group', { name: 'Panels' });
     expect(group.querySelectorAll('[data-panel-toggle]')).toHaveLength(2);
+    // No segmented frame around the toggles.
+    expect(group.className).not.toContain('border');
   });
 
   it('a click flips its own panel and no other', () => {
