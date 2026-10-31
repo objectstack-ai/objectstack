@@ -27,6 +27,11 @@
  * the page request, in the same wave: the record's comment thread, its
  * activity and, once per view, the mention list. None of them is a part of the page the payload answers;
  * they are pinned on their own below, not counted as page requests.
+ *
+ * And once the app's metadata bundle is in (`loadAppBundle`, on app entry), the
+ * object definitions the blocks read come from it: a record open in a warm
+ * session asks the page and no metadata at all (its 动态 stream's own reads aside), and a cold one adds at most
+ * the one bundle request.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -89,7 +94,8 @@ const TOTAL: Record<string, number> = { os_27627_task: 7, os_27627_case: 4, os_2
 
 interface Held { wave: number; method: string; path: string; body: any; released: boolean; release: () => void }
 
-const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+const json = (body: unknown, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
 
 /** The page payload the route answers for `body`, for record `id`. */
 function pageAnswer(id: string, body: any) {
@@ -112,7 +118,17 @@ function pageAnswer(id: string, body: any) {
   };
 }
 
+const APP = 'demo';
+const BUNDLE = `/api/v1/meta/app/${APP}/bundle`;
+
+/** The bundle carries its per-caller validator, as the route serves a bundle it may be kept by. */
+const BUNDLE_HEADERS = { ETag: 'W/"demo-bundle-1"', 'Cache-Control': 'private, no-cache' };
+
 function answerFor(h: Held): unknown {
+  if (h.path === BUNDLE) {
+    const env = (type: string, item: { name: string }) => ({ type, name: item.name, item });
+    return { app: env('app', { name: APP }), objects: ALL.map((o) => env('object', o)), views: [], pages: [], dashboards: [] };
+  }
   const meta = /\/api\/v1\/meta\/object\/([^/?]+)/.exec(h.path);
   if (meta) return { success: true, data: ALL.find((o) => o.name === meta[1]) ?? null };
   const page = /\/api\/v1\/data\/[^/?]+\/([^/?]+)\/page$/.exec(h.path);
@@ -136,7 +152,7 @@ function heldTransport() {
         wave: state.wave, method, path,
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
         released: false,
-        release: () => { if (h.released) return; h.released = true; resolve(json(answerFor(h))); },
+        release: () => { if (h.released) return; h.released = true; resolve(json(answerFor(h), h.path === BUNDLE ? BUNDLE_HEADERS : {})); },
       };
       held.push(h);
     });
@@ -222,9 +238,9 @@ describe('objectstack#27627 — one request opens a record page', () => {
     const data = dataRequests(held);
     expect(data.map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
     expect(held.filter((h) => /[?&](\$?top)=1\b/.test(h.path))).toEqual([]);
-    // Every DATA request goes out in the first wave. The object definitions the
-    // blocks read (`/meta/object/…`) are the app bundle's to serve once per
-    // session; until then they are read as before, beside it.
+    // Every DATA request goes out in the first wave. With no app entered there
+    // is no metadata bundle, so the object definitions the blocks read
+    // (`/meta/object/…`) are read by name beside it; with one, see below.
     expect(data.every((h) => h.wave === 1)).toBe(true);
 
     // The request names what the page draws: its four related lists, the
@@ -325,6 +341,35 @@ describe('objectstack#27627 — one request opens a record page', () => {
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
     // The swapped-in record's 动态 stream; the mention list is the view's, read once.
     expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1']);
+  });
+
+  it('a cold session, entering the app as the record opens, adds one bundle request and no by-name metadata read', async () => {
+    const { held, state, open, ds } = await boot();
+    void ds.loadAppBundle(APP);
+    open('c1');
+    await runWaves(held, state);
+    expect(held.filter(isMeta).map((h) => `${h.method} ${h.path}`)).toEqual([`GET ${BUNDLE}`]);
+    expect(dataRequests(held).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
+    // Both go out in the first wave, beside the 动态 stream's own reads: nothing waits on the other.
+    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1', 'sys_user']);
+    expect(held.every((h) => h.wave === 1)).toBe(true);
+  });
+
+  it('a warm session opens a record with one page request and zero metadata requests', async () => {
+    const { held, state, open, ds } = await boot();
+    // The app was entered earlier in the session; no record was opened yet,
+    // so no object definition was ever read by name.
+    const entered = ds.loadAppBundle(APP);
+    await runWaves(held, state);
+    await entered;
+    held.length = 0;
+    state.wave = 1;
+    open('c1');
+    await runWaves(held, state);
+    expect(held.filter(isMeta)).toEqual([]);
+    expect(dataRequests(held).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
+    // What else goes out is the 动态 stream's own data reads (objectstack#27524), no metadata.
+    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1', 'sys_user']);
   });
 
   it('in a drawer, an adapter without the payload keeps the count warm-up: each of the next record\'s counts is asked once', async () => {

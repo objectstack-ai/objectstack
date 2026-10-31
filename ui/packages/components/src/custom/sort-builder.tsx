@@ -22,11 +22,16 @@ const useSafeSortTranslation = createSafeTranslation(
     'sortBuilder.selectField': 'Select field',
     'sortBuilder.ascending': 'A → Z',
     'sortBuilder.descending': 'Z → A',
+    'sortBuilder.oldestFirst': 'Oldest → Newest',
+    'sortBuilder.newestFirst': 'Newest → Oldest',
     'sortBuilder.addSort': 'Add sort',
     'sortBuilder.removeSort': 'Remove sort',
   },
   'sortBuilder.sortBy',
 )
+
+/** Field types whose order is time: their direction reads "Oldest → Newest". */
+const DATE_SORT_TYPES = new Set(['date', 'datetime'])
 
 /**
  * One row of the SortBuilder UI: the spec's `SortItem` (`{ field, order }`)
@@ -56,6 +61,12 @@ export interface SortBuilderProps {
      * disabled, and is itself disabled when every entry is.
      */
     disabled?: boolean
+    /**
+     * The field's type (objectstack#27520). A `date` or `datetime` row names
+     * its direction as time ("Oldest → Newest") instead of "A → Z". Absent,
+     * the row reads "A → Z" as before.
+     */
+    type?: string
   }>;
   value?: SortItem[];
   onChange?: (value: SortItem[]) => void;
@@ -97,9 +108,27 @@ export function SortBuilder({
     onChange?.(newItems);
   };
 
+  // One row per field (objectstack#27520): a second key on a field the sort
+  // already orders by changes nothing, so a field another row holds is not
+  // offered to this one. A row's own field stays choosable in its dropdown.
+  const heldBy = new Map<string, string>();
+  for (const item of items) if (item.field && !heldBy.has(item.field)) heldBy.set(item.field, item.id);
+  const takenElsewhere = (field: string, rowId: string) => {
+    const holder = heldBy.get(field);
+    return holder !== undefined && holder !== rowId;
+  };
+
   // A new row starts on the first field the user may choose: a disabled
-  // entry is only there for the row that already names it.
-  const firstChoosable = fields.find((f) => !f.disabled);
+  // entry is only there for the row that already names it, and a field a row
+  // already sorts by is not offered again.
+  const firstChoosable = fields.find((f) => !f.disabled && !heldBy.has(f.value));
+
+  // A date's direction is time, not the alphabet (objectstack#27520).
+  const typeOf = new Map(fields.map((f) => [f.value, f.type]));
+  const directionLabels = (field: string) =>
+    DATE_SORT_TYPES.has(typeOf.get(field) ?? '')
+      ? { asc: t('sortBuilder.oldestFirst'), desc: t('sortBuilder.newestFirst') }
+      : { asc: t('sortBuilder.ascending'), desc: t('sortBuilder.descending') };
 
   const addItem = () => {
     const newItem: SortItem = {
@@ -121,7 +150,9 @@ export function SortBuilder({
   return (
     <div className={cn("space-y-3", className)}>
       <div className="space-y-2">
-        {items.map((item, index) => (
+        {items.map((item, index) => {
+          const direction = directionLabels(item.field);
+          return (
           <div key={item.id} className="flex items-center gap-2">
              <span className="text-sm font-medium w-16 text-muted-foreground">
                {index === 0 ? t('sortBuilder.sortBy') : t('sortBuilder.thenBy')}
@@ -136,12 +167,18 @@ export function SortBuilder({
                   </SelectTrigger>
                   <SelectContent>
                     {fields.map(f => (
-                      <SelectItem key={f.value} value={f.value} disabled={f.disabled}>{f.label}</SelectItem>
+                      <SelectItem
+                        key={f.value}
+                        value={f.value}
+                        disabled={f.disabled || takenElsewhere(f.value, item.id)}
+                      >
+                        {f.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
              </div>
-             <div className="w-28">
+             <div className="w-36">
                 <Select
                   value={item.order}
                   onValueChange={(val) => updateItem(item.id, { order: val as 'asc' | 'desc' })}
@@ -150,8 +187,8 @@ export function SortBuilder({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="asc">{t('sortBuilder.ascending')}</SelectItem>
-                    <SelectItem value="desc">{t('sortBuilder.descending')}</SelectItem>
+                    <SelectItem value="asc">{direction.asc}</SelectItem>
+                    <SelectItem value="desc">{direction.desc}</SelectItem>
                   </SelectContent>
                 </Select>
              </div>
@@ -165,7 +202,8 @@ export function SortBuilder({
                <X className="h-4 w-4" />
              </Button>
           </div>
-        ))}
+          );
+        })}
       </div>
        <Button
         variant="outline"
