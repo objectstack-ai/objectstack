@@ -16,4 +16,4 @@ A console working inside one app used to read the app, then one `GET /meta/objec
 - **Cached per caller**: a strong `ETag` over the bytes served to this caller, `Cache-Control: private, no-cache`, `Vary: Accept-Language`, and `If-None-Match` answered `304`. Two callers share a validator only when they are served the same bytes. A member whose field visibility could not be determined serves the bundle `private, no-store` with no `ETag`.
 - **Server-Timing**: the bundle's metadata reads are timed as a `meta` span beside `db` and `total`, under the existing gate (`OS_SERVER_TIMING=true`, or `X-OS-Debug-Timing: 1` from an admin).
 - The query-parameter set is closed and empty.
-- `@objectstack/client` gains `meta.getAppBundle(appId)`.
+- `@objectstack/client` gains `meta.getAppBundle(appId, { ifNoneMatch })`, conditional in `meta.getCached`'s spelling: it answers `{ notModified: false, data, etag }` on a `200` and `{ notModified: true, etag }` on a `304`, and a `304` is not thrown as a failed request.
