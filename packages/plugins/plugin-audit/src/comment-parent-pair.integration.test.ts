@@ -55,9 +55,19 @@ const DELEGATED_A = { ...MEMBER_A, onBehalfOf: { userId: 'u_delegator' } };
 /** The delegator's own leg on `e7_doc` admits every record but these (by name). */
 const WITHHELD_FROM_DELEGATOR = ['a0', 'a1', 'a2'];
 
-/** Past the 2,000-row candidate window the leaf replaces. */
-const DOCS_OF_A = 2_300;
-const DOCS_OF_B = 300;
+/**
+ * Past the 2,000-row candidate window the leaf replaces: 2,300 comments member
+ * A may read, 300 member B may. The window was over COMMENT rows (the thread
+ * probe's candidate pre-scan reads `sys_comment`, `READ_SCAN_LIMIT` in
+ * `comment-access-hooks.ts`), never over parent records, so the comments sit
+ * ten to a doc. [#23181] One comment per doc wrote 2,600 docs, and each doc
+ * write pays the CRUD mirror's ledger row and activity row, which nothing in
+ * this file reads: about 6 s of the file's clock, against well under 1 s for
+ * the comments themselves.
+ */
+const COMMENTS_PER_DOC = 10;
+const DOCS_OF_A = 230;
+const DOCS_OF_B = 30;
 const BATCH = 200;
 
 const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
@@ -145,6 +155,12 @@ const commentOn = (object: string, id: string, body: string): Row => ({
   author_id: 'u_fixture',
 });
 
+// [#23181] Pay the first kernel boot at module scope, never in a hook: vitest
+// clocks a hook as it clocks a test, and the first boot is the slow one. The
+// throwaway kernel registers no fixture object, writes nothing and is shut down
+// before any hook runs.
+await (await bootKernel(new SqliteWasmDriver({ filename: ':memory:' }))).kernel.shutdown();
+
 describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pair', () => {
   let kernel: ObjectKernel;
   let engine: ObjectQL;
@@ -209,7 +225,8 @@ describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pai
     for (let i = 0; i < DOCS_OF_A; i++) docs.push({ name: `a${i}`, owner: MEMBER_A.userId });
     for (let i = 0; i < DOCS_OF_B; i++) docs.push({ name: `b${i}`, owner: MEMBER_B.userId });
     const docIds = await insertInBatches(engine, DOC, docs);
-    await insertInBatches(engine, COMMENT, docIds.map((id, i) => commentOn(DOC, id, `c${i}`)));
+    await insertInBatches(engine, COMMENT, docIds.flatMap((id, i) =>
+      Array.from({ length: COMMENTS_PER_DOC }, (_, k) => commentOn(DOC, id, `c${i * COMMENTS_PER_DOC + k}`))));
 
     ids.gone = String((await engine.insert(DOC, { name: 'gone', owner: MEMBER_A.userId }, { context: SYS })).id);
     ids.vault = String((await engine.insert(VAULT, { name: 'vault' }, { context: SYS })).id);

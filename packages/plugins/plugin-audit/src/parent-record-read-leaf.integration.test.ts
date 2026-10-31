@@ -180,6 +180,12 @@ async function insertInBatches(engine: ObjectQL, object: string, rows: Row[]): P
   }
 }
 
+// [#23181] Pay the first kernel boot at module scope, never in a hook: vitest
+// clocks a hook as it clocks a test, and the first boot is the slow one. The
+// throwaway kernel registers no fixture object, writes nothing and is shut down
+// before any hook runs.
+await (await bootKernel(new SqliteWasmDriver({ filename: ':memory:' }))).kernel.shutdown();
+
 describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
   let kernel: ObjectKernel;
   let engine: ObjectQL;
@@ -201,12 +207,30 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
   const ledgerOrganizationBound: boolean[] = [];
   const ids: Record<string, string> = {};
 
+  /**
+   * [#23181] Every row of an object at rest, as the system reads it — read once
+   * and reused. No case in this describe writes after `beforeAll`, so each such
+   * read answered the same rows: the cases made about sixty of them, over tables
+   * of 2,600 to 7,000 rows. Each reuse counts the object first and re-reads on a
+   * moved count, so a case that adds or removes rows is never judged against an
+   * older ground truth.
+   */
+  const atRestCache = new Map<string, { count: number; rows: Row[] }>();
+  const atRestOf = async (object: string): Promise<Row[]> => {
+    const count = await engine.count(object, {}, { context: SYS });
+    const hit = atRestCache.get(object);
+    if (hit && hit.count === count) return hit.rows;
+    const rows: Row[] = await engine.find(object, { limit: 100_000, context: SYS });
+    atRestCache.set(object, { count, rows });
+    return rows;
+  };
+
   /** Every row at rest, and the ground truth of who may read which, judged by the stand-in's own rules. */
   const truth = async (object: string, reader: any): Promise<string[]> => {
-    const atRest: Row[] = await engine.find(object, { limit: 100_000, context: SYS });
+    const atRest = await atRestOf(object);
     const live = new Map<string, Map<string, Row>>();
     for (const parent of [DOC, VAULT, GATED, FAR]) {
-      const records: Row[] = await engine.find(parent, { limit: 100_000, context: SYS });
+      const records = await atRestOf(parent);
       live.set(parent, new Map(records.map((r) => [String(r.id), r])));
     }
     const holder = Array.isArray(reader?.systemPermissions) && reader.systemPermissions.includes(LEDGER_AUDIT_CAPABILITY);
@@ -298,12 +322,12 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
   }, 30_000);
 
   it('control: the fixture is past the window, and every row came from its producer', async () => {
-    const activity: Row[] = await engine.find(ACTIVITY, { limit: 100_000, context: SYS });
+    const activity = await atRestOf(ACTIVITY);
     expect(activity.length).toBeGreaterThan(PARENT_GATE_SCAN_LIMIT);
     expect(activity.filter((r) => r.object_name === DOC && r.type === 'created').length).toBe(DOCS_OF_A + DOCS_OF_B + 1);
     expect(activity.some((r) => r.object_name === DOC && r.record_id === ids.gone && r.type === 'deleted')).toBe(true);
     expect((await truth(ACTIVITY, MEMBER_A)).length).toBeGreaterThan(PARENT_GATE_SCAN_LIMIT);
-    const ledger: Row[] = await engine.find(LEDGER, { limit: 100_000, context: SYS });
+    const ledger = await atRestOf(LEDGER);
     expect(ledger.filter((r) => r.action === 'config_change').length).toBe(ROWS_ABOUT_NO_RECORD);
   });
 
@@ -328,7 +352,7 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
   });
 
   it('no row is served whose parent the reader may not read, or that no longer exists', async () => {
-    const all: Row[] = await engine.find(ACTIVITY, { limit: 100_000, context: SYS });
+    const all = await atRestOf(ACTIVITY);
     const byId = new Map(all.map((r) => [String(r.id), r]));
     for (const id of await served(ACTIVITY, MEMBER_A)) {
       const row = byId.get(id)!;
@@ -379,7 +403,7 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     const named = { object_name: { $in: NAMED } };
     // The same rows, in a spelling the gate does not read as naming its parents: it keeps every branch.
     const spelledOut = { $or: NAMED.map((object_name) => ({ object_name })) };
-    const atRest: Row[] = await engine.find(ACTIVITY, { limit: 100_000, context: SYS });
+    const atRest = await atRestOf(ACTIVITY);
     const parentOf = new Map(atRest.map((r) => [String(r.id), r.object_name]));
     const gateConjunct = (where: any) => where.$and[1];
     seenWhere[ACTIVITY].length = 0;
@@ -431,7 +455,7 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     // per parent object through the engine middleware chain, with the
     // delegated context. Asked here for every parent pair at rest, so no
     // window cuts it; the leaf must serve exactly the rows it admits.
-    const atRest: Row[] = await engine.find(ACTIVITY, { limit: 100_000, context: SYS });
+    const atRest = await atRestOf(ACTIVITY);
     const pairs = new Map<string, Set<string>>();
     for (const row of atRest) {
       const parent = parseParentRecord(row, ACTIVITY);
@@ -488,7 +512,7 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
       return Math.round((performance.now() - t0) * 10) / 10;
     };
     const reading = {
-      rowsAtRest: (await engine.find(ACTIVITY, { limit: 100_000, context: SYS })).length,
+      rowsAtRest: (await atRestOf(ACTIVITY)).length,
       leafMs: {
         memberFind: await time(() => served(ACTIVITY, MEMBER_A)),
         memberCount: await time(() => engine.count(ACTIVITY, {}, { context: MEMBER_A })),
