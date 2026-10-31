@@ -77,7 +77,8 @@ export function inlineEditRuleRefusals(
   for (const [field, value] of Object.entries(changes)) {
     const def = fields[field];
     if (!def || typeof def !== 'object') continue;
-    const rules = buildValidationRules(def) as Record<string, unknown>;
+    // A rule set that cannot be read judges nothing: the server stays the judge.
+    const rules = (buildValidationRules(def) ?? {}) as Record<string, unknown>;
     const label = labelOf(field);
     if (isBlank(value)) {
       if (rules.required) {
