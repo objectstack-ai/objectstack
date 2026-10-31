@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { urlUserinfoUsername } from './driver/common.zod';
+import { CODE_DEFINED_CREDENTIAL_ROUTE, urlUserinfoUsername } from './driver/common.zod';
 import { RETIRED_DRIVER_ID_GUIDANCE, resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
 
 /*
@@ -315,7 +315,8 @@ export const ExternalDatasourceSettingsSchema = strictObject(
         + "connection form's secret field encrypts it into `sys_secret` and stores the opaque "
         + 'handle here, or set `credentialsRef` to a handle the secret store minted (e.g. '
         + '`credentialsRef: "sys_secret:9f2c"`). The shipped binder resolves only '
-        + '`sys_secret:` handles; it never dereferences a hand-written path.',
+        + '`sys_secret:` handles; it never dereferences a hand-written path. '
+        + CODE_DEFINED_CREDENTIAL_ROUTE,
       // #4487 corrected the second half of this line. It used to offer
       // `capabilities.readOnly` as the place to "describe the driver" — a key the
       // liveness audit found has NO reader (liveness/datasource.json), so an
@@ -631,7 +632,8 @@ export const DatasourceSchema = lazySchema(() => strictObject(
         + '`sys_secret` and stores the opaque handle at `external.credentialsRef`, or set that '
         + 'key to a handle the secret store minted (e.g. '
         + '`external: { credentialsRef: "sys_secret:9f2c" }`). `external.credentialsRef` is '
-        + 'valid in every `schemaMode`, a managed datasource included.',
+        + 'valid in every `schemaMode`, a managed datasource included. '
+        + CODE_DEFINED_CREDENTIAL_ROUTE,
       readReplicas: RETIRED_READ_REPLICAS,
       replicas: RETIRED_READ_REPLICAS,
       capabilities: RETIRED_CAPABILITIES.capabilities,

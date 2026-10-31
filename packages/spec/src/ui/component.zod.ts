@@ -6171,11 +6171,12 @@ const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
   ...COMPONENT_LEVEL_GUIDANCE,
   {
     name: 'OBJECT_CALENDAR_FLAT_FIELD_KEYS',
-    keys: ['startDateField', 'dateField', 'endDateField', 'endField', 'titleField', 'colorField', 'allDayField'],
+    keys: ['startDateField', 'dateField', 'endDateField', 'endField', 'titleField', 'colorField', 'allDayField', 'initialDate'],
     examples: ['startDateField', 'titleField'],
     prescription:
       'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '
-      + 'endDateField, titleField, colorField, allDayField }`. `ObjectView`/`ListView` hand the binding '
+      + 'endDateField, titleField, colorField, allDayField }`, and `initialDate`, the date it opens on, '
+      + 'in the same block. `ObjectView`/`ListView` hand the binding '
       + 'off in that block too, and the renderer reads the binding there only: the flat spelling is not '
       + 'read and not a second authorable spelling (one key per concept, Prime Directive #12).',
   },
@@ -6207,7 +6208,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `endField` aliases among them — was never read.
    */
   calendar: ListViewSchema.shape.calendar
-    .describe('Calendar field config `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` — the same block a list view\'s `calendar` declares; `startDateField` is required'),
+    .describe('Calendar config `{ startDateField, endDateField?, titleField?, colorField?, allDayField?, initialDate? }` — the same block a list view\'s `calendar` declares; `startDateField` is required'),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
