@@ -97,12 +97,16 @@ const DELIBERATELY_NOT_SERVED: readonly string[] = [];
  *    Not a record field: it is a property of the running engine, recomputed per
  *    read and never stored. `isWritablePackage` is the same predicate the
  *    authoring and lifecycle gates use.
+ *  - `disableable` — the disable door's verdict (`withDisableableVerdict`,
+ *    #28318). Not a record field either, for the same reason: it is computed
+ *    per read by `isDisableablePackage`, the predicate `PATCH
+ *    /packages/:id/disable` asks, and never stored.
  *
  * Compared by SET EQUALITY against the measured `served − record`, so both
  * directions are loud: a stamp that stops reaching the wire (the reorder this
  * card is about) and a stamp that arrives without a decision.
  */
-const DOOR_COMPUTED_STAMPS: readonly string[] = ['writable'];
+const DOOR_COMPUTED_STAMPS: readonly string[] = ['writable', 'disableable'];
 
 /** Authenticated caller holding the ADR-0106 D4 read capability. */
 const reader = (): any => ({
