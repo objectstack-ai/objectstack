@@ -113,15 +113,20 @@ function copyLiteral(value: unknown): unknown {
 }
 
 /**
- * The first refusal the spec's two config judges make of `config` on a node of
+ * The first refusal the spec's two config judges make of `node`, a node of
  * `type` — `flowNodeValueTemplateRefusals` (a `{…}` token at a value slot) and
  * `flowNodeConfigRefusals` (the node's contract) — as one line naming the
  * path, or `undefined`. They are the judges `registerFlow` and `objectstack
  * validate` call, and an executor's run-time twin refuses the same set.
+ *
+ * The value-slot judge is handed the node's sibling blocks, so a slot the
+ * ledger roots outside `config` (a `connector_action` node's
+ * `connectorConfig.input`) is judged, and the line names its block.
  */
-function configRefusal(type: string, config: Record<string, unknown>): string | undefined {
-  const token = flowNodeValueTemplateRefusals(type, config)[0];
-  if (token) return `${token.label} at config.${token.path}: ${token.message}`;
+function configRefusal(type: string, node: SimNode): string | undefined {
+  const config = node.config ?? {};
+  const token = flowNodeValueTemplateRefusals(type, config, node)[0];
+  if (token) return `${token.label} at ${token.block}.${token.path}: ${token.message}`;
   const contract = flowNodeConfigRefusals(type, config)[0];
   return contract ? `config.${contract.path}: ${contract.message}` : undefined;
 }
@@ -381,6 +386,13 @@ export class FlowSimulator {
 
     if (type === 'loop') return this.executeLoop(node);
 
+    if (type === 'connector_action') {
+      // The executor resolves `connectorConfig.input` before it dispatches, and
+      // refuses a `{…}` token there, so the action is never called.
+      const refused = configRefusal(type, node);
+      if (refused) return this.record(node.id, type, node.label, 'error', { error: refused });
+    }
+
     if (MOCKED_SIDE_EFFECT.has(type) || type === 'script') {
       const wrote = this.applyMock(node);
       return this.proceed(node, 'mocked', {
@@ -583,7 +595,7 @@ export class FlowSimulator {
       });
     }
 
-    const refused = configRefusal('loop', cfg);
+    const refused = configRefusal('loop', node);
     if (refused) return this.record(node.id, node.type, node.label, 'error', { error: refused });
     let items: unknown = cfg.collection;
     let ref: string;
