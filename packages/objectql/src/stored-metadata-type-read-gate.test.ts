@@ -42,6 +42,7 @@ function matches(row: Record<string, unknown>, where: unknown): boolean {
   if (!where || typeof where !== 'object') return true;
   return Object.entries(where as Record<string, unknown>).every(([key, cond]) => {
     if (key === '$and') return (cond as unknown[]).every((c) => matches(row, c));
+    if (key.startsWith('$')) throw new Error(`pin driver: unsupported combinator ${key}`);
     const value = row[key] ?? null;
     if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
       const c = cond as Record<string, unknown>;
