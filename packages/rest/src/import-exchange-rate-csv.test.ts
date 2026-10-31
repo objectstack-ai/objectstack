@@ -98,7 +98,7 @@ async function importCsv(ctx: Booted, csv: string): Promise<{ job: any; results:
 }
 
 const rates = async (ctx: Booted) =>
-  (await ctx.engine.find('sys_exchange_rate', {} as any, { isSystem: true } as any))
+  (await ctx.engine.find('sys_exchange_rate', {}))
     .map((r: any) => ({ currency: r.currency, rate: Number(r.rate), effective_date: String(r.effective_date).slice(0, 10), source: r.source }))
     .sort((a: any, b: any) => `${a.currency}${a.effective_date}`.localeCompare(`${b.currency}${b.effective_date}`));
 
