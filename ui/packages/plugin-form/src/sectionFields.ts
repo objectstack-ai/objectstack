@@ -414,7 +414,14 @@ function resolveSectionEntry(
     );
   }
   if (fd.readonly != null) base.disabled = fd.readonly || base.disabled;
-  if (fd.immutable != null) base.immutable = fd.immutable;
+  // `immutable`: editable on create, locked once the record exists (spec
+  // FormField.immutable). It lands on `disabled`, the slot `readonly` above
+  // locks a control through, and asks the create-mode question `required`
+  // asks (`isCreateFormMode`), so a form seeded as create never locks it and an
+  // edit form always does. It used to be copied through as `immutable`, a key
+  // no renderer reads, so an edit form left the control editable
+  // (objectstack#25923).
+  if (fd.immutable === true && !isCreateFormMode(ctx)) base.disabled = true;
   if (fd.hidden != null) base.hidden = fd.hidden;
   if (fd.colSpan != null) base.colSpan = fd.colSpan;
   if (fd.span != null) base.span = fd.span;
