@@ -585,7 +585,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -594,7 +594,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task with 10 seeded tasks (2 in_progress) and the saved views in examples/app-showcase/src/ui/views/task.view.ts (in_progress/urgent/done, tabular with string sort, grid with inlineEdit, bulk_actions, legacy_row_actions)",
+          "showcase_task with 10 seeded tasks (2 in_progress) and the saved views in examples/app-showcase/src/ui/views/task.view.ts (in_progress/urgent/done, tabular with an array sort, grid with inlineEdit, bulk_actions, legacy_row_actions)",
           "showcase_field_zoo views for conditional formatting + bulk-action gating (examples/app-showcase/src/ui/views/field-zoo.view.ts)",
           "CJK seeds for search recall (account 华宁科技, contact 张伟)",
           "an EXPORT GRANT for the exporting principal, which no stock set carries: allowExport is opt-in (packages/plugins/plugin-security/src/permission-evaluator.ts#resolveUserExportAllowed, export = read ∧ a set saying allowExport: true), and no stock permission set grants it, the admin wildcard included (#3544). Without it the seeded admin sees no Export control and GET /api/v1/data/showcase_task/export answers 403 EXPORT_NOT_PERMITTED. Provision one before step 6: author a runtime set through the metadata door, PUT /api/v1/meta/permission/qa_task_export with {name:'qa_task_export', label, objects:{showcase_task:{allowRead:true, allowExport:true}}} (published; a ?mode=draft save also needs its POST …/publish), then bind it with POST /api/v1/data/sys_user_permission_set {user_id: <admin id>, permission_set: 'qa_task_export'} — the grant names its set by NAME (ADR-0131 D4) — and reload so /me/permissions carries the merged map"
@@ -617,12 +617,12 @@
         "open /_console/apps/com.example.showcase/showcase_task and screenshot the default All Tasks grid",
         "switch to the in_progress saved view; capture the data request — expect `filter` carrying the stored rule as an ObjectQL AST ([[\"status\",\"equals\",\"in_progress\"]]) and a 200; the count bar must read 2. The console spells its list params WITHOUT a `$` — filter, top, skip, search, sort — the same AST under the bare name, so a literal grep for $filter finds nothing",
         "quick-search 'huaning' on Accounts (or '张' on Contacts); capture the `search` request and the hits (pinyin + CJK recall, ADR-0061)",
-        "open the tabular saved view (string-form sort 'estimate_hours desc' — the objectui#2601 fixture); confirm it renders and the request carries the sort",
+        "open the tabular saved view (sort [{field: 'estimate_hours', order: 'desc'}] — the array form: #17053 retired the bare string clause 'estimate_hours desc' platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock); confirm it renders and the request carries the sort as sort=-estimate_hours",
         "page a list past page 1. No stock list holds more rows than the 50-row page (the largest seeded task and contact lists are under it), so stage one first: POST /api/v1/data/showcase_inquiry/createMany with a bare JSON array of 55 rows (name + email + message each — showcase_inquiry requires `message` too, and a name + email body answers 400 \"Message is required\", QA run #24616), then page the Inquiries list; capture `top`/`skip` on every data request; confirm no unpaged full fetch",
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
         "on in_progress, with the export grant from fixtures.requires[3] bound, open the toolbar's Display popover — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
-        "on bulk_actions, select rows and run showcase_mark_done (per-record) and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, it POSTs to its own endpoint /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the bulk bar, or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, it POSTs to its own endpoint /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
       ],
       "acceptance": [
@@ -651,9 +651,9 @@
           "evidence": "the request URLs + the id-union check"
         },
         {
-          "clause": "string-form sort ('estimate_hours desc') renders without error and the rows come back server-ordered (the objectui#2601 crash fixture stays green)",
+          "clause": "the tabular view's array sort ([{field: 'estimate_hours', order: 'desc'}]) renders without error and reaches the request as sort=-estimate_hours, and the rows come back server-ordered",
           "oracle": "network",
-          "verify": "the tabular view request succeeds; response row order is by estimate_hours descending",
+          "verify": "the tabular view request succeeds and carries sort=-estimate_hours (the adapter's `-field` spelling of a descending order, ui/packages/data-objectstack/src/index.ts); response row order is by estimate_hours descending",
           "evidence": "trace + first-page rows"
         },
         {
@@ -677,7 +677,7 @@
         {
           "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate', an api-type action) issues ONE request — POST /api/v1/apps/showcase/recalc — carrying every selected id in `_selectedIds` at the body's top level",
           "oracle": "network",
-          "verify": "count the captured POSTs against the selection size for each mode",
+          "verify": "count the captured POSTs against the selection size for each mode (the per-record selection holds not-done rows only, steps[8])",
           "evidence": "network trace of both runs"
         },
         {
@@ -702,7 +702,7 @@
         "ref": "objectui: e2e/live/saved-view-filter.spec.ts (acceptance[1]'s 200 half ONLY: it asserts that no showcase_task data response answered 400 or above and that the count bar starts '2 '; it captures neither the AST filter param nor the response total, so the param read and the count-against-total match are driven by hand), e2e/live/user-filters.spec.ts (acceptance[7]'s whitelist half ONLY: its visualization-switcher case reads exactly Grid, Kanban, Gallery, Calendar, Timeline and Gantt in the All Tasks Display popover, then switches to Kanban and reads only the trigger's label, so 'each re-renders the SAME task records' is driven by hand. Its lookup quick-filter case, which this item's stale record named, is retired: objectui 0b36ffa deleted it because the shipped showcase declares no lookup user filter, so no ref here cites it), e2e/live/inline-edit-polish-2572.spec.ts (acceptance[5]'s PATCH half ONLY, carrier-neutrally on a Project record page's inline edit, not this item's grid cell: the PATCH carries the edited budget and not the untouched spent. It never re-reads the row, so the re-read half is driven by hand)"
       },
       "source": [
-        "examples/app-showcase/src/ui/views/task.view.ts#inlineEdit (saved views, sort string form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
+        "examples/app-showcase/src/ui/views/task.view.ts#inlineEdit (saved views, sort array form, inlineEdit, exportOptions, bulk/row actions, allowedVisualizations)",
         "examples/app-showcase/src/ui/views/field-zoo.view.ts#conditionalFormatting (conditionalFormatting, gated bulk actions)",
         "packages/spec/src/ui/view.zod.ts#UserActionsConfigSchema (UserActionsConfigSchema, AppearanceConfigSchema/VisualizationTypeSchema)",
         "packages/spec/src/data/pagination-conformance.ts (deterministic paging property)",
@@ -750,6 +750,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read at ui/e2e/live/saved-view-filter.spec.ts on main cc378e93. (1) saved-view-filter.spec.ts asserts only that no showcase_task data response was 400 or above and the count bar starts '2 '; the ref now scopes it to acceptance[1]'s 200 half. (2) showcase-search.dogfood.test.ts leaves the ref, since by the ref's own words it scores no clause of this item; acceptance[2].verify keeps the note. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "steps[3], acceptance[4] (clause and verify), steps[8], acceptance[8].verify, fixtures.requires[0] and source[0] corrected. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The tabular view's sort has been the array [{field:'estimate_hours', order:'desc'}] since #17053 retired the bare string clause platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock. The clause now scores the array sort reaching the request as sort=-estimate_hours (the adapter's `-field` spelling, ui/packages/data-objectstack/src/index.ts). steps[8] says to select rows that are not done: Mark Done's per-row visible gate either drops the button or skips done rows as not eligible, and either breaks the one-dispatch-per-selected-row count. Read at base a0f865491d: task.view.ts (tabular, bulk_actions), ui/packages/plugin-grid/src/components/BulkActionDialog.tsx. The sort clause's contract (renders, server-ordered) is unchanged; a prior verdict scored on the string form does not carry",
+          "ref": "#27438"
         }
       ]
     },
@@ -1554,7 +1560,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1576,13 +1582,13 @@
       },
       "steps": [
         "open the Northwind account detail page (/_console/apps/com.example.showcase/showcase_account → Northwind)",
-        "screenshot; enumerate the related lists: the declared Invoices list (relatedList: 'primary') has its own tab, and the non-primary children — Contacts among them — stack under ONE shared 'Related' tab (?tab=related; packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown (stacked under the shared \"Related\" tab)')",
-        "open the Related tab's Contacts section; capture the page-1 data request (page size 5 — the pager reads 'Page 1 of 6' for Northwind's 26 contacts, QA run #24616)",
-        "click next-page; capture the page-2 request; note the pager text",
+        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. Record page v3 draws no tab strip there. The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the details column, and the non-primary children — Contacts among them — are compact cards in the related column, each naming at most 3 rows with no pager (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Only below 760 px is the page tabbed, with those cards under one 'Related' tab (?tab=related)",
+        "open Contacts' whole list: its card's header or count chip enlarges it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
+        "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
         "diff page-1 and page-2 row ids for overlap",
-        "open the Invoices related tab; verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
+        "read the Invoices body table in the details column (on the tabbed page it sits inside the Details tab); verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
         "capture every data request issued by the detail page and check each child query for a `top` bound (the console spells its list params without a `$` — top, skip, filter, sort — objectui data-objectstack's adapter; the server's own spelling $top is the same bound)",
-        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts related section/tab is ABSENT; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
+        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts card (or, on the tabbed page, its section of the Related tab) is ABSENT; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
         "repeat as showcase_manager (has showcase_contact read): confirm the Contacts section renders AND the same child query answers 200 with rows"
       ],
       "acceptance": [
@@ -1595,19 +1601,19 @@
         {
           "clause": "the pager reflects the server total (26 Northwind contacts), and pages partition the set — no row repeated or skipped across pages",
           "oracle": "network",
-          "verify": "pager reads 'page 2 of M' consistent with total 26; id sets of page 1 and 2 are disjoint",
+          "verify": "the enlarged list's pager reads 'Page 2 of 2' at its 25-row page, consistent with total 26; id sets of page 1 and 2 are disjoint",
           "evidence": "pager screenshot + the id diff"
         },
         {
           "clause": "related lists are DERIVED from the relationship declaration with no hand-built page: the Account detail auto-renders them (Projects is the pinned example)",
           "oracle": "dom",
-          "verify": "after screenshot, the related tabs exist on the stock detail page",
+          "verify": "after screenshot, the relationship-derived lists exist on the stock detail page: the Projects and Invoices body tables and the Contacts card at a column-tier width (under the Details and Related tabs below 760 px)",
           "evidence": "detail screenshot"
         },
         {
-          "clause": "the declared relatedList config is honored: the Invoices tab carries the authored title and exactly the authored columns",
+          "clause": "the declared relatedList config is honored: the Invoices body table carries the authored title and exactly the authored columns",
           "oracle": "dom",
-          "verify": "after screenshot, read the tab label and column headers; compare to relatedListTitle/relatedListColumns on the lookup field",
+          "verify": "after screenshot, read the table's title and column headers; compare to relatedListTitle/relatedListColumns on the lookup field",
           "evidence": "tab screenshot + declaration excerpt"
         },
         {
@@ -1619,7 +1625,7 @@
         {
           "clause": "related lists are READ-gated on BOTH ends: a persona WITHOUT read on the child object (showcase_contributor lacks showcase_contact read) sees NO Contacts section on the account detail (UI courtesy — deriveRelatedLists drops children the user cannot read, objectui#2359) AND a direct child query is refused server-side (403); a persona WITH child read (showcase_manager) sees the section AND the query 200s",
           "oracle": "api",
-          "verify": "as showcase_contributor: screenshot confirms the Contacts tab is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the tab renders and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
+          "verify": "as showcase_contributor: screenshot confirms the Contacts card is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the card renders and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
           "evidence": "both personas' detail screenshots + the 403 and the 200 child queries"
         }
       ],
@@ -1633,7 +1639,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "packages/qa/dogfood/test/related-list-server-paging-and-gate.dogfood.test.ts, at the REST data door the related list reads through (GET /api/v1/data/showcase_contact scoped by the Northwind filter) on the showcase as shipped, pins the server halves: acceptance[1] and negative[1] (the filtered read holds the 26 seeded contacts; $top=10 pages at $skip 0, 10 and 20 each answer total 26 and return 10, 10 and 6 rows with no id repeated or skipped), acceptance[4] (each served child re-reads by its own id with the same row) and acceptance[5] with negative[2] (a member staffed contributor is refused the identical query 403 with no rows; a member staffed manager reads it 200 with rows). acceptance[0] and negative[0] (the console's own top/skip on every child request), the pager text, acceptance[2] (the relationship-derived Projects tab on Northwind's detail page and its status labels), acceptance[3] (the Invoices tab's authored title and columns) and the Contacts tab's absence for the contributor stay live browser legs: they are judged on the console's requests and rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
+        "ref": "packages/qa/dogfood/test/related-list-server-paging-and-gate.dogfood.test.ts, at the REST data door the related list reads through (GET /api/v1/data/showcase_contact scoped by the Northwind filter) on the showcase as shipped, pins the server halves: acceptance[1] and negative[1] (the filtered read holds the 26 seeded contacts; $top=10 pages at $skip 0, 10 and 20 each answer total 26 and return 10, 10 and 6 rows with no id repeated or skipped), acceptance[4] (each served child re-reads by its own id with the same row) and acceptance[5] with negative[2] (a member staffed contributor is refused the identical query 403 with no rows; a member staffed manager reads it 200 with rows). acceptance[0] and negative[0] (the console's own top/skip on every child request), the pager text, acceptance[2] (the relationship-derived Projects list on Northwind's detail page and its status labels), acceptance[3] (the Invoices list's authored title and columns) and the Contacts list's absence for the contributor stay live browser legs: they are judged on the console's requests and rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "#3358 §4 (evidence run captured exactly this trace)",
@@ -1697,7 +1703,13 @@
           "change": "automated.ref names the dogfood pin for the server halves of acceptance[1], [4], [5] and negative[1], [2] (#26573 slice 4), and says why acceptance[0], [3], negative[0] and the rendered halves stay live browser legs. No clause changed",
           "ref": "#26573"
         },
-        { "revision": 10, "date": "2026-10-28", "change": "automated.ref and acceptance[2].verify drop ui/e2e/live/detail-related-list.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a row's name link now opens the record drawer (the record-open preference, #26681) and the spec waited for the /record/ID route it no longer navigates to. acceptance[2] joins the live browser legs the ref lists; its derivation, own-tab promotion and option-label cells stay unit-pinned in objectui (deriveRelatedLists.test.ts, buildDefaultPageSchema.test.ts, RelatedList.columnIdentityAccessor.test.tsx). The dogfood pin is unchanged. No clause changed", "ref": "#25914" }
+        { "revision": 10, "date": "2026-10-28", "change": "automated.ref and acceptance[2].verify drop ui/e2e/live/detail-related-list.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a row's name link now opens the record drawer (the record-open preference, #26681) and the spec waited for the /record/ID route it no longer navigates to. acceptance[2] joins the live browser legs the ref lists; its derivation, own-tab promotion and option-label cells stay unit-pinned in objectui (deriveRelatedLists.test.ts, buildDefaultPageSchema.test.ts, RelatedList.columnIdentityAccessor.test.tsx). The dogfood pin is unchanged. No clause changed", "ref": "#25914" },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "steps[1], [2], [3], [5] and [7], acceptance[1]–[3] and [5] (verify, plus clause [3]) and automated.ref re-pointed from the related tabs to record page v3's layout. From QA run #27438 (W3-C2b, at c4c515ad; the finding line is truncated in the record, so its tail was read from source; wave anchor #27377, wave-3 accuracy slice S1). At a column-tier width the account page has no tabs. The primary lists, Invoices and Projects, are body tables in the details column, and Contacts is a compact card in the related column naming at most 3 rows (5 at the run's c4c515ad) with no pager. Paging lives in the card's enlarged view (?related=showcase_contact.account), 25 rows a page, so Northwind's 26 contacts read 'Page 1 of 2' then 'Page 2 of 2', not the old Related tab's 'Page 1 of 6'. The tabbed page, below 760 px, keeps a Related tab. Read at base a0f865491d: buildDefaultPageSchema.ts (body tables vs side cards), relatedListCompact.ts (COMPACT_RELATED_ROWS 3), RelatedList.tsx (a compact card reads $top 3), RecordPageColumns.tsx (ENLARGED_PAGE_SIZE 25), the field.zod.ts relatedList describe. The paging, partition and read-gate contracts are unchanged; a prior pager reading of 'Page 1 of 6' does not carry",
+          "ref": "#27438"
+        }
       ]
     },
     {
@@ -2363,7 +2375,7 @@
       "title": "Gantt is interactive, not a picture: drag persists, locked tasks survive auto-schedule, host veto restores",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2375,7 +2387,7 @@
           "the task gantt view (task.view.ts 'Schedule (Gantt)': startDateField/endDateField/titleField/progressField)"
         ],
         "knownGaps": [
-          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It needs the view extended live, with lockField pointing at a boolean on showcase_task such as `done` (a view overlay or a scratch copy). That recipe is not run-proven, so score the sub-leg blocked(fixture) until a run proves it. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
+          "the stock task gantt view (examples/app-showcase/src/ui/views/task.view.ts, listViews.gantt) declares NO dependenciesField / lockField / parentField, so the auto-schedule, locked-task and subtree-drag surfaces are unreachable LIVE on stock fixtures. ⚠ All three ARE GanttConfig keys (packages/spec/src/ui/view.zod.ts#GanttConfigSchema). QA run #21782 read `lockField` as no spec key; that is wrong, so the variants need no re-point. The unit pins `automated` names per clause (under ui/packages/plugin-gantt/src) are component-layer evidence for A2 and A3, never their pass (RUNNER rule 6): those api clauses are scored from live row reads. The one sub-leg no pin reaches is a DIRECT drag on a locked LEAF bar: GanttView.tsx returns from the drag start for a locked task, but only the summary-drag and link-drop locked cases are unit-pinned. It is reachable live on a view overlay, run-proven by QA run #27438 (G4a, at c4c515ad): PUT /api/v1/meta/view/showcase_task.gantt with the stock view plus lockField: 'done' in its gantt config (view is org-overridable, ADR-0005); drag a done bar → no PATCH, and the row re-reads unchanged; the control, a drag of a not-done bar on the same overlay → PATCH 200; then DELETE /api/v1/meta/view/showcase_task.gantt restores the stock view. So the sub-leg is scored live on that overlay, and acceptance[2] stays blocked(fixture) only on its auto-schedule half, which, like acceptance[1], needs a dependenciesField. Re-confirmed by QA run #23163 (objectstack 36b2889c, objectui 1fb1ced36243): the stock view still declares no lockField, and no pin reaches the direct leaf drag. The nearest pin, GanttView.tree.test.tsx ('omits drag/resize/progress handles and the dependency dot on a locked bar'), proves a locked leaf loses its resize grips and link dot, NOT that dragging its body writes nothing, so it does not score the sub-leg either",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
@@ -2389,7 +2401,7 @@
         "open the task Schedule (Gantt) view; wait for bars to render (screenshot first)",
         "drag one task bar to new dates; capture the PATCH and re-read the record over the API",
         "reload and confirm the bar re-renders from the persisted dates",
-        "on an extended fixture (per knownGaps): configure dependencies + a locked row; run toolbar auto-schedule; capture the confirm dialog, cancel once (verify zero writes), run again and apply",
+        "on an extended fixture (per knownGaps): configure dependencies + a locked row (the direct drag on a locked leaf needs only knownGaps[0]'s lockField overlay); run toolbar auto-schedule; capture the confirm dialog, cancel once (verify zero writes), run again and apply",
         "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
       ],
       "acceptance": [
@@ -2477,6 +2489,12 @@
           "date": "2026-10-27",
           "change": "fixtures.knownGaps[0]: the per-clause unit pins are located under ui/packages/plugin-gantt/src instead of called objectui pins (#26626, maintainer-directed). Measured objectui revisions kept. No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "fixtures.knownGaps[0] and steps[3]: the direct drag on a locked leaf is run-proven. From QA run #27438 (W3-C2b, G4a, at c4c515ad; the finding line is truncated in the record, and its tail is in the run's own per-clause table; wave anchor #27377, wave-3 accuracy slice S1). The run overlaid showcase_task.gantt with lockField 'done', dragged a done bar (no PATCH, row unchanged, updated_at identical), dragged an unlocked bar on the same overlay as the control (PATCH 200), and reverted with DELETE. So the sub-leg is scored live on that overlay instead of blocked(fixture). acceptance[2] stays blocked(fixture) only on its auto-schedule half, which still needs a dependenciesField no stock view declares. Read at base a0f865491d: view.zod.ts (GanttConfigSchema lockField), task.view.ts (the gantt view). No clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -4785,7 +4803,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4795,18 +4813,18 @@
         "app": "showcase",
         "requires": [
           "a dev boot on its own port and DB, on the stock SQLite store (no boot door accepts the in-memory engine any more — every one refuses it and names SQLite, 9a4182a75) + a manage_metadata session — the item authors its own scratch object",
-          "scratch qa_unique object authored inline: sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
+          "scratch qauniq_item object authored inline under a package that declares the namespace 'qauniq' (steps[0]): sku text unique:true, gsku text unique:'global', nick text (no unique) — NO showcase object declares field-level unique (grepped; invoice.object.ts only mentions the word in a comment)"
         ],
         "knownGaps": [
-          "NO showcase object declares `unique` on any field — the write vectors run against the inline-authored qa_unique object; landing a unique field on the field zoo would retire this gap",
+          "NO showcase object declares `unique` on any field — the write vectors run against the inline-authored qauniq_item object; landing a unique field on the field zoo would retire this gap",
           "[INVERTED, rev 2 — this gap used to say the SQL-family live leg needed a SQL-datasource boot] the live legs now run on the SQL family (stock SQLite); it is the MEMORY-driver half that is no longer live-drivable, since no boot door accepts the in-memory engine (9a4182a75). Score the memory driver's own refusal wording (`object.field` named in backticks, the scope suffix) and its scope/converge legs from the pinned memory-unique-constraint.test.ts, and record which of the two each verdict rests on",
           "the per-organization scope leg needs TWO organizations with a colliding value in each — runtime-creatable via the better-auth org endpoints but not stock; record blocked(fixture) live and fall back to the unit pin (memory-unique-constraint.test.ts)",
           "the autonumber-collision converge leg is not drivable over plain HTTP (it needs a stale counter planted mid-flight) — unit-pin verdict (memory-unique-constraint.test.ts), plus the engine's 'Autonumber collided — re-seeding' warn line if one occurs naturally"
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB, on the stock SQLite store (the default — do not try to select the in-memory engine, every boot door refuses it); author qa_unique via the package-install + PUT /api/v1/meta/object/qa_unique pattern",
-        "POST /api/v1/data/qa_unique {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
+        "boot the showcase on its own port and DB, on the stock SQLite store (the default — do not try to select the in-memory engine, every boot door refuses it); author qauniq_item the way the area's qa-feeds-disabled recipe authors its object: POST /api/v1/packages {manifest: {id: 'com.objectstack.qa.unique', name: 'QA unique fixture', version: '1.0.0', type: 'app', namespace: 'qauniq'}, enableOnInstall: true}, then PUT /api/v1/meta/object/qauniq_item?package=com.objectstack.qa.unique. Every object a package defines must carry the package's namespace prefix: an unprefixed name such as qa_unique answers 422 NAMESPACE_PREFIX (QA run #27438), a manifest with no namespace gets one derived from the id's last segment, and 'qa' belongs to attachments-storage's qa-scratch-authz (packages/spec/src/kernel/namespace-prefix.ts)",
+        "POST /api/v1/data/qauniq_item {name:'r1', sku:'A-1'} → 2xx; POST {name:'r2', sku:'A-1'} → capture the refusal; count rows",
         "POST two rows with sku absent → both land (NULL-distinct)",
         "PATCH r2 to sku:'A-1' → capture the refusal and re-read r2; PATCH r1 touching only `nick` → 2xx (no self-collision)",
         "predicate update stamping ONE value onto BOTH rows (the updateMany path — client data.updateMany / the batch door where exposed; otherwise record clause 4 blocked(fixture) naming the missing door — its unit pin is driver-level evidence beside that verdict, never its pass (RUNNER rule 6, a pin scores only the layer it drives)) → capture the refusal and prove neither row changed",
@@ -4814,7 +4832,7 @@
       ],
       "acceptance": [
         {
-          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qa_unique') only where the object declares no label, and states 'No record was written.', while the user-facing `error` names the field by its label ('A record with this LABEL already exists') where a single offending column is reported and the field has a label, and is otherwise generic ('A record with this value already exists') — never by its API key, which stays on `field`; NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
+          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT by its declared label ('Duplicate record refused on 'LABEL': …'), by its API name ('qauniq_item') only where the object declares no label, and states 'No record was written.', while the user-facing `error` names the field by its label ('A record with this LABEL already exists') where a single offending column is reported and the field has a label, and is otherwise generic ('A record with this value already exists') — never by its API key, which stays on `field`; NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
           "oracle": "api",
           "verify": "the refusal body — status, code, and the developerMessage naming the object, read from developerMessage, not from the user-facing `error` — + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
           "evidence": "refusal response + before/after counts"
@@ -4943,6 +4961,12 @@
           "date": "2026-10-27",
           "change": "acceptance[0].clause: the user-facing `error` NAMES THE FIELD BY ITS LABEL ('A record with this LABEL already exists') where the driver reports a single offending column and the field has a label, and is generic otherwise, where it named the field by its API key ('A record with this gsku already exists') while developerMessage named it by label. The engine's DuplicateRecordError carries the label it resolves for its sentence as fieldLabel (packages/objectql/src/duplicate-record-error.ts, in the writer's locale), and the REST classification names the field by it (packages/types/src/data-error-classification.ts); `field` keeps the API key. automated.ref's sentence follows it, and the dogfood pin's exact body reads 'A record with this Global SKU already exists'. Status 409, code UNIQUE_VIOLATION, developerMessage and the composite-index generic sentence are unchanged",
           "ref": "#26867"
+        },
+        {
+          "revision": 13,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[1], steps[0], steps[1], acceptance[0] and knownGaps[0] rename the scratch object qa_unique → qauniq_item under a declared namespace, and steps[0] spells the install. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). A package's objects must carry its namespace prefix, so the old 'PUT /api/v1/meta/object/qa_unique' answers 422 NAMESPACE_PREFIX under any package that does not own 'qa', and 'qa' belongs to attachments-storage's qa-scratch-authz. steps[0] now spells the package install and the PUT the way the area's qa-feeds-disabled recipe does. Read at base a0f865491d against that recipe and packages/spec/src/kernel/namespace-prefix.ts. Only the object's name and the authoring call changed; no clause's contract changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -4951,7 +4975,7 @@
       "title": "deleteBehavior matrix: set_null clears / member-removes, master_detail cascades, restrict answers 409 DELETE_RESTRICTED with the cascade remedy, required-FK set_null escalates to restrict",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4962,7 +4986,7 @@
         "requires": [
           "cascade: showcase_invoice_line.invoice (master_detail, explicit deleteBehavior:'cascade', invoice.object.ts) and expense-report lines (expense-report.object.ts)",
           "set_null scalar: showcase_contact.account (optional lookup, default set_null — contact.object.ts)",
-          "multi-value: showcase_field_zoo.f_lookups (lookup multiple:true → showcase_account, field-zoo.object.ts)",
+          "multi-value: showcase_field_zoo.f_lookups (lookup multiple:true → showcase_account, field-zoo.object.ts); a zoo row also needs its required f_master_detail → showcase_project, and a showcase_project its required account (project.object.ts)",
           "required-FK escalation: showcase_invoice.account (lookup required:true with DEFAULT deleteBehavior — invoice.object.ts): deleting an account that invoices reference escalates set_null→restrict on stock seeds"
         ],
         "knownGaps": [
@@ -4982,7 +5006,7 @@
       "steps": [
         "boot the showcase on its own port and DB; admin API token; work on rows created BY THIS RUN, not the seeds (the cascade probes destroy their parents)",
         "set_null scalar: create an account + a contact pointing at it; DELETE the account; re-read the contact",
-        "multi-value: create two accounts + a field-zoo row with f_lookups = [both]; DELETE one account; re-read the row",
+        "multi-value: create three accounts — A and B for the probe, and C to parent the zoo row's project — then a showcase_project {name, account: C}, then a field-zoo row {name, f_master_detail: that project, f_lookups: [A, B]}. f_master_detail is required:true on the zoo, so a row without it is refused before the probe starts. DELETE A; re-read the row. C and the project are never deleted, so no cascade reaches the row",
         "cascade: create an invoice with two lines; DELETE the invoice; list the lines",
         "escalation/restrict: create an account + an invoice referencing it (account is required); DELETE the account; capture the refusal envelope",
         "author-restrict arm (scratch, per knownGaps): scratch child with deleteBehavior:'restrict' → same DELETE probe",
@@ -5069,6 +5093,12 @@
           "date": "2026-10-26",
           "change": "automated.ref, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read on main cc378e93. (1) Every pin is engine-level (ObjectQL over a test driver). A precedent scored acceptance[0]–[4] and negative[0]–[3] pass from them before RUNNER rule 6; at their api oracle they now score nothing until a REST pin exists, which the ref says. (2) packages/spec/src/data/field.test.ts pins acceptance[5]'s #9689 parse seam at schema level and was not in the ref; it is added, and the verify's PUT refusal is recorded as unpinned. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "steps[2] and fixtures.requires[2] add the zoo row's required parent. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). showcase_field_zoo.f_master_detail is Field.masterDetail('showcase_project', required: true), and a showcase_project requires an account, so the step creates a third account and a project first and deletes neither. Read at base a0f865491d: field-zoo.object.ts, project.object.ts. No clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -5417,7 +5447,7 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -5432,7 +5462,7 @@
           "at least one churned account and one non-churned account to invoice against"
         ],
         "knownGaps": [
-          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be provisioned. showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored from the ENGINE pin in `automated`, which proves the mechanism the clause rests on: the related row is read under SYSTEM authority with the acting identity carried, and the write path accepts and refuses by the parent field. A run that wants the live leg builds the scratch substitute #21720 measured: a scratch package with a parent object the member holds no grant on, and a child object (member create/edit) carrying a one-hop script validation over the lookup. Then it writes, as that member, against a tripping and a non-tripping parent"
+          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be made from the stock showcase objects: showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored from the ENGINE pin in `automated`, which proves the mechanism the clause rests on: the related row is read under SYSTEM authority with the acting identity carried, and the write path accepts and refuses by the parent field. Or it is scored live on the scratch substitute #21720 measured, which is runtime-only on a stock boot (QA run #27438 built and drove it at c4c515ad): POST /api/v1/packages with a declared namespace; PUT /api/v1/meta/object for a parent object, and for a child object carrying a one-hop script validation over its lookup to the parent; PUT /api/v1/meta/permission for a set granting the member the CHILD only, bound with POST /api/v1/data/sys_user_permission_set; then, as that member, write against a tripping and a non-tripping parent. The control is the member's GET of a parent row, which must answer 403: without it the leg proves nothing about an unreadable parent"
         ]
       },
       "steps": [
@@ -5514,6 +5544,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin that scores every clause at the api layer (#26573 slice 1): the showcase invoice rule over REST for acceptance[0]–[2] and negative[0]–[1], and the scratch substitute fixtures.knownGaps describes for acceptance[3] and negative[2], so acceptance[3] no longer rests on the engine layer alone. kind test → dogfood. No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "fixtures.knownGaps[0] no longer says the restricted persona cannot be provisioned. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). It still holds that no STOCK persona has invoice CRUD without account read. But the scratch substitute is runtime-only on a stock boot: the run installed a package, authored a parent and a child (a one-hop script validation on the child), granted the member the child alone and bound the set, with the member's 403 on a parent read as the control. The gap now spells that sequence and the control. acceptance[3] keeps both of its routes (the engine pin, or the live substitute); no clause changed",
+          "ref": "#27438"
         }
       ]
     },
@@ -5918,7 +5954,7 @@
       "title": "Discussion on v18: reactions are their own records (sys_comment_reaction — 201 with user_id forced, duplicate 409, unreadable comment 403, no update, no deleting another member's), the retired sys_comment.reactions column is refused, a comment edit is platform-stamped, and milestone activity is withheld whole from a reader missing a watched field",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -5930,7 +5966,7 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a showcase record both personas can read, with one comment by the admin",
-          "object grants for the member on sys_comment and sys_comment_reaction: no stock set gives a plain org member either (/api/v1/auth/me/permissions lists neither; the member's POST /api/v1/data/sys_comment_reaction and GET /api/v1/data/sys_comment answer 403 PERMISSION_DENIED — QA run #24558). Author a runtime permission set granting what the steps drive (read the comment; create, edit and delete reactions) through the metadata door and bind it with POST /api/v1/data/sys_user_permission_set {user_id, permission_set} — the run used one named qa_comment_set"
+          "object grants for the member on sys_comment and sys_comment_reaction: no stock set gives a plain org member either (/api/v1/auth/me/permissions lists neither; the member's POST /api/v1/data/sys_comment_reaction and GET /api/v1/data/sys_comment answer 403 PERMISSION_DENIED — QA run #24558). Author a runtime permission set granting what the steps drive (read the comment; read, create, edit and delete reactions) through the metadata door, PUT /api/v1/meta/permission/NAME {name, label, objects: {sys_comment: {allowRead: true}, sys_comment_reaction: {allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true}}} (200), and bind it with POST /api/v1/data/sys_user_permission_set {user_id, permission_set: NAME}. QA run #24558 used a set named qa_comment_set; QA run #27438 measured this sequence working at c4c515ad"
         ]
       },
       "steps": [
@@ -6002,6 +6038,12 @@
           "date": "2026-10-27",
           "change": "automated.ref names the dogfood pin that scores acceptance[1]–[3] at the REST data door (#26573 slice 1), with the measured refusals: an update is refused 405 OBJECT_API_METHOD_NOT_ALLOWED (the object offers no update) and a foreign delete 403 PERMISSION_DENIED (the own-record floor). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[2] names the door. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1): the runtime permission set is a PUT /api/v1/meta/permission/NAME carrying sys_comment allowRead and the four sys_comment_reaction grants (200), bound by a sys_user_permission_set row, and the run measured that sequence working. Read at base a0f865491d: permission is a runtime-creatable metadata type (packages/spec/src/kernel/metadata-plugin.zod.ts, allowRuntimeCreate). No clause changed",
+          "ref": "#27438"
         }
       ]
     },
