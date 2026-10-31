@@ -761,7 +761,14 @@ export class DatasourceConnectionService {
     // failure above never falls through to here. `envCredentialVar` stays set
     // when the slot applied but the variable was empty, so a failed connect
     // can name the variable to set.
+    //
+    // [#28283] The owner is claimed here, before the build, so the check and
+    // the claim are one step with no await between them; `claimedVariable`
+    // records that THIS attempt made the claim, and the failure path below
+    // releases it. A connect that failed holds no pool, so it must not refuse
+    // a later name as a collision against it.
     let envCredentialVar: string | undefined;
+    let claimedVariable: string | undefined;
     if (!credentialsRef && connector === undefined && !opts.asDefault) {
       const variable = this.envCredentialVarFor(name, opts.context);
       if (variable !== undefined) {
@@ -777,7 +784,10 @@ export class DatasourceConnectionService {
             opts.mappedObjects,
           );
         }
-        this.envCredentialOwners.set(variable, name);
+        if (owner === undefined) {
+          this.envCredentialOwners.set(variable, name);
+          claimedVariable = variable;
+        }
         const value = this.cfg.envCredentials?.read(variable);
         if (value) secret = value;
         else envCredentialVar = variable;
@@ -898,14 +908,20 @@ export class DatasourceConnectionService {
       // Before `handleFailure`, which records the unavailable mark: eviction
       // deliberately does not touch that map, and the mark must outlive it.
       if (registeredByThisAttempt) engine.unregisterDriver?.(registeredByThisAttempt);
+      if (claimedVariable !== undefined) this.envCredentialOwners.delete(claimedVariable);
       // `err` itself is handed on, not just its message: the driver package's
       // build output being absent is reported as `err.code ===
       // 'ERR_MODULE_NOT_FOUND'`, and that structured signal is gone the moment
       // the error is stringified (#5794).
+      //
+      // [#28283] The unset variable is a note after the driver's own error,
+      // never its explanation: an unreachable host, a missing driver module or
+      // a TLS failure is not cured by a password, and the driver's error is
+      // the one thing that says which failure this was.
       const reason = envCredentialVar === undefined
         ? errMsg(err)
-        : `${errMsg(err)} — datasource '${name}' is defined in code and reads its credential from `
-          + `${envCredentialVar} at connect, which is not set on this host`;
+        : `${errMsg(err)} (note: datasource '${name}' is defined in code and reads its credential from `
+          + `${envCredentialVar} at connect, which is not set on this host)`;
       return this.handleFailure(record, 'failed-degraded', reason, opts.context, opts.objects, opts.mappedObjects, err);
     }
   }
