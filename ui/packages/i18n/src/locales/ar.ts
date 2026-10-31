@@ -4843,6 +4843,8 @@ const ar = {
       confirmNoteSeparate_many: 'النشر يُصدر المسودات المعلقة ({{count}}) كلًّا على حدة: المسودة التي يتعذّر نشرها تبقى معلقة، وتُنشر البقية.',
       confirmNoteSeparate_other: 'النشر يُصدر المسودات المعلقة ({{count}}) كلًّا على حدة: المسودة التي يتعذّر نشرها تبقى معلقة، وتُنشر البقية.',
       publishConfirm: 'نشر الكل',
+      noteLabel: 'ملاحظة التغيير (اختيارية)',
+      notePlaceholder: 'ما الذي تغيّر ولماذا. تظهر في سجل كل عنصر.',
       summaryItems: '{{count}} عنصر',
       summaryItems_zero: '{{count}} عنصر',
       summaryItems_one: 'عنصر واحد ({{count}})',

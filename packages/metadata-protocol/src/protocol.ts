@@ -23781,7 +23781,13 @@ export class ObjectStackProtocolImplementation implements
     async publishPackageDrafts(request: {
         packageId: string;
         actor?: string;
-        /** ADR-0067 — commit message (for AI turns: the user's instruction). */
+        /**
+         * ADR-0067 — commit message (for AI turns: the user's instruction).
+         * [ADR-0146 D1] Also the change note of every item this publish
+         * promotes: each `sys_metadata_history` row it writes records it as
+         * `change_note`. Absent or empty, those rows keep the sentence naming
+         * the package.
+         */
         message?: string;
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
@@ -24352,7 +24358,15 @@ export class ObjectStackProtocolImplementation implements
                             // an object draft beside them may name.
                             batchDatasources,
                             ...(request.actor ? { actor: request.actor } : {}),
-                            message: `publish app package '${request.packageId}'`,
+                            // [ADR-0146 D1] The author's change note, when the
+                            // publish carries one, is what every history row
+                            // this batch writes records as its `change_note`
+                            // (the same note the package commit below keeps),
+                            // so the item history says why the item changed.
+                            // With none, the sentence naming the package.
+                            message: request.message
+                                ? request.message
+                                : `publish app package '${request.packageId}'`,
                         });
                         promoted.push({
                             d, singularType,

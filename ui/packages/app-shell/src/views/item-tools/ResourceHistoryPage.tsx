@@ -33,6 +33,7 @@ import {
   AlertDialogTitle,
 } from '@object-ui/components';
 import { t, tFormat, translateConsoleValue, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { useHistoryActorNames, type HistoryActorName } from './historyActors.js';
 import { PageShell } from '../metadata-admin/PageShell.js';
 import {
   useMetadataClient,
@@ -53,7 +54,18 @@ type HistoryEvent = {
   kind?: string;
   /** Per-(type,name) monotonic version used by rollback. */
   version?: number;
+  /**
+   * Who wrote it: a `sys_user` id (`sys_metadata_history.recorded_by`), or
+   * `null` for a write no person made. Shown by the user's name
+   * ({@link useHistoryActorNames}).
+   */
   actor?: string | null;
+  /**
+   * The change note recorded with the write (`sys_metadata_history.change_note`,
+   * `HistoryMetaItemResponseSchema` `events[].message`): a save's or publish's
+   * note, ADR-0146 D1. Shown under the row.
+   */
+  message?: string;
   at?: string | number;
   /** ISO timestamp on newer servers. */
   ts?: string | number;
@@ -166,6 +178,13 @@ export function HistoryPanel({
   // the in-app AlertDialog below rather than the browser's native `confirm()`.
   const [confirmVersion, setConfirmVersion] = React.useState<number | null>(null);
   const [localRefresh, setLocalRefresh] = React.useState(0);
+  // ADR-0146 D1 — the timeline names people, not ids.
+  const actorNames = useHistoryActorNames(
+    React.useMemo(
+      () => events.map((ev) => ev.actor).filter((a): a is string => typeof a === 'string' && a !== ''),
+      [events],
+    ),
+  );
 
   React.useEffect(() => {
     let cancelled = false;
@@ -289,11 +308,8 @@ export function HistoryPanel({
                         {translateConsoleValue('op', String(op), locale)}
                       </Badge>
                     )}
-                    {ev.actor && (
-                      <span className="text-xs text-muted-foreground">
-                        by{' '}
-                        <span className="font-mono">{String(ev.actor)}</span>
-                      </span>
+                    {typeof ev.actor === 'string' && ev.actor !== '' && (
+                      <HistoryActor id={ev.actor} name={actorNames.get(ev.actor)} locale={locale} />
                     )}
                     {ts && (
                       <span className="text-xs text-muted-foreground ml-auto">
@@ -320,6 +336,15 @@ export function HistoryPanel({
                       </Button>
                     )}
                   </div>
+                  {typeof ev.message === 'string' && ev.message.trim() !== '' && (
+                    // ADR-0146 D1 — why the item changed, as its author wrote it.
+                    <p
+                      className="mt-1.5 text-xs text-foreground/80 whitespace-pre-wrap break-words"
+                      data-testid="history-event-note"
+                    >
+                      {ev.message}
+                    </p>
+                  )}
                   {isOpen && (
                     <pre className="mt-2 text-xs font-mono bg-muted/30 rounded p-2 overflow-auto max-h-[280px]">
                       {safeStringify(ev)}
@@ -368,6 +393,42 @@ export function HistoryPanel({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+/**
+ * ADR-0146 D1 — who wrote one event: the user's name once the directory
+ * answered with it (the id stays on the element's title), the plain id while it
+ * is still being asked, and the id marked unresolved when no name came back —
+ * a deleted user, or a directory this viewer cannot read.
+ */
+function HistoryActor({
+  id,
+  name,
+  locale,
+}: {
+  id: string;
+  name: HistoryActorName | undefined;
+  locale?: string;
+}) {
+  return (
+    <span className="text-xs text-muted-foreground" data-testid="history-event-actor">
+      {t('engine.edit.historyBy', locale)}{' '}
+      {name?.kind === 'resolved' ? (
+        <span className="text-foreground" title={id}>
+          {name.name}
+        </span>
+      ) : (
+        <>
+          <span className="font-mono">{id}</span>
+          {name?.kind === 'unresolved' && (
+            <span className="ml-1 italic" title={t('engine.edit.historyActorUnresolvedHint', locale)}>
+              ({t('engine.edit.historyActorUnresolved', locale)})
+            </span>
+          )}
+        </>
+      )}
+    </span>
   );
 }
 

@@ -4546,6 +4546,8 @@ const es = {
       confirmNoteSeparate_many: 'Publicar libera los {{count}} de borradores pendientes uno por uno: el que falle sigue pendiente y los demás se publican igualmente.',
       confirmNoteSeparate_other: 'Publicar libera los {{count}} borradores pendientes uno por uno: el que falle sigue pendiente y los demás se publican igualmente.',
       publishConfirm: 'Publicar todo',
+      noteLabel: 'Nota del cambio (opcional)',
+      notePlaceholder: 'Qué cambió y por qué. Se muestra en el historial de cada elemento.',
       summaryItems: '{{count}} elementos',
       summaryItems_one: '{{count}} elemento',
       summaryItems_many: '{{count}} de elementos',

@@ -4542,6 +4542,8 @@ const fr = {
       confirmNoteSeparate_many: 'La publication libère les {{count}} de brouillons en attente un par un : celui qui échoue reste en attente, les autres sont publiés quand même.',
       confirmNoteSeparate_other: 'La publication libère les {{count}} brouillons en attente un par un : celui qui échoue reste en attente, les autres sont publiés quand même.',
       publishConfirm: 'Tout publier',
+      noteLabel: 'Note de modification (facultative)',
+      notePlaceholder: 'Ce qui a changé et pourquoi. Elle apparaît dans l’historique de chaque élément.',
       summaryItems: '{{count}} éléments',
       summaryItems_one: '{{count}} élément',
       summaryItems_many: '{{count}} d’éléments',

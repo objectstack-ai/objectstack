@@ -4448,6 +4448,8 @@ const ja = {
       confirmNoteSeparate_one: '公開すると、保留中のドラフト {{count}} 件がそれぞれ個別に公開されます。公開に失敗したドラフトは保留中のまま残り、ほかのドラフトは公開されます。',
       confirmNoteSeparate_other: '公開すると、保留中のドラフト {{count}} 件がそれぞれ個別に公開されます。公開に失敗したドラフトは保留中のまま残り、ほかのドラフトは公開されます。',
       publishConfirm: 'すべて公開',
+      noteLabel: '変更メモ（任意）',
+      notePlaceholder: '何をなぜ変更したか。各項目の履歴に表示されます。',
       summaryItems: '{{count}} 件',
       summaryItems_one: '{{count}} 件',
       summaryItems_other: '{{count}} 件',
