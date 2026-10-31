@@ -705,7 +705,14 @@ function fieldNamesHeldBy(body: Row): string[] {
     if (typeof name === 'string' && name) held.add(name);
   };
   if (Array.isArray(body.columns)) for (const column of body.columns) add(colFieldName(column));
-  if (Array.isArray(body.filter)) for (const rule of body.filter) if (isPlainObject(rule)) add(rule.field);
+  if (Array.isArray(body.filter)) {
+    for (const element of body.filter) {
+      if (!isPlainObject(element)) continue;
+      // An any-of group's members are rules too (`{ or: [rule, ...] }`).
+      if (Array.isArray(element.or)) element.or.forEach((rule: unknown) => { if (isPlainObject(rule)) add(rule.field); });
+      else add(element.field);
+    }
+  }
   for (const entry of sortEntriesOf(body.sort)) add(entry.field);
   if (isPlainObject(body.kanban)) {
     if (Array.isArray(body.kanban.columns)) body.kanban.columns.forEach(add);

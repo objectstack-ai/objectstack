@@ -13,6 +13,9 @@ import type { ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 // ViewItem record are the spec's own record of the console's round-trip keys,
 // read off the pin rather than hand-listed (see `VIEW_ITEM_ROUND_TRIP_KEYS`).
 import { VIEW_CONSOLE_ROUND_TRIP_KEYS } from '@objectstack/spec/ui';
+// The spec's one test for a view filter list's any-of group element
+// (`{ or: [rule, ...] }`), read here rather than restated.
+import { isViewFilterOrGroup } from '@objectstack/spec/ui';
 // #4934 — a VALUE import, not a type one: the write-warning boundary parses the
 // wire's `reason` against the enum the spec itself declares, so the accept set
 // is read off the pin instead of hand-copied here (a hand copy is the drift
@@ -656,13 +659,38 @@ function isObjectFilterEntryForm(filter: readonly unknown[]): boolean {
     && typeof first === 'object'
     && first !== null
     && !Array.isArray(first)
-    && (first as any).field !== undefined;
+    // A view filter list may open with an any-of group (`{ or: [...] }`), which
+    // carries no `field` of its own.
+    && ((first as any).field !== undefined || isViewFilterOrGroup(first));
+}
+
+/**
+ * One any-of group element of a view filter list — `{ or: [rule, ...] }`,
+ * `@objectstack/spec/ui`'s `ViewFilterOrGroupSchema` — to an `or` node of its
+ * rules' tuples (one member: that member's tuple), or `null` when it is not a
+ * usable group: an `or` that is not a non-empty array, or a member that is not
+ * a usable rule. Every member is translated by {@link objectFilterEntryToAST},
+ * so a rule inside a group is refused for what it says exactly as at the top
+ * level. `index` is the group's position in its list.
+ */
+function objectFilterOrGroupToAST(group: { or?: unknown }, index: number): unknown[] | null {
+  const members = group.or;
+  if (!Array.isArray(members) || members.length === 0) return null;
+  const tuples: unknown[] = [];
+  for (const member of members) {
+    const tuple = objectFilterEntryToAST(member, index);
+    if (!tuple) return null;
+    tuples.push(tuple);
+  }
+  return tuples.length === 1 ? (tuples[0] as unknown[]) : ['or', ...tuples];
 }
 
 /**
  * Translate `[{ field, operator, value }, ...]` into a filter AST node. Every
  * entry must translate; see `MalformedFilterError` for why one that doesn't is
- * an error rather than an omission.
+ * an error rather than an omission. An any-of group entry translates to one
+ * `or` node inside the list's `and`, and a group that does not translate is
+ * refused whole, by the same error.
  */
 function objectFilterEntriesToAST(entries: readonly unknown[]): unknown[] {
   const nodes = entries.map((entry, i) => {
@@ -670,6 +698,11 @@ function objectFilterEntriesToAST(entries: readonly unknown[]): unknown[] {
     // both conditions instead of losing one to a drop or the whole query to an
     // error.
     if (Array.isArray(entry)) return translateFilterChild(entry, i);
+    if (isViewFilterOrGroup(entry)) {
+      const node = objectFilterOrGroupToAST(entry, i);
+      if (!node) throw new MalformedFilterError(entry, i);
+      return node;
+    }
     const tuple = objectFilterEntryToAST(entry, i);
     if (!tuple) throw new MalformedFilterError(entry, i);
     return tuple;
@@ -743,6 +776,9 @@ function translateFilterArray(filter: unknown[]): unknown[] {
  */
 function translateFilterChild(child: unknown, index: number): unknown {
   if (Array.isArray(child)) return child.length > 0 ? translateFilterArray(child) : child;
+  // A spread any-of group element: translated when every member is a usable
+  // rule, otherwise left for the server to refuse, like a bare rule above.
+  if (isViewFilterOrGroup(child)) return objectFilterOrGroupToAST(child, index) ?? child;
   if (child && typeof child === 'object' && (child as any).field !== undefined) {
     const tuple = objectFilterEntryToAST(child, index);
     if (tuple) return tuple;
@@ -755,7 +791,8 @@ function translateFilterChild(child: unknown, index: number): unknown {
  * understood by the ObjectStack server's `parseFilterAST()`.
  *
  * Accepted inputs:
- *   - `[{ field, operator, value }, ...]` — ViewFilterRule[] from view configs
+ *   - `[{ field, operator, value }, ...]` — a view filter list from view configs,
+ *     whose elements may also be any-of groups `{ or: [rule, ...] }`
  *   - `[field, op, value]`                — single AST tuple (passed through)
  *   - `['and'|'or', ...children]`         — logical AST node (passed through)
  *   - `[[...], [...]]`                    — legacy nested AST (passed through)

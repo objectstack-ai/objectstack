@@ -2292,7 +2292,7 @@ const ko = {
       objectNotFoundDescription: "객체 \"{{objectName}}\"이(가) 현재 구성에 존재하지 않습니다.",
       objectNotFoundHint: "앱 탐색 설정을 확인하거나 사이드바에서 다른 객체를 선택하세요.",
       objectPackageDisabled: "객체 \"{{objectName}}\"이(가) 속한 패키지가 비활성화되어 있어 제공되지 않습니다.",
-      filterOrNotSavable: "이 필터는 조건 사이에 OR을 사용하며, 저장된 뷰에는 아직 저장할 수 없습니다. 현재 목록에는 계속 적용됩니다. 뷰에 저장하려면 OR 그룹을 해제하세요.",
+      filterOrGroupNotEditable: "이 필터에는 다른 조건과 함께 OR 그룹이 있어 필터 편집기에서 표시할 수 없으므로 여기서는 읽기 전용입니다. 뷰에는 계속 적용됩니다.",
       filterNestedNotSavable: "이 필터는 중첩된 조건 그룹을 사용하며, 저장된 뷰에는 저장할 수 없습니다. 뷰에 저장하려면 단일 조건 목록으로 펼치세요.",
       allRecords: "모든 레코드",
       new: "새로 만들기",
