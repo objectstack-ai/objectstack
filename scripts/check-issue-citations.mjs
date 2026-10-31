@@ -178,7 +178,6 @@ import { globToRegExp } from './glob-match.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { commentProse } from './symbol-anchors.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan } from './pm/check-half-states.mjs';
-import { BOARD_READ_RETRY, boardReadBudget, readBoard, readFailure, retryableNetworkCode, sleepMs } from './board-read.mjs';
 
 /** This file, as the re-exec below has to name it on a child's argv. */
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -698,7 +697,12 @@ function authHeaders(token) {
 // The transient-read retry policy lives in the leaf `./board-read.mjs` (moved
 // there unchanged so release tooling can import it without this file's
 // closure); re-exported so every importer of these names is unchanged. This
-// file's `--self-test` still pins it.
+// file's `--self-test` still pins it. The import sits here, beside the
+// re-export, rather than in the header's import block: a line added above this
+// file's population-marker declaration (near the top) moves the line number the
+// dispatch-gates self-test's census pins it at. An ES import is hoisted wherever
+// it is written.
+import { BOARD_READ_RETRY, boardReadBudget, readBoard, readFailure, retryableNetworkCode, sleepMs } from './board-read.mjs';
 export { BOARD_READ_RETRY, RETRYABLE_NETWORK_CODES, retryableNetworkCode, boardReadBudget, readBoard, readFailure } from './board-read.mjs';
 
 /**
