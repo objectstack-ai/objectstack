@@ -55,6 +55,12 @@ import { strictObject } from '../shared/strict-object';
  */
 export const CUSTOMIZATION_PACKAGE_SUFFIX = '.custom';
 
+/** {@link CUSTOMIZATION_PACKAGE_SUFFIX}, escaped for a regular expression. */
+const ESCAPED_CUSTOMIZATION_PACKAGE_SUFFIX = CUSTOMIZATION_PACKAGE_SUFFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Any non-empty string that does not end in {@link CUSTOMIZATION_PACKAGE_SUFFIX}. */
+const NOT_A_CUSTOMIZATION_PACKAGE_ID = new RegExp(`^(?![\\s\\S]*${ESCAPED_CUSTOMIZATION_PACKAGE_SUFFIX}$)[\\s\\S]+$`);
+
 /**
  * The override declaration's body: which base package's item this item
  * replaces, and which version of that item the author started from.
@@ -71,7 +77,10 @@ export const OverrideDeclarationSchema = strictObject({
 }, {
   package: z.string()
     .min(1)
-    .refine((id) => !id.endsWith(CUSTOMIZATION_PACKAGE_SUFFIX), {
+    // A pattern, not a `.refine()`: a pattern publishes into the JSON Schema
+    // (`json-schema/**`), so a document the file accepts is one the parse
+    // accepts. Built from the constant, so the suffix has one spelling.
+    .regex(NOT_A_CUSTOMIZATION_PACKAGE_ID, {
       message:
         `\`overrides.package\` names the BASE package whose item this item replaces, never a \`${CUSTOMIZATION_PACKAGE_SUFFIX}\` package: `
         + `the declaring item lives in the base's paired \`<base>${CUSTOMIZATION_PACKAGE_SUFFIX}\` package and names the base it overrides `

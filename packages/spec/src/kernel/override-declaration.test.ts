@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { OverrideDeclarationSchema, OverrideDeclarationFields, CUSTOMIZATION_PACKAGE_SUFFIX } from './override-declaration.zod';
 import { OVERRIDE_TYPE_CLASSIFICATION, OVERRIDABLE_METADATA_TYPES } from './customization-package';
 import { getMetadataTypeSchema } from './metadata-type-schemas';
@@ -62,7 +63,20 @@ describe('OverrideDeclarationSchema — the shape', () => {
   it(`refuses a \`${CUSTOMIZATION_PACKAGE_SUFFIX}\` package — the declaration names the BASE, never a pair`, () => {
     const r = OverrideDeclarationSchema.safeParse({ package: `com.acme.crm${CUSTOMIZATION_PACKAGE_SUFFIX}`, basedOn: '3.2.0' });
     expect(r.success).toBe(false);
-    expect(issuesOf(r)).toContainEqual(expect.objectContaining({ code: 'custom', path: 'package' }));
+    expect(issuesOf(r)).toContainEqual(expect.objectContaining({ code: 'invalid_format', path: 'package' }));
+  });
+
+  it('accepts an id that merely contains the suffix\'s letters', () => {
+    for (const id of ['com.acme.customx', 'com.acme.custom-crm', 'custom']) {
+      expect(OverrideDeclarationSchema.safeParse({ package: id, basedOn: '1.0.0' }).success, id).toBe(true);
+    }
+  });
+
+  it('publishes the refusal into the JSON Schema as a pattern (no dropped refinement)', () => {
+    const json = z.toJSONSchema(OverrideDeclarationSchema) as { properties: { package: { pattern?: string } } };
+    const pattern = new RegExp(json.properties.package.pattern ?? '');
+    expect(pattern.test('com.acme.crm')).toBe(true);
+    expect(pattern.test(`com.acme.crm${CUSTOMIZATION_PACKAGE_SUFFIX}`)).toBe(false);
   });
 
   it('describes basedOn as recorded and never judged (ADR-0146 D2)', () => {
