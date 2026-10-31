@@ -39,7 +39,7 @@
 
 import React, { createContext, useContext } from 'react';
 import type { FilterNode } from '@object-ui/core';
-import type { ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement } from '@objectstack/spec/ui';
 
 /** A child-object action surfaced in a related list's row menu. */
 export interface RelatedRowActionDef {
@@ -171,8 +171,11 @@ export interface ResolveRelatedRecordActionsInput {
    * ({@link RelatedRecordHandlers.onViewAll}): it scopes that destination by
    * this filter too, or offers none. Absent means the list has no filter of
    * its own; it does not mean "unknown".
+   *
+   * Its elements are the list's: flat rules or any-of `{ or }` groups
+   * (objectstack#28462).
    */
-  filter?: ViewFilterRule[] | FilterNode;
+  filter?: ViewFilterElement[] | FilterNode;
 }
 
 export interface RelatedRecordActionsValue {
