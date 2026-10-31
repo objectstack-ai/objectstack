@@ -374,6 +374,12 @@ out of the box:
 | `auth` | Dispatcher | Identity / session resolution — the prime suspect for unexplained data-API overhead. |
 | `db` | SQL driver | Total SQL time across the request; `desc` is the **query count** (folded from knex's per-query events, attributed to the originating request via `AsyncLocalStorage` so it is correct under concurrency). The basic header carries no SQL text; individual **parametrized** statements appear only in the admin-only `X-OS-Debug-Timing: json` detail payload. |
 | `hooks` | ObjectQL engine | Total business-hook execution time; `desc` is the hook count. |
+| `meta` | REST `/meta` routes | Total metadata-read time across the request; `desc` is the **read count** (`meta;dur=0.7;desc="1 reads"`). |
+
+`db` and `meta` are on every timed response, even one that ran no SQL or read no
+metadata: such a response carries them as zero members (`db;dur=0;desc="0 queries"`,
+`meta;dur=0;desc="0 reads"`). A missing member therefore means the response was
+not timed at all, never that nothing was spent there.
 
 Each phase is recorded through a request-scoped collector that is a no-op when
 the mode is off, so every one of them costs nothing on the normal path. The

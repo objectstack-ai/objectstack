@@ -819,6 +819,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../runtime
