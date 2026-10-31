@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -720,18 +720,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // renders the "← All <object>" back link — switching tabs must keep it.
     setTabSearchParams(sp, { replace: true, state: location.state });
   }, [setTabSearchParams, location.state]);
-  // ── The enlarged related list, `?related=object.field` (objectstack#27055,
-  // Target 9) ── One path to a related list's every record and column: a
-  // card's ⤢ (or its count) opens the list as a full-width table over the
-  // page body, addressed by the URL so it survives a reload and a shared link.
-  // Opening PUSHES an entry (the browser's Back returns to the columns);
-  // closing — Esc or ‹ — pops it when this view pushed it, and otherwise
-  // replaces the URL without the parameter.
+  // ── The active tab, `?related=object.field` (objectstack#27055, Target 9;
+  // objectstack#27524, Targets 8 and 9) ── One path to a related list's every
+  // record and column: a tab of the record's tab row (or a panel's header)
+  // opens the list as a full-width table under the header, addressed by the
+  // URL so it survives a reload and a shared link. Leaving 「概览」 PUSHES an
+  // entry (the browser's Back returns to the page); moving between tabs
+  // REPLACES it, so Back, Esc and 「概览」 all return to the page in one step.
+  // Closing — Esc or 「概览」 — pops the entry when this view pushed it, and
+  // otherwise replaces the URL without the parameter.
   const enlargedRelatedParam = tabSearchParams.get(RECORD_RELATED_ENLARGE_PARAM) ?? undefined;
   const openEnlargedRelated = useCallback((id: string) => {
     const sp = new URLSearchParams(window.location.search);
-    if (sp.get(RECORD_RELATED_ENLARGE_PARAM) === id) return;
+    const open = sp.get(RECORD_RELATED_ENLARGE_PARAM);
+    if (open === id) return;
     sp.set(RECORD_RELATED_ENLARGE_PARAM, id);
+    if (open) {
+      setTabSearchParams(sp, { replace: true, state: location.state });
+      return;
+    }
     const state = location.state && typeof location.state === 'object' ? location.state : {};
     setTabSearchParams(sp, { state: { ...(state as object), [RELATED_ENLARGE_PUSHED]: true } });
   }, [setTabSearchParams, location.state]);
@@ -4516,21 +4523,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // highlight grid); an authored page keeps its own face.
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
-                      {assignedPage || namedPageBlocked ? (
-                        <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
-                      ) : (
-                        // objectstack#27055 — the 关联 tab in the reader's
-                        // arrangement, the same one the related column reads.
-                        <ArrangedRelatedTab
-                          page={renderedPage}
-                          arrangement={relatedArrangement}
-                          onArrangementChange={setRelatedArrangement}
-                        >
-                          {(arranged) => (
-                            <SchemaRenderer schema={withPageTabsUrlSync(arranged as any, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
-                          )}
-                        </ArrangedRelatedTab>
-                      )}
+                      {/* A page drawn as its strip is drawn as written: the
+                          reader's arrangement belongs to the right column and
+                          the tab row (objectstack#27524). */}
+                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
