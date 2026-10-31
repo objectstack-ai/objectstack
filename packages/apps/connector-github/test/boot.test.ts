@@ -100,6 +100,18 @@ describe('connector-github app — boot against a fake MCP server', () => {
     expect(transports).toEqual([]);
   });
 
+  it('a flow run while the credential is unset fails, naming the credential, and dials nothing', async () => {
+    const res = await booted.apiAs(token, 'POST', '/automation/github_search_issues/trigger', {
+      params: { query: 'repo:acme/app is:open' },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: { code?: string; message?: string } };
+    expect(body.error?.code).toBe('FLOW_FAILED');
+    expect(body.error?.message).toContain(REF);
+    expect(calls).toEqual([]);
+    expect(transports).toEqual([]);
+  });
+
   it('once the administrator sets the credential, it materializes with only the included read tools', async () => {
     const put = await booted.apiAs(token, 'PUT', `/automation/connectors/credential-refs/${REF}`, { value: FIXTURE_TOKEN });
     expect(put.status, await put.clone().text()).toBeLessThan(300);

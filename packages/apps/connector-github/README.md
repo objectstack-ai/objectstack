@@ -34,9 +34,13 @@ install dialog right after installing. An environment variable named
 `GITHUB_MCP_TOKEN` on the server takes precedence over a stored value.
 
 Prefer a fine-grained token. With a classic token, GitHub's server hides every
-tool whose scope the token lacks; if it hides `search_issues` or `issue_read`,
-the connector refuses to start rather than quietly running without them, and
-the reason names the missing tool.
+tool whose scope the token lacks. If that hides `search_issues` or
+`issue_read`, the connector does not start without them: a value set in
+**Connector Credentials** leaves `github_mcp` disconnected with a reason naming
+the missing tools, and a value set as the server environment variable stops the
+server from starting at all. Replace the token with one that carries the `repo`
+scope: a new value in **Connector Credentials** takes effect at once, a new
+environment variable at the next start.
 
 The token is only ever sent to GitHub. It is never stored in the app's
 metadata.
