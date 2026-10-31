@@ -104,10 +104,12 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // (`/automation/connectors/:name/connection` and the OAuth callback, in
   // `@objectstack/runtime`) asks this capability and nothing else — never the
   // platform-scoped `manage_metadata`. Held by default by platform
-  // administrators (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other position,
-  // the organization administrator included, only by explicit grant. `org`:
-  // the door acts on the caller's own organization's connection, and the
-  // holder never sees a token.
+  // administrators (`ADMIN_FULL_ACCESS_CAPABILITIES`) and by organization
+  // administrators (the shipped `organization_admin` and
+  // `organization_admin_no_bypass` sets, ruling B, record 6545223261); every
+  // other position only by explicit grant. `org`: the door acts on the
+  // caller's own organization's connection, and the holder never sees a
+  // token.
   { name: 'manage_connector_connections', label: 'Manage Connector Connections', description: 'Connect, reconnect and revoke the holder’s organization’s connection of an OAuth2 connector instance, and read its status. A connection authorizes the platform to call the vendor on the organization’s behalf; no token is ever shown to the holder.', scope: 'org' },
 ];
 
