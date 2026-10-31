@@ -1380,9 +1380,12 @@ const fr = {
     concurrentUpdateRecordLabel: "cet enregistrement",
     openInNewTab: "Ouvrir dans un nouvel onglet",
     activity: "Activité",
-    timeline: "Chronologie",
-    timelineFolded: "Activité",
-    relatedColumn: "Colonne associée",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Activité",
+    relatedColumn: "Colonne de droite",
+    timelineComposer: "Écrire une note… @ pour mentionner",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} sections vides",
     emptySections_one: "{{count}} section vide",
@@ -2221,8 +2224,7 @@ const fr = {
       newChat: "Nouvelle discussion",
       toggleChatsList: "Basculer la liste des discussions",
       goHome: "Retour à l'accueil",
-      toggleTimeline: "Afficher / masquer la chronologie",
-      toggleRelated: "Afficher / masquer les éléments associés",
+      toggleRelated: "Afficher / masquer la colonne de droite",
     },
     reportIndex: {
       title: "Rapports",

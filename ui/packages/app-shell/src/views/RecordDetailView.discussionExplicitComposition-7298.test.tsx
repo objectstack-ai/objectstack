@@ -281,12 +281,13 @@ describe('objectui#7298 — the discussion panel is composed, never appended', (
     expect(composerCount()).toBe(0);
   });
 
-  it('the SYNTHESIZED default page still shows the discussion — its Timeline stream declares it', async () => {
-    // No authored page ⇒ `buildDefaultPageSchema`, which composes the timeline
-    // stream itself (objectstack#27055: discussion, activity and changes in the
-    // Timeline tab's one `record:activity`). The ruling removes the host's
-    // append, not the default page's discussion.
-    renderDetail({ objects: OBJECTS_FEEDS_ON, pages: [], comments: ONE_COMMENT, search: '?tab=timeline' });
+  it('the SYNTHESIZED default page still shows the discussion — its 动态 stream declares it', async () => {
+    // No authored page ⇒ `buildDefaultPageSchema`, which composes the 动态
+    // stream itself (objectstack#27055: discussion, activity and changes in
+    // one `record:activity`; its whole face is the 动态 tab since
+    // objectstack#27524). The ruling removes the host's append, not the
+    // default page's discussion.
+    renderDetail({ objects: OBJECTS_FEEDS_ON, pages: [], comments: ONE_COMMENT, search: '?related=timeline' });
     await settled();
 
     await waitFor(() => expect(count(COMMENT_MARKER)).toBeGreaterThan(0));

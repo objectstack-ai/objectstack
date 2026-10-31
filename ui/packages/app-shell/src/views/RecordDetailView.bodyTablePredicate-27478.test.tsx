@@ -18,8 +18,8 @@
  * ("write true to keep it a side card"). The page used to draw it as a body
  * table, because its own copy of the rule ignored `relatedList`.
  *
- * Measured from a real `RecordDetailView` mount at three columns (the
- * `relatedListsOrder-27241` harness).
+ * Measured from a real `RecordDetailView` mount at 1440 px, details beside
+ * the right column (the `relatedListsOrder-27241` harness).
  */
 
 import * as React from 'react';
@@ -138,7 +138,7 @@ function renderPage(objects: ReturnType<typeof objectsWith>) {
 }
 
 const cardOrder = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll('[data-record-column="related"] [data-related-card-id]')).map((el) =>
+  Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
     el.getAttribute('data-related-card-id'),
   );
 

@@ -1176,9 +1176,12 @@ const ja = {
     new: "新規",
     add: "追加",
     activity: "アクティビティ",
-    timeline: "タイムライン",
-    timelineFolded: "アクティビティ",
-    relatedColumn: "関連列",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "アクティビティ",
+    relatedColumn: "右側の列",
+    timelineComposer: "メモを書く… @ でメンション",
     // objectstack#27055 — the record page v3.
     emptySections: "空のセクション {{count}} 件",
     emptySections_one: "空のセクション {{count}} 件",
@@ -2169,8 +2172,7 @@ const ja = {
       newChat: "新しいチャット",
       toggleChatsList: "チャット一覧を切り替え",
       goHome: "ホームに戻る",
-      toggleTimeline: "タイムラインの表示 / 非表示",
-      toggleRelated: "関連の表示 / 非表示",
+      toggleRelated: "右側の列の表示 / 非表示",
     },
     reportIndex: {
       title: "レポート",
