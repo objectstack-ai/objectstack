@@ -22,10 +22,12 @@
  *  - re-entering sends `If-None-Match`, and a `304` keeps what is held;
  *  - an invalidation naming a bundled item, and any metadata write through the
  *    client, make the next bundled read ask the bundle again first;
- *  - a cache clear downloads the bundle again, with no validator;
+ *  - a bundled object carries its envelope's `sortability`, as its by-name read does;
+ *  - a cache clear, or a bundle served with no validator, downloads it again;
  *  - a refused bundle leaves every read to its by-name route.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readObjectSortability } from '@object-ui/core';
 import { ObjectStackAdapter } from './index';
 
 const BASE = 'http://test.local';
@@ -78,19 +80,18 @@ async function drain() {
 const contact = { name: 'b27627_contact', label: 'Contact', fields: { name: { type: 'text', label: 'Name' } } };
 const task = { name: 'b27627_task', label: 'Task', fields: { contact: { type: 'lookup', reference: 'b27627_contact' } } };
 
+/** The bundle's answer: bare, every member the envelope its by-name read answers. */
 function bundle(label = 'Contact') {
+  const env = (type: string, item: { name: string }, extra: Record<string, unknown> = {}) => ({ type, name: item.name, item, ...extra });
   return {
-    success: true,
-    data: {
-      app: { name: APP, label: 'App' },
-      objects: [
-        { item: { ...contact, label }, sortability: { name: { sortable: true } } },
-        { item: task },
-      ],
-      views: [{ name: 'b27627_contact.all', object: 'b27627_contact', label: 'All' }],
-      pages: [{ name: 'b27627_contact_page', label: 'Contact page' }],
-      dashboards: [{ name: 'b27627_home', label: 'Home' }],
-    },
+    app: env('app', { name: APP, label: 'App' }),
+    objects: [
+      env('object', { ...contact, label }, { sortability: { fields: { name: { sortable: true } } } }),
+      env('object', task),
+    ],
+    views: [env('view', { name: 'b27627_contact.all', object: 'b27627_contact', label: 'All' } as { name: string })],
+    pages: [env('page', { name: 'b27627_contact_page', label: 'Contact page' } as { name: string })],
+    dashboards: [env('dashboard', { name: 'b27627_home', label: 'Home' } as { name: string })],
   };
 }
 
@@ -212,7 +213,7 @@ describe('objectstack#27627 — the app metadata bundle', () => {
     expect(held[2].path).toBe(BUNDLE_PATH);
     expect(held[2].headers['if-none-match']).toBe('W/"b1"');
     const next = bundle();
-    next.data.pages = [{ name: 'b27627_contact_page', label: 'Renamed' }];
+    next.pages = [{ type: 'page', name: 'b27627_contact_page', item: { name: 'b27627_contact_page', label: 'Renamed' } }];
     held[2].respond(200, next, { ETag: 'W/"b2"' });
     expect((await reread as any).item.label).toBe('Renamed');
   });
@@ -233,11 +234,35 @@ describe('objectstack#27627 — the app metadata bundle', () => {
     expect((await reread as any).label).toBe('Kontakt');
   });
 
+  it("a bundled object carries its envelope's sortability, as its by-name read does", async () => {
+    const { ds, held } = await heldAdapter();
+    const entered = ds.loadAppBundle(APP);
+    await drain();
+    held[0].respond(200, bundle(), { ETag: '"b1"' });
+    await entered;
+    expect(readObjectSortability(await ds.getObjectSchema('b27627_contact'))?.fields.name?.sortable).toBe(true);
+  });
+
+  it('a bundle served with no validator (`no-store`) is downloaded again, never revalidated', async () => {
+    const { ds, held } = await heldAdapter();
+    const first = ds.loadAppBundle(APP);
+    await drain();
+    held[0].respond(200, bundle(), { 'Cache-Control': 'private, no-store' });
+    await first;
+    const again = ds.loadAppBundle(APP);
+    await drain();
+    expect(held[1].path).toBe(BUNDLE_PATH);
+    expect(held[1].headers['if-none-match']).toBeUndefined();
+    held[1].respond(200, bundle());
+    await again;
+  });
+
   it('a refused bundle leaves every read to its by-name route', async () => {
     const { ds, held } = await heldAdapter();
     const first = ds.loadAppBundle(APP);
     await drain();
-    held[0].respond(404, { success: false, error: { code: 'NOT_FOUND', message: 'No such app' } });
+    // An app the caller cannot read refuses the whole bundle with the app read's own answer.
+    held[0].respond(403, { success: false, error: { code: 'PERMISSION_DENIED', message: 'Not your app' } });
     await first;
 
     const read = ds.getObjectSchema('b27627_contact');

@@ -21,6 +21,11 @@
  * approval / lock / record read, one wave of data requests; the badges draw the
  * payload's totals; and the record a drawer step shows next is asked ahead, so stepping to it
  * asks nothing for the record it opens.
+ *
+ * And once the app's metadata bundle is in (`loadAppBundle`, on app entry), the
+ * object definitions the blocks read come from it: a record open in a warm
+ * session asks the page and no metadata at all, and a cold one adds at most
+ * the one bundle request.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -106,7 +111,14 @@ function pageAnswer(id: string, body: any) {
   };
 }
 
+const APP = 'demo';
+const BUNDLE = `/api/v1/meta/app/${APP}/bundle`;
+
 function answerFor(h: Held): unknown {
+  if (h.path === BUNDLE) {
+    const env = (type: string, item: { name: string }) => ({ type, name: item.name, item });
+    return { app: env('app', { name: APP }), objects: ALL.map((o) => env('object', o)), views: [], pages: [], dashboards: [] };
+  }
   const meta = /\/api\/v1\/meta\/object\/([^/?]+)/.exec(h.path);
   if (meta) return { success: true, data: ALL.find((o) => o.name === meta[1]) ?? null };
   const page = /\/api\/v1\/data\/[^/?]+\/([^/?]+)\/page$/.exec(h.path);
@@ -206,9 +218,9 @@ describe('objectstack#27627 — one request opens a record page', () => {
     const data = dataRequests(held);
     expect(data.map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
     expect(held.filter((h) => /[?&](\$?top)=1\b/.test(h.path))).toEqual([]);
-    // Every DATA request goes out in the first wave. The object definitions the
-    // blocks read (`/meta/object/…`) are the app bundle's to serve once per
-    // session; until then they are read as before, beside it.
+    // Every DATA request goes out in the first wave. With no app entered there
+    // is no metadata bundle, so the object definitions the blocks read
+    // (`/meta/object/…`) are read by name beside it; with one, see below.
     expect(data.every((h) => h.wave === 1)).toBe(true);
 
     // The request names what the page draws: its four related lists, the
@@ -299,6 +311,31 @@ describe('objectstack#27627 — one request opens a record page', () => {
       `/api/v1/data/${OBJECT}/c2/page`,
     ]);
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
+  });
+
+  it('a cold session, entering the app as the record opens, adds one bundle request and no by-name metadata read', async () => {
+    const { held, state, open, ds } = await boot();
+    void ds.loadAppBundle(APP);
+    open('c1');
+    await runWaves(held, state);
+    expect(held.filter(isMeta).map((h) => `${h.method} ${h.path}`)).toEqual([`GET ${BUNDLE}`]);
+    expect(dataRequests(held).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
+    // Both go out in the first wave: nothing waits on the other.
+    expect(held.every((h) => h.wave === 1)).toBe(true);
+  });
+
+  it('a warm session opens a record with one page request and zero metadata requests', async () => {
+    const { held, state, open, ds } = await boot();
+    // The app was entered earlier in the session; no record was opened yet,
+    // so no object definition was ever read by name.
+    const entered = ds.loadAppBundle(APP);
+    await runWaves(held, state);
+    await entered;
+    held.length = 0;
+    state.wave = 1;
+    open('c1');
+    await runWaves(held, state);
+    expect(held.map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
   });
 
   it('in a drawer, an adapter without the payload keeps the count warm-up: each of the next record\'s counts is asked once', async () => {

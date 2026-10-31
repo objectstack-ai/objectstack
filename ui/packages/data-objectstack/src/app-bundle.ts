@@ -30,11 +30,11 @@
  * asks the server and reports what it answered.
  */
 
-/** One bundled item, as the by-name route's envelope would carry it. */
+/** One bundled item. */
 export interface AppBundleEntry {
-  /** The item's document. */
+  /** The item's document (the envelope's `item`). */
   item: unknown;
-  /** The envelope keys the by-name route serves beside `item` (an object's `sortability`, `disabledActions`). */
+  /** The whole envelope its by-name read answers (`type`, `name`, `item`, an object's `sortability`, …). */
   envelope: Record<string, unknown>;
 }
 
@@ -164,7 +164,7 @@ export class AppBundleStore {
   }
 }
 
-/** Where a bundle answer lists each metadata type. */
+/** Where the bundle lists each metadata type. */
 const BUNDLE_LISTS: ReadonlyArray<readonly [key: string, type: string]> = [
   ['objects', 'object'],
   ['views', 'view'],
@@ -173,37 +173,29 @@ const BUNDLE_LISTS: ReadonlyArray<readonly [key: string, type: string]> = [
 ];
 
 /**
- * Index a bundle answer's data by type and name. Each listed part is either the
- * by-name route's envelope (`{ item, … }`) or the bare document; the app rides
- * under `app`.
+ * Index the bundle's answer (`AppMetadataBundleResponse`, `@objectstack/spec/api`)
+ * by type and name. The answer is bare, as the `/meta` item reads answer: the
+ * app under `app`, and the other items listed under `objects`, `views`,
+ * `pages` and `dashboards`. Every member is the envelope its own
+ * `GET /meta/{type}/{name}` answers (`GetMetaItemResponse`), so it is kept
+ * whole and handed back as that read's answer.
  */
-export function indexAppBundle(data: unknown): AppBundleItems {
+export function indexAppBundle(body: unknown): AppBundleItems {
   const items: AppBundleItems = new Map();
-  if (!data || typeof data !== 'object') return items;
-  const bag = data as Record<string, unknown>;
-  const put = (type: string, part: unknown) => {
-    const entry = toEntry(part);
-    if (!entry) return;
-    const name = (entry.item as { name?: unknown }).name;
-    if (typeof name !== 'string' || !name) return;
+  if (!body || typeof body !== 'object') return items;
+  const bag = body as Record<string, unknown>;
+  const put = (type: string, member: unknown) => {
+    if (!member || typeof member !== 'object') return;
+    const envelope = member as Record<string, unknown>;
+    if (typeof envelope.name !== 'string' || !envelope.name) return;
     let byName = items.get(type);
     if (!byName) items.set(type, (byName = new Map()));
-    byName.set(name, entry);
+    byName.set(envelope.name, { item: envelope.item, envelope });
   };
-  if (bag.app !== undefined) put('app', bag.app);
+  put('app', bag.app);
   for (const [key, type] of BUNDLE_LISTS) {
     const list = bag[key];
-    if (Array.isArray(list)) for (const part of list) put(type, part);
+    if (Array.isArray(list)) for (const member of list) put(type, member);
   }
   return items;
-}
-
-function toEntry(part: unknown): AppBundleEntry | undefined {
-  if (!part || typeof part !== 'object') return undefined;
-  const p = part as Record<string, unknown>;
-  if ('item' in p) {
-    if (!p.item || typeof p.item !== 'object') return undefined;
-    return { item: p.item, envelope: p };
-  }
-  return { item: p, envelope: { item: p } };
 }

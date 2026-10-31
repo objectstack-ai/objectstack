@@ -4495,7 +4495,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       const [type, name, options] = args;
       if (options !== undefined) return original(...args);
       return this.appBundles.read(type, name).then((entry) =>
-        entry ? ({ type, name, ...structuredClone(entry.envelope) } as Awaited<ReturnType<typeof original>>) : original(type, name),
+        entry ? (structuredClone(entry.envelope) as Awaited<ReturnType<typeof original>>) : original(type, name),
       );
     }) as typeof meta.getItem;
 
@@ -4534,9 +4534,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     const res = await this.fetchImpl(url, { method: 'GET', headers, cache: 'no-store' });
     if (res.status === 304) return { status: 'unchanged' };
     if (!res.ok) return { status: 'absent' };
-    const body: any = await res.json();
-    const data = body && typeof body === 'object' && 'success' in body && 'data' in body ? body.data : body;
-    return { status: 'fresh', etag: res.headers.get('etag') ?? undefined, items: indexAppBundle(data) };
+    return { status: 'fresh', etag: res.headers.get('etag') ?? undefined, items: indexAppBundle(await res.json()) };
   }
 
   /**
