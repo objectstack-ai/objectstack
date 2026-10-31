@@ -49,6 +49,7 @@ import { MEMBERSHIP_REACH_NAMES, lowerRequiresMembershipReach } from '../identit
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
@@ -2018,6 +2019,8 @@ const actionObject = () => strictObject({
   // parse. This is the LAST name on the undeclared-envelope debt list the
   // structural walk opened with eight of.
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 });
 
 /**

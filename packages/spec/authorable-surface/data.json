@@ -541,6 +541,7 @@
     "data/Mapping:label",
     "data/Mapping:mode",
     "data/Mapping:name",
+    "data/Mapping:overrides",
     "data/Mapping:sourceFormat",
     "data/Mapping:targetObject",
     "data/Mapping:upsertKey",

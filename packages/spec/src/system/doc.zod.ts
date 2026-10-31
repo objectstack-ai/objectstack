@@ -27,6 +27,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 
 export const DocSchema = lazySchema(() => strictObject({
   surface: 'this doc',
@@ -151,6 +152,8 @@ export const DocSchema = lazySchema(() => strictObject({
   // on every parse — the inverse drift that made `permission` 422 when it went
   // strict (#4001 findings log, entry 2).
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 }));
 export type Doc = z.input<typeof DocSchema>;
 export type DocTranslation = NonNullable<Doc['translations']>[string];
