@@ -20,6 +20,7 @@ const ja = {
       manage_org_users: "組織ユーザーの管理",
       manage_metadata: "メタデータ管理",
       manage_mailboxes: "メールボックスの管理",
+      manage_connector_connections: "コネクタ接続の管理",
       manage_platform_settings: "プラットフォーム設定の管理",
       setup_access: "設定へのアクセス",
       setup_write: "設定の書き込み",

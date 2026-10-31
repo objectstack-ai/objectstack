@@ -31,7 +31,12 @@ function isStringRecord(v: unknown): v is Record<string, string> {
  * automation service invokes it for each `provider: 'rest'` declarative instance,
  * turning `providerConfig.baseUrl` (+ the resolved `auth`) into the same
  * `{ def, handlers }` bundle {@link createRestConnector} produces for a
- * hand-wired REST connector — one `request` action over static-auth HTTP.
+ * hand-wired REST connector — one `request` action over HTTP.
+ *
+ * A grant-bearing instance (`oauth2`, `app-credential`) arrives with
+ * `ctx.credentialHandle` instead of `ctx.auth` (ADR-0143 D4), and the
+ * transport asks it on every request; this package registers the factory
+ * with `{ credentialHandle: true }` to say so (`./connector-rest-plugin.ts`).
  *
  * Hard-fails on invalid config (missing `baseUrl`), so a misconfigured instance
  * fails boot loudly rather than materializing a dead connector.
@@ -59,6 +64,8 @@ export function createRestProviderFactory(deps: RestProviderDeps = {}): Connecto
       auth,
       // ADR-0143 D2.3 — a `signed` instance's signer, applied to every attempt.
       requestSigner: ctx.requestSigner,
+      // ADR-0143 D4 — a grant-bearing instance's per-dispatch credential.
+      credentialHandle: ctx.credentialHandle,
       defaultHeaders: isStringRecord(cfg.defaultHeaders) ? cfg.defaultHeaders : undefined,
       // ADR-0049 · #18975 — the authored resilience policy, already resolved by
       // the materializer, reaches the transport this bundle closes over.

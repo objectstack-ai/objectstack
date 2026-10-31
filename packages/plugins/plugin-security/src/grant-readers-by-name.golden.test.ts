@@ -383,6 +383,7 @@ const SINGLE: unknown = {
         positions: ['everyone', 'platform_admin'],
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [
+          'manage_connector_connections',
           'manage_mailboxes',
           'manage_metadata',
           'manage_platform_settings',
@@ -475,6 +476,7 @@ const WALLED: unknown = {
         positions: ['everyone', 'platform_admin'],
         posture: 'PLATFORM_ADMIN',
         systemPermissions: [
+          'manage_connector_connections',
           'manage_mailboxes',
           'manage_metadata',
           'manage_platform_settings',

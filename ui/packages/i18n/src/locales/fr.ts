@@ -20,6 +20,7 @@ const fr = {
       manage_org_users: "Gérer les utilisateurs de l'organisation",
       manage_metadata: "Gérer les métadonnées",
       manage_mailboxes: "Gérer les boîtes aux lettres",
+      manage_connector_connections: "Gérer les connexions des connecteurs",
       manage_platform_settings: "Gérer les paramètres de la plateforme",
       setup_access: "Accès à la configuration",
       setup_write: "Écriture des paramètres",

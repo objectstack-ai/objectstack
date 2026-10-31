@@ -20,6 +20,7 @@ const ar = {
       manage_org_users: "إدارة مستخدمي المؤسسة",
       manage_metadata: "إدارة البيانات الوصفية",
       manage_mailboxes: "إدارة صناديق البريد",
+      manage_connector_connections: "إدارة اتصالات الموصلات",
       manage_platform_settings: "إدارة إعدادات المنصة",
       setup_access: "الوصول إلى الإعداد",
       setup_write: "كتابة الإعدادات",

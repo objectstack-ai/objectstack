@@ -20,6 +20,7 @@ const ko = {
       manage_org_users: "조직 사용자 관리",
       manage_metadata: "메타데이터 관리",
       manage_mailboxes: "메일함 관리",
+      manage_connector_connections: "커넥터 연결 관리",
       manage_platform_settings: "플랫폼 설정 관리",
       setup_access: "설정 접근",
       setup_write: "설정 쓰기",

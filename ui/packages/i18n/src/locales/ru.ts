@@ -20,6 +20,7 @@ const ru = {
       manage_org_users: "Управление пользователями организации",
       manage_metadata: "Управление метаданными",
       manage_mailboxes: "Управление почтовыми ящиками",
+      manage_connector_connections: "Управление подключениями коннекторов",
       manage_platform_settings: "Управление настройками платформы",
       setup_access: "Доступ к настройке",
       setup_write: "Запись настроек",

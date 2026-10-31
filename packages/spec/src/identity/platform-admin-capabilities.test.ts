@@ -49,6 +49,14 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES — the one platform-admin list plugin-
     expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'view_all_audit_log')?.scope).toBe('org');
   });
 
+  it('carries the connector connection capability, declared org-scoped (ADR-0143 D5)', () => {
+    // Platform administrators hold it by default through this grant; the
+    // organization administrator's shipped sets withhold it, pinned on the
+    // seeded sets in plugin-security's `default-permission-sets.test.ts`.
+    expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain('manage_connector_connections');
+    expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'manage_connector_connections')?.scope).toBe('org');
+  });
+
   it('every granted system permission is a declared built-in capability (ADR-0066 registry)', () => {
     const unknown = (ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []).filter(
       (name) => !PLATFORM_CAPABILITY_NAMES.has(name),

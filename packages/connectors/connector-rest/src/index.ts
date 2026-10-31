@@ -8,8 +8,9 @@
  * dispatch node + an empty connector registry; this plugin populates the
  * registry with a `rest` connector exposing a `request` action.
  *
- * Static auth only (`none` / `api-key` / `basic` / `bearer`); OAuth2 refresh,
- * credential vaulting, and multi-tenant lifecycle are the enterprise tier.
+ * Static auth (`none` / `api-key` / `basic` / `bearer`), a request signer
+ * (ADR-0143 D2.3), or a per-dispatch credential handle for the grant-bearing
+ * kinds `oauth2` and `app-credential` (ADR-0143 D4, open tier per D1).
  */
 
 export {

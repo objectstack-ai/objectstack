@@ -20,6 +20,7 @@ const pt = {
       manage_org_users: "Gerenciar usuários da organização",
       manage_metadata: "Gerenciar metadados",
       manage_mailboxes: "Gerenciar caixas de correio",
+      manage_connector_connections: "Gerenciar conexões de conectores",
       manage_platform_settings: "Gerenciar configurações da plataforma",
       setup_access: "Acesso à configuração",
       setup_write: "Gravação de configurações",

@@ -4,8 +4,9 @@
 // /automation/connectors/:name/connection` and `GET /automation/connectors/
 // oauth/callback`.
 //
-// What is pinned here is the DOOR: who may reach it (`manage_metadata`, under
-// every posture — a connection belongs to its organization), what it accepts
+// What is pinned here is the DOOR: who may reach it (the organization-scoped
+// `manage_connector_connections`, and not the platform-scoped `manage_metadata`,
+// under every posture — a connection belongs to its organization), what it accepts
 // (no query parameter on the connection routes; the closed authorization-
 // response set on the callback, each once), how the service's refusals reach
 // the wire, and that a token never travels back out. The connect flow, the
@@ -14,9 +15,11 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
+
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
-import { CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS } from './automation.js';
+import { CONNECTOR_CONNECTION_CAPABILITY, CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS } from './automation.js';
 
 /** An authorization code as a callback carries it — a dummy. */
 const AUTH_CODE = 'dummy-authorization-code';
@@ -52,15 +55,24 @@ function boot(opts: { posture?: 'single' | 'group' | 'isolated'; service?: Recor
     return { dispatcher: new HttpDispatcher(kernel as never), get, begin, complete, revoke };
 }
 
-const ADMIN = (): HttpProtocolContext => ({
+/** A caller holding exactly `systemPermissions`, in organization `org_a`. */
+const HOLDING = (systemPermissions: string[], userId = 'u_admin'): HttpProtocolContext => ({
     request: {},
-    executionContext: { userId: 'u_admin', tenantId: 'org_a', positions: [], permissions: [], systemPermissions: ['manage_metadata'] },
+    executionContext: { userId, tenantId: 'org_a', positions: [], permissions: [], systemPermissions },
 } as HttpProtocolContext);
 
-const MEMBER = (): HttpProtocolContext => ({
-    request: {},
-    executionContext: { userId: 'u_member', tenantId: 'org_a', positions: [], permissions: [], systemPermissions: [] },
-} as HttpProtocolContext);
+/** The connection administrator: the capability, and nothing else. */
+const ADMIN = (): HttpProtocolContext => HOLDING(['manage_connector_connections']);
+
+const MEMBER = (): HttpProtocolContext => HOLDING([], 'u_member');
+
+/**
+ * The organization administrator's shipped grant (`organization_admin` in
+ * plugin-security's default sets), transcribed: it does not carry the
+ * connection capability, which an organization administrator holds only by
+ * explicit grant.
+ */
+const ORG_ADMIN_GRANT = ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'];
 
 const ANONYMOUS = (): HttpProtocolContext => ({ request: {}, executionContext: {} } as HttpProtocolContext);
 
@@ -88,13 +100,59 @@ describe('ADR-0143 D5 — connector connection door: who may reach it', () => {
         ['POST', (h: Harness) => connection(h, 'POST', MEMBER())],
         ['DELETE', (h: Harness) => connection(h, 'DELETE', MEMBER())],
         ['GET callback', (h: Harness) => callback(h, MEMBER(), { code: AUTH_CODE, state: 's' })],
-    ] as const)('%s without `manage_metadata` is refused 403 and never reaches the service', async (_verb, call) => {
+    ] as const)('%s without `manage_connector_connections` is refused 403 and never reaches the service', async (_verb, call) => {
         const h = boot();
         const { response } = await call(h);
         expect(statusOf(response)).toBe(403);
         expect(codeOf(response)).toBe('PERMISSION_DENIED');
-        expect(messageOf(response)).toContain('`manage_metadata`');
+        expect(messageOf(response)).toContain('`manage_connector_connections`');
         for (const member of [h.get, h.begin, h.complete, h.revoke]) expect(member).not.toHaveBeenCalled();
+    });
+
+    it('asks the organization-scoped capability the spec declares for it', () => {
+        expect(CONNECTOR_CONNECTION_CAPABILITY).toBe('manage_connector_connections');
+        expect(PLATFORM_CAPABILITIES.find((c) => c.name === CONNECTOR_CONNECTION_CAPABILITY)?.scope).toBe('org');
+    });
+
+    const EVERY_MEMBER = [
+        ['GET', (h: Harness, ctx: HttpProtocolContext) => connection(h, 'GET', ctx), (h: Harness) => h.get],
+        ['POST', (h: Harness, ctx: HttpProtocolContext) => connection(h, 'POST', ctx), (h: Harness) => h.begin],
+        ['DELETE', (h: Harness, ctx: HttpProtocolContext) => connection(h, 'DELETE', ctx), (h: Harness) => h.revoke],
+        ['GET callback', (h: Harness, ctx: HttpProtocolContext) => callback(h, ctx, { code: AUTH_CODE, state: 's' }), (h: Harness) => h.complete],
+    ] as const;
+
+    it.each(EVERY_MEMBER)('%s: the platform-scoped `manage_metadata` alone no longer admits the caller', async (_verb, call) => {
+        for (const grant of [['manage_metadata'], ['manage_metadata', 'studio.access', 'setup.access', 'manage_users', 'manage_platform_settings']]) {
+            const h = boot();
+            const { response } = await call(h, HOLDING(grant));
+            expect(statusOf(response)).toBe(403);
+            expect(codeOf(response)).toBe('PERMISSION_DENIED');
+            for (const member of [h.get, h.begin, h.complete, h.revoke]) expect(member).not.toHaveBeenCalled();
+        }
+    });
+
+    it.each(EVERY_MEMBER)('%s: an organization administrator on the shipped grant is refused; granted the capability, admitted', async (_verb, call, member) => {
+        const refused = boot();
+        const denied = await call(refused, HOLDING(ORG_ADMIN_GRANT));
+        expect(statusOf(denied.response)).toBe(403);
+        expect(codeOf(denied.response)).toBe('PERMISSION_DENIED');
+        for (const m of [refused.get, refused.begin, refused.complete, refused.revoke]) expect(m).not.toHaveBeenCalled();
+
+        const admitted = boot();
+        const allowed = await call(admitted, HOLDING([...ORG_ADMIN_GRANT, 'manage_connector_connections']));
+        expect(statusOf(allowed.response)).toBe(200);
+        expect(member(admitted)).toHaveBeenCalledTimes(1);
+        expect(member(admitted)).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ tenantId: 'org_a' }) }));
+    });
+
+    it('the system context passes without the capability; an absent capability list is refused (fail-closed)', async () => {
+        const system = boot();
+        const sys = { request: {}, executionContext: { userId: 'system', isSystem: true } } as HttpProtocolContext;
+        expect(statusOf((await connection(system, 'GET', sys)).response)).toBe(200);
+        const absent = boot();
+        const noList = { request: {}, executionContext: { userId: 'u_x', tenantId: 'org_a' } } as HttpProtocolContext;
+        expect(statusOf((await connection(absent, 'GET', noList)).response)).toBe(403);
+        expect(absent.get).not.toHaveBeenCalled();
     });
 
     it('a walled posture does not refuse the holder: a connection belongs to its organization', async () => {

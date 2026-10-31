@@ -931,15 +931,23 @@ export const CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS: readonly string[] = Object.f
     'code', 'state', 'error', 'error_description', 'error_uri', 'iss',
 ]);
 
-const CONNECTOR_CONNECTION_DENY_MESSAGE =
-    `Connecting, reconnecting or revoking a connector instance requires the \`${FLOW_AUTHORING_CAPABILITY}\` capability.`;
-
 /**
  * ADR-0143 D5 — "who may connect, reconnect or revoke is a capability check
- * the server slice declares": `manage_metadata`, the capability the
- * credential door above asks for the same instances, fail-closed, only
- * `isSystem` bypassing. The callback is gated too: the browser that lands on
- * it is the administrator's, carrying the session that began the connect.
+ * the server slice declares". The organization-scoped capability the spec
+ * declares for exactly this door (`PLATFORM_CAPABILITIES`). Connecting a vendor
+ * account is an organization act (Q1 = A), so the door asks this capability
+ * alone: the platform-scoped `manage_metadata` does not admit a caller here.
+ */
+export const CONNECTOR_CONNECTION_CAPABILITY = 'manage_connector_connections';
+
+const CONNECTOR_CONNECTION_DENY_MESSAGE =
+    `Connecting, reconnecting or revoking a connector instance, or reading its connection, requires the \`${CONNECTOR_CONNECTION_CAPABILITY}\` capability.`;
+
+/**
+ * ADR-0143 D5 — the connection door's capability gate:
+ * {@link CONNECTOR_CONNECTION_CAPABILITY}, fail-closed, only `isSystem`
+ * bypassing. The callback is gated too: the browser that lands on it is the
+ * administrator's, carrying the session that began the connect.
  */
 function refuseUngrantedConnectorConnectionAccess(
     deps: DomainHandlerDeps,
@@ -947,7 +955,7 @@ function refuseUngrantedConnectorConnectionAccess(
 ): HttpDispatcherResult | undefined {
     const ec: any = context?.executionContext;
     if (ec?.isSystem) return undefined;
-    if (new Set<string>(ec?.systemPermissions ?? []).has(FLOW_AUTHORING_CAPABILITY)) return undefined;
+    if (new Set<string>(ec?.systemPermissions ?? []).has(CONNECTOR_CONNECTION_CAPABILITY)) return undefined;
     return {
         handled: true,
         response: deps.error(CONNECTOR_CONNECTION_DENY_MESSAGE, FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
@@ -3084,8 +3092,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (refusal) return refusal;
     }
 
-    // ADR-0143 D5 — CONNECTOR CONNECTION GATE: `manage_metadata`, ahead of the
-    // service probe and of any query check, as above. No walled refusal: a
+    // ADR-0143 D5 — CONNECTOR CONNECTION GATE: `manage_connector_connections`,
+    // the organization-scoped capability, ahead of the service probe and of
+    // any query check, as above. No walled refusal: a
     // connection belongs to its organization (Q1 = A), so it is served under
     // every tenancy posture.
     if (isConnectorConnectionDoor(parts, m)) {
