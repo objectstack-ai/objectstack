@@ -2354,6 +2354,8 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
                   ...(calendarCfg.titleField ? { titleField: calendarCfg.titleField } : {}),
                   ...(calendarCfg.colorField ? { colorField: calendarCfg.colorField } : {}),
                   ...(calendarCfg.allDayField ? { allDayField: calendarCfg.allDayField } : {}),
+                  // The date the calendar opens on, which `ObjectCalendar` seeds its date from.
+                  ...(calendarCfg.initialDate ? { initialDate: calendarCfg.initialDate } : {}),
                 },
               }
             : {}),
