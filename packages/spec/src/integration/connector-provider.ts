@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Connector, RetryConfigParsed } from './connector.zod';
-import type { ResolvedConnectorAuth } from '../shared/connector-auth.zod';
+import type { ConnectorSigningScheme, ResolvedConnectorAuth } from '../shared/connector-auth.zod';
 
 /**
  * Connector **provider** contract (ADR-0097).
@@ -170,7 +170,7 @@ export interface ConnectorRequestSigner {
   /** The connector instance this signer signs for. */
   readonly connector: string;
   /** The scheme it implements — a member of `ConnectorSigningSchemeSchema`. */
-  readonly scheme: string;
+  readonly scheme: ConnectorSigningScheme;
   /**
    * Sign one request. Called once per attempt, so a retried request carries a
    * fresh signature. Throws when the request cannot be signed (a body that is

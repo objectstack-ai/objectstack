@@ -1288,6 +1288,7 @@ export {
   ConnectorAppCredentialVendorSchema,
   ConnectorInstanceSignedAuthSchema,
   ConnectorInstanceSignedAliyunAcs3AuthSchema,
+  ConnectorInstanceSignedTencentCloudTc3AuthSchema,
   ConnectorSigningSchemeSchema,
 } from '../shared/connector-auth.zod';
 export type {
@@ -1309,5 +1310,6 @@ export type {
   ConnectorAppCredentialVendor,
   ConnectorInstanceSignedAuth,
   ConnectorInstanceSignedAliyunAcs3Auth,
+  ConnectorInstanceSignedTencentCloudTc3Auth,
   ConnectorSigningScheme,
 } from '../shared/connector-auth.zod';
