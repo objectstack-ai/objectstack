@@ -138,7 +138,10 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
     });
 
     it('an explicit searchFields narrowing does not rescue it — the allowed set is empty, so the fallback is too', async () => {
-        for (const searchFields of [['title'], ['book'], ['nope'], []]) {
+        // [#27732] An empty override is no longer a narrowing to rescue: it
+        // names no field, and is refused before the expansion
+        // (engine-empty-search-fields-refusal.test.ts).
+        for (const searchFields of [['title'], ['book'], ['nope']]) {
             const err: any = await engine.find('lib_loan', { search: 'Dune', searchFields }).then(() => null, (e) => e);
             expect(err, `searchFields ${JSON.stringify(searchFields)}`).toMatchObject(REFUSAL);
         }
@@ -173,14 +176,14 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
         }
     });
 
-    it('control: an object with a stored text field still filters, and an override intersected to nothing falls back to its set', async () => {
+    it('control: an object with a stored text field still filters, and an override intersected to nothing is refused', async () => {
         expect((await engine.find('lib_book', { search: 'Dune' })).map((r) => r.id)).toEqual(['b1']);
         expect(await engine.find('lib_book', { search: 'zzzz-nothing' })).toEqual([]);
         expect(await engine.count('lib_book', { search: 'zzzz-nothing' })).toBe(0);
-        // A direct engine caller naming only fields outside the allowed set: the
-        // tolerant intersection falls back to the allowed set — a FILTERED
-        // answer, never every row.
-        expect((await engine.find('lib_book', { search: 'emma', searchFields: ['nope'] })).map((r) => r.id)).toEqual(['b2']);
+        // [#28120] A direct engine caller naming only fields outside the allowed
+        // set is refused, never answered over the whole allowed set.
+        await expect(engine.find('lib_book', { search: 'emma', searchFields: ['nope'] }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'searchFields', field: 'nope' });
     });
 });
 

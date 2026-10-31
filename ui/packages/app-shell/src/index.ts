@@ -282,10 +282,11 @@ export { useBootstrapStatus, type BootstrapStatus } from './console/auth/bootstr
 // arrived from an invitation link (#25886), and the signed-out invitation
 // preview both login and both register pages greet that visitor with (#26473),
 // or answer with the "no longer valid" notice when the server no longer knows
-// the invitation (#27509).
+// the invitation (#27509), and the plain login's hint to open the link.
 export {
   InvitationSignUpPrompt,
   InvitationGoneNotice,
+  InvitationLinkHint,
   invitationArrivalCopy,
   useInvitationArrival,
   useInvitationPreview,

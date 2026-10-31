@@ -18,6 +18,7 @@ import type { FlowParsed, FlowNodeParsed, FlowEdgeParsed, FlowRegionParsed } fro
 import { findRegionEntry } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult } from '@objectstack/spec/contracts';
 import { isGuardRefusal } from './guard-refusal.js';
+import { gradeAfterTenantCurrencyReadFault } from './builtin/template.js';
 import { attachCarriedRefusal, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
@@ -251,7 +252,13 @@ export async function executeNode(
             } else {
                 result = await executor.execute(node, variables, context);
             }
-        } catch (execErr: unknown) {
+        } catch (thrown: unknown) {
+            // [#28056] A text slot refused for want of the tenant default
+            // currency, when this run's read of it FAILED, is a runtime
+            // failure and no guard refusal: the read learned nothing, and the
+            // run can succeed once it does. Graded first, so the step, `$error`
+            // and the routing below all read the graded failure.
+            const execErr = gradeAfterTenantCurrencyReadFault(thrown, variables, context);
             const errMsg = execErr instanceof Error ? execErr.message : String(execErr);
             // [#18881] ONE region refusal is ONE failure. The refusal names
             // the region node whose body could not carry the pause, and

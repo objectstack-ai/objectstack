@@ -113,7 +113,7 @@ through the metadata API.
 |:---|:---|:---|
 | `script` | `IDataEngine.executeAction(object, target, ctx)` — the same call Studio makes | open (MCP) + ObjectOS |
 | `flow` | automation flow runner — `execute(target, automationContext)` (caller identity forwarded so `runAs` engages) | open (MCP) + ObjectOS; needs the `automation` service registered |
-| `api` | same-origin `target` (a path starting with `/`): forwarded in-process through the action door to that target, after the door's gates, with the caller's own credentials; a credential rotation the target emits comes back as the bearer-lane headers only (`set-auth-token` / `set-admin-session-token`), never a `Set-Cookie` line | open (MCP) + ObjectOS; an `api` action whose `target` is on another origin stays browser-only and is not listed |
+| `api` | same-origin `target` (a path starting with `/`): forwarded in-process through the action door to that target, after the door's gates, with the caller's own credentials; a credential rotation the target emits comes back as the bearer-lane headers only (`set-auth-token` / `set-admin-session-token`), never a `Set-Cookie` line. A caller authenticated with an API key is refused `401` before the forward when the `target` is an identity route (`/api/v1/auth/…`), which reads a signed-in session only | open (MCP) + ObjectOS; an `api` action whose `target` is on another origin stays browser-only and is not listed |
 
 Console-only types (`url`, `modal`, `form`) are always skipped.
 

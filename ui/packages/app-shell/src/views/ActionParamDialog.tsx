@@ -83,8 +83,10 @@ import {
   EXPANDABLE_FIELD_TYPES,
 } from '@object-ui/core';
 import { usePredicateScope } from '@object-ui/react';
-import { getLazyFieldWidget, fileIdOf } from '@object-ui/fields';
+import { getLazyFieldWidget, fileIdOf, buildValidationRules, resolveParamWidgetType } from '@object-ui/fields';
+import { useInitialFieldFocus } from '@object-ui/plugin-form';
 import { paramToField, paramDegradesWithoutTarget } from '../utils/paramToField.js';
+import { useActionDialogReturnFocus } from './actionDialogReturnFocus.js';
 
 export interface ParamDialogState {
   open: boolean;
@@ -299,6 +301,20 @@ export function serializeParamValues(
 }
 
 /** Skeleton shown while a lazy field widget's chunk loads. */
+/**
+ * The i18n key of the format rule a typed value breaks, or `null`. The rule is
+ * the one the object form checks the same field type with
+ * (`buildValidationRules`: email and url), so a param and a form field of one
+ * type accept the same values. An empty value is the required check's; a
+ * carried-over value is not the user's to fix.
+ */
+export function paramFormatErrorKey(param: ActionParamDef, value: unknown): string | null {
+  if (param.carryOver || typeof value !== 'string' || value === '') return null;
+  const pattern = buildValidationRules({ type: resolveParamWidgetType(param.type) })?.pattern;
+  if (!pattern || !(pattern.value instanceof RegExp)) return null;
+  return pattern.value.test(value) ? null : (pattern.messageKey ?? 'validation.pattern');
+}
+
 function WidgetFallback() {
   return <div className="h-9 w-full animate-pulse rounded-md bg-muted" aria-hidden="true" />;
 }
@@ -374,7 +390,7 @@ function CarryOverParam({
         </CollapsibleContent>
       </Collapsible>
       {error && <p className="text-xs text-destructive">{error}</p>}
-      {helpText && <p className="text-xs text-muted-foreground">{helpText}</p>}
+      {helpText && <p className="whitespace-pre-line text-xs text-muted-foreground">{helpText}</p>}
     </div>
   );
 }
@@ -424,7 +440,9 @@ function paramNeedsDependentValues(widgetType: string): boolean {
 export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProps) {
   const { t, language } = useObjectTranslation();
   const [values, setValues] = useState<Record<string, any>>({});
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  // Each failing param's message, as an i18n key (`actionDialog.requiredError`
+  // or a format rule's key), rendered with the param's label.
+  const [errors, setErrors] = useState<Record<string, string>>({});
   // Params whose upload widget (file/image/avatar) is mid-upload. Confirm stays
   // disabled while any is in flight so a param can't be submitted before its
   // fileId resolves (the value is only the fileId once the upload settles).
@@ -532,12 +550,16 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
     // legitimately collect, so the action is not launchable from here. Confirm
     // is disabled too; this guards keyboard submit (`6cc910b6d`).
     if (unresolvedKey) return;
-    // Validate required fields
-    const newErrors: Record<string, boolean> = {};
+    // Validate required fields, then the format of what was typed, so a
+    // malformed value is marked on its field instead of refused by the server.
+    const newErrors: Record<string, string> = {};
     for (const param of visibleParams) {
       if (param.required && isMissingValue(values[param.name])) {
-        newErrors[param.name] = true;
+        newErrors[param.name] = 'actionDialog.requiredError';
+        continue;
       }
+      const formatKey = paramFormatErrorKey(param, values[param.name]);
+      if (formatKey) newErrors[param.name] = formatKey;
     }
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -579,11 +601,20 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
 
   const updateValue = (name: string, value: any) => {
     setValues(prev => ({ ...prev, [name]: value }));
-    setErrors(prev => ({ ...prev, [name]: false }));
+    setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
   // A long list widens to two columns (objectui#12080 — see the header).
   const isLongList = visibleParams.length > NARROW_PARAM_MAX_COUNT;
+
+  // Focus opens on the first editable param (its widget is lazy, so it lands
+  // after the content mounts) and returns to the control that opened the
+  // dialog. Editable rows carry `data-field`; carry-over and unresolved rows
+  // do not, so a dialog of carried-over values opens on itself.
+  const initialFocus = useInitialFieldFocus();
+  const returnFocus = useActionDialogReturnFocus(state.open);
+  const errorText = (name: string, label: string): string | undefined =>
+    errors[name] ? t(errors[name], { label, field: label }) : undefined;
 
   return (
     <Dialog open={state.open} onOpenChange={(open) => {
@@ -592,7 +623,15 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
       {/* Bounded (objectui#12080): a flex column at most 90vh tall, in which
           only the body below can give up height (`min-h-0`) and scroll, so the
           header and the footer always stay on screen. */}
-      <DialogContent className={cn('flex max-h-[90vh] flex-col', isLongList && `sm:max-w-3xl ${DIALOG_VIEWPORT_GUTTER}`)}>
+      <DialogContent
+        ref={returnFocus.contentRef}
+        className={cn('flex max-h-[90vh] flex-col', isLongList && `sm:max-w-3xl ${DIALOG_VIEWPORT_GUTTER}`)}
+        onOpenAutoFocus={initialFocus.onOpenAutoFocus}
+        onCloseAutoFocus={(event) => {
+          initialFocus.onCloseAutoFocus(event);
+          returnFocus.onCloseAutoFocus(event);
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{state.title || t('actionDialog.title')}</DialogTitle>
           {/* `whitespace-pre-line` so a description composed of more than one
@@ -656,7 +695,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
                   helpText={param.helpText}
                   value={values[param.name]}
                   hint={t('actionDialog.carryOverHint')}
-                  error={errors[param.name] ? t('actionDialog.requiredError', { label: param.label }) : undefined}
+                  error={errorText(param.name, param.label)}
                 />
               );
             }
@@ -756,7 +795,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
             // instead of above it; help text appears underneath).
             if (field.type === 'boolean') {
               return (
-                <div key={param.name} className="grid gap-1">
+                <div key={param.name} className="grid gap-1" data-field={param.name}>
                   <div className="flex items-start gap-2">
                     <Suspense fallback={<div className="size-4 mt-0.5 animate-pulse rounded-sm bg-muted" aria-hidden="true" />}>
                       <Widget
@@ -796,17 +835,17 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
                     </Label>
                   </div>
                   {errors[param.name] && (
-                    <p className="text-xs text-destructive ml-6">{t('actionDialog.requiredError', { label: param.label })}</p>
+                    <p className="text-xs text-destructive ml-6">{errorText(param.name, param.label)}</p>
                   )}
                   {param.helpText && (
-                    <p className="text-xs text-muted-foreground ml-6">{param.helpText}</p>
+                    <p className="whitespace-pre-line text-xs text-muted-foreground ml-6">{param.helpText}</p>
                   )}
                 </div>
               );
             }
 
             return (
-            <div key={param.name} className="grid gap-2">
+            <div key={param.name} className="grid gap-2" data-field={param.name}>
               <Label htmlFor={param.name}>
                 {param.label}
                 {/* Visual-only (objectui#3299): `aria-required` on the widget is
@@ -822,6 +861,9 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
                   onChange={(v: unknown) => updateValue(param.name, v)}
                   field={field}
                   className={errors[param.name] ? 'border-destructive' : ''}
+                  // The widget's validation slot: it sets `aria-invalid` on its
+                  // control. The message itself is drawn below, once.
+                  error={errorText(param.name, param.label)}
                   // State channel for required (objectui#3299) — deliberately NOT
                   // the native `required` attribute (#3290 ruling: that would arm
                   // the browser's constraint-validation bubble alongside the
@@ -835,10 +877,11 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
               </Suspense>
 
               {errors[param.name] && (
-                <p className="text-xs text-destructive">{t('actionDialog.requiredError', { label: param.label })}</p>
+                <p className="text-xs text-destructive">{errorText(param.name, param.label)}</p>
               )}
               {param.helpText && (
-                <p className="text-xs text-muted-foreground">{param.helpText}</p>
+                // Kept line breaks: a help text may give one line per option.
+                <p className="whitespace-pre-line text-xs text-muted-foreground">{param.helpText}</p>
               )}
               {degradedPicker && !param.helpText && (
                 <p className="text-xs text-muted-foreground">

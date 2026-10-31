@@ -24,10 +24,15 @@ import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
 import { RecordListFaceProvider, ActiveListRecordProvider, type RecordListFace } from '@object-ui/components';
 import { ObjectGrid } from '../ObjectGrid';
+import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
+import { installExplainDouble } from './explainDouble';
 
 registerAllFields();
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const OBJECT = 'crm_lead';
 const OBJECT_FIELDS = {
@@ -103,6 +108,35 @@ describe('the grid beside a record pane (objectstack#27545)', () => {
     fireEvent.click(first);
     expect(onRowClick).toHaveBeenCalledTimes(1);
     expect(onRowClick.mock.calls[0][0]).toMatchObject({ id: 'l1' });
+  });
+
+  it('`columns`: the row-actions header keeps its name but draws no label, so the column is only as wide as its ⋮', async () => {
+    __clearRecordCrudVerdictCache();
+    installExplainDouble();
+    const mountWired = (face: RecordListFace) =>
+      render(
+        <ActionProvider>
+          <RecordListFaceProvider value={face}>
+            <ObjectGrid
+              schema={{ type: 'object-grid', objectName: OBJECT, columns: ['name', 'company'], data: { provider: 'value', items: ROWS } } as never}
+              onEdit={vi.fn()}
+              onDelete={vi.fn()}
+            />
+          </RecordListFaceProvider>
+        </ActionProvider>,
+      );
+    mountWired('columns');
+    await waitFor(() => expect(screen.getByText('Contoso')).toBeInTheDocument());
+    const narrowed = screen.getByRole('columnheader', { name: 'Actions' });
+    expect(narrowed.querySelector('.sr-only')?.textContent).toBe('Actions');
+    expect(narrowed.textContent?.replace('Actions', '').trim()).toBe('');
+    cleanup();
+    // CONTROL — no pane beside the list: the label is drawn.
+    mountWired('full');
+    await waitFor(() => expect(screen.getByText('Contoso')).toBeInTheDocument());
+    const full = screen.getByRole('columnheader', { name: 'Actions' });
+    expect(full.querySelector('.sr-only')).toBeNull();
+    expect(full.textContent).toContain('Actions');
   });
 
   it('marks the open record\'s row in both faces', async () => {

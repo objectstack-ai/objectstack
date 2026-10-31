@@ -225,6 +225,21 @@ describe('validate-ai-tool-references', () => {
     expect(control[0].message).toContain('list_package_docs');
   });
 
+  /**
+   * The `ask` agent's new-record draft signal (cloud#3383, ui half #28104): a
+   * skill naming `draft_record` resolves; a near name nobody registers does not.
+   */
+  it('resolves the service-ai-studio record-draft signal', () => {
+    expect(validateAiToolReferences({ skills: [{ name: 's', tools: ['draft_record'] }] })).toEqual([]);
+
+    const control = validateAiToolReferences({
+      skills: [{ name: 's', tools: ['draft_record', 'draft_records'] }],
+    });
+    expect(control).toHaveLength(1);
+    expect(control[0].path).toBe('skills[0].tools[1]');
+    expect(control[0].message).toContain('draft_records');
+  });
+
   it('reports stable paths and tolerates junk shapes', () => {
     const stack = {
       skills: [{ name: 's', tools: ['query_records', 'nope_tool'] }],

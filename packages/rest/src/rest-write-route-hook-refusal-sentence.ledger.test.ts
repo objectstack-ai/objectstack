@@ -300,6 +300,12 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
         called: 'protocol.findData', body: {},
         protocol: (error) => ({ findData: async () => { throw error(); } }),
     },
+    // [#27627] A read on a write verb too: a `beforeFind` hook refusing the
+    // record read is the record page payload's whole answer.
+    'POST /api/v1/data/:object/:id/page': {
+        called: 'protocol.getData', body: {},
+        protocol: (error) => ({ getData: async () => { throw error(); } }),
+    },
     'PATCH /api/v1/data/:object/:id': { called: 'protocol.updateData', body: { name: 'x' } },
     'DELETE /api/v1/data/:object/:id': { called: 'protocol.deleteData' },
     'POST /api/v1/data/:object/:id/clone': { called: 'protocol.cloneData', body: {} },

@@ -237,7 +237,7 @@ describe('objectui#3811 — console routes DefaultAcceptInvitationPage', () => {
       ).toBeInTheDocument();
     });
 
-    it('accept switches the user into the invited organization, then reloads onto the console ROOT', async () => {
+    it('accept switches the user into the invited organization, says they joined, and Continue reloads onto the console ROOT', async () => {
       // objectui#7373 moved this landing. It used to be an in-router
       // `navigate('/home')` — the environment launcher, reached without leaving
       // the SPA, which is exactly why it could not honour the declaration: the
@@ -260,6 +260,18 @@ describe('objectui#3811 — console routes DefaultAcceptInvitationPage', () => {
         (authState.switchOrganization as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
       );
 
+      // The page says the user joined, and waits for Continue (#27521 row 11):
+      // the confirmation is on the page, because the page load below would drop
+      // a toast before anyone read it.
+      const joined = await screen.findByTestId('accept-invitation-joined');
+      expect(joined).toHaveTextContent('Invitation accepted');
+      expect(joined).toHaveTextContent('Welcome to Acme Corp. You joined as Admin.');
+      expect(navigations).toHaveLength(0);
+      expect(toastSuccess).not.toHaveBeenCalled();
+      const proceed = screen.getByRole('button', { name: 'Continue' });
+      expect(proceed).toHaveFocus();
+      await user.click(proceed);
+
       // A full page load, not a router transition — the whole point is that
       // every data scope is re-seated on the new organization before anything
       // reads the app list.
@@ -281,8 +293,6 @@ describe('objectui#3811 — console routes DefaultAcceptInvitationPage', () => {
       // load were also performed.
       expect(screen.queryByTestId('home-sentinel')).not.toBeInTheDocument();
       expect(seen).not.toContain('/home');
-
-      expect(toastSuccess).toHaveBeenCalledWith('Invitation accepted');
     });
 
     it('decline rejects the invitation and lands on /organizations', async () => {

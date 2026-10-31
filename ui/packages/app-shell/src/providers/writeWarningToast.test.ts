@@ -37,6 +37,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DroppedFieldsEventSchema } from '@objectstack/spec/data';
 import { emitWriteWarning, type WriteWarningSink } from './writeWarningToast';
+import { claimAnswerWarnings } from '@object-ui/react';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { createI18n, loadBuiltInLocale, type TranslateFn } from '@object-ui/i18n';
 import type { DroppedFieldsEvent, WriteWarningEvent } from '@object-ui/data-objectstack';
@@ -485,5 +486,106 @@ describe('emitWriteWarning — write answer warnings (objectui#12107)', () => {
       { title: 'Saved — with warnings', description: `${ADVISORY.message}\n${second.message}` },
     ]);
     expect(adapter.getObjectSchema).not.toHaveBeenCalled();
+  });
+});
+
+// ── a record save surface reports its own write's warnings (objectstack-ai/objectstack#27999) ──
+//
+// Same real chain as above. The claim is keyed on the object the listener
+// hands `emitWriteWarning` as its adapter — in `AdapterProvider` that is the
+// adapter itself, the one the save surfaces read through `useAdapter`.
+
+describe('claimAnswerWarnings — the save surface reports its write (objectstack-ai/objectstack#27999)', () => {
+  const WARNED = 'Saved — with warnings';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    adapter.getObjectSchema.mockResolvedValue(ANDON_SCHEMA);
+  });
+
+  it('an update the claim names: the channel shows nothing, the surface takes the message', async () => {
+    const update = vi.fn().mockResolvedValue({ record: { id: 'r1' }, warnings: [ADVISORY] });
+    const { ds, calls, settle } = wiredAdapter({ update });
+    const claim = claimAnswerWarnings(adapter, { operation: 'update', resource: 'quote', id: 'r1' });
+
+    const saved = await ds.update('quote', 'r1', { discount: 40 });
+    // Taken as the surface's success handler would, before the channel settles.
+    expect(claim.take(saved)).toEqual([ADVISORY.message]);
+    await settle();
+    claim.release();
+
+    expect(calls).toEqual([]);
+  });
+
+  it('a create the claim names: its own record id is the surface\'s, another create\'s keeps the channel toast', async () => {
+    const other = { ...ADVISORY, message: 'Another create, another rule' };
+    const create = vi.fn()
+      .mockResolvedValueOnce({ record: { id: 'q9' }, warnings: [other] })
+      .mockResolvedValueOnce({ record: { id: 'q1' }, warnings: [ADVISORY] });
+    const { ds, calls, settle } = wiredAdapter({ create });
+    const claim = claimAnswerWarnings(adapter, { operation: 'create', resource: 'quote' });
+
+    await ds.create('quote', { discount: 50 });
+    const saved = await ds.create('quote', { discount: 40 });
+    await settle();
+    expect(calls).toEqual([]);
+
+    expect(claim.take(saved)).toEqual([ADVISORY.message]);
+    expect(calls).toEqual([{ title: WARNED, description: other.message }]);
+    claim.release();
+  });
+
+  it('the stripped-fields notice keeps its own toast while the warnings are claimed', async () => {
+    const update = vi.fn().mockResolvedValue({
+      record: { id: 'r1' },
+      droppedFields: [{ object: 'andon', fields: ['type', 'source_method'], reason: 'readonly_when' }],
+      warnings: [ADVISORY],
+    });
+    const { ds, calls, settle } = wiredAdapter({ update });
+    const strippedOnly = makeSink();
+    await emitWriteWarning(EVENT, t, adapter as never, identityLabel, strippedOnly.sink);
+    const claim = claimAnswerWarnings(adapter, { operation: 'update', resource: 'andon', id: 'r1' });
+
+    const saved = await ds.update('andon', 'r1', { type: 'x', source_method: 'y' });
+    expect(claim.take(saved)).toEqual([ADVISORY.message]);
+    await settle();
+    claim.release();
+
+    expect(calls).toEqual([strippedOnly.calls[0]]);
+  });
+
+  it('CONTROL: a write the claim does not name keeps the channel toast', async () => {
+    const update = vi.fn().mockResolvedValue({ record: { id: 'r2' }, warnings: [ADVISORY] });
+    const create = vi.fn().mockResolvedValue({ record: { id: 'o1' }, warnings: [ADVISORY] });
+    const { ds, calls, settle } = wiredAdapter({ update, create });
+    const claim = claimAnswerWarnings(adapter, { operation: 'update', resource: 'quote', id: 'r1' });
+
+    await ds.update('quote', 'r2', { discount: 40 });
+    await ds.create('quote', { discount: 40 });
+    await ds.update('order', 'r1', { discount: 40 });
+    await settle();
+    claim.release();
+
+    expect(calls).toEqual([
+      { title: WARNED, description: ADVISORY.message },
+      { title: WARNED, description: ADVISORY.message },
+      { title: WARNED, description: ADVISORY.message },
+    ]);
+  });
+
+  it('a claim closed without a take shows what it parked, and stops claiming', async () => {
+    const update = vi.fn().mockResolvedValue({ record: { id: 'r1' }, warnings: [ADVISORY] });
+    const { ds, calls, settle } = wiredAdapter({ update });
+    const claim = claimAnswerWarnings(adapter, { operation: 'update', resource: 'quote', id: 'r1' });
+
+    await ds.update('quote', 'r1', { discount: 40 });
+    await settle();
+    expect(calls).toEqual([]);
+    claim.release();
+    expect(calls).toEqual([{ title: WARNED, description: ADVISORY.message }]);
+
+    await ds.update('quote', 'r1', { discount: 40 });
+    await settle();
+    expect(calls).toHaveLength(2);
   });
 });

@@ -246,3 +246,64 @@ describe('storage.resumeUpload exits on an expired session before uploading (#78
     ).resolves.toBeDefined();
   });
 });
+
+/**
+ * `storage.upload` names a type for a file the browser could not type.
+ *
+ * A browser `File` whose type the browser does not know carries
+ * `type === ''`. The presigned door refuses an empty `mimeType` with
+ * `400 INVALID_REQUEST` — that refusal is the published contract
+ * (`GetPresignedUrlRequestSchema.mimeType` is `min(1)`), so the helper is the
+ * one that must name a type: an unknown type is sent as
+ * `application/octet-stream`. The control pins the other half — a typed file
+ * keeps its own type, so the fallback cannot widen into overwriting one.
+ */
+describe('storage.upload sends application/octet-stream for a file of unknown type', () => {
+  function uploadHarness() {
+    const fetchMock = vi.fn(async (url: string) => {
+      const body = url.includes('/upload/presigned')
+        ? {
+            success: true,
+            data: {
+              uploadUrl: 'http://localhost:3000/api/v1/storage/_local/raw/tok',
+              method: 'PUT',
+              fileId: 'f1',
+              expiresIn: 3600,
+            },
+          }
+        : { success: true, data: { fileId: 'f1' } };
+      return { ok: true, status: 200, statusText: 'OK', json: async () => body, headers: new Headers() };
+    });
+    const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000', fetch: fetchMock as any });
+    const presignedBody = () => {
+      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/upload/presigned'));
+      expect(call, 'storage.upload never asked the presigned door').toBeDefined();
+      return JSON.parse((call as any)[1].body as string);
+    };
+    return { client, presignedBody };
+  }
+
+  it('a File with type "" asks the door for application/octet-stream', async () => {
+    const { client, presignedBody } = uploadHarness();
+    const file = new File(['payload'], 'notes.weird-ext', { type: '' });
+    expect(file.type).toBe('');
+
+    await client.storage.upload(file);
+
+    expect(presignedBody()).toMatchObject({
+      filename: 'notes.weird-ext',
+      mimeType: 'application/octet-stream',
+      size: 7,
+      scope: 'user',
+    });
+  });
+
+  it('control: a typed File keeps its own type', async () => {
+    const { client, presignedBody } = uploadHarness();
+    const file = new File(['payload'], 'photo.png', { type: 'image/png' });
+
+    await client.storage.upload(file);
+
+    expect(presignedBody().mimeType).toBe('image/png');
+  });
+});

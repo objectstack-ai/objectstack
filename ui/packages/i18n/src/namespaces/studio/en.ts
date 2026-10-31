@@ -2413,6 +2413,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.savedDraft': 'Automation “{label}” saved as draft',
   'engine.studio.auto.defaultOff': 'Off by default · review before enabling',
   'engine.studio.auto.heading': 'Automations',
+  'engine.studio.auto.deleteFlow': 'Delete flow',
+  'engine.studio.auto.flowDeleted': 'Deleted flow "{item}"',
   'engine.studio.auto.on': 'On',
   'engine.studio.auto.off': 'Off',
   'engine.studio.auto.offTitle': 'Disabled — will not run',

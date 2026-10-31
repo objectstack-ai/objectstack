@@ -12,7 +12,9 @@
  *    (objectui#12942). A short value is one step smaller (20 px) in a tile
  *    narrower than 160 px, 24 px from 160 px up. A longer one — a seven-digit
  *    money figure with cents — takes a size ladder from 14 px to 24 px whose
- *    steps start where that size fits (`metricTileValueClass`).
+ *    steps start where that size fits (`metricTileValueClass`), on the
+ *    dataset-bound tile too, against its own box. Past 14 px it keeps the
+ *    ellipsis and carries the full figure as its tooltip.
  *  - The caption (dataset-bound tile only) is an 11 px muted line under the
  *    value, dropped below 160 px: the widget's description when one is
  *    authored, else the measure label. The title's tooltip carries the measure
@@ -34,9 +36,10 @@ export const METRIC_TILE_TITLE_CLASS = 'min-w-0 line-clamp-2 break-words text-[1
 
 /**
  * The value: never wraps; 20 px below a 160 px tile, 24 px from 160 px up. The
- * short value's face on a plain tile, and the dataset-bound tile's value at
- * every length: that tile has no Card inset, so its value has the container's
- * whole width and the ladder below, measured against a Card, does not apply.
+ * short value's face on both tiles. A longer value takes its tile's ladder
+ * below: {@link METRIC_TILE_VALUE_LADDER} on a plain tile, measured against a
+ * Card, and {@link METRIC_TILE_DATASET_VALUE_LADDER} on the dataset-bound
+ * tile, which has no Card inset.
  */
 export const METRIC_TILE_VALUE_CLASS = 'max-w-full overflow-hidden text-ellipsis whitespace-nowrap tabular-nums text-xl @[160px]:text-2xl';
 
@@ -69,6 +72,25 @@ export const METRIC_TILE_VALUE_LADDER: ReadonlyArray<{ readonly maxEm: number; r
   { maxEm: 12.5, sizes: 'text-sm @[248px]:text-base @[273px]:text-lg @[298px]:text-xl @[348px]:text-2xl' },
 ];
 
+/**
+ * The dataset-bound tile's ladder (`DatasetWidget`): the same rungs, measured
+ * against that tile's own box. It has no Card inset — its value has the
+ * container's whole content width — so a step starts at `ceil(maxEm * px)`.
+ * The short rung's two faces bound it from below: no step draws 24 px under a
+ * 160 px tile, so a longer value is never drawn larger than a shorter one
+ * beside it. The `metricTileDatasetValueScale-27520` test re-derives these steps.
+ *
+ * Literals only: Tailwind's content scanner must see every class.
+ */
+export const METRIC_TILE_DATASET_VALUE_LADDER: ReadonlyArray<{ readonly maxEm: number; readonly sizes: string }> = [
+  { maxEm: 4.5, sizes: 'text-xl @[160px]:text-2xl' },
+  { maxEm: 5.5, sizes: 'text-sm @[88px]:text-base @[99px]:text-lg @[110px]:text-xl @[160px]:text-2xl' },
+  { maxEm: 6.75, sizes: 'text-sm @[108px]:text-base @[122px]:text-lg @[135px]:text-xl @[162px]:text-2xl' },
+  { maxEm: 8, sizes: 'text-sm @[128px]:text-base @[144px]:text-lg @[160px]:text-xl @[192px]:text-2xl' },
+  { maxEm: 10, sizes: 'text-sm @[160px]:text-base @[180px]:text-lg @[200px]:text-xl @[240px]:text-2xl' },
+  { maxEm: 12.5, sizes: 'text-sm @[200px]:text-base @[225px]:text-lg @[250px]:text-xl @[300px]:text-2xl' },
+];
+
 /** Past the ladder's last rung: 14 px at every width. */
 export const METRIC_TILE_VALUE_FINAL_SIZES = 'text-sm';
 
@@ -92,12 +114,16 @@ export function metricTileValueEm(text: string): number {
 }
 
 /**
- * The value node's class for `value`: the rung of {@link METRIC_TILE_VALUE_LADDER}
- * its width falls in, or the 14 px final face past the last rung.
+ * The value node's class for `value`: the rung of `ladder` (the plain tile's
+ * {@link METRIC_TILE_VALUE_LADDER} unless told otherwise) its width falls in,
+ * or the 14 px final face past the last rung.
  */
-export function metricTileValueClass(value: string | number): string {
+export function metricTileValueClass(
+  value: string | number,
+  ladder: ReadonlyArray<{ readonly maxEm: number; readonly sizes: string }> = METRIC_TILE_VALUE_LADDER,
+): string {
   const em = metricTileValueEm(String(value));
-  const rung = METRIC_TILE_VALUE_LADDER.find((r) => em <= r.maxEm);
+  const rung = ladder.find((r) => em <= r.maxEm);
   return `${METRIC_TILE_VALUE_BASE} ${rung ? rung.sizes : METRIC_TILE_VALUE_FINAL_SIZES}`;
 }
 

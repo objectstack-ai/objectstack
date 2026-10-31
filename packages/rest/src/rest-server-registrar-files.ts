@@ -69,6 +69,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#23050 slice 13e] The seventh `/meta` group of `registerMetadataEndpointsInner`'
     // body, the object state-machine read — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-object-state-routes.ts',
+    // [#27627] `registerRecordPageEndpoints`' body, the record page payload. New, not a
+    // moved slice: a registrar added beside the others joins the list in its own PR.
+    'record-page-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */

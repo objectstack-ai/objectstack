@@ -13,7 +13,7 @@
  */
 
 import * as React from 'react';
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Search, RefreshCw, AlertTriangle, Lock, Copy } from 'lucide-react';
 import {
   Button,
@@ -51,6 +51,9 @@ import { Empty, EmptyTitle, EmptyDescription, EmptyValue } from '@object-ui/comp
 import { PageShell, WritabilityBadge } from './PageShell.js';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { useInSetupApp } from '../../console/setupApp.js';
+import { useExpressionContext } from '../../providers/ExpressionProvider.js';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { navEntryTitle } from './navEntryTitle.js';
 import { getIcon } from '../../utils/getIcon.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
 import { CreatePackageDialog } from './PackagesPage.js';
@@ -187,6 +190,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // the description. Read off the route's `:appName`; the same page anywhere
   // else (the directory, Studio's "Open in Setup" target) keeps its shell.
   const inSetup = useInSetupApp();
+  // objectstack#27356 — under Setup the header names the page as the sidebar
+  // entry that opens it does ("Positions"); the type's label otherwise.
+  const { app } = useExpressionContext();
+  const location = useLocation();
+  const { t: navT, language } = useObjectTranslation();
   // objectui#12183 — under a wall the security catalog is the platform
   // operator's: the server refuses this caller every write of the type,
   // whatever it holds (`catalog-scope.ts`). Not keyed on the scope: the server's
@@ -577,6 +585,13 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     config.bundleMemberField,
   );
   const typeLabel = translateMetadataType(type, locale, entry?.label ?? type);
+  const setupTitle =
+    (inSetup && navEntryTitle(app, `/apps/${appName}`, location.pathname, location.search, navT, language)) || typeLabel;
+  // objectstack#27356 — under Setup the label leads the identity cell, with the
+  // API name beneath it, in place of a separate Label column.
+  const primaryKey = config.primaryKey ?? 'name';
+  const labelColumn = inSetup && columns[0]?.key === primaryKey ? columns.find((c) => c.key === 'label') : undefined;
+  const shownColumns = labelColumn ? columns.filter((c) => c !== labelColumn) : columns;
   // The type offers SOME runtime write channel (the editors' type tier), and —
   // in the environment scope — the caller holds the capability the metadata
   // door requires. The server refuses either way; this is the half that says
@@ -826,13 +841,13 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                 }
               >
                 <tr className={HEAD_ROW_TINT}>
-                  {columns.map((c) => (
+                  {shownColumns.map((c, ci) => (
                     <th
                       key={c.key}
                       className={cn('px-3 text-left font-medium', inSetup ? 'h-9 py-0' : 'py-2')}
                       style={c.width ? { width: c.width } : undefined}
                     >
-                      {localizeColumnLabel(c)}
+                      {localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c)}
                     </th>
                   ))}
                   <th className={cn('px-3 text-right font-medium w-[80px]', inSetup ? 'h-9 py-0' : 'py-2')}>{t('engine.list.col.source', locale)}</th>
@@ -910,9 +925,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                         HOVER_ROW_TINT,
                       )}
                     >
-                      {columns.map((c, ci) => {
+                      {shownColumns.map((c, ci) => {
                         const value = row.item[c.key];
                         const cell = c.render ? c.render(value, row.item) : defaultCell(value);
+                        const labelValue = labelColumn ? row.item[labelColumn.key] : undefined;
+                        const hasLabel = labelValue != null && labelValue !== '';
                         return (
                           <td key={c.key} className={cellClass}>
                             {ci === 0 ? (
@@ -935,12 +952,32 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                                     <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                                   </span>
                                 )}
-                                <Link
-                                  to={rowHref}
-                                  className="text-primary hover:underline font-mono"
-                                >
-                                  {cell}
-                                </Link>
+                                {labelColumn && hasLabel ? (
+                                  <span className="min-w-0">
+                                    <Link to={rowHref} className="text-primary hover:underline">
+                                      {labelColumn.render ? labelColumn.render(labelValue, row.item) : defaultCell(labelValue)}
+                                    </Link>
+                                    <span
+                                      className="block font-mono text-xs text-muted-foreground"
+                                      data-testid="metadata-row-api-name"
+                                    >
+                                      {cell}
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <Link
+                                    to={rowHref}
+                                    className="text-primary hover:underline font-mono"
+                                  >
+                                    {cell}
+                                  </Link>
+                                )}
+                              </span>
+                            ) : inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
+                              // objectstack#27356 — two lines at most, so a row
+                              // stays a row on a phone; the whole text on hover.
+                              <span className="line-clamp-2" title={value}>
+                                {cell}
                               </span>
                             ) : (
                               cell
@@ -1068,7 +1105,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <PageHeader
-          title={typeLabel}
+          title={setupTitle}
           // `createElement`, not a JSX tag: the looked-up icon is a value
           // (the convention ObjectView set).
           icon={React.createElement(getIcon(config.iconName ?? 'layers'), { className: 'h-4 w-4' })}

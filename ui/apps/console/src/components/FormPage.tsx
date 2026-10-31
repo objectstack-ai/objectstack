@@ -116,7 +116,7 @@
  * the host half (ids, label association, required, uploads).
  */
 
-import { Suspense, useContext, useEffect, useId, useMemo, useState, type FormEvent } from 'react';
+import { Suspense, useContext, useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -162,6 +162,7 @@ import {
 import {
   SchemaRendererContext,
   extractFieldErrors,
+  unmarkedRefusalLines,
   usePredicateScope,
   type ApiFetch,
 } from '@object-ui/react';
@@ -1948,6 +1949,19 @@ function refusedWriteError(message: string, body: string): Error {
   return error;
 }
 
+/**
+ * A submit refusal as the banner and the toast draw it: one string as itself,
+ * several reasons as one list item each.
+ */
+function refusalContent(refusal: string | string[]): ReactNode {
+  if (typeof refusal === 'string') return refusal;
+  return (
+    <ul className="list-disc space-y-1 pl-4">
+      {refusal.map((line, i) => <li key={i}>{line}</li>)}
+    </ul>
+  );
+}
+
 // ─── Field renderers ─────────────────────────────────────────────────
 
 /** The DOM id of a row's control — the host owns it (objectui#3962). */
@@ -2382,7 +2396,8 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const channel = mode === 'internal' ? hostApiFetch : undefined;
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  /** One string, or one line per reason a server refusal marked on no row. */
+  const [error, setError] = useState<string | string[] | null>(null);
   /**
    * The load answered "no such form" ({@link FormNotFoundError}). Its own flag
    * rather than a string in `error`, because the page draws a localized state
@@ -2856,9 +2871,6 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           break;
       }
     } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      setError(msg);
-      toast.error(msg, { id: outcomeToastId });
       // The fields the server's refusal names, read by the record dialog's
       // reader (see `refusedWriteError`), marked where this form draws them. A
       // field the form does not draw marks nothing; the banner still says it.
@@ -2866,6 +2878,15 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       const named = (extractFieldErrors(err) ?? []).filter((fe) =>
         drawn.some((f) => f.name === fe.field),
       );
+      // A refusal listing one entry per failed rule says each entry no row
+      // carries on its own line, not the envelope's `; `-joined summary.
+      const unmarked = unmarkedRefusalLines(err, (field) => named.some((fe) => fe.field === field));
+      const msg: string | string[] =
+        unmarked && unmarked.length > 1
+          ? unmarked
+          : unmarked?.[0] ?? err?.message ?? String(err);
+      setError(msg);
+      toast.error(refusalContent(msg), { id: outcomeToastId });
       setFieldErrors(Object.fromEntries(
         named.map((fe) => [fe.field, fe.message || t('form.submitFailed')]),
       ));
@@ -2921,7 +2942,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     return (
       <div className="mx-auto max-w-2xl p-6">
         <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-          {error}
+          {refusalContent(error)}
         </div>
       </div>
     );
@@ -3022,7 +3043,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           const refusal = mark === undefined
             ? undefined
             : mark === null
-              ? { message: error ?? '', describedBy: errorBannerId }
+              ? { message: [error ?? ''].flat().join(' '), describedBy: errorBannerId }
               : { message: mark, describedBy: errorIdOf(f.name) };
           const spanClass =
             f.colSpan === 2 ? 'sm:col-span-2'
@@ -3325,7 +3346,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
             id={errorBannerId}
             className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
           >
-            {error}
+            {refusalContent(error)}
           </div>
         )}
         <div className="flex flex-wrap items-center justify-end gap-2">

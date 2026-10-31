@@ -24,6 +24,9 @@ import type {
   ImportJobStatus,
   ImportRowResult,
   ImportWriteMode,
+  RecordPageExplainOperation,
+  RecordPagePartRefusal,
+  RecordPageRequest,
   UndoImportJobResponse,
 } from '@objectstack/spec/api';
 import type { EngineAggregateOptions, FilterArray } from '@objectstack/spec/data';
@@ -374,6 +377,38 @@ export interface RecordFieldAccess {
   writable?: boolean;
 }
 
+/** A record-grained operation a record page's header asks a verdict for. */
+export type RecordPageOperation = RecordPageExplainOperation;
+
+// What a record page asks when it opens (`POST /data/{object}/{id}/page`) and
+// the refusal a replaced read answers are the spec's own shapes.
+export type {
+  RecordPagePartRefusal,
+  RecordPageRelatedRequest,
+  RecordPageRequest,
+} from '@objectstack/spec/api';
+
+/**
+ * The answer to {@link RecordPageRequest} (`RecordPageResponse` in
+ * `@objectstack/spec`): each part is what the read it replaces answers the same
+ * caller, or that read's refusal.
+ */
+export interface RecordPagePayload {
+  object: string;
+  id: string;
+  record: Record<string, any>;
+  related: Array<{
+    object: string;
+    field: string;
+    total?: number;
+    records?: Record<string, any>[];
+    error?: RecordPagePartRefusal;
+  }>;
+  fieldAccess?: RecordFieldAccess | { error: RecordPagePartRefusal };
+  explain?: Partial<Record<RecordPageOperation, unknown>>;
+  approvals?: { requests: Record<string, any>[]; lock: { locked: boolean } | null } | { error: RecordPagePartRefusal };
+}
+
 /**
  * The backend-agnostic data contract every adapter implements.
  *
@@ -634,6 +669,29 @@ export interface DataSource<T = any> {
    * Optional — adapters that don't speak to an ObjectStack server can omit it.
    */
   getRecordFieldAccess?(resource: string, id: string): Promise<RecordFieldAccess | null>;
+
+  /**
+   * Everything a record page asks of the server when it opens, in ONE read
+   * (objectstack#27627): the record, each related list's count and first rows,
+   * the field projection, the header's access verdicts and the approval state.
+   * Every part passes the permission, row-level and field-level filters of the
+   * read it replaces.
+   *
+   * `null` when the record is absent or hidden from the caller, as
+   * {@link findOne} answers it. A refused read is thrown.
+   *
+   * Optional — adapters that don't speak to an ObjectStack server omit it, and
+   * the page then asks each part on its own.
+   */
+  getRecordPage?(resource: string, id: string, request: RecordPageRequest): Promise<RecordPagePayload | null>;
+
+  /**
+   * Start {@link getRecordPage} for a record the reader is likely to open next
+   * (the previous / next record of a stepper), so its open is served from the
+   * answer already on its way. Fire-and-forget; a later `getRecordPage` with
+   * the same arguments takes it, and a write to the object drops it.
+   */
+  prefetchRecordPage?(resource: string, id: string, request: RecordPageRequest): void;
 
   /**
    * Get object schema/metadata.

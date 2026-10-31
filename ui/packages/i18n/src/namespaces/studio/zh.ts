@@ -2171,6 +2171,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.savedDraft': '自动化「{label}」已存为草稿',
   'engine.studio.auto.defaultOff': '默认停用 · 审阅后再启用',
   'engine.studio.auto.heading': '自动化',
+  'engine.studio.auto.deleteFlow': '删除流程',
+  'engine.studio.auto.flowDeleted': '已删除流程「{item}」',
   'engine.studio.auto.on': '已启用',
   'engine.studio.auto.off': '已停用',
   'engine.studio.auto.offTitle': '已停用 — 不会运行',

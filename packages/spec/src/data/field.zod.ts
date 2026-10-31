@@ -1501,6 +1501,29 @@ export const FieldSchema = lazySchema(() => {
   useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 
   /**
+   * Presentation hint: how a `percent` value is drawn wherever the field is
+   * shown read-only — list-grid cells and the record page alike. The Studio
+   * UI's percent face draws a progress bar beside the number for every value,
+   * which reads right for progress (a task 60% done) and wrong for a rate or a
+   * probability (an opportunity's 25% win probability is not 25% of the way
+   * anywhere). `Field.format` cannot carry this — it declares no vocabulary —
+   * and `Field.widget` is the form's input override, not the read-only face.
+   *
+   * Same posture as `useGrouping` above: a flat, optional, per-type display
+   * hint with no declared default and no parse-time type restriction.
+   *   - **absent** — the renderer's default face, the progress bar today;
+   *   - **`'bar'`** — the author pins the progress bar;
+   *   - **`'plain'`** — the percentage as text alone (a stored 0.25 reads
+   *     `25%`, at the field's `scale`), no bar.
+   * Display only: it changes no stored value, no validation and no width.
+   *
+   * Declared spec-first: the console's percent face does not read it yet (the
+   * renderer half is its own `domain:ui` card), so the liveness row is
+   * `planned` and the describe says so until that reader lands.
+   */
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged. Declared ahead of its renderer: the Studio UI does not read it yet, so every percent field still draws the bar until it does.'),
+
+  /**
    * Media Constraints (ADR-0104 D3 wave 2)
    *
    * Apply to the media family — `file`, `image`, `avatar`, `video`, `audio`.
@@ -1962,6 +1985,55 @@ export const FieldSchema = lazySchema(() => {
     param: z.string().optional(),
   })])).optional().describe("Declares that this field's available values depend on the value of other field(s) on the same record — the form gates the field until they are set and re-evaluates as they change. For `lookup`/`master_detail` it scopes the candidate query (string = same local/remote key; {field,param} when the remote filter key differs — the {field,param} form is lookup-only). For `select`/`multiselect`/`radio` the actual per-option rule lives in each option's `visibleWhen`; list the referenced fields here (string form) so the option list gates and refreshes with the parent."),
   allowCreate: z.boolean().optional().describe('Allow inline quick-create from the record picker: when no match exists the user can create a record from the typed text (optimistic dataSource.create with the display field). Best for simple objects whose only required field is the display field.'),
+
+  /**
+   * LOOKUP-PICK AUTOFILL — which fields of the record being edited a pick in
+   * this lookup fills, each from a named field of the picked record
+   * (`target ← lookup.source`): a quote line's `unit_price` from the picked
+   * product's `list_price`.
+   *
+   * ⭐ The FIELD is its one home, not a form view. A record form draws this
+   * field from its definition whichever form is showing it (a declared form
+   * view, a `formViews` entry, or the derived form an object without one
+   * gets), and the inline line-item grid hydrates its columns from the same
+   * child field definitions — so both read one declaration. A form-view key
+   * would be invisible to the grid and to every other form of the object.
+   *
+   * ⭐ The overwrite rule is part of the contract, stated in the describe: a
+   * pick never replaces a value somebody wrote unless the pair says
+   * `overwrite: true`.
+   *
+   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`),
+   * which is unchanged: that key governs only the grid's implicit SAME-NAMED
+   * copy (on by default, overwriting). A declared pair applies in the grid too,
+   * under this key's own overwrite rule, and takes its target out of the
+   * same-named copy, so one target never has two writers on one pick.
+   *
+   * Three doors judge it: the parse (this field's superRefine — a single-value
+   * relationship only), the object's parse (`refuseDishonestLookupAutofill` in
+   * `object.zod.ts` — each target a writable field of the same object, named
+   * once), and the stack's cross-reference pass (`collectLookupAutofillErrors`
+   * in `stack.zod.ts` — each source a readable field of the referenced object
+   * whose value the target can hold).
+   */
+  lookupAutofill: z.array(strictObject({
+    surface: 'this lookupAutofill entry',
+    history: 'A new shape, closed from its first release: a misspelt key in a pair would otherwise fill nothing and say nothing.',
+    aliases: {
+      field: 'target', to: 'target', targetField: 'target',
+      from: 'source', sourceField: 'source', lookupField: 'source',
+      replace: 'overwrite', force: 'overwrite',
+    },
+  }, {
+    target: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Field of THIS object the pick fills (snake_case machine name).'),
+    source: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe("Field of the picked record — a field of this lookup's `reference` object — whose value is copied (snake_case machine name)."),
+    overwrite: z.boolean().optional().describe('TRUE: the pick replaces whatever the target holds, a typed value included. Absent or FALSE: the pick fills the target only while it is empty or still holds the value an earlier pick filled in.'),
+  })).min(1).optional().describe(
+    "Fields a pick in this lookup fills on the record being edited: each `{ target, source }` pair copies the picked record's `source` field (a field of the `reference` object) into this object's `target` field — e.g. `[{ target: 'unit_price', source: 'list_price' }]` on a quote line's product lookup. Read wherever this field is picked: the record form, and a line-item grid column over it. "
+    + "OVERWRITE RULE — the default, `overwrite` absent or false: a pick never replaces a value somebody wrote. The target is filled only while it is empty or still holds the value an earlier pick filled in; a value the user typed, or one the record already stored, stays. Only a pair that declares `overwrite: true` replaces the target on every pick, whatever it holds. "
+    + 'Client-side only: it fills the form, and nothing on the write path reads it — the filled value is saved as an ordinary write, and an import or API write that sets the lookup fills nothing. '
+    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy and is unchanged; a declared pair takes its target out of that copy.",
+  ),
 
   /**
    * Calculation — CEL formula. Plain string accepted for back-compat; build emits canonical envelope.
@@ -2491,6 +2563,32 @@ export const FieldSchema = lazySchema(() => {
         "a field as holding a correspondent's address, matched against the participant addresses of " +
         'inbound mail, and only an `email` field stores an address to match. Change the field to ' +
         "`type: 'email'` if it holds an email address, or drop the key.",
+    });
+  }
+  // [#27945] `lookupAutofill` copies fields of the ONE record a pick chooses.
+  // Off a relationship there is no pick, and on a multi-value relationship a
+  // pick chooses several records with no single source to copy from — either
+  // way the declaration would parse and fill nothing. The target and source
+  // halves need the object's field map and the stack's objects, and are judged
+  // in `ObjectSchema`'s superRefine and the stack's cross-reference pass.
+  if (field.lookupAutofill !== undefined && field.type !== 'lookup' && field.type !== 'master_detail') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['lookupAutofill'],
+      message:
+        "`lookupAutofill` is only valid on `type: 'lookup'` or `type: 'master_detail'` (this field is " +
+        `\`${field.type}\`): it fills fields of the record being edited from the record a pick in this ` +
+        'field chooses, and only a relationship field has a pick. Declare it on the relationship field ' +
+        'whose pick should fill the form, or drop the key.',
+    });
+  } else if (field.lookupAutofill !== undefined && field.multiple === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['lookupAutofill'],
+      message:
+        '`lookupAutofill` is not valid on a multi-value relationship (`multiple: true`): a pick there ' +
+        'chooses several records, so there is no single record to copy each `source` from. Drop the key, ' +
+        'or make the field single-value if one record is picked.',
     });
   }
 

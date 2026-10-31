@@ -430,6 +430,16 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     note: 'Split from `cel-action-visible` rather than sharing one row with it, for the reason the collision assertion encodes: one classification covering both would have to pick one fail-policy, and the two faces are opposites — a faulting `visible` HIDES the action, a `disabled` the renderer cannot evaluate LEAVES IT RUNNABLE. A single row would have stated one of those and silently spoken for the other. ⛔ NOT MEASURED HERE: the renderer, and the `-log` half of `fail-soft-log` — the reading above establishes the soft DIRECTION from the objectui fix that removed the closed face, not that a line is logged; the same posture, and the same limit, as `cel-row-crud-disabled` on the built-in row buttons.',
   },
   {
+    // The key arrived with #27946, its spec half; the console half is a follow-up card.
+    id: 'cel-action-pressed',
+    summary: 'registered action pressed state (Action.pressed) — the per-reader toggle face of a button, drawn as aria-pressed',
+    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
+    enforcement:
+      'PARSE ONLY — `EvaluatedExpressionInputSchema` normalizes a bare string to `{dialect:"cel",source}` and refuses a boolean literal, an `ast`-only envelope and a blank source; NO EVALUATOR FOUND: no action surface reads the key yet. The build-time gate is in place ahead of the reader: lint/validate-expressions.ts `checkAction` checks it against the `record` scope on every declared action, as a served-row site where a block the object declares under `attachedOnRead` resolves',
+    covers: ['ui/action.zod.ts:actionObject.pressed'],
+    note: 'EXPERIMENTAL until the console draws it: declared spec-first, with the liveness row `planned`. Display only by contract — it never gates, greys or routes the action — so when the reader lands its fault face is a plain, unpressed button, and this row is re-stated as `enforced` with that fail policy, naming the surfaces that evaluate it.',
+  },
+  {
     id: 'cel-record-alert-visible',
     summary: '`record:alert` banner visibility (RecordAlertProps.visible) — the one record component whose PROPS carry a real predicate',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',

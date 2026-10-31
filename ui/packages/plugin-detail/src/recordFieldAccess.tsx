@@ -45,8 +45,42 @@
 
 import React, { useEffect, useState } from 'react';
 import { RecordFieldAccessScope } from '@object-ui/permissions';
-import { useDataInvalidation, useInlineEdit } from '@object-ui/react';
-import type { DataSource } from '@object-ui/types';
+import { dataChangeMatches, subscribeDataChanges, useDataInvalidation, useInlineEdit } from '@object-ui/react';
+import type { DataSource, RecordFieldAccess } from '@object-ui/types';
+
+/**
+ * objectstack#27627 — field projections the record page's ONE read
+ * (`DataSource.getRecordPage`) answered, by object and record. The blocks'
+ * first ask of a record (revision 0) reads them instead of the data source; a
+ * data change on the record drops its entry (the bus's own matching rule), and
+ * every later ask (a write or a change raised the revision) goes to the server.
+ */
+const seededFieldAccess = new Map<string, Promise<RecordFieldAccess | null>>();
+
+subscribeDataChanges((change) => {
+  for (const key of Array.from(seededFieldAccess.keys())) {
+    const [object, recordId] = JSON.parse(key) as [string, string];
+    if (dataChangeMatches(change, object, recordId)) seededFieldAccess.delete(key);
+  }
+});
+
+/**
+ * Hand the in-place edit blocks the field projection the record page's payload
+ * carries: what `getRecordFieldAccess` answers (`null` for no answer).
+ */
+export function seedRecordFieldAccess(
+  objectName: string,
+  recordId: string,
+  access: Promise<RecordFieldAccess | null>,
+): void {
+  access.catch(() => undefined);
+  seededFieldAccess.set(JSON.stringify([objectName, recordId]), access);
+}
+
+/** Test seam — forgets every seeded field projection. */
+export function __clearSeededFieldAccess(): void {
+  seededFieldAccess.clear();
+}
 
 export interface RecordFieldAccessForRecordProps {
   objectName?: string | null;
@@ -90,7 +124,9 @@ export function RecordFieldAccessForRecord({
     <RecordFieldAccessScope
       object={objectName as string}
       recordId={id as string}
-      load={(object, recordKey) => (load as NonNullable<typeof load>).call(dataSource, object, recordKey)}
+      load={(object, recordKey) =>
+        (busRevision + writeRevision === 0 ? seededFieldAccess.get(JSON.stringify([object, recordKey])) : undefined)
+        ?? (load as NonNullable<typeof load>).call(dataSource, object, recordKey)}
       revision={busRevision + writeRevision}
     >
       {children}

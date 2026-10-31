@@ -51,6 +51,7 @@ export * from './websocket.zod';
 export * from './router.zod';
 export * from './odata.zod';
 export * from './batch.zod';
+export * from './record-page.zod';
 export * from './http-cache.zod';
 export * from './errors.zod';
 // The ADR-0114 D3 boundary mapper — the ONE implementation of Zod issue code →

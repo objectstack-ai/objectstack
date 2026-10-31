@@ -2082,6 +2082,24 @@ export const RecordPathProps = strictObject({
      */
     terminal: z.enum(['won', 'lost']).optional().describe('Mark this stage a terminus and its kind — overrides the renderer\'s value/label token heuristic'),
   })).optional().describe('Explicit stage definitions (if not using field metadata)'),
+  /**
+   * Opt in to changing the record's stage from the path itself. Absent or
+   * `false` is the read-only progress rail, as today, so every existing path
+   * keeps its non-interactive look. No schema default, for the
+   * `RecordChatterProps` reason — a default would write `false` onto every
+   * parsed component and turn "the author said nothing" into "the author
+   * asked for it".
+   *
+   * The spec declares the opt-in and its meaning only; nothing new is judged
+   * on the server. With the key on, each stage the reader may move the record
+   * to is a button, offered only when the reader may edit `statusField`. A
+   * press asks for confirmation, then writes `statusField` through the same
+   * record update `record:details` uses, carrying the record's concurrency
+   * token, so the object's `state_machine` validation (ADR-0020) and the
+   * field's edit rights judge the move like any other edit; a refusal (an
+   * illegal transition, a missing required field) is shown in place.
+   */
+  allowStageChange: z.boolean().optional().describe('Let the reader change the record\'s stage by pressing a stage on the path. Absent or `false`: the path is a read-only progress rail, as today. Each press asks for confirmation and saves `statusField` through the ordinary record update, so the object\'s state machine validation and the field\'s edit rights decide; stages appear pressable only to readers who may edit `statusField`, and a refused move is shown in place.'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });

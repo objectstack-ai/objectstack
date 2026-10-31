@@ -3,6 +3,7 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
+import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
 /**
  * sys_organization — System Organization Object
@@ -194,7 +195,7 @@ export const SysOrganization = ObjectSchema.create({
         // is sys_invitation's: both required, and the role picker offers only
         // what this caller may grant ([ADR-0105 D8] `INVITATION_ROLE_OPTIONS`).
         { field: 'email', objectOverride: 'sys_invitation', required: true },
-        { field: 'role', objectOverride: 'sys_invitation', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+        { field: 'role', objectOverride: 'sys_invitation', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
     },
     {

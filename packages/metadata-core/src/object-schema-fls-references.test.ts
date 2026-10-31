@@ -23,6 +23,7 @@ import {
     FIELD_REFERENCE_POSITIONS,
     INLINE_COLUMN_POSITIONS,
     LIST_COLUMN_POSITIONS,
+    LOOKUP_AUTOFILL_PAIR_POSITIONS,
     OBJECT_REFERENCE_POSITIONS,
     mentionsDenied,
 } from './object-schema-fls-references.js';
@@ -404,6 +405,29 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         expect(served.fields.title).not.toHaveProperty('inlineAmountField');
     });
 
+    it('drops a `lookupAutofill` pair whose target is denied, and keeps a source named on the referenced object', () => {
+        // #27945 — `target` is a field of THIS object; `source` names a field of
+        // the lookup's `reference` object, which this projection cannot judge.
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({
+                type: 'lookup',
+                reference: 'other',
+                lookupAutofill: [
+                    { target: 'id', source: 'secret_score' },
+                    { target: 'secret_score', source: 'price', overwrite: true },
+                ],
+            }),
+        });
+        expect(served.fields.title.lookupAutofill).toEqual([{ target: 'id', source: 'secret_score' }]);
+
+        const allDenied = mask({
+            name: 'thing',
+            fields: fieldsWith({ type: 'lookup', reference: 'other', lookupAutofill: [{ target: 'secret_score', source: 'price' }] }),
+        });
+        expect(allDenied.fields.title).not.toHaveProperty('lookupAutofill');
+    });
+
     it('keeps a readable inline amount field, and deletes a grid left with no column', () => {
         const served = mask({
             name: 'thing',
@@ -729,6 +753,14 @@ describe('[ADR-0106 D1] every position is classified — closed against the live
     it('classifies every InlineGridColumnSchema key', () => {
         const unclassified = declaredKeys(InlineGridColumnSchema).filter((key) => !(key in INLINE_COLUMN_POSITIONS));
         expect(unclassified, 'classify each new InlineGridColumnSchema key in INLINE_COLUMN_POSITIONS').toEqual([]);
+    });
+
+    // A lookup autofill pair's `target` names a field of this object (#27945).
+    it('classifies every lookupAutofill pair key, and nothing it no longer declares', () => {
+        const list = (FieldSchema.shape as unknown as Record<string, { unwrap(): { element: unknown } }>).lookupAutofill!;
+        const keys = declaredKeys(list.unwrap().element);
+        expect(keys.filter((key) => !(key in LOOKUP_AUTOFILL_PAIR_POSITIONS)), 'classify each new lookupAutofill pair key').toEqual([]);
+        expect(Object.keys(LOOKUP_AUTOFILL_PAIR_POSITIONS).filter((key) => !keys.includes(key))).toEqual([]);
     });
 
     // A list column's nested pointers (`prefix.field`, `summary.field`) name

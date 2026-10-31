@@ -192,6 +192,63 @@ export function splitMeasuresByFilter(
 }
 
 /**
+ * [#28127] Expand a selection's measures into the base measures the queries
+ * must aggregate and the derived measures the executor computes afterwards.
+ *
+ * A derived measure's `of` may name ANOTHER derived measure (`DatasetSchema`
+ * accepts it, and the currency guard judges it at the next level), so the walk
+ * follows `of` until it reaches aggregated measures. Before, only the selected
+ * measure's own `of` was read: a derived operand was handed to the cube as a
+ * base measure, which the live strategies refused (`INVALID_FIELD`, "aggregates
+ * field 'total_twice', which object … does not have") and the draft preview
+ * answered as a row count — a plausible wrong number.
+ *
+ * `derived` comes back dependencies first, so {@link evaluateDerivedMeasures}
+ * finds every operand already computed on the row. A derived measure that
+ * reaches itself through `of` has no value at any depth and is refused
+ * `DATASET_INVALID` / 400 with the cycle's path (`DatasetSchema` refuses only
+ * the one-step self-reference).
+ */
+export function expandSelectedMeasures(
+  measures: readonly string[],
+  derived: readonly DerivedMeasureSpec[],
+): { base: Set<string>; derived: DerivedMeasureSpec[] } {
+  const derivedByName = new Map(derived.map((d) => [d.name, d]));
+  const base = new Set<string>();
+  const ordered: DerivedMeasureSpec[] = [];
+  const done = new Set<string>();
+  const path: string[] = [];
+  const visit = (d: DerivedMeasureSpec): void => {
+    if (done.has(d.name)) return;
+    const at = path.indexOf(d.name);
+    if (at >= 0) {
+      const cycle = [...path.slice(at), d.name].join(' → ');
+      throw datasetInvalidError(
+        `[dataset-executor] derived measure "${d.name}" depends on itself: ${cycle}. `
+        + 'A derived measure must reach aggregated measures through `of`; remove one of these names from the `of` that closes the cycle.',
+      );
+    }
+    path.push(d.name);
+    for (const dep of d.of) {
+      const inner = derivedByName.get(dep);
+      if (inner) visit(inner);
+      else base.add(dep);
+    }
+    path.pop();
+    done.add(d.name);
+    ordered.push(d);
+  };
+  for (const m of measures) {
+    if (!derivedByName.has(m)) base.add(m);
+  }
+  for (const m of measures) {
+    const d = derivedByName.get(m);
+    if (d) visit(d);
+  }
+  return { base, derived: ordered };
+}
+
+/**
  * Evaluate derived measures on each aggregated row, mutating a shallow copy.
  * Division by zero (and missing operands) yields `null` rather than Infinity/NaN.
  */
@@ -1215,19 +1272,9 @@ export class DatasetExecutor {
     selection: DatasetSelection,
     context?: ExecutionContext,
   ): Promise<AnalyticsResult> {
-    const derivedByName = new Map(compiled.derived.map((d) => [d.name, d]));
-    const selectedDerived = selection.measures
-      .map((m) => derivedByName.get(m))
-      .filter((d): d is DerivedMeasureSpec => !!d);
-
-    // Base measures = selected non-derived + dependencies of selected derived.
-    const baseMeasures = new Set<string>();
-    for (const m of selection.measures) {
-      if (!derivedByName.has(m)) baseMeasures.add(m);
-    }
-    for (const d of selectedDerived) {
-      for (const dep of d.of) baseMeasures.add(dep);
-    }
+    // Base measures = selected non-derived + the aggregated measures the
+    // selected derived ones reach through `of`, at any depth (#28127).
+    const { base: baseMeasures, derived: selectedDerived } = expandSelectedMeasures(selection.measures, compiled.derived);
 
     // Split measures into those with a scoped filter and those without.
     const { unfiltered, filtered } = splitMeasuresByFilter(baseMeasures, compiled.measureFilters);

@@ -145,6 +145,15 @@ export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-
 export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 
+// [#27238] The Setup → Integrations entry of the connector credential door,
+// registered by AutomationServicePlugin at `kernel:ready` and exported for the
+// composition-root census of platform-app navigation (`check:app-nav-i18n`).
+export {
+    CONNECTOR_CREDENTIALS_UI_BUNDLE,
+    CONNECTOR_CREDENTIALS_COMPONENT_REF,
+    CONNECTOR_CREDENTIALS_NAV_CAPABILITY,
+} from './connector-credentials-ui.js';
+
 // [#20790] The write-only flow credential channel: where a flow's inbound hook
 // secret and http signing secrets live once they are out of its definition —
 // the object, the channel the plugin registers on the metadata save door, and

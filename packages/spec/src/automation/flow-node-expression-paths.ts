@@ -172,13 +172,56 @@ export type FlowNodeExpressionRole =
    */
   | 'value';
 
+/**
+ * [#27968] The SIBLING blocks of a node's `config` a ledger path can be rooted
+ * in, each with the one node type whose executor reads it.
+ *
+ * Two node types keep their contract in a declared block of `FlowNodeSchema`
+ * beside `config` rather than in `config` (`flow-sibling-block-loose-keys.ts`):
+ * `wait` (`waitEventConfig`) and `connector_action` (`connectorConfig`). Only
+ * the second holds a value slot — `connectorConfig.input`, evaluated by the
+ * `connector_action` executor through the same per-key resolver as every other
+ * value map — so it is the one listed. `waitEventConfig` holds literals only.
+ *
+ * The marker that declares a slot here rides `FlowNodeSchema` itself (the
+ * block's own Zod, `.meta({ xExpression })`), and the reconciliation ratchet
+ * (`config-expression-ledger.test.ts` in `service-automation`) reads it from
+ * there, mapping each block to its node type through this table — so a marker
+ * on a block this table does not name fails it, and so does an entry rooted in
+ * a block no marker declares.
+ */
+export const FLOW_NODE_SIBLING_EXPRESSION_BLOCKS = {
+  connectorConfig: 'connector_action',
+} as const satisfies Readonly<Record<string, string>>;
+
+/** A sibling block of `config` a ledger path can be rooted in ({@link FLOW_NODE_SIBLING_EXPRESSION_BLOCKS}). */
+export type FlowNodeSiblingExpressionBlock = keyof typeof FLOW_NODE_SIBLING_EXPRESSION_BLOCKS;
+
+/** The node block a ledger path is rooted in: `config`, or a declared sibling block. */
+export type FlowNodeExpressionBlock = 'config' | FlowNodeSiblingExpressionBlock;
+
+/**
+ * [#27968] The sibling blocks of one node, as the resolvers read them — the
+ * node itself satisfies it. A caller that hands none is answered for the
+ * `config`-rooted entries only.
+ */
+export type FlowNodeSiblingBlocks = { readonly [Block in FlowNodeSiblingExpressionBlock]?: unknown };
+
 /** One expression-bearing config slot on a builtin flow node type. */
 export interface FlowNodeExpressionPath {
   /** Registry node type the path belongs to (`node.type`). */
   readonly nodeType: string;
   /**
-   * Dot path into `node.config`, using `[]` for "every element of this array"
-   * and a `*` segment for "every key of this object" (#14149).
+   * [#27968] The node block the path is rooted in, when it is not `config`: a
+   * declared sibling block ({@link FLOW_NODE_SIBLING_EXPRESSION_BLOCKS}) —
+   * today `connectorConfig`, for a `connector_action` node's `input` map.
+   * Absent means `config`, which every entry before #27968 is.
+   */
+  readonly block?: FlowNodeSiblingExpressionBlock;
+  /**
+   * Dot path into the node's {@link FlowNodeExpressionPath.block} — `config`
+   * unless the entry names another — using `[]` for "every element of this
+   * array" and a `*` segment for "every key of this object" (#14149).
    * `'fields[].visibleWhen'` reads `config.fields[i].visibleWhen` for each `i`;
    * `'assignments.*'` reads `config.assignments[k]` for each authored key `k`
    * — the spelling for a map whose keys are the author's own names (variable
@@ -337,6 +380,13 @@ export interface FlowNodeExpressionPath {
  * open map with no marker). The entry carries
  * {@link FlowNodeExpressionPath.filterOperands}: the walks emit each operand
  * at its own path, never the filter itself.
+ *
+ * So is, since #27968, a `connector_action` node's `input` map — the one entry
+ * rooted outside `config` ({@link FlowNodeExpressionPath.block}): the node's
+ * contract is its `connectorConfig` sibling block, and the executor hands each
+ * value of `connectorConfig.input` to the action through the per-key resolver
+ * the callee maps use. Declared on `FlowNodeSchema.connectorConfig`'s `input`
+ * map value (`.meta({ xExpression: 'value' })`).
  */
 export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
   {
@@ -590,7 +640,36 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     label: 'delete_record filter operand',
     filterOperands: true,
   },
+  {
+    // [#27968] The input map a `connector_action` node hands to the action —
+    // `{ <action input>: <value> }`, keys named by the connector's action —
+    // evaluated in the run's scope before dispatch, through the one per-key
+    // resolver the callee maps above use (`resolveValueSlotMap`). Rooted in the
+    // node's `connectorConfig` sibling block, not `config`: that block is the
+    // node's whole contract, and the executor reads nothing else. Declared
+    // through the block's own Zod (`FlowNodeSchema.connectorConfig`'s `input`
+    // map value carries `.meta({ xExpression: 'value' })`).
+    nodeType: 'connector_action',
+    block: 'connectorConfig',
+    path: 'input.*',
+    role: 'value',
+    label: 'connector_action input value',
+  },
 ];
+
+/** The block `entry`'s path is rooted in. */
+export function flowNodeExpressionBlock(entry: FlowNodeExpressionPath): FlowNodeExpressionBlock {
+  return entry.block ?? 'config';
+}
+
+/**
+ * The value `entry`'s path is walked from on one node: its `config`, or — for
+ * an entry rooted in a sibling block — that block, read off `siblings`
+ * (`undefined` when the caller handed none).
+ */
+function entryRoot(entry: FlowNodeExpressionPath, config: unknown, siblings: FlowNodeSiblingBlocks | undefined): unknown {
+  return entry.block === undefined ? config : siblings?.[entry.block];
+}
 
 /** One operand of a flow node's query filter ({@link flowFilterOperands}). */
 export interface FlowFilterOperand {
@@ -703,7 +782,14 @@ function operandPath(prefix: string, path: readonly (string | number)[]): string
 export interface ResolvedFlowNodeExpression {
   /** The ledger entry that matched. */
   readonly entry: FlowNodeExpressionPath;
-  /** Concrete location, with array indices filled in (`fields[1].visibleWhen`). */
+  /**
+   * [#27968] The node block {@link ResolvedFlowNodeExpression.path} is inside
+   * — `config`, or the entry's sibling block — so a consumer locates the value
+   * as `<block>.<path>` (`config.fields[1].visibleWhen`,
+   * `connectorConfig.input.ticket`).
+   */
+  readonly block: FlowNodeExpressionBlock;
+  /** Concrete location inside {@link ResolvedFlowNodeExpression.block}, with array indices filled in (`fields[1].visibleWhen`). */
   readonly path: string;
   /** The authored value sitting at that location. */
   readonly value: unknown;
@@ -786,28 +872,38 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
  * each element of an array as a value of its own, at its index (#19939). An
  * entry with {@link FlowNodeExpressionPath.filterOperands} reads each operand
  * of the filter as a value of its own, at its path (#19939).
+ *
+ * [#27968] An entry rooted in a sibling block ({@link FlowNodeExpressionPath.block})
+ * is walked from that block, read off `siblings` — pass the node itself — and
+ * each result names the block it is in ({@link ResolvedFlowNodeExpression.block}).
+ * A caller that hands no `siblings` is answered for the `config`-rooted entries
+ * only: every door that judges a whole node (`FlowSchema.parse`,
+ * `AutomationEngine.registerFlow`, `objectstack validate`) hands the node.
  */
 export function resolveFlowNodeExpressions(
   nodeType: string,
   config: unknown,
+  siblings?: FlowNodeSiblingBlocks,
 ): ResolvedFlowNodeExpression[] {
-  if (config == null || typeof config !== 'object') return [];
   const out: ResolvedFlowNodeExpression[] = [];
   for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
-    if (entry.nodeType !== nodeType || !readOn(entry, config)) continue;
-    walk(config as Record<string, unknown>, entry.path.split('.'), '', slotEmitter(entry, (path, value) => {
+    if (entry.nodeType !== nodeType) continue;
+    const root = entryRoot(entry, config, siblings);
+    if (root == null || typeof root !== 'object' || !readOn(entry, root)) continue;
+    const block = flowNodeExpressionBlock(entry);
+    walk(root, entry.path.split('.'), '', slotEmitter(entry, (path, value) => {
       if (entry.role === 'value') {
-        if (isExpressionEnvelopeShaped(value)) out.push({ entry, path, value });
+        if (isExpressionEnvelopeShaped(value)) out.push({ entry, block, path, value });
       } else if (typeof value === 'string') {
         // #17493 — every string in a `predicate` slot is emitted, a BLANK one
         // included, for the consumer to refuse (see `predicateSlotRefusal`).
-        out.push({ entry, path, value });
+        out.push({ entry, block, path, value });
       } else if (value != null || entry.required) {
         // #15572 — a non-string in a predicate slot. Emitted so a consumer can
         // REFUSE it (see `predicateSlotRefusal`), never so it can be parsed.
         // #19961 — on a REQUIRED slot, absent and `null` are emitted too: the
         // walk hands over `undefined` for a key an existing element lacks.
-        out.push({ entry, path, value });
+        out.push({ entry, block, path, value });
       }
     }));
   }
@@ -832,15 +928,22 @@ export function resolveFlowNodeExpressions(
  * filter at its own path.
  *
  * Pure path resolution, like its sibling — no judgement about what a value
- * says.
+ * says. Reads a sibling-block entry off `siblings` exactly as its sibling does
+ * (#27968).
  */
-export function resolveFlowNodeValueSlots(nodeType: string, config: unknown): ResolvedFlowNodeExpression[] {
-  if (config == null || typeof config !== 'object') return [];
+export function resolveFlowNodeValueSlots(
+  nodeType: string,
+  config: unknown,
+  siblings?: FlowNodeSiblingBlocks,
+): ResolvedFlowNodeExpression[] {
   const out: ResolvedFlowNodeExpression[] = [];
   for (const entry of FLOW_NODE_EXPRESSION_PATHS) {
-    if (entry.nodeType !== nodeType || entry.role !== 'value' || !readOn(entry, config)) continue;
-    walk(config as Record<string, unknown>, entry.path.split('.'), '', slotEmitter(entry, (path, value) => {
-      if (value !== undefined) out.push({ entry, path, value });
+    if (entry.nodeType !== nodeType || entry.role !== 'value') continue;
+    const root = entryRoot(entry, config, siblings);
+    if (root == null || typeof root !== 'object' || !readOn(entry, root)) continue;
+    const block = flowNodeExpressionBlock(entry);
+    walk(root, entry.path.split('.'), '', slotEmitter(entry, (path, value) => {
+      if (value !== undefined) out.push({ entry, block, path, value });
     }));
   }
   return out;

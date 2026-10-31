@@ -65,8 +65,13 @@ export interface ViewSettingsDensity {
   cycle: () => void;
 }
 
-/** How a reader prefers a drawer-mode record to open (objectstack#26681). */
-export type ViewSettingsRecordOpenPreference = 'drawer' | 'split';
+/**
+ * How a reader prefers a drawer-mode record to open (objectstack#26681): the
+ * pane beside the list (the default since objectstack#27545) or the drawer
+ * over it. The full page is a third choice only a host that offers it draws
+ * (`ViewSettingsRecordOpen.selectPage`).
+ */
+export type ViewSettingsRecordOpenPreference = 'split' | 'drawer';
 
 /**
  * The Open records section (objectstack#26681): how a row opens its record.
@@ -76,9 +81,10 @@ export type ViewSettingsRecordOpenPreference = 'drawer' | 'split';
  * default) or `page` (maintainer ruling 2026-10-27, objectstack#26677). So the
  * section answers by the mode the host resolved for this object and view:
  *
- *   - `drawer`: two segments, Drawer | Split, writing the reader's preference
- *     through `setPreference`, with a one-line note that the choice is the
- *     reader's own and that both expand to the full page;
+ *   - `drawer`: two segments, Split | Drawer, writing the reader's preference
+ *     through `setPreference` — and a third, Full page, when the host passes
+ *     `selectPage` (objectstack#27545) — with a one-line note that the choice
+ *     is the reader's own and that a record's `↗` always opens the full page;
  *   - `page`: one read-only line saying the object is declared to open as a
  *     full page — the declaration wins, so there is nothing to choose;
  *   - `new_window` / `none`: no section. The preference changes nothing there
@@ -87,10 +93,20 @@ export type ViewSettingsRecordOpenPreference = 'drawer' | 'split';
 export interface ViewSettingsRecordOpen {
   /** The `navigation.mode` the host resolved for this object and view. */
   resolvedMode: 'drawer' | 'page' | 'new_window' | 'none';
-  /** The reader's current preference; read only when `resolvedMode` is `drawer`. */
-  preference: ViewSettingsRecordOpenPreference;
-  /** Keep the reader's choice. The host owns where it is kept. */
+  /**
+   * The reader's current preference; read only when `resolvedMode` is
+   * `drawer`. `'page'` selects the Full page segment, drawn only with
+   * `selectPage`. Read, never handed back: a choice is written through
+   * `setPreference` or `selectPage`.
+   */
+  preference: ViewSettingsRecordOpenPreference | 'page';
+  /** Keep the reader's choice of Split or Drawer. The host owns where it is kept. */
   setPreference: (next: ViewSettingsRecordOpenPreference) => void;
+  /**
+   * Keep the reader's choice of the full page (objectstack#27545). The Full
+   * page segment is drawn only when the host passes it.
+   */
+  selectPage?: () => void;
 }
 
 export interface ViewSettingsPopoverProps {
@@ -307,7 +323,7 @@ function RecordOpenSection({
   t: ViewSettingsPopoverProps['t'];
   recordOpen: ViewSettingsRecordOpen;
 }) {
-  const { resolvedMode, preference, setPreference } = recordOpen;
+  const { resolvedMode, preference, setPreference, selectPage } = recordOpen;
   if (resolvedMode !== 'drawer' && resolvedMode !== 'page') return null;
   const title = t('list.recordOpen', { defaultValue: 'Open records' });
   return (
@@ -321,28 +337,39 @@ function RecordOpenSection({
             size="sm"
             value={preference}
             // Radix hands back '' when the pressed segment is pressed again:
-            // one of the two is always the choice, so that writes nothing.
+            // one segment is always the choice, so that writes nothing.
             onValueChange={(next) => {
-              if ((next === 'drawer' || next === 'split') && next !== preference) setPreference(next);
+              if (next === preference) return;
+              if (next === 'split' || next === 'drawer') setPreference(next);
+              else if (next === 'page') selectPage?.();
             }}
             aria-label={title}
             className="gap-0"
             data-testid="display-record-open-choice"
           >
             <ToggleGroupItem
-              value="drawer"
-              className="h-7 rounded-r-none px-2.5 text-xs"
-              data-testid="display-record-open-drawer"
-            >
-              {t('list.recordOpenDrawer', { defaultValue: 'Drawer' })}
-            </ToggleGroupItem>
-            <ToggleGroupItem
               value="split"
-              className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
+              className="h-7 rounded-r-none px-2.5 text-xs"
               data-testid="display-record-open-split"
             >
               {t('list.recordOpenSplit', { defaultValue: 'Split' })}
             </ToggleGroupItem>
+            <ToggleGroupItem
+              value="drawer"
+              className={cn('-ml-px h-7 px-2.5 text-xs', selectPage ? 'rounded-none' : 'rounded-l-none')}
+              data-testid="display-record-open-drawer"
+            >
+              {t('list.recordOpenDrawer', { defaultValue: 'Drawer' })}
+            </ToggleGroupItem>
+            {selectPage && (
+              <ToggleGroupItem
+                value="page"
+                className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
+                data-testid="display-record-open-page"
+              >
+                {t('list.recordOpenPage', { defaultValue: 'Full page' })}
+              </ToggleGroupItem>
+            )}
           </ToggleGroup>
         ) : (
           <span className="min-w-0 text-right text-xs text-muted-foreground" data-testid="display-record-open-declared">
@@ -353,7 +380,7 @@ function RecordOpenSection({
       {resolvedMode === 'drawer' && (
         <p className="mt-1 text-[11px] leading-snug text-muted-foreground" data-testid="display-record-open-note">
           {t('list.recordOpenNote', {
-            defaultValue: 'Your own preference, not part of the object’s declaration. Both expand to the full page.',
+            defaultValue: 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
           })}
         </p>
       )}

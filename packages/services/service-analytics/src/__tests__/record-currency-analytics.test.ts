@@ -279,6 +279,74 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
     expect(err.object).toBe(OBJECT);
   });
 
+  // The column's currency for a derived measure is the compile guard's own
+  // resolved reading: a `sum` / `difference` whose operands all resolve to one
+  // `fixed` code carries it, as `content/docs/data-modeling/currency.mdx` says.
+  describe('a derived measure column takes the currency its operands resolve to', () => {
+    const DERIVED = DatasetSchema.parse({
+      name: 'os28049_derived_currency',
+      label: 'Derived currency',
+      object: OBJECT,
+      dimensions: [{ name: 'currency', field: 'currency_code', type: 'string' }],
+      measures: [
+        { name: 'eur', aggregate: 'sum', field: 'amt_eur' },
+        { name: 'eur_restated', aggregate: 'sum', field: 'amt_eur', currency: 'EUR' },
+        { name: 'usd', aggregate: 'sum', field: 'amt_usd' },
+        { name: 'tenant', aggregate: 'sum', field: 'amt_tenant' },
+        { name: 'tenant_as_jpy', aggregate: 'sum', field: 'amt_tenant', currency: 'JPY' },
+        { name: 'total', aggregate: 'sum', field: 'amount' },
+        { name: 'invoices', aggregate: 'count' },
+        { name: 'eur_twice', derived: { op: 'sum', of: ['eur', 'eur_restated'] } },
+        { name: 'eur_net', derived: { op: 'difference', of: ['eur', 'eur'] } },
+        { name: 'eur_twice_restated', derived: { op: 'sum', of: ['eur', 'eur'] }, currency: 'EUR' },
+        // Controls: no one `fixed` code, so today's answer stands.
+        { name: 'usd_and_tenant', derived: { op: 'sum', of: ['usd', 'tenant'] } },
+        { name: 'tenant_twice', derived: { op: 'sum', of: ['tenant', 'tenant'] } },
+        { name: 'jpy_twice', derived: { op: 'sum', of: ['tenant_as_jpy', 'tenant_as_jpy'] } },
+        { name: 'eur_per_invoice', derived: { op: 'ratio', of: ['eur', 'invoices'] } },
+        { name: 'eur_product', derived: { op: 'product', of: ['eur', 'eur'] } },
+        { name: 'total_twice', derived: { op: 'sum', of: ['total', 'total'] } },
+      ],
+    });
+    const LABELLED = { eur_twice: 'EUR', eur_net: 'EUR', eur_twice_restated: 'EUR' } as const;
+    const UNLABELLED = ['usd_and_tenant', 'tenant_twice', 'jpy_twice', 'eur_per_invoice', 'eur_product', 'total_twice'] as const;
+    const expectColumns = (result: AnalyticsResult) => {
+      for (const [name, code] of Object.entries(LABELLED)) {
+        expect(column(result, name)?.currency, name).toBe(code);
+        expect(column(result, name)?.currencyField, name).toBeUndefined();
+      }
+      for (const name of UNLABELLED) {
+        expect(column(result, name)?.currency, name).toBeUndefined();
+        expect(column(result, name)?.currencyField, name).toBeUndefined();
+      }
+    };
+
+    for (const face of FACES) {
+      it(`${face} strategy: a sum or difference over one fixed code carries it; no other derived column gains one`, async () => {
+        const result = await services[face]!.queryDataset(
+          DERIVED,
+          { dimensions: ['currency'], measures: [...Object.keys(LABELLED), ...UNLABELLED] },
+          CTX,
+        );
+        expectColumns(result);
+        const eurByCode = Object.fromEntries(
+          (result.rows as Array<Record<string, unknown>>).map((r) => [r.currency, Number(r.eur_twice)]),
+        );
+        expect(eurByCode).toEqual({ USD: 20, EUR: 180 });
+      });
+    }
+
+    it('the draft-preview path labels the same columns', async () => {
+      const result = await services.objectql!.queryDataset(
+        DERIVED,
+        { dimensions: ['currency'], measures: [...Object.keys(LABELLED), ...UNLABELLED] },
+        CTX,
+        { previewDrafts: true },
+      );
+      expectColumns(result);
+    });
+  });
+
   describe('compile-time guards on measure currencies', () => {
     const datasetWith = (measures: unknown[]) =>
       DatasetSchema.parse({
@@ -384,7 +452,7 @@ describe('[ADR-0144 M0-3] analytics over a record-currency amount', () => {
           + 'measures "eur", "eur_restated", whose amounts are fixed to EUR.',
         );
         expect(compileRefusal(measures)?.message)
-          .toContain("restate the operands' EUR as the measure's `currency`, or delete it (the column then carries no currency code)");
+          .toContain("delete the measure's `currency` (the column takes the operands' EUR), or restate EUR.");
       });
     }
 
