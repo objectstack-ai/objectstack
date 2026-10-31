@@ -227,6 +227,10 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/meta/book/:name/tree', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getBookTree',
     responseSchema: 'ResolvedBookSchema',
     note: 'REST-only route; payload answered BARE — `resolveBookTree()`\'s `ResolvedBook`, verbatim. The schema is declared beside its interfaces in spec `system/book.zod.ts` and re-exported into `/api`, never declared there a second time; conformance: spec `system/book.test.ts`' },
+  // [#27627] The app metadata bundle — see meta-app-bundle-routes.ts.
+  { route: 'GET /api/v1/meta/app/:appId/bundle', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAppBundle',
+    responseSchema: 'AppMetadataBundleResponseSchema',
+    note: 'The app metadata bundle: the app and the objects, views, pages and dashboards its navigation reaches (objects: navigation, then one hop of inbound relationships), each member the item chain\'s answer of its own GET /meta/:type/:name as the same caller (createMetaItemAnswer, the uncached arm\'s fetch), a refused member absent, a refused app the whole answer. Answers BARE, so the named schema is the whole body; per-caller weak ETag over the served body (the /meta reads\' shared validator), private, no-cache, 304 on If-None-Match. meta-app-bundle-routes.test.ts parses the body against the named schema on the mount' },
   // [#5882] The three-layer diagnostic projection, promoted from the
   // `?layers=true` flag on the row below to a path of its own so that one path
   // answers one response shape. `responseSchema` is filled because this mount

@@ -99,10 +99,8 @@ const CLONE_CONFLICT_REFUSAL =
 
 /** `FLOW_CLONE_NOTICE` — returned on every successful clone. */
 const CLONE_NOTICE =
-  'References are not re-pointed: this clone calls exactly what the original called (subflows, actions ' +
-  'and objects are unchanged). It is created with status `draft`, which is a lifecycle label and NOT an ' +
-  'off-switch — a cloned record-change or schedule flow is bound to its trigger and will run alongside ' +
-  'the flow it was copied from.';
+  'The copy runs alongside the original until you switch one of them off, ' +
+  'and it still uses the same subflows, actions and objects as the original.';
 
 /**
  * `SCHEDULED_WORK_DISABLED_REASON` (`@objectstack/types` 17.5.0), the sentence

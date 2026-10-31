@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // nothing; a key beside a local url stays the author's call, as it was.
 export const entry: SemanticMigration = {
   id: 'turso-config-encryption-key-retired',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.TursoConfig.encryptionKey (a turso / libsql datasource.config), the published TursoConfigSchema '
     + 'mirror and the TursoDriver constructor of @objectstack/driver-turso — the key is removed: every '

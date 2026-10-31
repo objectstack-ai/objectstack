@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // rewrite the source mechanically.
 export const entry: SemanticMigration = {
   id: 'flow-cel-record-variables-alias-retired',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'flows[].nodes[].config.condition, flows[].edges[].condition, a decision node\'s conditions[].expression, a '
     + 'screen node\'s fields[].visibleWhen, and the CEL value envelopes of an assignment node\'s assignments and of '

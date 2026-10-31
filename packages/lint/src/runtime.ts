@@ -35,7 +35,7 @@
  *
  * ## Why it exists anyway
  *
- * So the kernel boot path can name only the five gate functions below, and so a
+ * So the kernel boot path can name only the gate functions below, and so a
  * test can prove it named nothing else. `@objectstack/metadata-protocol`'s
  * runtime gate must reach this package through this entry rather than the root
  * barrel, and `authoring-rule-wiring.test.ts` fails if it ever does otherwise.
@@ -64,6 +64,7 @@
 export {
   buildRuntimeWriteSnapshots,
   narrowObjectsToPackageClosure,
+  resolvePackageClosure,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,

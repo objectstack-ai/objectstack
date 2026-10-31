@@ -88,6 +88,7 @@ import {
   resolveFilterPlaceholders,
   toFilterNodeSafely,
   GANTT_CONFIG_SPELLING,
+  kanbanDeclaredLanes,
   type FilterTokenScope,
   type SchemaLike,
 } from '@object-ui/core';
@@ -2168,7 +2169,8 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
         // `groupByField` is the spec's lane key and the only spelling read here:
         // the pre-#2231 `groupField` alias retired in objectui#6152 round 14.
         // `kanban.columns` (when provided) lists the FIELDS to render on each card —
-        // these are NOT lanes; lanes are derived from the groupBy field's options.
+        // these are NOT lanes; lanes are derived from the groupBy field's options,
+        // or are the block's `lanes` when it declares them (below).
         const kanbanCfg = viewOptions.kanban || {};
         const groupBy =
           kanbanCfg.groupByField ||
@@ -2285,10 +2287,20 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
         //
         // ⚠️ NODE-LOCAL: the VIEW-LEVEL `kanbanCfg.groupField` alias read here
         // was a separate key, and objectui#6152 round 14 retired it.
+        // objectstack#28211 — the block's `lanes`, the lanes the board draws in
+        // the author's order, go out as the node's `columns` (its lanes), the
+        // mapping `ListView`'s twin makes. A record whose value is not listed
+        // lands in `Uncategorized`.
+        const fieldDefs = (objectSchema as { fields?: Record<string, { options?: unknown }> } | null)?.fields;
+        const declaredLanes = kanbanDeclaredLanes(
+          kanbanCfg.lanes,
+          fieldDefs?.[groupBy]?.options as Parameters<typeof kanbanDeclaredLanes>[1],
+        );
         return {
           type: 'object-kanban',
           ...baseProps,
           groupBy,
+          ...(declaredLanes ? { columns: declaredLanes } : {}),
           titleField: kanbanCfg.titleField || 'name',
           cardFields,
           ...(kanbanCfg.summarizeField ? { summarizeField: kanbanCfg.summarizeField } : {}),
@@ -2354,6 +2366,8 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
                   ...(calendarCfg.titleField ? { titleField: calendarCfg.titleField } : {}),
                   ...(calendarCfg.colorField ? { colorField: calendarCfg.colorField } : {}),
                   ...(calendarCfg.allDayField ? { allDayField: calendarCfg.allDayField } : {}),
+                  // The date the calendar opens on, which `ObjectCalendar` seeds its date from.
+                  ...(calendarCfg.initialDate ? { initialDate: calendarCfg.initialDate } : {}),
                 },
               }
             : {}),
@@ -2571,7 +2585,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
     // `schema.table?.columns` joins the list with the read added for
     // objectui#5269: a memo that reads a key but does not depend on it keeps
     // serving the field list the author has already replaced.
-  }, [schema.objectName, schema.table?.columns, schema.table?.fields, currentNamedViewConfig, activeView]);
+  }, [schema.objectName, schema.table?.columns, schema.table?.fields, currentNamedViewConfig, activeView, objectSchema]);
 
   // Build grid schema (default content renderer)
   //

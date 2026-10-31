@@ -70,6 +70,13 @@ import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driv
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import * as actionExec from '../action-execution.js';
+import {
+    actionInvocationBranch,
+    actionInvocationForwardedFrom,
+    actionInvocationTarget,
+    recordActionInvocation,
+    withActionSurface,
+} from '../action-invocation-audit.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 // [#25976] The one value-shape check the run doors share — the trigger and
@@ -767,6 +774,66 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         await resolveActorDisplayName(() => ql, ec),
     );
 
+    // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW.
+    // Every call that cleared the gates above reaches its branch below, and
+    // whatever the branch answers — a result, the subject-record 404, a
+    // target's refusal, a body's throw mapped by the catch — is answered as
+    // ONE response. One `action_invocation` row is written for it, naming this
+    // door (`surface: 'rest'`, set from the door's identity on a copy of the
+    // caller's envelope; nothing on the request can move it). A call a gate
+    // above refused ran nothing and writes no row. See
+    // `../action-invocation-audit.ts`.
+    const answer = await dispatchAdmittedRestAction(deps, _context, {
+        objectName, actionName, actionDef, actionType, subject, record, recordId, reqParams, ql, ec, userFromAuth,
+    });
+    const answered: any = answer.response;
+    const answeredStatus: number = typeof answered?.status === 'number' ? answered.status : 500;
+    const answeredOk = answeredStatus >= 200 && answeredStatus < 300;
+    const answeredCode: unknown = answered?.body?.error?.code;
+    await recordActionInvocation(deps, _context, _context?.environmentId, {
+        context: withActionSurface(ec, 'rest'),
+        actionName: typeof actionDef?.name === 'string' && actionDef.name ? actionDef.name : actionName,
+        objectName: actionExec.isObjectLessActionKey(objectName) ? undefined : objectName,
+        recordId: recordId !== undefined && recordId !== null && recordId !== '' ? String(recordId) : undefined,
+        branch: actionInvocationBranch(actionDef, actionExec.isDeclarativeUpdateAction(actionDef)),
+        outcome: answeredOk ? 'succeeded' : 'failed',
+        ...(answeredOk ? {} : { status: answeredStatus }),
+        ...(!answeredOk && typeof answeredCode === 'string' ? { errorCode: answeredCode } : {}),
+        // An api forward's two rows name each other: this row, as the OUTER
+        // door, the declared target; as the INNER door, the forward mark it
+        // arrived carrying (a hint — see `../action-invocation-audit.ts`).
+        target: actionInvocationTarget(actionDef, actionExec.isDeclarativeUpdateAction(actionDef)),
+        forwardedFrom: actionInvocationForwardedFrom(_context, actionExec.API_FORWARD_MARK_HEADER),
+    });
+    return answer;
+}
+
+/**
+ * The REST action door's dispatch, once every admission gate in
+ * {@link handleActionsRequest} has passed: the declarative update, the
+ * subject-record verdict, the api forward, the flow dispatch and the
+ * script/body dispatch, with the one catch that maps a thrown refusal to the
+ * route's answer. Split out of the handler so the handler can write the
+ * invocation row for whatever this answers (#27908); the code is unchanged.
+ */
+async function dispatchAdmittedRestAction(
+    deps: DomainHandlerDeps,
+    _context: HttpProtocolContext,
+    admitted: {
+        objectName: string;
+        actionName: string;
+        actionDef: any;
+        actionType: string;
+        subject: actionExec.ActionSubjectRecordLoad;
+        record: any;
+        recordId: any;
+        reqParams: Record<string, unknown>;
+        ql: any;
+        ec: any;
+        userFromAuth: ReturnType<typeof actorUserFromExecutionContext>;
+    },
+): Promise<HttpDispatcherResult> {
+    const { objectName, actionName, actionDef, actionType, subject, record, recordId, reqParams, ql, ec, userFromAuth } = admitted;
     try {
         // ── declarative update ── [#15079] FIRST, ahead of the `type` switch
         // and ahead of the trusted-mode plumbing below. Contract point 1 reads

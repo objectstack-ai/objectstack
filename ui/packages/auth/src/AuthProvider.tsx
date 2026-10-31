@@ -407,11 +407,17 @@ export function AuthProvider({
   );
 
   const signUp = useCallback(
-    async (name: string, email: string, password: string, callbackURL?: string) => {
+    async (name: string, email: string, password: string, callbackURL?: string, captchaToken?: string) => {
       setIsLoading(true);
       setError(null);
       try {
-        const result = await client.signUp({ name, email, password, ...(callbackURL ? { callbackURL } : {}) });
+        const result = await client.signUp({
+          name,
+          email,
+          password,
+          ...(callbackURL ? { callbackURL } : {}),
+          ...(captchaToken ? { captchaToken } : {}),
+        });
         if (result.requiresVerification) {
           // No session was created — the user must verify their email before
           // they can sign in. Leave auth state untouched so the caller can

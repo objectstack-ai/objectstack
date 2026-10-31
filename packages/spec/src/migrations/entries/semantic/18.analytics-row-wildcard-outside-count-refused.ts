@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // figure the author asked for, and a column is the author's to name.
 export const entry: SemanticMigration = {
   id: 'analytics-row-wildcard-outside-count-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'analyticsCubes[].measures.<metric>.sql, analyticsCubes[].dimensions.<dimension>.sql and '
     + 'datasets[].measures[].field (data.MetricSchema.sql / data.DimensionSchema.sql / '

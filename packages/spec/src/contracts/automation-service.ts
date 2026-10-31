@@ -1082,6 +1082,69 @@ export interface ConnectorCredentialClearRequest {
     context?: ExecutionContext;
 }
 
+/**
+ * ADR-0143 D3 / D5 — the connection of an `authorization_code` connector
+ * instance in the caller's organization, as the connection door answers it.
+ * ⛔ Never a token: the refresh token is a `secret` column the door never
+ * reads, and the access token is never stored at all.
+ */
+export interface ConnectorConnectionState {
+    /** The connector instance. */
+    connector: string;
+    /** The organization the connection belongs to (ADR-0143 Q1 = A). */
+    organizationId: string;
+    /**
+     * `not_connected` — no administrator connected it here yet (the instance
+     * dispatches nothing for this organization); `connected`; or
+     * `reconnect_required` — the authorization server refused the grant.
+     */
+    status: 'not_connected' | 'connected' | 'reconnect_required';
+    /** Why the grant stopped working, when `status` is `reconnect_required`. */
+    statusReason?: string;
+    /** The scopes the authorization server granted, space-separated. */
+    scopes?: string;
+    /** When the last access token obtained for this connection expires. */
+    expiresAt?: string;
+    /** When it was last connected, and by whom. */
+    connectedAt?: string;
+    connectedBy?: string;
+}
+
+/** What {@link IAutomationService.getConnectorConnection} and its revoke / begin siblings are asked about. */
+export interface ConnectorConnectionRequest {
+    /** The declarative connector instance, by name. */
+    connector: string;
+    /** The caller — its organization selects the connection, its user stamps the row. */
+    context?: ExecutionContext;
+}
+
+/** What {@link IAutomationService.beginConnectorConnection} answers: where to send the administrator's browser. */
+export interface ConnectorConnectionBegin {
+    connector: string;
+    organizationId: string;
+    /** The vendor's authorization URL, carrying `state` and the `S256` PKCE challenge. */
+    authorizationUrl: string;
+    /** When the begun connect stops being completable. */
+    expiresAt: string;
+}
+
+/** The redirect's closed query set (RFC 6749 §4.1.2, RFC 9207), as the callback door hands it over. */
+export interface ConnectorConnectionCallbackQuery {
+    code?: string;
+    state?: string;
+    error?: string;
+    error_description?: string;
+    error_uri?: string;
+    iss?: string;
+}
+
+/** What {@link IAutomationService.completeConnectorConnection} is asked to finish. */
+export interface ConnectorConnectionCallbackRequest {
+    query: ConnectorConnectionCallbackQuery;
+    /** The caller — it must be the user and organization that began the connect. */
+    context?: ExecutionContext;
+}
+
 export interface IAutomationService {
     /**
      * Execute a named flow or script
@@ -1377,6 +1440,48 @@ export interface IAutomationService {
      * PERMISSION_DENIED` under a walled tenancy posture, as a set does.
      */
     clearConnectorCredential?(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef>;
+
+    /**
+     * ADR-0143 D3 — the caller's organization's connection of one
+     * `authorization_code` instance. Rejects with an ADR-0112 `code` +
+     * `status`: an instance no installed package declares (`404
+     * RESOURCE_NOT_FOUND`); one whose auth is not `oauth2` with `grant:
+     * 'authorization_code'` (`400 VALIDATION_ERROR`); a caller with no
+     * organization (`400`); a deployment that cannot read the store (`503`).
+     *
+     * Optional for the reason {@link getConnectorDescriptors} is.
+     */
+    getConnectorConnection?(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState>;
+
+    /**
+     * ADR-0143 D5 — begin connecting (or reconnecting) one
+     * `authorization_code` instance for the caller's organization: a fresh
+     * `state` and `S256` PKCE pair bound to the caller, and the authorization
+     * URL to send the browser to. Nothing is stored in the connection record
+     * until the callback completes. Rejects as {@link getConnectorConnection}
+     * does, plus `503 SERVICE_UNAVAILABLE` when the deployment has no fixed
+     * origin for the redirect URI.
+     */
+    beginConnectorConnection?(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin>;
+
+    /**
+     * ADR-0143 D5 — complete a begun connect from the authorization server's
+     * redirect: the `state` is taken once and must have been begun by the same
+     * user in the same organization, then the code is exchanged with the PKCE
+     * verifier and the connection stored. Rejects `400 VALIDATION_ERROR` for an
+     * unknown, expired, replayed or foreign `state` and for an authorization
+     * server's `error` answer (naming its registered code only), and `503` when
+     * the token endpoint cannot be reached.
+     */
+    completeConnectorConnection?(request: ConnectorConnectionCallbackRequest): Promise<ConnectorConnectionState>;
+
+    /**
+     * ADR-0143 D5 — remove the caller's organization's connection of one
+     * instance; its next dispatch there is refused "not connected". Rejects
+     * `404 RESOURCE_NOT_FOUND` when it was not connected, otherwise as
+     * {@link getConnectorConnection} does.
+     */
+    revokeConnectorConnection?(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState>;
 
     /**
      * Per-flow deployment + binding state, for operator surfaces.

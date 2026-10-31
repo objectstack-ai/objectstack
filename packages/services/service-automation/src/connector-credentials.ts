@@ -155,11 +155,12 @@ export class ConnectorCredentialUnavailableError extends Error {
 }
 
 /** True when `err` is the engine's fail-closed refusal to persist a `secret` field. */
-function isSecretProtectionFailure(err: unknown): boolean {
+export function isSecretProtectionFailure(err: unknown): boolean {
     return /Cannot persist secret field/i.test(String((err as Error)?.message ?? err ?? ''));
 }
 
-function rowsOf(found: unknown): Record<string, unknown>[] {
+/** The rows of a data engine `find` answer, whichever envelope it came in. */
+export function rowsOf(found: unknown): Record<string, unknown>[] {
     if (Array.isArray(found)) return found as Record<string, unknown>[];
     const env = found as { data?: unknown; records?: unknown; value?: unknown } | null | undefined;
     for (const candidate of [env?.data, env?.records, env?.value]) {
@@ -168,7 +169,8 @@ function rowsOf(found: unknown): Record<string, unknown>[] {
     return [];
 }
 
-function optionalText(v: unknown): string | undefined {
+/** A non-empty text column, a datetime column read as ISO, or `undefined`. */
+export function optionalText(v: unknown): string | undefined {
     if (typeof v === 'string' && v.length > 0) return v;
     if (v instanceof Date) return v.toISOString();
     return undefined;

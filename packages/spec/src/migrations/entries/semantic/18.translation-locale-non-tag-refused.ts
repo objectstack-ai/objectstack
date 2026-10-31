@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // artifacts; this entry is the judgment an author still owes on the rest.
 export const entry: SemanticMigration = {
   id: 'translation-locale-non-tag-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'a locale that is not a BCP-47 tag (LocaleSchema): a translation item locale, a translation '
     + 'bundle locale key, i18n.defaultLocale / fallbackLocale / supportedLocales, a seed dataset '

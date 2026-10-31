@@ -205,15 +205,14 @@ export type {
   ObjectDefFieldLike,
   BuildPageOptions,
 } from './synth/buildDefaultPageSchema';
-// objectstack#26678 — the synthesized record page at two widths: the tier a
-// container takes, the page partitioned into its columns, and the columns.
+// objectstack#26678 / objectstack#27524 — the synthesized record page laid
+// out by its width: the tier a container takes, the page partitioned into its
+// details and panels, and the layout.
 export {
-  RECORD_PAGE_THREE_COLUMN_MIN_WIDTH,
+  RECORD_PAGE_WIDE_MIN_WIDTH,
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
   recordPageTierFor,
-  recordPageArrangementFor,
-  recordPageColumnDefaults,
-  recordTimelineDefaultReason,
+  recordPageTierHasRightColumn,
   recordPageColumnOfTab,
   buildDefaultPageColumns,
   bodyTableIdsOf,
@@ -224,10 +223,6 @@ export type {
   RecordPageTier,
   RecordPageColumn,
   DefaultPageColumns,
-  RecordPageColumnSwitches,
-  RecordPageArrangement,
-  RecordPageObjectLike,
-  RecordTimelineDefaultReason,
 } from './synth/recordPageColumns';
 export { useRecordPageTier } from './useRecordPageTier';
 export type { UseRecordPageTierOptions } from './useRecordPageTier';
@@ -987,6 +982,8 @@ ComponentRegistry.register('path', RecordPathRenderer, {
   inputs: [
     { name: 'statusField', type: 'string', required: true, description: 'Field representing the current status/stage' },
     { name: 'stages', type: 'array', of: 'object', description: 'Explicit stage definitions [{ value, label }] (else derived from field metadata)' },
+    // objectstack#28061 — read by `useStageChange` (`renderers/recordPathStageChange.tsx`).
+    { name: 'allowStageChange', type: 'boolean', description: 'Let the reader change the record\'s stage by pressing a stage on the path (default: off, a read-only progress rail). Each press asks for confirmation, then saves `statusField` through the record\'s ordinary update, guarded by the record\'s version, so the object\'s state machine and validation rules decide; a refused move is shown under the path. Stages are pressable only for a reader who may edit `statusField` on this record, and not while the record\'s inline edit holds unsaved changes.' },
   ],
 });
 

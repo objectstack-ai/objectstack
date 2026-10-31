@@ -201,9 +201,120 @@ The organization's home currency is the existing `localization.currency` setting
 **Metadata never names it**: no field, object or dataset declares the home currency, and a
 `dynamic` amount displays in it because that is what `dynamic` means.
 
-Consolidating record-mode amounts into one home-currency total, through dated exchange
-rates and a stored home amount, comes in a later release. Until then, total a record-mode
-amount per currency by grouping by its code field.
+To total record-mode amounts across currencies, store each one converted into the home
+currency when it is written, as the next section shows, and aggregate the stored home
+amount.
+
+## Converting into the home currency
+
+### Declaring the home amount
+
+A record-mode amount declares `currencyConfig.homeAmount` to have the engine store its
+value converted into the home currency, together with the rate it used. The declaration
+names three fields of the same object, all required:
+
+| Pointer | Names | Declared as |
+|:---|:---|:---|
+| `field` | where the home amount is stored | a `currency` field in `dynamic` mode (it displays in the home currency), `readonly: true` |
+| `rateDate` | the record's document date, which picks the rate | a `date` or `datetime` field. There is no default: the engine never uses `created_at` in its place. |
+| `rateField` | where the rate used is stored | a `number` field, `readonly: true` |
+
+```typescript
+export const Invoice = ObjectSchema.create({
+  name: 'invoice',
+  label: 'Invoice',
+  fields: {
+    name: Field.text({ label: 'Number', required: true }),
+    currency_code: Field.text({ label: 'Currency', valueDomain: 'iso_4217_currency' }),
+    invoice_date: Field.date({ label: 'Invoice Date' }),
+    amount: Field.currency({
+      label: 'Amount',
+      currencyConfig: {
+        currencyMode: 'record',
+        currencyField: 'currency_code',
+        homeAmount: { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' },
+      },
+    }),
+    amount_home: Field.currency({ label: 'Amount (home currency)', readonly: true }),
+    amount_rate: Field.number({ label: 'Exchange rate', readonly: true }),
+  },
+});
+```
+
+The names `amount_home` and `amount_rate` are a convention, not a contract: the platform
+never injects these columns and never looks them up by name.
+
+### The exchange rates
+
+Rates live in the organization's **Exchange Rates** (Setup, the `sys_exchange_rate`
+object): one row per currency and effective date, entered by an organization
+administrator, imported, or written by an app flow that fetches a provider feed. A rate
+states how many units of the foreign currency **one unit of the home currency** buys:
+with home currency USD, an EUR row of `0.92` means 1 USD = 0.92 EUR. A rate keeps up to
+twelve decimals.
+
+A year of rates loads from one CSV with the columns `currency`, `rate` and
+`effective_date`, through the list page's **Import** or the generic
+[import door](/docs/data-modeling/import-mappings) (`POST /api/v1/data/sys_exchange_rate/import/jobs`).
+A line repeating a currency and effective date already on file is refused for that row
+alone (`UNIQUE_VIOLATION`) and the rest of the file still lands; add a `source` column
+reading `import` to mark the rows imported, since an omitted one takes the default,
+`manual`.
+
+### What a write stores
+
+When a record is inserted, and whenever an update changes its amount, its code or its
+document date, the engine computes the home amount:
+
+- **The rate** is the row for the record's currency with the latest effective date **on
+  or before** the document date. A row dated after the document never applies, and
+  neither does "the most recent rate" when it is dated later. A `datetime` document date
+  is dated in the organization's timezone (the `localization.timezone` setting, UTC when
+  unset): an invoice written at 01:00 on April 1 in Shanghai takes the April 1 rate. A
+  `date` document date is its own day.
+- **The home amount** is the amount **divided by** the rate, computed in exact decimal
+  arithmetic and rounded once, half away from zero, to the home currency's decimal
+  places as CLDR gives them (its fraction digits): 0 for JPY, 2 for USD and CNY, 3 for
+  KWD. For a few currencies CLDR's count differs from ISO 4217's minor units (IQD, HUF,
+  COP, IDR and PKR among them), and CLDR's applies. USD 10,000 at a rate of 0.1389 into
+  CNY stores ¥71,994.24.
+- **The rate field** stores the rate row's own value, unrounded, so the stored home
+  amount always reproduces from the stored amount and rate.
+- **An amount in the home currency itself** stores rate `1` and needs no rate row.
+- **A blank amount** stores a blank home amount and a blank rate.
+
+The home and rate fields are **the engine's alone**. A value a caller sends for either is
+dropped like any `readonly` value (or refused under `strictReadonlyWrites`); a
+`defaultValue` on either never stands; and a value a system write or a historical import
+supplies is computed over. A batch insert and an import convert every row through the
+same path as a single write.
+
+A rate row corrected later does not rewrite the amounts already converted with it: an
+update that does not touch the amount, its code or its document date leaves the stored
+home amount and rate as they are.
+
+An update by filter (`multi: true`) writes one patch to every matched row, so it is
+refused, with `VALIDATION_FAILED`, when the patch would convert the rows to different home
+amounts. Update those rows by id instead, and each is converted from its own row.
+
+### What a write refuses
+
+Each refusal is answered before anything is written, and the row is not stored:
+
+| Refusal | When | Fix |
+|:---|:---|:---|
+| **`ERR_EXCHANGE_RATE_MISSING` / 400** | No rate row for the record's currency has an effective date on or before its document date. The message names the currency and the date. | Add a rate for that currency effective on or before that date, then write again. The engine never stores a rate of 1, a later rate or an empty home amount in its place. |
+| **`ERR_HOME_CURRENCY_UNSET` / 400** | The organization has no home currency: `localization.currency` is not set. | Set **Localization → Default currency**, then write again. The platform never assumes a home currency. |
+| `VALIDATION_FAILED` / 400, `required` on the date field | A foreign-currency amount has a blank document date. | Write the document date in the same write. |
+
+The `validate()` preview, and an import's dry run, answer the same refusals for the same
+rows.
+
+### Totals in the home currency
+
+The home field is an ordinary stored `currency` field, so every aggregate reads it as it
+reads any amount: a `sum` over `amount_home` is the consolidated total, with no grouping,
+and a `summary` roll-up, a dataset measure or a grid footer over it needs nothing special.
 
 ## See also
 

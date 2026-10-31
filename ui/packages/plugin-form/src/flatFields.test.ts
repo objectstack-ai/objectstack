@@ -135,8 +135,10 @@ describe('buildFlatFields WARNS on an unresolvable top-level member (route 1, ob
 describe('buildFlatFields ↔ normalizeSectionField parity (#4755)', () => {
   it('agrees key-by-key with the sectioned producer, adding only `group`', () => {
     for (const name of Object.keys(OBJECT_SCHEMA.fields)) {
-      const flat = buildFlatFields({ ...ctx, fields: [name] })[0] as Record<string, unknown>;
-      const sectioned = normalizeSectionField(name, ctx) as Record<string, unknown>;
+      // Spread into plain records: the pin enumerates whatever keys each
+      // producer wrote, declared on `FormField` or not.
+      const flat: Record<string, unknown> = { ...buildFlatFields({ ...ctx, fields: [name] })[0] };
+      const sectioned: Record<string, unknown> = { ...normalizeSectionField(name, ctx) };
 
       expect(new Set(Object.keys(flat))).toEqual(new Set([...Object.keys(sectioned), 'group']));
       for (const key of Object.keys(sectioned)) {

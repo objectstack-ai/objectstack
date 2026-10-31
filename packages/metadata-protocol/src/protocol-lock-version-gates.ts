@@ -50,6 +50,7 @@
 import type { ObjectStackProtocolImplementation, MetadataAuditEntry } from './protocol.js';
 import { canonicalMetaType } from './protocol.js';
 import { SysMetadataRepository, unboundItemDraftAddress } from './sys-metadata-repository.js';
+import { packagelessContentPackage } from './protocol-environment-rows.js';
 import { resolveItemLockLazily } from './item-lock.js';
 import { ConflictError } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
@@ -111,6 +112,7 @@ export interface LockVersionGateHost {
     receiptVersion: ObjectStackProtocolImplementation['receiptVersion'];
     recordMetadataAudit: ObjectStackProtocolImplementation['recordMetadataAudit'];
     rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
+    shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
     storedHashDigest: ObjectStackProtocolImplementation['storedHashDigest'];
     storedHeadAt: ObjectStackProtocolImplementation['storedHeadAt'];
 }
@@ -437,9 +439,10 @@ export async function readVersionToken(
 
 /** The body of `ObjectStackProtocolImplementation#packagelessReadAddress`; the method's docblock there is its contract. */
 export async function packagelessReadAddress(
-    this: Pick<LockVersionGateHost, 'packagelessAddress'>,
-    type: string, name: string, member?: string): Promise<string | undefined> {
-    return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
+    this: Pick<LockVersionGateHost, 'packagelessAddress' | 'shippedArtifactsOf'>,
+    type: string, name: string, member?: string): Promise<string | null | undefined> {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    return packagelessContentPackage(await this.packagelessAddress(singular, name, member), this.shippedArtifactsOf(singular, name));
 }
 
 /** The body of `ObjectStackProtocolImplementation#strictDraftReadAddress`; the method's docblock there is its contract. */

@@ -20,7 +20,18 @@ export interface ConnectorRegistrySurface {
         >,
     ): void;
     unregisterConnector(name: string): void;
-    registerConnectorProvider(providerKey: string, factory: ConnectorProviderFactory): void;
+    /**
+     * `options.credentialHandle: true` says the factory asks
+     * `ConnectorProviderContext.credentialHandle` on every request, so the host
+     * serves grant-bearing instances (`oauth2`, `app-credential`) through it
+     * (ADR-0143 D4). An older host ignores the third argument and keeps
+     * holding those instances degraded.
+     */
+    registerConnectorProvider(
+        providerKey: string,
+        factory: ConnectorProviderFactory,
+        options?: { readonly credentialHandle?: boolean },
+    ): void;
 }
 
 /**
@@ -81,6 +92,8 @@ export class ConnectorOpenApiPlugin implements Plugin {
             automation.registerConnectorProvider(
                 OPENAPI_PROVIDER_KEY,
                 createOpenApiProviderFactory({ fetchImpl: this.options.fetchImpl }),
+                // ADR-0143 D4 — the transport asks the credential handle per request.
+                { credentialHandle: true },
             );
             ctx.logger.info("ConnectorOpenApiPlugin: registered 'openapi' connector provider");
         }

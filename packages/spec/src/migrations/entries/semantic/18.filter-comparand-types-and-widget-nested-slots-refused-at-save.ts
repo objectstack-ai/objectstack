@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // save door only asks them.
 export const entry: SemanticMigration = {
   id: 'filter-comparand-types-and-widget-nested-slots-refused-at-save',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.FilterCondition — a comparand the comparand-type face refuses, now refused when the '
     + 'document is PARSED: a plain object where a single value belongs (an $eq, $ne, ordering, '

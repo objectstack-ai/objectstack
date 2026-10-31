@@ -13,9 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // replays the retired D2 entry `page-list-view-object-name-view-type-to-data-type`
 // on read. The judgment left to the author is the TODO that entry reports: an
 // alias beside a spec key that answers the same question differently.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'page-list-view-object-name-view-type-retired',
   surface:

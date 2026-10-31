@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // ups-delegated-from-column-retired shape).
 export const entry: SemanticMigration = {
   id: 'ups-permission-set-id-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_user_permission_set.permission_set_id — the legacy id reference of a permission-set grant '
     + 'left the platform grant table declared by plugin-security (packages/plugins/plugin-security/'

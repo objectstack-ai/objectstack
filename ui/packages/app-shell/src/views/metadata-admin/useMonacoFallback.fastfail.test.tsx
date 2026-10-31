@@ -25,7 +25,7 @@ vi.mock('@monaco-editor/react', () => {
 // `configureBundledMonaco` before `loader.init()` (its own suite drives it).
 vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
 
-import { JsonSourceEditor } from './JsonSourceEditor';
+import { JsonSourceEditor } from '../item-tools/JsonSourceEditor';
 
 describe('useMonacoFallback — fast-fail on loader rejection', () => {
   it('shows the textarea immediately when loader.init() rejects, without waiting out fallbackDelayMs', async () => {

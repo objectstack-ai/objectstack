@@ -21,6 +21,9 @@ List all registered metadata types.
 
 **Response**: `{ types: ["object", "view", "plugin", ...] }`
 
+The answer carries a weak `ETag` and `Cache-Control: private, no-cache`; send the
+`ETag` back as `If-None-Match` and an unchanged list answers **304** with no body.
+
 ### `GET /meta/:type`
 
 List all items of a metadata type.
@@ -39,6 +42,13 @@ Listing applies the ADR-0046 §6.7 audience gate to books and docs, RBAC
 filtering to privileged apps, and the usual response shaping.
 
 **Response**: `{ type: "object", items: [{ name: "account", ... }, ...] }`
+
+The list carries a weak `ETag` and `Cache-Control: private, no-cache`, and
+`If-None-Match` with the current `ETag` answers **304** with no body. The `ETag`
+hashes the list this caller was served, after the audience and RBAC filtering
+above, so two callers who see different items hold different tags and one
+caller's tag never revalidates another caller's list. Keep the response in the
+client only: `private` means no shared cache may store it.
 
 ### `GET /meta/:type/:name`
 

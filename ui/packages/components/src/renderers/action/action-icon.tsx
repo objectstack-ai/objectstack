@@ -174,6 +174,8 @@ const ActionIconRenderer = forwardRef<
           // and found here by `check:action-forward-parity`).
           label: schema.label,
           description: (schema as any).description,
+          // The param dialog's submit-button verb, read by the same dialog.
+          submitText: schema.submitText,
           target: schema.target,
           openIn: (schema as any).openIn,
           endpoint: schema.endpoint,

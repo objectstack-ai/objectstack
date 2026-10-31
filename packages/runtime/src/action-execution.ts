@@ -73,6 +73,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
+import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -3516,6 +3517,62 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // `/actions` door emit the same `recordLoadDenied` signal to handlers.
     const subject = await loadActionSubjectRecord(objectName, recordId, () =>
         callData('get', { object: objectName, id: recordId }, driver, envId, ec));
+
+    // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW.
+    // Every call that cleared the gates above reaches its branch below; one
+    // `action_invocation` row is written for it whether the branch answers or
+    // throws (the subject-record verdict, a target's refusal, a body's throw),
+    // naming this door (`surface: 'mcp'`, set from the door's identity on a
+    // copy of the caller's envelope; nothing on the request can move it). A
+    // call a gate above refused ran nothing and writes no row. The REST
+    // `/actions` door writes the same row with `surface: 'rest'`. See
+    // `action-invocation-audit.ts`.
+    const invocation = {
+        context: withActionSurface(ec, 'mcp'),
+        actionName: typeof action?.name === 'string' && action.name ? action.name : name,
+        objectName: isObjectLessActionKey(objectName) ? undefined : objectName,
+        recordId,
+        branch: actionInvocationBranch(action, isDeclarativeUpdateAction(action)),
+        target: actionInvocationTarget(action, isDeclarativeUpdateAction(action)), // #28281: the outer row names where an api forward went
+    };
+    let answer: any;
+    try {
+        answer = await dispatchAdmittedBusinessAction(deps, requestContext, name, {
+            action, objectName, recordId, params, subject, ec, driver, envId, callData,
+        });
+    } catch (err) {
+        await recordActionInvocation(deps, requestContext, envId, {
+            ...invocation, outcome: 'failed', ...actionInvocationFailure(err),
+        });
+        throw err;
+    }
+    await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
+    return answer;
+}
+
+/**
+ * The MCP `run_action` dispatch, once every admission gate in
+ * {@link invokeBusinessAction} has passed: the declarative update, the
+ * subject-record verdict, the api forward, the flow dispatch and the
+ * script/body dispatch. Split out so the door can write the invocation row
+ * for whatever this answers or throws (#27908); the code is unchanged.
+ */
+async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    name: string,
+    admitted: {
+        action: any;
+        objectName: string;
+        recordId: string | undefined;
+        params: Record<string, unknown>;
+        subject: ActionSubjectRecordLoad;
+        ec: any;
+        driver: any;
+        envId?: string;
+        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+    },
+): Promise<any> {
+    const { action, objectName, recordId, params, subject, ec, driver, envId, callData } = admitted;
     const record = subject.record;
 
     // ── declarative update ── [#15079] BEFORE the `type` switch below, and

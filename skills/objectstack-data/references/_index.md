@@ -23,6 +23,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/automation/flow-function.zod.ts` — The contract for a **named handler function a `script` node invokes** —
 - `node_modules/@objectstack/spec/src/data/column-apply-on.zod.ts` — Exports: ColumnApplyOnSchema
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
+- `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — Exports: SQLDialectSchema, DataTypeMappingSchema, SSLConfigSchema, SQLDriverConfigSchema, SQLiteDataTypeMappingDefaults
 - `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Exports: DriverOptionsSchema, DriverCapabilitiesSchema, DriverInterfaceSchema, PoolConfigSchema, DriverConfigSchema
 - `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes.

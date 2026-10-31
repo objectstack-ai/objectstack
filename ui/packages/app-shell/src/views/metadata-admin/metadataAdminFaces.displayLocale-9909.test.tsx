@@ -42,8 +42,8 @@ vi.mock('./external/api', async (importOriginal) => ({
   listRemoteTables: async () => [{ name: 'orders', schema: 'public', columnCount: 3, rowCountEstimate: 1234567 }],
 }));
 
-import { AuditPanel } from './AuditPanel';
-import { HistoryPanel } from './ResourceHistoryPage';
+import { AuditPanel } from '../item-tools/AuditPanel';
+import { HistoryPanel } from '../item-tools/ResourceHistoryPage';
 import { ExternalDatasourcePanel } from './external/ExternalDatasourcePanel';
 import { SchemaBrowser } from './external/SchemaBrowser';
 import { FlowRunsPanel } from './previews/FlowRunsPanel';

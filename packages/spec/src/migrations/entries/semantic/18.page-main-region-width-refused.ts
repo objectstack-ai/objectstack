@@ -14,9 +14,6 @@ import type { SemanticMigration } from '../../types.js';
 // `page-main-region-width-removed` on read, which deletes exactly the widths
 // the parse refuses. No relevance question: the surface reaches pages a plugin
 // registers in code and stored rows.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'page-main-region-width-refused',
   surface:

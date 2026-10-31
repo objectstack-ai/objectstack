@@ -438,7 +438,7 @@ import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
-import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress } from './protocol-environment-rows.js';
+import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
@@ -447,6 +447,8 @@ import { deletePackage } from './protocol-package-uninstall.js';
 import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-unmanaged-import.js';
 // [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
+// [#28355] The `denied` row the four single-item doors leave for a refusal that writes none of its own.
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -6407,6 +6409,124 @@ export interface RowlessExpandedView {
     container: StoredOverlayEntry;
 }
 
+/*
+ * [#28355] The request shapes of the four single-item doors. Each door is a
+ * public wrapper (refusal audit) over a private body, and both read the shape
+ * from here: a private member's type is not published, so a wrapper typed off
+ * its body would publish an untyped `request`. Deliberately not exported — the
+ * published signatures are what they were, under these local names.
+ */
+
+/** The request of {@link ObjectStackProtocolImplementation.saveMetaItem}. */
+type SaveMetaItemRequest = { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient };
+
+/** The request of {@link ObjectStackProtocolImplementation.publishMetaItem}. */
+type PublishMetaItemRequest = {
+    type: string;
+    name: string;
+    actor?: string;
+    message?: string;
+    /**
+     * [commit 490879ad0] ADR-0048 — the software package the draft being promoted was
+     * listed under, when the caller has one to state. Forwarded whole to
+     * {@link promoteDraftForPublish}, which threads it into BOTH the #9612
+     * gate closure and `repo.promoteDraft`, so the gate and the write
+     * resolve the draft under the SAME key it was listed by.
+     *
+     * Declared because it is REAL on this door, not merely tolerated:
+     * since commit 9e04c3e35 `POST /meta/:type/:name/publish?package=PKG_ID` states it
+     * on every HTTP-driven promotion that names a package — which is
+     * Studio's designer save-then-publish loop. Until it was declared the
+     * value flowed correctly but was invisible to every typed caller, and
+     * the only caller that states one reaches this method through a cast,
+     * so the binding was enforced by nothing. Commit 490879ad0 added the pins in
+     * `protocol-publish-drafts-package-scope.test.ts`.
+     *
+     * ⚠️ `null` is NOT the same as absent, and the difference is load
+     * bearing the whole way down: {@link promoteDraftForPublish} branches on
+     * the KEY BEING PRESENT (`'packageId' in request`), so an ABSENT key
+     * names no package while `null` pins the lookup to the UNBOUND row.
+     * [#23495] Naming no package is no longer "match any package": the
+     * publish promotes the draft a draft save naming no package writes
+     * ({@link packagelessDraftAddress}), and is refused `409
+     * RESOURCE_CONFLICT` when the item's active rows are bound to two or
+     * more packages. Spread it in conditionally; never write
+     * `packageId: maybeUndefined`, which arrives as a present-and-undefined
+     * key, coerces to `null` downstream, and makes a package-bound draft
+     * unfindable — a silent `no_draft` on the untouched path.
+     */
+    packageId?: string | null;
+    // [commit 490879ad0] `environmentId` is deliberately NOT declared here, although
+    // the REST door spreads it into this very request literal. It is the
+    // multi-kernel ROUTING key, and it is out of the protocol request shape
+    // by explicit maintainer ruling (recorded 2026-08-18, landed as commit 2a29caa53):
+    // `resolveProtocol(environmentId)` has already selected the target
+    // kernel before this method is entered, and this class reads its
+    // environment off the INSTANCE (`this.environmentId`, set at
+    // construction) and never off a request — measured, `request.environmentId`
+    // occurs nowhere in this file. `packages/rest` declares that one
+    // transport-level member on top of the declared shape instead
+    // (`TransportScopedMetaRequest`), which is where a routing key belongs.
+    // Adding it here would reverse that ruling rather than record it.
+    /**
+     * INTERNAL — `publishPackageDrafts` publishes many drafts and batch-applies
+     * every seed body in ONE loader pass afterwards (cross-seed references need
+     * multi-pass over the whole set), so it suppresses the per-item apply here.
+     */
+    _skipSeedApply?: boolean;
+    /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+    member?: string;
+};
+
+/** The request of {@link ObjectStackProtocolImplementation.rollbackMetaItem}. */
+type RollbackMetaItemRequest = {
+    type: string;
+    name: string;
+    toVersion: number;
+    actor?: string;
+    message?: string;
+    /**
+     * [#22877] The bundle member to revert — {@link resolveBundleMemberSelector};
+     * omitted, the canonical one. The bundle shares one lineage counter, so
+     * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
+     */
+    member?: string;
+};
+
+/** The request of {@link ObjectStackProtocolImplementation.deleteMetaItem}. */
+type DeleteMetaItemRequest = {
+    type: string;
+    name: string;
+    parentVersion?: string | null;
+    actor?: string;
+    state?: 'active' | 'draft';
+    /**
+     * When true, also drop the object's physical table after the metadata
+     * is removed (object + active only; never `sys_`). Default false keeps
+     * delete non-destructive to data. Used by the "discard a previewed
+     * object" flow so a publish-to-preview leaves no orphan table.
+     * [#23415] Only with the object's last stored row: while another row
+     * of it stays stored, the delete is refused `409 RESOURCE_CONFLICT`
+     * ({@link dropStorageRemainingRowsRefusal}).
+     */
+    dropStorage?: boolean;
+    /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+    member?: string;
+    /**
+     * [#23165, ADR-0048] The package whose row this delete removes, as a
+     * save names the row it writes (`?package=` on the REST door). Named,
+     * the delete removes that package's row and no other. Absent or `null`
+     * names no package: the delete removes the row of the one package the
+     * item's rows at its state are bound to, is refused `409
+     * RESOURCE_CONFLICT` when they are bound to two or more, and with none
+     * removes the package-unbound row ({@link packagelessAddress}).
+     * [#23495] A draft discard naming none removes the draft a draft save
+     * naming none writes ({@link packagelessDraftAddress}), the one the
+     * per-item publish naming none promotes.
+     */
+    packageId?: string | null;
+};
+
 /**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
@@ -10844,12 +10964,18 @@ export class ObjectStackProtocolImplementation implements
         // The package-less binding ({@link packagelessReadAddress}'s), selected
         // from those rows; the `version` below ({@link readVersionToken})
         // takes the same binding instead of reading it again.
-        const packagelessBinding = readState === 'active' && !request.packageId
-            ? (await this.packagelessAddress(
+        const packagelessAddressed = readState === 'active' && !request.packageId
+            ? await this.packagelessAddress(
                 PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member, 'active', activeRows,
-            )).packageId
+            )
             : undefined;
-        const contentPackageId = request.packageId || (packagelessBinding ?? undefined);
+        const packagelessBinding = packagelessAddressed?.packageId;
+        // [#28238] The content, though, is {@link packagelessContentPackage}'s:
+        // the code package that ships the name is a candidate too, so a row
+        // another package stored under the name is not served for it.
+        const contentPackageId = request.packageId || (packagelessAddressed
+            ? packagelessContentPackage(packagelessAddressed, this.shippedArtifactsOf(request.type, request.name))
+            : undefined);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -10868,7 +10994,7 @@ export class ObjectStackProtocolImplementation implements
                     state: 'draft',
                     ...(draftContentAddress
                         ? { packageId: draftContentAddress.packageId }
-                        : contentPackageId ? { packageId: contentPackageId } : {}),
+                        : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
                 // [#23715] Two or more packages and no package-unbound draft:
@@ -10928,7 +11054,7 @@ export class ObjectStackProtocolImplementation implements
                 state: readState,
                 ...(readState === 'draft' && draftContentAddress
                     ? { packageId: draftContentAddress.packageId }
-                    : contentPackageId ? { packageId: contentPackageId } : {}),
+                    : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }, activeRows))?.row;
             // [#23715] Two or more packages and no package-unbound draft: the
@@ -11559,7 +11685,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: 'active',
-                ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                ...(contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
@@ -17077,11 +17203,18 @@ export class ObjectStackProtocolImplementation implements
      * layered read's `effective` and `/published` serve one row. [#23715] The
      * strict draft read asks {@link strictDraftReadAddress} instead: the draft
      * its `version` names.
+     *
+     * [#28238] The code packages that ship the name are candidates too
+     * ({@link packagelessContentPackage}, the rule {@link getMetaItem} applies
+     * to the rows it already read): a row bound to another package is not
+     * served for a name one code package ships, and `null` is the
+     * package-unbound row alone. The write address does not move.
      */
-    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | null | undefined> {
         // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
         const host: ThisParameterType<typeof packagelessReadAddress> = {
             packagelessAddress: (...a) => this.packagelessAddress(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
         return packagelessReadAddress.call(host, type, name, member);
     }
@@ -20181,7 +20314,16 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient }) {
+    async saveMetaItem(request: SaveMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'save', type: request.type, name: request.name, actor: request.actor,
+            source: request.source ?? 'protocol.saveMetaItem',
+        }, () => this.saveMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async saveMetaItemUnaudited(request: SaveMetaItemRequest) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -22493,62 +22635,16 @@ export class ObjectStackProtocolImplementation implements
      * Records a history event with `op='publish'`. 404 (`NO_DRAFT`)
      * when there is nothing to publish.
      */
-    async publishMetaItem(request: {
-        type: string;
-        name: string;
-        actor?: string;
-        message?: string;
-        /**
-         * [commit 490879ad0] ADR-0048 — the software package the draft being promoted was
-         * listed under, when the caller has one to state. Forwarded whole to
-         * {@link promoteDraftForPublish}, which threads it into BOTH the #9612
-         * gate closure and `repo.promoteDraft`, so the gate and the write
-         * resolve the draft under the SAME key it was listed by.
-         *
-         * Declared because it is REAL on this door, not merely tolerated:
-         * since commit 9e04c3e35 `POST /meta/:type/:name/publish?package=PKG_ID` states it
-         * on every HTTP-driven promotion that names a package — which is
-         * Studio's designer save-then-publish loop. Until it was declared the
-         * value flowed correctly but was invisible to every typed caller, and
-         * the only caller that states one reaches this method through a cast,
-         * so the binding was enforced by nothing. Commit 490879ad0 added the pins in
-         * `protocol-publish-drafts-package-scope.test.ts`.
-         *
-         * ⚠️ `null` is NOT the same as absent, and the difference is load
-         * bearing the whole way down: {@link promoteDraftForPublish} branches on
-         * the KEY BEING PRESENT (`'packageId' in request`), so an ABSENT key
-         * names no package while `null` pins the lookup to the UNBOUND row.
-         * [#23495] Naming no package is no longer "match any package": the
-         * publish promotes the draft a draft save naming no package writes
-         * ({@link packagelessDraftAddress}), and is refused `409
-         * RESOURCE_CONFLICT` when the item's active rows are bound to two or
-         * more packages. Spread it in conditionally; never write
-         * `packageId: maybeUndefined`, which arrives as a present-and-undefined
-         * key, coerces to `null` downstream, and makes a package-bound draft
-         * unfindable — a silent `no_draft` on the untouched path.
-         */
-        packageId?: string | null;
-        // [commit 490879ad0] `environmentId` is deliberately NOT declared here, although
-        // the REST door spreads it into this very request literal. It is the
-        // multi-kernel ROUTING key, and it is out of the protocol request shape
-        // by explicit maintainer ruling (recorded 2026-08-18, landed as commit 2a29caa53):
-        // `resolveProtocol(environmentId)` has already selected the target
-        // kernel before this method is entered, and this class reads its
-        // environment off the INSTANCE (`this.environmentId`, set at
-        // construction) and never off a request — measured, `request.environmentId`
-        // occurs nowhere in this file. `packages/rest` declares that one
-        // transport-level member on top of the declared shape instead
-        // (`TransportScopedMetaRequest`), which is where a routing key belongs.
-        // Adding it here would reverse that ruling rather than record it.
-        /**
-         * INTERNAL — `publishPackageDrafts` publishes many drafts and batch-applies
-         * every seed body in ONE loader pass afterwards (cross-seed references need
-         * multi-pass over the whole set), so it suppresses the per-item apply here.
-         */
-        _skipSeedApply?: boolean;
-        /** [#22877] The bundle member whose draft to publish — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
-        member?: string;
-    }): Promise<{
+    async publishMetaItem(request: PublishMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'publish', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.publishMetaItem',
+        }, () => this.publishMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link publishMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async publishMetaItemUnaudited(request: PublishMetaItemRequest): Promise<{
         success: boolean;
         version: string;
         seq: number;
@@ -26918,19 +27014,16 @@ export class ObjectStackProtocolImplementation implements
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
      */
-    async rollbackMetaItem(request: {
-        type: string;
-        name: string;
-        toVersion: number;
-        actor?: string;
-        message?: string;
-        /**
-         * [#22877] The bundle member to revert — {@link resolveBundleMemberSelector};
-         * omitted, the canonical one. The bundle shares one lineage counter, so
-         * a version of ANOTHER member answers 404 `VERSION_NOT_FOUND`.
-         */
-        member?: string;
-    }): Promise<{
+    async rollbackMetaItem(request: RollbackMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.rollbackMetaItem',
+        }, () => this.rollbackMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async rollbackMetaItemUnaudited(request: RollbackMetaItemRequest): Promise<{
         success: boolean;
         version: string;
         seq: number;
@@ -27529,38 +27622,16 @@ export class ObjectStackProtocolImplementation implements
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
      * with {@link saveMetaItem}.
      */
-    async deleteMetaItem(request: {
-        type: string;
-        name: string;
-        parentVersion?: string | null;
-        actor?: string;
-        state?: 'active' | 'draft';
-        /**
-         * When true, also drop the object's physical table after the metadata
-         * is removed (object + active only; never `sys_`). Default false keeps
-         * delete non-destructive to data. Used by the "discard a previewed
-         * object" flow so a publish-to-preview leaves no orphan table.
-         * [#23415] Only with the object's last stored row: while another row
-         * of it stays stored, the delete is refused `409 RESOURCE_CONFLICT`
-         * ({@link dropStorageRemainingRowsRefusal}).
-         */
-        dropStorage?: boolean;
-        /** [#22877] The bundle member to reset — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
-        member?: string;
-        /**
-         * [#23165, ADR-0048] The package whose row this delete removes, as a
-         * save names the row it writes (`?package=` on the REST door). Named,
-         * the delete removes that package's row and no other. Absent or `null`
-         * names no package: the delete removes the row of the one package the
-         * item's rows at its state are bound to, is refused `409
-         * RESOURCE_CONFLICT` when they are bound to two or more, and with none
-         * removes the package-unbound row ({@link packagelessAddress}).
-         * [#23495] A draft discard naming none removes the draft a draft save
-         * naming none writes ({@link packagelessDraftAddress}), the one the
-         * per-item publish naming none promotes.
-         */
-        packageId?: string | null;
-    }): Promise<{
+    async deleteMetaItem(request: DeleteMetaItemRequest) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'delete', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.deleteMetaItem',
+        }, () => this.deleteMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */
+    private async deleteMetaItemUnaudited(request: DeleteMetaItemRequest): Promise<{
         success: boolean;
         message?: string;
         reset?: boolean;

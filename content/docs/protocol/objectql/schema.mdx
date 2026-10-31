@@ -292,7 +292,7 @@ fields:
 | `max` | `number` | `number`, `currency` | Maximum numeric value. |
 | `scale` | `number` | `number`, `percent`, `rating`, `slider` | Decimal places, enforced on writes. Refused on `currency` — delete it there: a currency amount's decimal places are its currency's, so its ISO 4217 minor unit decides the display. |
 | `precision` | `number` | `number`, `currency` | Total digits (including scale). |
-| `currencyConfig` | `object` | `currency` | Where the amount's currency comes from: `currencyMode` `dynamic` (the tenant default, the default), `fixed` (with `defaultCurrency`) or `record` (with `currencyField`, the sibling code field). |
+| `currencyConfig` | `object` | `currency` | Where the amount's currency comes from: `currencyMode` `dynamic` (the tenant default, the default), `fixed` (with `defaultCurrency`) or `record` (with `currencyField`, the sibling code field, and optionally `homeAmount`, the stored home-currency projection: `field` a `dynamic`-mode `currency` field, `rateDate` a `date` or `datetime` field, `rateField` a `number` field — see [Declaring the home amount](/docs/data-modeling/currency#declaring-the-home-amount)). |
 | `options` | `array` | `select`, `multiselect` | List of valid values. |
 | `multiple` | `boolean` | `select`, `lookup` | Allow multiple selections. |
 | `reference` | `string` | `lookup`, `master_detail` | Target object for relationships. |

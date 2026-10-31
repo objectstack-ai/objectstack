@@ -68,7 +68,8 @@ import {
   type WidgetLabelling,
   type WidgetRenderer,
 } from './widgets.js';
-import { useMetadataLocale, t, tFormat, translateValidationMessage, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp } from './i18n.js';
+import { useMetadataLocale, t, tFormat, translateSchemaIssue, translateEnumOption, translateSchemaFieldLabel, translateSchemaFieldHelp } from './i18n.js';
+import type { SchemaIssueDetail } from './i18n.js';
 import { prettifyFieldName as prettify, untranslatedFieldLabel } from './field-source-label.js';
 
 /**
@@ -1078,6 +1079,12 @@ function readVisibility(
 export interface SchemaFormIssue {
   path: string;
   message: string;
+  /**
+   * The Zod issue's code and parameters when the issue came from a client
+   * schema parse; what `translateSchemaIssue` picks the reader's-locale text
+   * by. Absent on server diagnostics and lint findings.
+   */
+  detail?: SchemaIssueDetail;
 }
 
 export interface SchemaFormProps {
@@ -1134,6 +1141,22 @@ export interface SchemaFormProps {
    * out, so one mistake is one message (objectstack#27865).
    */
   onInlineIssueFieldsChange?: (fields: ReadonlySet<string>) => void;
+  /**
+   * Told which TOP-LEVEL rows this form offers whose served layout row says
+   * `required: true`: in a visible section, not hidden, editable. That flag is
+   * a layout override the schema need not share, so no `issues` the host gets
+   * from the schema carry it; the host judges an unset one itself
+   * (objectstack#28179). Only a sectioned layout has rows, so any other face
+   * reports none.
+   */
+  onRequiredRowFieldsChange?: (fields: ReadonlySet<string>) => void;
+  /**
+   * One line the host shows under a TOP-LEVEL field, keyed by field: a fact
+   * about that field's value the host knows and the schema cannot say, such
+   * as a create form's Name that could not be filled from the label
+   * (objectstack#28232). Shown at once, never deferred like an issue.
+   */
+  fieldNotes?: Readonly<Record<string, string>>;
 }
 
 function SchemaFormBody({
@@ -1148,6 +1171,8 @@ function SchemaFormBody({
   createMode = false,
   widgetContext,
   idPath,
+  onRequiredRowFieldsChange,
+  fieldNotes,
 }: SchemaFormProps) {
   // Live app locale (follows the i18next language, not just the browser) —
   // hoisted above the no-schema early return so the hook order is stable.
@@ -1171,7 +1196,7 @@ function SchemaFormBody({
   const issuesByPath = React.useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const i of issues) {
-      (map[i.path] ??= []).push(translateValidationMessage(i.message, locale));
+      (map[i.path] ??= []).push(translateSchemaIssue(i, locale));
     }
     return map;
   }, [issues, locale]);
@@ -1272,6 +1297,8 @@ function SchemaFormBody({
           readOnly={readOnly}
           createMode={createMode}
           widgetContext={widgetContext}
+          onRequiredRowFieldsChange={onRequiredRowFieldsChange}
+          fieldNotes={fieldNotes}
           onChange={setField}
         />
       );
@@ -1298,6 +1325,7 @@ function SchemaFormBody({
           value={(v as Record<string, unknown>)[key]}
           required={required.includes(key)}
           issues={issuesByPath[key]}
+          note={fieldNotes?.[key]}
           readOnly={readOnly}
           widgetContext={widgetContext}
           // Honor an explicit `widget` declared on a raw JSON-schema property
@@ -1583,6 +1611,8 @@ function SectionedSchemaForm({
   createMode,
   widgetContext,
   idPath,
+  onRequiredRowFieldsChange,
+  fieldNotes,
   onChange,
 }: {
   /** The form's sections, already through {@link resolveFormSections}. */
@@ -1598,6 +1628,8 @@ function SectionedSchemaForm({
   widgetContext?: WidgetContext;
   /** Ancestor id path, forwarded from the hosting `SchemaForm` (#5062). */
   idPath?: string;
+  onRequiredRowFieldsChange?: SchemaFormProps['onRequiredRowFieldsChange'];
+  fieldNotes?: SchemaFormProps['fieldNotes'];
   onChange: (key: string, val: unknown) => void;
 }) {
   const locale = useMetadataLocale();
@@ -1611,11 +1643,9 @@ function SectionedSchemaForm({
     return !visibility || evaluatePredicate(visibility, buildPredicateCtx(value, hostScope));
   });
 
-  // Decide whether to render as tabs or stacked sections.
-  const isTabbed = formType === 'tabbed' && sections.length > 1;
-
-  const renderSection = (s: ResolvedFormSection, idx: number) => {
-    const fields = s.fields
+  // The rows a section offers: the one visibility rule every read below shares.
+  const visibleFields = (s: ResolvedFormSection): FormFieldSpec[] =>
+    s.fields
       .map(normaliseField)
       .filter((f) => {
         if (f.hidden) return false;
@@ -1626,6 +1656,33 @@ function SectionedSchemaForm({
         }
         return true;
       });
+  const rowReadOnly = (f: FormFieldSpec): boolean =>
+    Boolean(readOnly || f.readonly || (f.immutable && !createMode));
+
+  // objectstack#28179 — report the offered rows whose layout says
+  // `required: true`. A row in a collapsed section or another tab is still
+  // offered; a hidden, read-only or schema-less one is not, so the host never
+  // holds Save on a row the author cannot fill. Keyed on the joined names, so
+  // no array identity re-runs the effect (AGENTS.md #10).
+  const requiredRowKey = sections
+    .flatMap(visibleFields)
+    .filter((f) => f.required === true && props[f.field] !== undefined && !rowReadOnly(f))
+    .map((f) => f.field)
+    .join('\n');
+  const onRequiredRowsRef = React.useRef(onRequiredRowFieldsChange);
+  React.useEffect(() => {
+    onRequiredRowsRef.current = onRequiredRowFieldsChange;
+  });
+  React.useEffect(() => {
+    onRequiredRowsRef.current?.(new Set(requiredRowKey ? requiredRowKey.split('\n') : []));
+  }, [requiredRowKey]);
+  React.useEffect(() => () => onRequiredRowsRef.current?.(new Set()), []);
+
+  // Decide whether to render as tabs or stacked sections.
+  const isTabbed = formType === 'tabbed' && sections.length > 1;
+
+  const renderSection = (s: ResolvedFormSection, idx: number) => {
+    const fields = visibleFields(s);
     if (fields.length === 0) return null;
     const cols = s.columns ?? 1;
     const fieldsGrid = (
@@ -1674,7 +1731,8 @@ function SectionedSchemaForm({
                   value={value[f.field]}
                   required={f.required ?? required.includes(f.field)}
                   issues={issuesByPath[f.field]}
-                  readOnly={readOnly || f.readonly || (f.immutable && !createMode)}
+                  note={fieldNotes?.[f.field]}
+                  readOnly={rowReadOnly(f)}
                   fieldSpec={f}
                   widgetContext={widgetContext}
                   formData={value}
@@ -1739,17 +1797,7 @@ function SectionedSchemaForm({
   };
 
   if (isTabbed) {
-    const tabSections = sections.filter(
-      (s) =>
-        s.fields
-          .map(normaliseField)
-          .some((f) => {
-            if (f.hidden) return false;
-            if (hiddenFields.includes(f.field)) return false;
-            const visibility = readVisibility(f);
-            return !visibility || evaluatePredicate(visibility, buildPredicateCtx(value, hostScope));
-          }),
-    );
+    const tabSections = sections.filter((s) => visibleFields(s).length > 0);
     if (tabSections.length === 0) return null;
     const defaultTab = (tabSections[0].label ?? 'section-0').toLowerCase();
     return (
@@ -1826,6 +1874,7 @@ function FieldRow({
   value,
   required,
   issues,
+  note,
   readOnly,
   fieldSpec,
   widgetContext,
@@ -1845,6 +1894,8 @@ function FieldRow({
   value: unknown;
   required: boolean;
   issues?: string[];
+  /** The host's line for this field ({@link SchemaFormProps.fieldNotes}). */
+  note?: string;
   readOnly?: boolean;
   fieldSpec?: FormFieldSpec;
   widgetContext?: WidgetContext;
@@ -1987,6 +2038,11 @@ function FieldRow({
           {description && (
             <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
           )}
+          {note && (
+            <div data-testid="schema-form-field-note" className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+              {note}
+            </div>
+          )}
           {visibleIssues?.map((m, i) => (
             <div key={i} data-testid="schema-form-issue" className="text-xs text-destructive mt-0.5">{m}</div>
           ))}
@@ -2042,6 +2098,11 @@ function FieldRow({
       />
       {description && (
         <div className="text-xs text-muted-foreground">{description}</div>
+      )}
+      {note && (
+        <div data-testid="schema-form-field-note" className="text-xs text-amber-700 dark:text-amber-400">
+          {note}
+        </div>
       )}
       {visibleIssues?.map((m, i) => (
         <div key={i} data-testid="schema-form-issue" className="text-xs text-destructive">

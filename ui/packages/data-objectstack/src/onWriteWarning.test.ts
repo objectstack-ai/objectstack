@@ -372,3 +372,64 @@ describe('ObjectStackAdapter.onWriteWarning — write answer warnings (objectui#
     ]);
   });
 });
+
+// ── a write answer's `notice` (objectstack-ai/objectstack#28252) ───────────
+//
+// The spec declares `notice` (one non-empty string a hook set for the
+// requester, objectstack-ai/objectstack#28000) on the single-record
+// create/update answers. It rides THIS event the way `warnings` does, and
+// what the write resolves stays the record.
+
+describe('ObjectStackAdapter.onWriteWarning — write answer notice (objectstack-ai/objectstack#28252)', () => {
+  it('emits a create write-warning carrying the notice, and the create still resolves the record', async () => {
+    const create = vi.fn().mockResolvedValue({ record: { id: 'r1', stage: 'won' }, notice: 'Sent for approval' });
+    const ds = makeDS({ create });
+    const events: WriteWarningEvent[] = [];
+    ds.onWriteWarning((e: WriteWarningEvent) => events.push(e));
+
+    const rec = await ds.create('deal', { stage: 'won' });
+
+    expect(rec).toEqual({ id: 'r1', stage: 'won' });
+    expect(events).toEqual([
+      { operation: 'create', resource: 'deal', id: 'r1', droppedFields: [], notice: 'Sent for approval' },
+    ]);
+  });
+
+  it('emits an update write-warning carrying the notice beside the answer warnings', async () => {
+    const update = vi
+      .fn()
+      .mockResolvedValue({ record: { id: 'r1' }, warnings: ONE_WARNING, notice: 'Sent for approval' });
+    const ds = makeDS({ update });
+    const events: WriteWarningEvent[] = [];
+    ds.onWriteWarning((e: WriteWarningEvent) => events.push(e));
+
+    const rec = await ds.update('deal', 'r1', { stage: 'won' });
+
+    expect(rec).toEqual({ id: 'r1' });
+    expect(events).toEqual([
+      {
+        operation: 'update',
+        resource: 'deal',
+        id: 'r1',
+        droppedFields: [],
+        warnings: ONE_WARNING,
+        notice: 'Sent for approval',
+      },
+    ]);
+  });
+
+  it('CONTROL: an empty or non-string notice emits nothing', async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ record: { id: 'r1' }, notice: '' })
+      .mockResolvedValueOnce({ record: { id: 'r2' }, notice: 42 });
+    const ds = makeDS({ create });
+    const events: WriteWarningEvent[] = [];
+    ds.onWriteWarning((e: WriteWarningEvent) => events.push(e));
+
+    await ds.create('deal', {});
+    await ds.create('deal', {});
+
+    expect(events).toEqual([]);
+  });
+});

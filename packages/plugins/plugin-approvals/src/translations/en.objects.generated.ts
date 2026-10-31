@@ -43,7 +43,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Object"
       },
       record_id: {
-        label: "Record ID"
+        label: "Record"
       },
       submitter_id: {
         label: "Submitter"

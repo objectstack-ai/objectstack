@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // ruling on the step orders onto this change's note).
 export const entry: SemanticMigration = {
   id: 'security-catalog-environment-overlay-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the cold boot of a deployment whose sys_metadata holds an active, environment-wide row of type '
     + 'permission or position (or the legacy plural permissions or positions) under the name of a '

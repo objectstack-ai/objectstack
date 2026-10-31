@@ -1607,6 +1607,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.refusal-audit-rows.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.refusal-audit-rows.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.restore-doors-save-refusal-family.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4447,6 +4457,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-invocation-audit.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/api-key-lifecycle.pin.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4755,6 +4770,16 @@
       "file": "packages/services/service-automation/src/builtin/wait-node-degraded-run.test.ts",
       "verb": "update",
       "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/connector-connections.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/services/service-automation/src/connector-connections.test.ts",
+      "verb": "update",
+      "pinned": 2
     },
     {
       "file": "packages/services/service-automation/src/flow-activation-ledger.test.ts",

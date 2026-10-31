@@ -90,6 +90,8 @@ export const jaJPSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.nav_teams.label': '3fe8519872f65108',
   'apps.setup.navigation.nav_organizations.label': '07488357631b973d',
   'apps.setup.navigation.nav_invitations.label': '4ebb9fd13de7a546',
+  'apps.setup.navigation.nav_position_holders.label': '627cacb50fd1b0d8',
+  'apps.setup.navigation.nav_permission_set_assignment.label': 'fcf7d1b69ee9c298',
   'apps.setup.navigation.nav_positions.label': '517a2743f949b5f0',
   'apps.setup.navigation.nav_capabilities.label': '0b59005e10add41f',
   'apps.setup.navigation.nav_permission_sets.label': '4addfe2b8b28b78a',

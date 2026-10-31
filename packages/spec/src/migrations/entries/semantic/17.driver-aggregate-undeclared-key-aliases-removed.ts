@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'driver-aggregate-undeclared-key-aliases-removed',
-  // No backticks in `surface`: the upgrade-guide renderer wraps this string
-  // in a code span of its own, and a nested pair renders as literal ticks.
   surface: "driver aggregate() call argument — query.aggregate and aggregations[].func",
   replacement:
     'query.aggregations and aggregations[].function — the spellings QueryASTSchema and '
