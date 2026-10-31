@@ -40,8 +40,8 @@ function tokenEndpoint() {
 }
 
 /** An in-memory connection store with the semantics of `ConnectorConnectionStore`. */
-function fakeConnections(rows: Array<{ org: string; refreshToken?: string; status?: ConnectorConnectionRecord['status'] }>) {
-    const held = new Map<string, ConnectorConnectionRecord & { refreshToken?: string }>();
+function fakeConnections(rows: Array<{ org: string; refreshToken?: string; status?: ConnectorConnectionRecord['status']; registeredClient?: string }>) {
+    const held = new Map<string, ConnectorConnectionRecord & { refreshToken?: string; registeredClient?: string }>();
     for (const r of rows) {
         held.set(r.org, {
             id: `row_${r.org}`,
@@ -50,11 +50,13 @@ function fakeConnections(rows: Array<{ org: string; refreshToken?: string; statu
             status: r.status ?? 'connected',
             revision: 1,
             hasRefreshToken: r.refreshToken !== undefined,
+            hasRegisteredClient: r.registeredClient !== undefined,
             refreshToken: r.refreshToken,
+            registeredClient: r.registeredClient,
         });
     }
-    const strip = (r: ConnectorConnectionRecord & { refreshToken?: string }): ConnectorConnectionRecord => {
-        const { refreshToken: _omit, ...rest } = r;
+    const strip = (r: ConnectorConnectionRecord & { refreshToken?: string; registeredClient?: string }): ConnectorConnectionRecord => {
+        const { refreshToken: _omit, registeredClient: _omitClient, ...rest } = r;
         return { ...rest };
     };
     const calls = { read: 0, markReconnectRequired: [] as string[], recordRefresh: [] as ConnectorGrantWrite[] };
@@ -69,6 +71,9 @@ function fakeConnections(rows: Array<{ org: string; refreshToken?: string; statu
         },
         async resolveRefreshToken(record: ConnectorConnectionRecord) {
             return held.get(record.organizationId)?.refreshToken;
+        },
+        async resolveRegisteredClient(record: ConnectorConnectionRecord) {
+            return held.get(record.organizationId)?.registeredClient;
         },
         async recordRefresh(record: ConnectorConnectionRecord, write: ConnectorGrantWrite) {
             const r = held.get(record.organizationId);
@@ -333,5 +338,78 @@ describe('ADR-0143 D4 — authorization_code: refresh', () => {
         handle.forget('org_a');
         await handle.get({ organizationId: 'org_a' });
         expect(idp.state.requests).toHaveLength(2);
+    });
+});
+
+describe('ADR-0143 D2.1 — an MCP instance whose connection keeps the client its authorization flow found', () => {
+    const KEPT = (over: Record<string, unknown> = {}) => JSON.stringify({
+        issuer: 'https://auth.mcp.example.com',
+        authorizationUrl: 'https://auth.mcp.example.com/authorize',
+        tokenUrl: 'https://auth.mcp.example.com/token',
+        resource: 'https://mcp.example.com/mcp',
+        clientId: 'registered-client-a',
+        registered: true,
+        ...over,
+    });
+    /** A token endpoint recording where each request went and how its client authenticated. */
+    function recordingEndpoint() {
+        const seen: Array<{ url: string; form: URLSearchParams; authorization?: string }> = [];
+        const fetchImpl = (async (url: string, init: RequestInit) => {
+            const headers = new Headers(init.headers);
+            seen.push({ url, form: new URLSearchParams(String(init.body)), ...(headers.get('authorization') ? { authorization: headers.get('authorization') as string } : {}) });
+            return new Response(JSON.stringify({ access_token: `dummy-at-${seen.length}`, token_type: 'Bearer', expires_in: 3600 }), { status: 200 });
+        }) as unknown as typeof fetch;
+        return { seen, fetch: fetchImpl };
+    }
+    const DISCOVERED: OAuth2GrantConfig = { grant: 'authorization_code' };
+
+    it('refreshes at the kept token endpoint, as the kept public client, with the kept resource indicator', async () => {
+        const idp = recordingEndpoint();
+        const { store } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a', registeredClient: KEPT() }]);
+        const handle = createOAuth2GrantHandle({ connector: 'notion', config: DISCOVERED, connections: store, fetch: idp.fetch });
+        expect((await handle.get({ organizationId: 'org_a' })).auth).toEqual({ type: 'bearer', token: 'dummy-at-1' });
+        expect(idp.seen[0].url).toBe('https://auth.mcp.example.com/token');
+        expect(idp.seen[0].form.get('client_id')).toBe('registered-client-a');
+        expect(idp.seen[0].form.get('resource')).toBe('https://mcp.example.com/mcp');
+        expect(idp.seen[0].authorization).toBeUndefined();
+    });
+
+    it('each organization refreshes with its own kept client', async () => {
+        const idp = recordingEndpoint();
+        const { store } = fakeConnections([
+            { org: 'org_a', refreshToken: 'dummy-rt-a', registeredClient: KEPT() },
+            { org: 'org_b', refreshToken: 'dummy-rt-b', registeredClient: KEPT({ clientId: 'registered-client-b', clientSecret: 'dummy-registered-secret' }) },
+        ]);
+        const handle = createOAuth2GrantHandle({ connector: 'notion', config: DISCOVERED, connections: store, fetch: idp.fetch });
+        await handle.get({ organizationId: 'org_a' });
+        await handle.get({ organizationId: 'org_b' });
+        expect(idp.seen[0].form.get('client_id')).toBe('registered-client-a');
+        expect(idp.seen[1].authorization).toMatch(/^Basic /);
+        expect(idp.seen[1].form.get('client_id')).toBeNull();
+    });
+
+    it('a declared clientId and secret win over the kept client; the kept endpoints are still used', async () => {
+        const idp = recordingEndpoint();
+        const { store } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a', registeredClient: KEPT({ clientId: 'hubspot-app', registered: false }) }]);
+        const handle = createOAuth2GrantHandle({
+            connector: 'hubspot',
+            config: { grant: 'authorization_code', clientId: 'hubspot-app', clientSecret: 'dummy-declared-secret' },
+            connections: store,
+            fetch: idp.fetch,
+        });
+        await handle.get({ organizationId: 'org_a' });
+        expect(idp.seen[0].url).toBe('https://auth.mcp.example.com/token');
+        expect(idp.seen[0].authorization).toMatch(/^Basic /);
+    });
+
+    it('⛔ a connection that keeps no client it can be read back as is reconnect required; no token request', async () => {
+        const idp = recordingEndpoint();
+        const onGrantRefused = vi.fn();
+        const { store, calls } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'notion', config: DISCOVERED, connections: store, fetch: idp.fetch, onGrantRefused });
+        await expect(handle.get({ organizationId: 'org_a' })).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+        expect(idp.seen).toHaveLength(0);
+        expect(calls.markReconnectRequired).toEqual(['org_a']);
+        expect(onGrantRefused).toHaveBeenCalledWith('org_a');
     });
 });

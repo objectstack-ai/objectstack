@@ -84,6 +84,12 @@ export const SysConnectorConnection = ObjectSchema.create({
         'The refresh token the authorization server issued, encrypted at rest and masked on every read; replaced atomically when the server rotates it. Absent when the server issues none.',
     }),
 
+    registered_client: Field.secret({
+      label: 'Registered Client',
+      description:
+        "The OAuth client a `provider: 'mcp'` instance's connection authorizes with, when the MCP authorization flow discovered its endpoints or registered it (ADR-0143 D2.1): the issuer, the two endpoints, the resource indicator, the client id and any client secret the registration issued. Encrypted at rest and masked on every read; absent when the instance declares its endpoints and client.",
+    }),
+
     status: Field.select(['connected', 'reconnect_required'], {
       label: 'Status',
       required: true,

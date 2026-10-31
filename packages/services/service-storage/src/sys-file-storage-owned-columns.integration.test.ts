@@ -18,6 +18,12 @@
  * `pending`. Neither refuses the write. The service's own writes, all under
  * the system context, still move every column: presign, complete, claim.
  *
+ * The file-reference columns (`ref_object`, `ref_id`, `ref_field`,
+ * `released_ref_object`, `released_ref_id`) take the same form: the
+ * file-reference lifecycle owns them, so they are `readonly` and the same
+ * create-side guard drops them from a non-system create, while the lifecycle's
+ * claim, release and copy, all under the system context, still write them.
+ *
  * Driven through the doors as they ship, as the #26479 rig is: one real
  * `ObjectQL` engine over sqlite `:memory:`, `StorageServicePlugin` booted on
  * the local adapter, the upload doors called as routes, and the data writes
@@ -34,7 +40,11 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { StorageServicePlugin } from './storage-service-plugin.js';
-import { SystemFile, SYS_FILE_STORAGE_OWNED_COLUMNS } from './objects/system-file.object.js';
+import {
+  SystemFile,
+  SYS_FILE_REFERENCE_COLUMNS,
+  SYS_FILE_STORAGE_OWNED_COLUMNS,
+} from './objects/system-file.object.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const BASE = '/api/v1/storage';
@@ -302,5 +312,127 @@ describe('sys_file storage-owned columns are not writable outside the storage se
     await engine.insert('sys_file', { id: fileId, name: 'copy.png', ...FORGED } as any, { context: SYS });
 
     expect(await owned(fileId)).toEqual({ ...FORGED });
+  });
+
+  // ── The file-reference columns ────────────────────────────────────
+
+  const references = async (id: string) => {
+    const row = await fileRow(id);
+    return Object.fromEntries(SYS_FILE_REFERENCE_COLUMNS.map((c) => [c, row?.[c] ?? null]));
+  };
+  const UNREFERENCED = { ref_object: null, ref_id: null, ref_field: null, released_ref_object: null, released_ref_id: null };
+  /** A value for every reference column that differs from any the lifecycle writes in this file. */
+  const NAMED = {
+    ref_object: 'named_object',
+    ref_id: 'r_named',
+    ref_field: 'named_field',
+    released_ref_object: 'named_released_object',
+    released_ref_id: 'r_named_released',
+  } as const;
+
+  /** A committed upload claimed by a fresh `media` record's `poster`: the lifecycle's own claim. */
+  const claimedUpload = async () => {
+    const fileId = await committedUpload();
+    const recordId = `m_${++seq}`;
+    await engine.insert('media', { id: recordId, name: 'owner', poster: fileId } as any, { context: WRITER_CTX });
+    return { fileId, recordId };
+  };
+
+  it('declares exactly the five file-reference columns, each readonly on sys_file', () => {
+    expect([...SYS_FILE_REFERENCE_COLUMNS].sort()).toEqual([
+      'ref_field', 'ref_id', 'ref_object', 'released_ref_id', 'released_ref_object',
+    ]);
+    for (const column of SYS_FILE_REFERENCE_COLUMNS) {
+      expect((SystemFile.fields as Record<string, { readonly?: boolean }>)[column]?.readonly, column).toBe(true);
+    }
+  });
+
+  it.each(SYS_FILE_REFERENCE_COLUMNS)('an update by id cannot change %s, and the rest of the write lands', async (column) => {
+    const { fileId } = await claimedUpload();
+    const before = await references(fileId);
+    expect(before.ref_object).toBe('media');
+
+    await engine.update('sys_file', { id: fileId, name: 'renamed.png', [column]: NAMED[column] } as any, { context: WRITER_CTX });
+
+    expect(await references(fileId)).toEqual(before);
+    expect((await fileRow(fileId))?.name).toBe('renamed.png');
+  });
+
+  it('a predicate update cannot change any of them either', async () => {
+    const fileId = await committedUpload();
+
+    await engine.update('sys_file', { ...NAMED, acl: 'private' } as any, { where: { id: fileId }, context: WRITER_CTX } as any);
+
+    expect(await references(fileId)).toEqual(UNREFERENCED);
+    expect((await fileRow(fileId))?.acl).toBe('private');
+  });
+
+  it('a create cannot set any of them: the row is written with none of the caller\'s values', async () => {
+    const fileId = `f_named_${++seq}`;
+
+    await engine.insert('sys_file', { id: fileId, name: 'named.png', owner_id: WRITER, ...NAMED } as any, { context: WRITER_CTX });
+
+    expect(await references(fileId)).toEqual(UNREFERENCED);
+    expect((await fileRow(fileId))?.name).toBe('named.png');
+  });
+
+  it('a batch create cannot set them on any row', async () => {
+    const a = `f_named_${++seq}`;
+    const b = `f_named_${++seq}`;
+
+    await engine.insert('sys_file', [
+      { id: a, name: 'a.png', ...NAMED },
+      { id: b, name: 'b.png', ref_object: 'media', ref_id: 'm_other', ref_field: 'poster' },
+    ] as any, { context: WRITER_CTX });
+
+    expect(await references(a)).toEqual(UNREFERENCED);
+    expect(await references(b)).toEqual(UNREFERENCED);
+  });
+
+  it('the lifecycle\'s claim, release and copy still write them', async () => {
+    const { fileId, recordId } = await claimedUpload();
+    expect(await references(fileId)).toEqual({ ...UNREFERENCED, ref_object: 'media', ref_id: recordId, ref_field: 'poster' });
+
+    // Writing the owned id into a second slot copies the file into a fresh row the second slot owns.
+    const second = `m_${++seq}`;
+    await engine.insert('media', { id: second, name: 'second', poster: fileId } as any, { context: WRITER_CTX });
+    const copyId = (await record(second))?.poster as string;
+    expect(copyId).not.toBe(fileId);
+    expect(await references(copyId)).toEqual({ ...UNREFERENCED, ref_object: 'media', ref_id: second, ref_field: 'poster' });
+
+    // Clearing the field releases the file and keeps the record that let it go.
+    await engine.update('media', { id: recordId, poster: null } as any, { context: WRITER_CTX });
+    expect(await references(fileId)).toEqual({ ...UNREFERENCED, released_ref_object: 'media', released_ref_id: recordId });
+  });
+
+  it('a system create and a system update keep the values they write', async () => {
+    const fileId = `f_system_${++seq}`;
+
+    await engine.insert('sys_file', { id: fileId, name: 'system.png', ...NAMED } as any, { context: SYS });
+    expect(await references(fileId)).toEqual({ ...NAMED });
+
+    await engine.update('sys_file', { id: fileId, ...UNREFERENCED, ref_object: 'media', ref_id: 'm_system' } as any, { context: SYS });
+    expect(await references(fileId)).toEqual({ ...UNREFERENCED, ref_object: 'media', ref_id: 'm_system' });
+  });
+
+  // ── The presence of `key` and `status` (#27778) ───────────────────
+
+  it('every storage writer sets key and status: presign, complete and the field copy', async () => {
+    const { fileId: presigned } = await presign();
+    const pendingRow = await owned(presigned);
+    expect(pendingRow.status).toBe('pending');
+    expect(typeof pendingRow.key === 'string' && pendingRow.key.length > 0, JSON.stringify(pendingRow)).toBe(true);
+
+    const { fileId } = await claimedUpload();
+    const committedRow = await owned(fileId);
+    expect(committedRow.status).toBe('committed');
+    expect(typeof committedRow.key === 'string' && committedRow.key.length > 0, JSON.stringify(committedRow)).toBe(true);
+
+    const second = `m_${++seq}`;
+    await engine.insert('media', { id: second, name: 'copy', poster: fileId } as any, { context: WRITER_CTX });
+    const copyRow = await owned((await record(second))?.poster as string);
+    expect(copyRow.status).toBe('committed');
+    expect(typeof copyRow.key === 'string' && copyRow.key.length > 0, JSON.stringify(copyRow)).toBe(true);
+    expect(copyRow.key).not.toBe(committedRow.key);
   });
 });

@@ -1242,7 +1242,60 @@ describe('RuntimeAuthoringIssueSchema (the ONE finding shape)', () => {
   });
 });
 
-import { PublishPackageDraftsResponseSchema } from './protocol.zod';
+import { PublishPackageDraftsRequestSchema, PublishPackageDraftsResponseSchema } from './protocol.zod';
+
+/**
+ * ADR-0146 D1 — the request half of the batch publish door: the body
+ * `POST /packages/:id/publish-drafts` reads. What the door does with each body
+ * is pinned against the real handler in
+ * `packages/runtime/src/domains/packages-publish-drafts-request-conformance.test.ts`;
+ * here, what the declaration itself accepts and refuses.
+ */
+describe('PublishPackageDraftsRequestSchema (declares the batch publish request body)', () => {
+  const issuesOf = (body: unknown) => {
+    const r = PublishPackageDraftsRequestSchema.safeParse(body);
+    expect(r.success, `expected ${JSON.stringify(body)} to be refused`).toBe(false);
+    return r.success ? [] : r.error.issues.map((i) => ({ code: i.code, path: i.path.join('.') }));
+  };
+
+  it('accepts an empty body, a note, a backfill, and both', () => {
+    expect(PublishPackageDraftsRequestSchema.parse({})).toEqual({});
+    expect(PublishPackageDraftsRequestSchema.parse({ message: 'Split notes into two lists' }))
+      .toEqual({ message: 'Split notes into two lists' });
+    const backfill = [{ object: 'crm_account', field: 'is_key' }];
+    expect(PublishPackageDraftsRequestSchema.parse({ backfill })).toEqual({ backfill });
+    expect(PublishPackageDraftsRequestSchema.parse({ message: '', backfill: [] })).toEqual({ message: '', backfill: [] });
+  });
+
+  it('is not strict: the SDK\'s deprecated `actor` is accepted and stripped, never carried through', () => {
+    // `packages.publishDrafts` still sends `opts.actor`; the door ignores it and
+    // records the authenticated caller. A strict object would refuse that call.
+    const parsed = PublishPackageDraftsRequestSchema.parse({ actor: 'someone_else', message: 'note', aiModel: 'x' });
+    expect(parsed).toEqual({ message: 'note' });
+    expect('actor' in parsed).toBe(false);
+  });
+
+  it('refuses a note that is not a string', () => {
+    expect(issuesOf({ message: 42 })).toEqual([{ code: 'invalid_type', path: 'message' }]);
+    expect(issuesOf({ message: null })).toEqual([{ code: 'invalid_type', path: 'message' }]);
+  });
+
+  it('refuses a backfill that is not an array of { object, field } pairs of non-empty strings', () => {
+    expect(issuesOf({ backfill: { object: 'crm_account', field: 'is_key' } }))
+      .toEqual([{ code: 'invalid_type', path: 'backfill' }]);
+    expect(issuesOf({ backfill: ['crm_account.is_key'] })).toEqual([{ code: 'invalid_type', path: 'backfill.0' }]);
+    expect(issuesOf({ backfill: [{ object: 'crm_account' }] })).toEqual([{ code: 'invalid_type', path: 'backfill.0.field' }]);
+    expect(issuesOf({ backfill: [{ object: '', field: 'is_key' }] })).toEqual([{ code: 'too_small', path: 'backfill.0.object' }]);
+    // An entry names an object and a field and nothing else, as the protocol's
+    // shape judgement refuses (`unrecognized_keys` there too).
+    expect(issuesOf({ backfill: [{ object: 'crm_account', field: 'is_key', value: true }] }))
+      .toEqual([{ code: 'unrecognized_keys', path: 'backfill.0' }]);
+  });
+
+  it('declares exactly the two members the door reads', () => {
+    expect(Object.keys(PublishPackageDraftsRequestSchema.shape).sort()).toEqual(['backfill', 'message']);
+  });
+});
 
 /**
  * #9406 — the same suite one door over again, for the BATCH publish door

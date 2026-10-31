@@ -155,6 +155,28 @@ export interface RouteLedgerEntry {
    */
   responseSchema?: string;
   /**
+   * Name of the `@objectstack/spec/api` export declaring the JSON BODY this
+   * route READS — the request-side twin of {@link responseSchema}, under the
+   * same rules: a NAME (this module stays import-free), resolved against the
+   * live spec exports by `packages/client/src/route-ledger-response-schema.test.ts`,
+   * and ABSENT MEANS "UNDECLARED", never a defect.
+   *
+   * What a filled row claims: the named schema's members are exactly the body
+   * members the handler reads, with the shapes it reads them in. It does NOT
+   * by itself claim the handler REFUSES a body the schema refuses — whether
+   * and where a violating body is refused is a per-member fact, pinned by the
+   * row's conformance suite. (This is NOT the REST catalog's `requestSchema`
+   * in `@objectstack/spec/api` `plugin-rest-api.zod.ts`, whose ratchet demands
+   * the route refuse every violating body; the dispatcher's `/packages`
+   * family is not in that catalog.)
+   *
+   * ⛔ DO NOT FILL A ROW THAT HAS NO CONFORMANCE COVERAGE: a suite that drives
+   * THIS handler, shows each declared member reaching the producer as sent and
+   * an undeclared member not reaching it, and asserts this row names the
+   * schema it parses with.
+   */
+  requestSchema?: string;
+  /**
    * The AUTHORIZATION posture this route has been REVIEWED to have, named by
    * the `authz-conformance.matrix.ts` row that classifies it (ADR-0056 D10).
    *
@@ -499,8 +521,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     responseSchema: 'PackagePublishResultSchema',
     note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — `MetadataManager.publishPackage`\'s declared return, whose exact schema already existed in spec `system/metadata-persistence.zod.ts` and is re-exported into `/api`, never declared there a second time. Conformance: spec `api/package-lifecycle.test.ts`' },
   { route: 'POST /packages/:id/publish-drafts', domain: '/packages', disposition: 'sdk', client: 'packages.publishDrafts',
+    requestSchema: 'PublishPackageDraftsRequestSchema',
     responseSchema: 'PublishPackageDraftsResponseSchema',
-    note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — the protocol result AFTER the door\'s own mutations (seedApplied back-fill, ADR-0045 unhiddenApps/unhideError, rebindError). Fillable because packages-publish-drafts-response-conformance.test.ts drives THIS handler and parses the payload it answers; the producer half is pinned in objectql\'s publish-package-drafts-response-conformance.test.ts. `probes` is deliberately opaque in the declaration, upgraded to a modeled schema only when a consumer needs a field of it' },
+    note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — the protocol result AFTER the door\'s own mutations (seedApplied back-fill, ADR-0045 unhiddenApps/unhideError, rebindError). Fillable because packages-publish-drafts-response-conformance.test.ts drives THIS handler and parses the payload it answers; the producer half is pinned in objectql\'s publish-package-drafts-response-conformance.test.ts. `probes` is deliberately opaque in the declaration, upgraded to a modeled schema only when a consumer needs a field of it. `requestSchema` is the body the door reads (`message`, `backfill`; a body `actor` is ignored, so the schema strips unknown keys rather than refusing them), filled because packages-publish-drafts-request-conformance.test.ts drives THIS handler and pins what each body member does' },
   { route: 'POST /packages/:id/discard-drafts', domain: '/packages', disposition: 'sdk', client: 'packages.discardDrafts',
     responseSchema: 'DiscardPackageDraftsResponseSchema',
     note: 'Enveloped — the named schema is the `data`: `discardPackageDrafts`\'s declared return, transcribed describe-only. Conformance: spec `api/package-lifecycle.test.ts`' },
