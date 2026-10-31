@@ -255,6 +255,16 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFil
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The sweep's reads retry a transient answer through the ONE policy the
+// citation gate measured and the release gate's full-battery read already uses
+// (`BOARD_READ_RETRY` and its reader; see `retryingReads` below). Imported,
+// never copied.
+// ⛔ This import puts `check-issue-citations.mjs` and its own imports in THIS
+// file's load closure, and release.yml runs this file off a bare checkout with
+// no install step. Measured when it was added: every module in that closure
+// imports only `node:*` builtins and runs nothing at load -- the same closure
+// `scripts/ci/scheduled-full-run.mjs` already loads in the `full-battery` job.
+import { boardReadBudget, readBoard, readFailure } from './check-issue-citations.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 export const CLI_MANIFEST = 'packages/cli/package.json';
@@ -1047,7 +1057,56 @@ function makeHttp({ apiUrl, token, dryRun }) {
   };
 }
 
+/**
+ * A read that was still answering a transient failure (an HTTP 5xx, or a named
+ * connection failure) when its retry ladder or the run's retry budget ran out.
+ * The sweep defers on it; every other failed read stays a plain `Error`.
+ */
+export class TransientReadFailure extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = 'TransientReadFailure';
+  }
+}
+
+/**
+ * `http` with every GET retried only when the failure is transient, through the
+ * shared policy (`BOARD_READ_RETRY` in `./check-issue-citations.mjs`, whose
+ * docblock is the measurement):
+ *
+ *   retried   an HTTP 5xx, or a named connection failure (ECONNRESET,
+ *             UND_ERR_SOCKET) -- 3 attempts per read, 500 / 1000 ms apart, and
+ *             at most 4 retries across every read of the `budget`'s run;
+ *   final     any other answer (a 4xx is answered at once, unchanged), and any
+ *             other thrown error, rethrown unchanged.
+ *
+ * A read whose ladder or budget is spent on a transient answer comes back with
+ * `unread` set -- the failure, its text naming the last answer and the attempts
+ * -- and `expectOk` throws it as a `TransientReadFailure`. A write (the cancel)
+ * passes through untouched: it is sent once, and its answer is judged where it
+ * always was.
+ */
+export function retryingReads(http, budget = boardReadBudget()) {
+  return async (method, path) => {
+    if (method !== 'GET') return http(method, path);
+    let last = null;
+    const read = await readBoard(
+      async () => {
+        last = null;
+        last = await http(method, path);
+        return { ok: last.status === 200, status: last.status, headers: null, json: async () => last.body };
+      },
+      path,
+      undefined,
+      budget,
+    );
+    if (read.stoppedBy === 'answer') return last;
+    return { status: read.status, body: read.status === null ? null : last.body, unread: readFailure(`GET ${path}`, read, budget.policy) };
+  };
+}
+
 function expectOk(res, what) {
+  if (res.unread) throw new TransientReadFailure(`${what}: ${res.unread.message}`, { cause: res.unread });
   if (res.status !== 200) {
     throw new Error(`${what} answered HTTP ${res.status}: ${JSON.stringify(res.body).slice(0, 300)}`);
   }
@@ -1200,64 +1259,116 @@ export function describeReadings({ runs, filtered, targeted }) {
   );
 }
 
-function requireEnv(name) {
-  const value = process.env[name];
+function requireEnv(name, env = process.env) {
+  const value = env[name];
   if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
-async function sweep({ workflow, dryRun }) {
-  const repo = requireEnv('GITHUB_REPOSITORY');
-  const token = requireEnv('GITHUB_TOKEN');
-  const apiUrl = process.env.GITHUB_API_URL || 'https://api.github.com';
-  const currentRunId = process.env.GITHUB_RUN_ID || '';
-  const http = makeHttp({ apiUrl, token, dryRun });
+/**
+ * The sweep's outcome when its read is still failing transiently after the
+ * retries -- pure. `log` is the `::warning::` line, `summary` the job-summary
+ * section.
+ *
+ * ⛔ Exit 0 here, and only here. The sweep runs on every push to main and
+ * re-reads every waiting run from scratch, so a read the API would not answer
+ * is work deferred to the next push, never lost: nothing was judged, so nothing
+ * was cancelled. A red job for it read as "main red" on main's health board,
+ * five times in one day, for a platform 502. A 4xx, a body that does not add
+ * up, any other thrown error and a cancel that did not land still fail the job.
+ */
+export function deferredSweep({ workflow, error }) {
+  const why =
+    `${error.message}. Nothing was judged and nothing was cancelled; the next push to main runs this sweep again ` +
+    'and re-reads every waiting run, so the work is deferred, not lost.';
+  return {
+    log: `::warning::the stale-prompts sweep of ${workflow} could not read the Actions API this run: ${commandData(why)}`,
+    summary: [`### Waiting approval prompts of ${workflow}: NOT READ this run`, '', `- ${why}`],
+  };
+}
 
-  const versionCommits = versionCommitsOf({ cwd: process.cwd() });
-  const read = await collectWaitingRuns({ http, repo, workflow, versionCommits, currentRunId });
-  for (const a of read.anomalies) console.log(`::warning::${a}`);
+/**
+ * The sweep: read every waiting run, judge it, cancel the stale push-lane
+ * prompts. Answers the exit code. `env`, `http`, `versionCommits`,
+ * `npmStateOf`, `now`, `sleep`, `log` and `warn` are injectable so `--self-test`
+ * drives the whole path offline -- the defaults are the live job's.
+ */
+export async function sweep({
+  workflow,
+  dryRun,
+  env = process.env,
+  http = null,
+  versionCommits = null,
+  npmStateOf = (v) => npmState(v),
+  now = Date.now(),
+  sleep,
+  log = console.log,
+  warn = console.error,
+}) {
+  const repo = requireEnv('GITHUB_REPOSITORY', env);
+  const currentRunId = env.GITHUB_RUN_ID || '';
+  const raw = http ?? makeHttp({ apiUrl: env.GITHUB_API_URL || 'https://api.github.com', token: requireEnv('GITHUB_TOKEN', env), dryRun });
+  // ONE retry budget for the whole sweep: a flapping API costs it at most the
+  // policy's per-run retries (4, so at most 3 s of backoff), never that many per read.
+  const reads = retryingReads(raw, boardReadBudget({ sleep }));
+  const summarise = (lines) => {
+    if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+  };
+
+  let read;
+  try {
+    read = await collectWaitingRuns({ http: reads, repo, workflow, versionCommits: versionCommits ?? versionCommitsOf({ cwd: process.cwd() }), currentRunId, now });
+  } catch (error) {
+    if (!(error instanceof TransientReadFailure)) throw error;
+    const deferred = deferredSweep({ workflow, error });
+    warn(deferred.log);
+    summarise(deferred.summary);
+    return 0;
+  }
+  for (const a of read.anomalies) log(`::warning::${a}`);
   const { runs } = read;
-  const verdict = judgeWaitingRuns({ runs, currentRunId, npmStateOf: (v) => npmState(v) });
+  const verdict = judgeWaitingRuns({ runs, currentRunId, npmStateOf });
 
   const waiting = runs.filter((r) => r.status === 'waiting').length;
   const lines = [`### Waiting approval prompts (${waiting} waiting run(s) of ${workflow})`, '', describeReadings(read)];
   const failures = [];
   for (const c of verdict.cancel) {
-    const url = `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${c.id}`;
+    const url = `${env.GITHUB_SERVER_URL || 'https://github.com'}/${repo}/actions/runs/${c.id}`;
     if (dryRun) {
-      console.log(`would cancel run ${c.id}: Publish ${c.version} -- ${c.reason}`);
+      log(`would cancel run ${c.id}: Publish ${c.version} -- ${c.reason}`);
       lines.push(`- would cancel [${c.id}](${url}): \`Publish ${c.version}\`, ${c.reason}`);
       continue;
     }
-    const res = await http('POST', `/repos/${repo}/actions/runs/${c.id}/cancel`);
+    const res = await reads('POST', `/repos/${repo}/actions/runs/${c.id}/cancel`);
     if (res.status === 202) {
-      console.log(`::warning::cancelled run ${c.id}: its "Publish ${c.version} to npm" prompt was still waiting, and ${c.reason}. Approving it would have published nothing, and it held the release-publish group ahead of any real prompt.`);
+      log(`::warning::cancelled run ${c.id}: its "Publish ${c.version} to npm" prompt was still waiting, and ${c.reason}. Approving it would have published nothing, and it held the release-publish group ahead of any real prompt.`);
       lines.push(`- cancelled [${c.id}](${url}): \`Publish ${c.version}\`, ${c.reason}`);
     } else if (res.status === 409) {
-      console.log(`run ${c.id} finished before it could be cancelled (HTTP 409) -- nothing waiting there any more.`);
+      log(`run ${c.id} finished before it could be cancelled (HTTP 409) -- nothing waiting there any more.`);
       lines.push(`- [${c.id}](${url}) finished before the cancel landed`);
     } else {
       failures.push(`cancel of run ${c.id} answered HTTP ${res.status}`);
     }
   }
   for (const k of verdict.keep) {
-    if (k.npm === 'unknown') console.log(`::warning::run ${k.id} waits to publish ${k.version}, and npm could not be read to judge it.`);
+    if (k.npm === 'unknown') log(`::warning::run ${k.id} waits to publish ${k.version}, and npm could not be read to judge it.`);
     lines.push(`- kept ${k.id}: \`Publish ${k.version}\`, ${k.reason}`);
   }
   for (const u of verdict.untouched) {
     if (u.version && u.npm === 'present') {
-      console.log(`::warning::run ${u.id} (${u.event}) waits to publish ${u.version}, which is already on npm. Not cancelled: ${u.reason}.`);
+      log(`::warning::run ${u.id} (${u.event}) waits to publish ${u.version}, which is already on npm. Not cancelled: ${u.reason}.`);
     }
     lines.push(`- untouched ${u.id}: ${u.reason}`);
   }
   if (waiting === 0) lines.push('- none waiting');
-  console.log(lines.join('\n'));
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+  log(lines.join('\n'));
+  summarise(lines);
 
   if (failures.length > 0) {
-    for (const f of failures) console.log(`::error::${f}`);
-    process.exit(1);
+    for (const f of failures) log(`::error::${f}`);
+    return 1;
   }
+  return 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1492,8 +1603,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'changelog fold -> on the stable cut each prerelease section of the cycle folds into the stable section: an entry is its summary, not its commit, and a dependency bump is superseded': 4,
   'changelog fold -> the stable section is kept whole, and so is every older cycle; a prerelease section carrying an entry the stable section lacks stays': 5,
   'changelog fold -> armed only on an exit-mode cut, for the CHANGELOGs whose top was a prerelease before the version pass wrote': 3,
+  'the sweep -> a transient read is retried under one budget, still failing it defers with a warning and exit 0, and a 4xx or a failed cancel stays red': 10,
 });
-const SELF_TEST_BATTERY_FLOOR = 34;
+const SELF_TEST_BATTERY_FLOOR = 35;
 
 async function selfTest() {
   let failed = 0;
@@ -2376,6 +2488,165 @@ async function selfTest() {
   }
   check(refused, 'a probe answering non-200 -> the read throws (a red job), never a partial answer');
 
+  battery('the sweep -> a transient read is retried under one budget, still failing it defers with a warning and exit 0, and a 4xx or a failed cancel stays red');
+  {
+    // The incident's read: the jobs listing of a COMPLETED push run that
+    // carried a version commit (run 40078805767, 18.1.0, re-read on every push
+    // inside the read-back window to verify the targeting), next to a waiting
+    // push-lane prompt for a version already on npm. `answers` scripts each
+    // path's answers in order; the last one repeats.
+    const sweepWith = async (answers = {}, { npm = ['1.1.0', '1.2.0'] } = {}) => {
+      const calls = [];
+      const slept = [];
+      const logged = [];
+      const warned = [];
+      const seenBy = new Map();
+      const http = async (method, path) => {
+        calls.push(`${method} ${path}`);
+        const u = new URL(path, 'https://api.invalid');
+        const key = `${method} ${u.pathname}`;
+        const n = seenBy.get(key) ?? 0;
+        seenBy.set(key, n + 1);
+        const scripted = answers[key];
+        if (scripted) {
+          const a = scripted[Math.min(n, scripted.length - 1)];
+          if (a instanceof Error) throw a;
+          if (a !== 'pass') return a;
+        }
+        if (method === 'POST') return { status: 202, body: null };
+        let m;
+        if (u.pathname.endsWith('/actions/workflows/release.yml/runs')) {
+          if (u.searchParams.get('status') === 'waiting') return { status: 200, body: { total_count: 0, workflow_runs: [] } };
+          const at = { v6: [pushRun(301, 'completed', 2)], v5: [pushRun(201, 'waiting', 1)] }[u.searchParams.get('head_sha')] ?? [];
+          return { status: 200, body: { workflow_runs: at } };
+        }
+        const direct = {
+          301: carrying(301, 'completed', 2, [prompt('1.2.0', 'completed')]),
+          201: carrying(201, 'waiting', 1, [prompt('1.1.0')], ['release']),
+        };
+        if ((m = /\/actions\/runs\/(\d+)$/.exec(u.pathname))) return { status: 200, body: direct[m[1]] };
+        if ((m = /\/actions\/runs\/(\d+)\/jobs$/.exec(u.pathname))) return { status: 200, body: { jobs: direct[m[1]].jobs } };
+        if ((m = /\/actions\/runs\/(\d+)\/pending_deployments$/.exec(u.pathname))) return { status: 200, body: direct[m[1]].pending };
+        return { status: 404, body: null };
+      };
+      const dir = mkdtempSync(join(tmpdir(), 'release-pending-publish-sweep-'));
+      dirs.push(dir);
+      const summaryFile = join(dir, 'summary.md');
+      writeFileSync(summaryFile, '');
+      let exit = null;
+      let threw = null;
+      try {
+        exit = await sweep({
+          workflow: 'release.yml',
+          dryRun: false,
+          env: { GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '900', GITHUB_STEP_SUMMARY: summaryFile },
+          http,
+          versionCommits: [vc('v6', '1.2.0'), vc('v5', '1.1.0')],
+          npmStateOf: npmOf(npm),
+          now: NOW,
+          sleep: async (ms) => { slept.push(ms); },
+          log: (line) => logged.push(line),
+          warn: (line) => warned.push(line),
+        });
+      } catch (err) {
+        threw = err;
+      }
+      const summary = readFileSync(summaryFile, 'utf8');
+      const count = (re) => calls.filter((c) => re.test(c)).length;
+      return { exit, threw, calls, slept, logged, warned, summary, count };
+    };
+    const JOBS_301 = 'GET /repos/o/r/actions/runs/301/jobs';
+    const CANCEL_201 = /^POST \/repos\/o\/r\/actions\/runs\/201\/cancel$/;
+    const bad = { status: 502, body: { message: 'Server Error' } };
+    const ok = 'pass';
+
+    const control = await sweepWith();
+    check(
+      control.exit === 0 && control.threw === null && control.count(CANCEL_201) === 1 && control.slept.length === 0 && control.warned.length === 0,
+      'the control: every read answers -> the stale prompt is cancelled, exit 0, no backoff and no warning',
+    );
+
+    const blip = await sweepWith({ [JOBS_301]: [bad, ok] });
+    check(
+      blip.exit === 0 && blip.threw === null && blip.count(/runs\/301\/jobs/) === 2 && blip.slept.join() === '500' &&
+        blip.count(CANCEL_201) === 1 && /cancelled \[201\]/.test(blip.summary) && blip.warned.length === 0,
+      "a 502 then a 200 on a carried run's jobs listing (the incident's read) -> retried once after 500 ms, and swept: the stale prompt is cancelled, exit 0",
+    );
+
+    const down = await sweepWith({ [JOBS_301]: [bad] });
+    check(
+      down.exit === 0 && down.threw === null && down.count(/runs\/301\/jobs/) === 3 && down.slept.join() === '500,1000' &&
+        down.count(/^POST /) === 0,
+      "a 502 on every attempt -> the read's ladder is spent (3 attempts, 500 + 1000 ms), nothing is judged or cancelled, and the sweep exits 0",
+    );
+    check(
+      down.warned.length === 1 && down.warned[0].startsWith('::warning::the stale-prompts sweep of release.yml could not read the Actions API') &&
+        /listing run 301's jobs: GET \/repos\/o\/r\/actions\/runs\/301\/jobs\?filter=latest&per_page=100 -> HTTP 502 after 3 attempts/.test(down.warned[0]) &&
+        !down.warned[0].includes('\n') && /NOT READ this run/.test(down.summary) && /the next push to main runs this sweep again/.test(down.summary),
+      'and it says so: one ::warning:: line naming the read, the answer and the attempts, and a NOT READ section in the job summary',
+    );
+
+    const reset = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) });
+    const dropped = await sweepWith({ [JOBS_301]: [reset, ok] });
+    check(
+      dropped.exit === 0 && dropped.threw === null && dropped.count(/runs\/301\/jobs/) === 2 && dropped.slept.join() === '500' && dropped.count(CANCEL_201) === 1,
+      'a connection reset (ECONNRESET on the cause) then a 200 -> retried, and swept',
+    );
+    const unnamed = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('getaddrinfo'), { code: 'ENOTFOUND' }) });
+    const dns = await sweepWith({ [JOBS_301]: [unnamed, ok] });
+    check(
+      dns.exit === null && dns.threw === unnamed && dns.count(/runs\/301\/jobs/) === 1 && dns.slept.length === 0,
+      'a thrown error that is not a named connection failure -> rethrown unchanged on the first attempt (a red job)',
+    );
+
+    const missing = await sweepWith({ [JOBS_301]: [{ status: 404, body: { message: 'Not Found' } }] });
+    check(
+      missing.exit === null && !(missing.threw instanceof TransientReadFailure) &&
+        /listing run 301's jobs answered HTTP 404/.test(String(missing.threw && missing.threw.message)) &&
+        missing.count(/runs\/301\/jobs/) === 1 && missing.slept.length === 0 && missing.count(/^POST /) === 0,
+      'a 404 -> fatal at once: one request, no backoff, nothing cancelled, and the error is not a deferral (a red job)',
+    );
+
+    // Five reads each answer one 502 first (the waiting list, both direct
+    // reads, both jobs listings): the run's budget of 4 retries covers the
+    // first four, and the fifth read's first 502 is final.
+    const flap = {};
+    const FLAPPING = ['workflows/release.yml/runs', 'runs/301', 'runs/301/jobs', 'runs/201', 'runs/201/jobs'];
+    for (const p of FLAPPING) flap[`GET /repos/o/r/actions/${p}`] = [bad, ok];
+    const flapping = await sweepWith(flap);
+    check(
+      flapping.exit === 0 && flapping.slept.length === 4 && flapping.slept.every((ms) => ms === 500) && flapping.count(/^POST /) === 0 &&
+        flapping.warned.length === 1 && /after 1 attempt \(this run's budget of 4 retries is spent\)/.test(flapping.warned[0]),
+      "a flapping API -> ONE budget for the whole sweep: 4 retries, then the next 5xx defers (exit 0) -- at most 3 s of backoff a run, never a ladder per read",
+    );
+
+    const cancel502 = await sweepWith({ 'POST /repos/o/r/actions/runs/201/cancel': [bad] });
+    check(
+      cancel502.exit === 1 && cancel502.count(CANCEL_201) === 1 && cancel502.slept.length === 0 &&
+        cancel502.logged.some((l) => l === '::error::cancel of run 201 answered HTTP 502'),
+      'a cancel answering 502 -> sent once, never retried, and the job fails as before',
+    );
+
+    // ⛔ The publish guard's reads keep their semantics: `in-flight` reads
+    // through the bare HTTP layer, so an unreadable answer is in flight at once.
+    const gateCalls = [];
+    const guarded = await publishInFlight({
+      http: async (method, path) => {
+        gateCalls.push(path);
+        return bad;
+      },
+      repo: 'o/r',
+      workflow: 'release.yml',
+      version: '1.1.0',
+      versionCommit: 'c'.repeat(40),
+      walk: [{ versionCommit: 'c'.repeat(40), version: '1.1.0', tips: ['c'.repeat(40)] }].values(),
+    });
+    check(
+      guarded.state === 'in-flight' && guarded.reason === 'unreadable' && /answered HTTP 502/.test(guarded.detail) && gateCalls.length === 1,
+      'the publish guard (in-flight) on a 502 -> still unreadable, so in flight, after its one request: the retry and the deferral are the sweep\'s alone',
+    );
+  }
+
   battery("a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight");
   {
     const job = (version, status) => ({ name: `Publish ${version} to npm (awaiting approval)`, status });
@@ -2737,7 +3008,8 @@ async function main(argv) {
     return;
   }
   if (mode === 'sweep') {
-    await sweep({ workflow: flag(rest, '--workflow') || 'release.yml', dryRun: rest.includes('--dry-run') });
+    const exit = await sweep({ workflow: flag(rest, '--workflow') || 'release.yml', dryRun: rest.includes('--dry-run') });
+    if (exit !== 0) process.exit(exit);
     return;
   }
   if (mode === 'in-flight') {
