@@ -77,7 +77,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { ComponentPropsMap } from '@objectstack/spec/ui';
-import type { ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement, ViewFilterRule } from '@objectstack/spec/ui';
 
 import { ObjectCalendarSchema, ObjectKanbanSchema, safeValidateSchema } from '../zod/index.zod';
 import type {
@@ -134,10 +134,11 @@ type IsOptional<T, K extends keyof T> = Record<string, never> extends Pick<T, K>
 // either member made the indexed access fall back to `[key: string]: any`,
 // making `IsAny` true and the `Equal` row false; since objectui#8347 the
 // indexed access stops compiling instead.
-export type _KanbanFilterIsArray = Expect<Equal<TsObjectKanbanSchema['filter'], ViewFilterRule[] | undefined>>;
+// objectstack#28020: the array element is a flat rule OR an any-of group.
+export type _KanbanFilterIsArray = Expect<Equal<TsObjectKanbanSchema['filter'], ViewFilterElement[] | undefined>>;
 export type _KanbanFilterIsNotAny = Expect<Equal<IsAny<TsObjectKanbanSchema['filter']>, false>>;
 export type _KanbanFilterIsOptional = Expect<IsOptional<TsObjectKanbanSchema, 'filter'>>;
-export type _CalendarFilterIsArray = Expect<Equal<TsObjectCalendarSchema['filter'], ViewFilterRule[] | undefined>>;
+export type _CalendarFilterIsArray = Expect<Equal<TsObjectCalendarSchema['filter'], ViewFilterElement[] | undefined>>;
 export type _CalendarFilterIsNotAny = Expect<Equal<IsAny<TsObjectCalendarSchema['filter']>, false>>;
 export type _CalendarFilterIsOptional = Expect<IsOptional<TsObjectCalendarSchema, 'filter'>>;
 // `sort` on the CALENDAR only: declared `SortConfig[]`, optional, not `any`.
