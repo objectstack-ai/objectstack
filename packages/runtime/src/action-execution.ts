@@ -73,7 +73,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
-import { actionInvocationBranch, actionInvocationFailure, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
+import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -3533,6 +3533,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         objectName: isObjectLessActionKey(objectName) ? undefined : objectName,
         recordId,
         branch: actionInvocationBranch(action, isDeclarativeUpdateAction(action)),
+        target: actionInvocationTarget(action, isDeclarativeUpdateAction(action)), // #28281: the outer row names where an api forward went
     };
     let answer: any;
     try {
