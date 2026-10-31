@@ -53,7 +53,7 @@ import { CriteriaSharingRuleSchema } from '../security/sharing.zod.js';
 import { PluginPermissionSchema } from '../kernel/plugin-security-advanced.zod.js';
 import { MultiVersionSupportSchema } from '../kernel/plugin-versioning.zod.js';
 import { ActionParamSchema, ActionSchema } from '../ui/action.zod.js';
-import { ObjectNavItemSchema } from '../ui/app.zod.js';
+import { AppLandingEntrySchema, ObjectNavItemSchema } from '../ui/app.zod.js';
 import { BulkActionDefSchema } from '../ui/bulk-action.zod.js';
 import { PageTabsProps, RecordAlertProps } from '../ui/component.zod.js';
 import { PageComponentSchema } from '../ui/page.zod.js';
@@ -191,10 +191,13 @@ function element(schema: unknown, ...path: string[]): z.ZodType {
 }
 
 /**
- * The 32 declaring positions, keyed the way the ADR-0058 D7 conformance ledger
+ * The 33 declaring positions, keyed the way the ADR-0058 D7 conformance ledger
  * keys them (`file:Schema.field`). Re-derived by identity on this tree, ⛔ not
- * inherited from the card: 30 declaring source lines, two of which are
+ * inherited from the card: 31 declaring source lines, two of which are
  * file-local alias consts mounting two slots each.
+ *
+ * [#28022] It was 32 over 30 lines. `ui/app.zod.ts:AppLandingEntrySchema.visible`
+ * joined: an app's per-audience landing predicate, a new evaluated position.
  *
  * [#27946] It was 31 over 29 lines. `ui/action.zod.ts:actionObject.pressed`
  * joined: the action's per-reader pressed-state predicate, a new evaluated
@@ -239,6 +242,8 @@ const POSITIONS: ReadonlyArray<readonly [string, () => z.ZodType]> = [
   // [#27946] Mounted directly, no boolean arm: the reader's pressed state.
   ['ui/action.zod.ts:actionObject.pressed', () => slot(ActionSchema, 'pressed')],
   ['ui/app.zod.ts:BaseNavItemSchema.visible', () => slot(ObjectNavItemSchema, 'visible')],
+  // [#28022] Mounted directly, required: the audience a landing entry is for.
+  ['ui/app.zod.ts:AppLandingEntrySchema.visible', () => slot(AppLandingEntrySchema, 'visible')],
   ['ui/bulk-action.zod.ts:BulkActionDefSchema.visible', () => slot(BulkActionDefSchema, 'visible')],
   ['ui/component.zod.ts:PageTabsProps.visibleWhen', () => slot(element(PageTabsProps, 'items'), 'visibleWhen')],
   ['ui/component.zod.ts:RecordAlertProps.visible', () => slot(RecordAlertProps, 'visible')],
@@ -258,10 +263,10 @@ const POSITIONS: ReadonlyArray<readonly [string, () => z.ZodType]> = [
 ];
 
 describe('every evaluated slot refuses the two shapes no engine can run', () => {
-  it('reaches exactly the 32 declaring positions the census enumerated', () => {
+  it('reaches exactly the 33 declaring positions the census enumerated', () => {
     // A position that stops being reachable must red here rather than fall out
     // of the table: that silent drop is the #17630 failure in another costume.
-    expect(POSITIONS.length).toBe(32);
+    expect(POSITIONS.length).toBe(33);
     for (const [key, get] of POSITIONS) {
       expect(() => get(), `unreachable: ${key}`).not.toThrow();
     }
@@ -302,7 +307,7 @@ describe('every evaluated slot refuses the two shapes no engine can run', () => 
   });
 
   it('CONTROL — the persistence contract is NOT narrowed and still accepts both shapes', () => {
-    // This is what makes the 32 `false`s above a reading. Ruling item 2:
+    // This is what makes the 33 `false`s above a reading. Ruling item 2:
     // `ExpressionSchema` / `ExpressionInputSchema` keep `source` OR `ast`.
     for (const schema of [ExpressionSchema, ExpressionInputSchema, PredicateInputSchema]) {
       expect(schema.safeParse(AST_ONLY).success).toBe(true);
@@ -310,7 +315,7 @@ describe('every evaluated slot refuses the two shapes no engine can run', () => 
     }
   });
 
-  it('CONTROL — a healthy predicate still parses at every one of the 32 positions', () => {
+  it('CONTROL — a healthy predicate still parses at every one of the 33 positions', () => {
     // The narrowing removes accepted shapes and adds none. The settings-manifest
     // pair speaks its own closed non-CEL grammar (#7169), so it gets the
     // predicate that grammar accepts; every other slot gets CEL.

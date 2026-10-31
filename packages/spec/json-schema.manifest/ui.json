@@ -17,6 +17,7 @@
     "ui/App",
     "ui/AppBranding",
     "ui/AppContextSelector",
+    "ui/AppLandingEntry",
     "ui/AppearanceConfig",
     "ui/AriaProps",
     "ui/BulkActionDef",
