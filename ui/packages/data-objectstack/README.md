@@ -451,7 +451,7 @@ dataSource.clearCache();
 
 `loadAppBundle(appId)` loads an app's metadata bundle (`GET /api/v1/meta/app/{appId}/bundle`) in one request. The console calls it when it enters an app. A by-name read of an item the bundle holds is then answered from the bundle and never sent: `getObjectSchema`, `getView`, `getPage`, `getApp`, `getItems` and `getClient().meta.getItem(type, name)`. Items the bundle does not hold keep their by-name reads.
 
-Calling `loadAppBundle` again for the same app sends `If-None-Match` with the held `ETag` exactly as served (a weak `W/` validator included), and a `304` keeps what is held. A bundle served `no-store` answers the reads that waited on it and is not kept. A metadata write through the client, or an `invalidateCache(key)` that names a bundled item, makes the next bundled read revalidate the bundle first. `clearCache()` drops the bundles.
+Calling `loadAppBundle` again for the same app sends `If-None-Match` with the held `ETag` exactly as served (a weak `W/` validator included), and a `304` keeps what is held. A bundle served `no-store` with no `ETag` answers the reads that waited on it and is not kept. A metadata write through the client, or an `invalidateCache(key)` that names a bundled item, makes the next bundled read revalidate the bundle first. `clearCache()` drops the bundles.
 
 ### Cache Configuration
 

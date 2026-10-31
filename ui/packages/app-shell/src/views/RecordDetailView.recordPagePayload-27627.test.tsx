@@ -94,7 +94,8 @@ const TOTAL: Record<string, number> = { os_27627_task: 7, os_27627_case: 4, os_2
 
 interface Held { wave: number; method: string; path: string; body: any; released: boolean; release: () => void }
 
-const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+const json = (body: unknown, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
 
 /** The page payload the route answers for `body`, for record `id`. */
 function pageAnswer(id: string, body: any) {
@@ -119,6 +120,9 @@ function pageAnswer(id: string, body: any) {
 
 const APP = 'demo';
 const BUNDLE = `/api/v1/meta/app/${APP}/bundle`;
+
+/** The bundle carries its per-caller validator, as the route serves a bundle it may be kept by. */
+const BUNDLE_HEADERS = { ETag: 'W/"demo-bundle-1"', 'Cache-Control': 'private, no-cache' };
 
 function answerFor(h: Held): unknown {
   if (h.path === BUNDLE) {
@@ -148,7 +152,7 @@ function heldTransport() {
         wave: state.wave, method, path,
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
         released: false,
-        release: () => { if (h.released) return; h.released = true; resolve(json(answerFor(h))); },
+        release: () => { if (h.released) return; h.released = true; resolve(json(answerFor(h), h.path === BUNDLE ? BUNDLE_HEADERS : {})); },
       };
       held.push(h);
     });

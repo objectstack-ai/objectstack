@@ -33,6 +33,8 @@
  * asks the server and reports what it answered.
  */
 
+import type { AppMetadataBundleResponse } from '@objectstack/spec/api';
+
 /** One bundled item. */
 export interface AppBundleEntry {
   /** The item's document (the envelope's `item`). */
@@ -186,17 +188,17 @@ const BUNDLE_LISTS: ReadonlyArray<readonly [key: string, type: string]> = [
 ];
 
 /**
- * Index the bundle's answer (`AppMetadataBundleResponse`, `@objectstack/spec/api`)
+ * Index the bundle's answer (`AppMetadataBundleResponseSchema`, `@objectstack/spec/api`)
  * by type and name. The answer is bare, as the `/meta` item reads answer: the
  * app under `app`, and the other items listed under `objects`, `views`,
  * `pages` and `dashboards`. Every member is the envelope its own
  * `GET /meta/{type}/{name}` answers (`GetMetaItemResponse`), so it is kept
  * whole and handed back as that read's answer.
  */
-export function indexAppBundle(body: unknown): AppBundleItems {
+export function indexAppBundle(body: AppMetadataBundleResponse): AppBundleItems {
   const items: AppBundleItems = new Map();
   if (!body || typeof body !== 'object') return items;
-  const bag = body as Record<string, unknown>;
+  const bag = body as unknown as Record<string, unknown>;
   const put = (type: string, member: unknown) => {
     if (!member || typeof member !== 'object') return;
     const envelope = member as Record<string, unknown>;

@@ -265,7 +265,7 @@ pages and dashboards. Each one is the envelope its own
 - Calling `loadAppBundle` again for the same app sends `If-None-Match` with the
   held `ETag` exactly as served (a weak `W/` validator included), and a `304`
   keeps the bundle already held.
-- A bundle served `no-store` (the server could not settle a member's field
+- A bundle served `no-store` with no `ETag` (the server could not settle a member's field
   visibility) answers the reads that waited on it and is not kept. Later reads
   go by name until the app is entered again.
 - A metadata write through the client, or an `invalidateCache(key)` that names

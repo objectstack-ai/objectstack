@@ -4549,21 +4549,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   /** The one round trip behind {@link loadAppBundle}. */
   private async requestAppBundle(appId: string, etag: string | undefined): Promise<AppBundleAnswer> {
     await this.connect();
-    const url = `${this.baseUrl}/api/v1/meta/app/${encodeURIComponent(appId)}/bundle`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...this.getAuthHeaders() };
-    if (etag) headers['If-None-Match'] = etag;
-    // `no-store`: the validator is this adapter's to send, so the browser's
-    // HTTP cache neither answers for the server nor hides its `304`.
-    const res = await this.fetchImpl(url, { method: 'GET', headers, cache: 'no-store' });
-    if (res.status === 304) return { status: 'unchanged' };
-    if (!res.ok) return { status: 'absent' };
-    const items = indexAppBundle(await res.json());
+    // The client's conditional read: a `304` is answered as `notModified`,
+    // any other refusal rejects (the store reads that as no bundle).
+    const answer = await this.client.meta.getAppBundle(appId, etag ? { ifNoneMatch: etag } : undefined);
+    if (answer.notModified) return { status: 'unchanged' };
+    const items = indexAppBundle(answer.data);
     // A bundle holding a member whose field visibility the server could not
-    // settle is served `no-store`, with no validator: it answers the reads
+    // settle is served `no-store` with no validator: it answers the reads
     // that waited on it and is not kept.
-    if (/\bno-store\b/i.test(res.headers.get('cache-control') ?? '')) return { status: 'fresh', items, noStore: true };
-    // The validator goes back byte-for-byte, a weak `W/` prefix included.
-    return { status: 'fresh', etag: res.headers.get('etag') ?? undefined, items };
+    if (!answer.etag) return { status: 'fresh', items, noStore: true };
+    // The validator goes back as the server spelled it, a weak `W/` included.
+    return { status: 'fresh', etag: `${answer.etag.weak ? 'W/' : ''}"${answer.etag.value}"`, items };
   }
 
   /**
