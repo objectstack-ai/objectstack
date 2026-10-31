@@ -10,18 +10,13 @@
  *
  * A datasource document is a row of the stored-metadata family
  * (`sys_metadata`, and its version snapshots in `sys_metadata_history`). The
- * `/meta` read doors refuse a caller without `manage_platform_settings` before
- * any store read (`metaTypeReadRefusal`, `@objectstack/rest`), but the same row
- * is also reachable as a RECORD: the generic data door's list, get, query,
- * count and export legs, on both transports, and any other reader that runs a
- * caller's context through the engine. A record read is admitted by the
- * object's grants, and a permission set that reads every object (a built-in
- * administrative set below platform administration among them) reads the
- * family's tables like any other. So the same document admitted two sets of
- * callers through two exits.
+ * `/meta` read doors admit a caller to a datasource-family type only when it
+ * holds `manage_platform_settings` (`metaTypeReadRefusal`, `@objectstack/rest`).
+ * The rule is that one document admits one set of callers at every exit that
+ * serves it, so the stored row admits exactly those callers too.
  *
- * Every one of those reads passes this engine's middleware chain, so the rule
- * is applied once, here, from the one table both exits read
+ * Every caller-context read of the family passes this engine's middleware
+ * chain, so the rule is applied once, here, from the one table both exits read
  * (`STORED_METADATA_TYPE_READ_CAPABILITIES`, `@objectstack/metadata-core`):
  * for a caller missing a row's capability, `type NOT IN (those types)` is
  * AND-composed into the read's predicate. ⛔ Never a second copy of the table,

@@ -1,20 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#27884] A datasource definition is served only to datasource
-// administrators, whichever door reads it. The metadata read door
-// (`GET /api/v1/meta/datasource`) already admits only holders of the
-// datasource family's read capability; the stored row the definition lives in
-// is also a record of the stored-metadata table, and the generic data door must
-// admit the same callers to it. Pinned at the REST doors of a booted stack,
-// with the platform's own security composition:
+// administrators, at every exit that serves it: the stored row the definition
+// lives in admits the same callers the metadata read door
+// (`GET /api/v1/meta/datasource`) admits. Pinned at the REST doors of a booted
+// stack, with the platform's own security composition:
 //
-//  - the platform administrator reads the row whole through the data door,
-//    connection configuration and `external.credentialsRef` included;
-//  - the shipped organization-administrator set (below datasource
-//    administration) and a plain member are served no row: the list and the
-//    query answer none, a get of the row's id answers 404, and the metadata
-//    door refuses them as before;
-//  - parity: for each caller, the data door serves the row exactly when the
+//  - the platform administrator reads the row whole;
+//  - a caller below datasource administration and a plain member are served
+//    no row, and the metadata door refuses them as before;
+//  - parity: for each caller, the stored row is served exactly when the
 //    metadata door serves the definition.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -92,7 +87,7 @@ describe('[#27884] the stored row of a datasource definition admits only datasou
     await stack?.stop();
   });
 
-  it('the platform administrator reads the row whole: connection configuration and credentialsRef', async () => {
+  it('the platform administrator reads the row whole', async () => {
     const list = await call(tokens.admin, 'GET', `/data/sys_metadata?type=datasource&name=${DS}&fields=name,type,metadata`);
     expect(list.status, list.text).toBe(200);
     const [row] = listRows(list);
@@ -104,7 +99,7 @@ describe('[#27884] the stored row of a datasource definition admits only datasou
   });
 
   for (const who of ['orgAdmin', 'member'] as const) {
-    it(`${who === 'orgAdmin' ? 'the built-in organization administrator' : 'a plain member'} is served no row through any data-door read`, async () => {
+    it(`${who === 'orgAdmin' ? 'a caller below datasource administration' : 'a plain member'} is served no row`, async () => {
       const token = tokens[who];
       const list = await call(token, 'GET', `/data/sys_metadata?type=datasource&fields=name,type,metadata`);
       // 403 (the object is not readable at all) or 200 with no datasource row.
@@ -124,7 +119,7 @@ describe('[#27884] the stored row of a datasource definition admits only datasou
     });
   }
 
-  it('parity: each caller is served the row by the data door exactly when the metadata door serves the definition', async () => {
+  it('parity: each caller is served the stored row exactly when the metadata door serves the definition', async () => {
     for (const who of ['admin', 'orgAdmin', 'member'] as const) {
       const meta = await call(tokens[who], 'GET', `/meta/datasource/${DS}`);
       const data = await call(tokens[who], 'GET', `/data/sys_metadata/${encodeURIComponent(rowId)}`);

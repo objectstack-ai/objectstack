@@ -2078,8 +2078,8 @@ export function isPublicAudienceRead(
  * (`@objectstack/metadata-core`), and this name is that same frozen object. The
  * engine's stored-row read gate (`@objectstack/objectql`) narrows every
  * caller-context read of `sys_metadata` / `sys_metadata_history` by the same
- * row, so the generic data door cannot serve a document of a listed type to a
- * caller this gate refuses. A row is added THERE, and reaches both exits.
+ * row, so no exit serves a document of a listed type to a caller this gate
+ * refuses. A row is added THERE, and reaches both exits.
  */
 export const META_TYPE_READ_CAPABILITIES: Readonly<Record<string, string>> = STORED_METADATA_TYPE_READ_CAPABILITIES;
 

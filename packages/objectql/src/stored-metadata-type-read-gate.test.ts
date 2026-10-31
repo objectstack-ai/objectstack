@@ -95,10 +95,7 @@ function makeDriver() {
 
 /** A datasource administrator: holds the row's capability (platform administrators do). */
 const ADMIN = { userId: 'u_admin', systemPermissions: [CAPABILITY, 'manage_metadata', 'studio.access'] };
-/**
- * The shipped organization administrator's capability set — below datasource
- * administration (`organization_admin`, `@objectstack/plugin-security`).
- */
+/** A caller below datasource administration. */
 const ORG_ADMIN = { userId: 'u_org_admin', systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'] };
 /** A caller that may enter Studio (and so read the history table) without datasource administration. */
 const STUDIO_AUTHOR = { userId: 'u_author', systemPermissions: ['studio.access', 'manage_metadata'] };
@@ -121,7 +118,7 @@ describe('[#27884] stored-row read gate on the stored-metadata tables', () => {
     vi.spyOn((engine as any).logger, 'debug').mockImplementation(() => undefined);
   });
 
-  it('a datasource administrator reads the row whole: connection configuration and credentialsRef', async () => {
+  it('a datasource administrator reads the row whole', async () => {
     const rows = await engine.find('sys_metadata', { where: { type: 'datasource' }, context: ADMIN });
     expect(rows).toHaveLength(1);
     const body = JSON.parse(rows[0].metadata);
@@ -132,7 +129,7 @@ describe('[#27884] stored-row read gate on the stored-metadata tables', () => {
     expect(await engine.count('sys_metadata', { context: ADMIN })).toBe(3);
   });
 
-  for (const [label, caller] of [['the built-in organization administrator', ORG_ADMIN], ['a plain reader', READER]] as const) {
+  for (const [label, caller] of [['a caller below datasource administration', ORG_ADMIN], ['a plain reader', READER]] as const) {
     it(`${label} is served no datasource-family row on sys_metadata (find, findOne, count, aggregate)`, async () => {
       const listed = await engine.find('sys_metadata', { context: caller });
       expect(listed.map((r: any) => r.type).sort()).toEqual(['view']);

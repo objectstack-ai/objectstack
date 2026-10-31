@@ -19,7 +19,7 @@ import { META_TYPE_READ_CAPABILITIES, metaTypeReadRefusal } from './meta-item-re
 const CALLERS: Record<string, unknown> = {
     platformAdmin: { userId: 'u_admin', systemPermissions: ['manage_platform_settings', 'manage_metadata', 'studio.access', 'setup.access'] },
     datasourceAdminOnly: { userId: 'u_ds', systemPermissions: ['manage_platform_settings'] },
-    organizationAdmin: { userId: 'u_org', systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'] },
+    belowDatasourceAdmin: { userId: 'u_org', systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'] },
     studioAuthor: { userId: 'u_author', systemPermissions: ['studio.access', 'manage_metadata'] },
     member: { userId: 'u_member', systemPermissions: [] },
     noCapabilitySet: { userId: 'u_bare' },
@@ -42,6 +42,6 @@ describe('[#27884] one read row for a datasource-family document, at both exits'
 
     it('a holder is withheld nothing; a caller below datasource administration is withheld every gated type', () => {
         expect(storedMetadataTypesWithheldFrom(CALLERS.platformAdmin)).toEqual([]);
-        expect(storedMetadataTypesWithheldFrom(CALLERS.organizationAdmin).sort()).toEqual(['datasource', 'external_catalog']);
+        expect(storedMetadataTypesWithheldFrom(CALLERS.belowDatasourceAdmin).sort()).toEqual(['datasource', 'external_catalog']);
     });
 });

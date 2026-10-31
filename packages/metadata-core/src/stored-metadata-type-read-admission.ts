@@ -14,9 +14,8 @@
  *  - the `/meta` read doors, whose type-level read admission
  *    (`metaTypeReadRefusal`, `@objectstack/rest`) refuses a caller without the
  *    row's capability before any store read; and
- *  - every engine read of the family's rows — the generic data door's list,
- *    get, query, count and export legs on both transports, and every other
- *    reader that runs a caller's context through the engine — narrowed by
+ *  - every caller-context engine read of the family's rows, whichever door
+ *    issues it, narrowed by
  *    {@link storedMetadataTypesWithheldFrom}, which the engine composes into
  *    the read's predicate (`stored-metadata-type-read-gate.ts`,
  *    `@objectstack/objectql`).
