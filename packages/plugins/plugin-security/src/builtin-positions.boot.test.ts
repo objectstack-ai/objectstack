@@ -659,7 +659,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_connector_connections', 'manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -677,7 +677,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['field_default', 'member_default', 'organization_admin_no_bypass'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_connector_connections', 'manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
@@ -709,7 +709,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['mcp_agent_data_read'],
       positions: [],
       principalKind: 'agent',
-      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_connector_connections', 'manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     member: {
       accessible_org_ids: ['org_eq'],
@@ -727,7 +727,7 @@ const GRANT_GOLDEN: Record<'single' | 'isolated', unknown> = {
       permissions: ['field_default', 'member_default', 'organization_admin'],
       positions: ['everyone', 'org_owner'],
       posture: 'TENANT_ADMIN',
-      systemPermissions: ['manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
+      systemPermissions: ['manage_connector_connections', 'manage_mailboxes', 'manage_org_users', 'setup.access', 'setup.write'],
     },
     platformAdmin: {
       accessible_org_ids: [],
