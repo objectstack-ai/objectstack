@@ -67,7 +67,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { z } from 'zod';
 import { RecordRelatedListProps } from '@objectstack/spec/ui';
-import type { ViewFilterOrGroup, ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement, ViewFilterOrGroup, ViewFilterRule } from '@objectstack/spec/ui';
 import type { RecordRelatedListComponentProps } from '../record-components';
 
 /* ── Type-level legs (compiled by `tsc -p tsconfig.test.json`, erased by vitest) ── */
@@ -95,24 +95,19 @@ type SpecFilter = z.input<typeof RecordRelatedListProps>['filter'];
 
 /** ⭐ The ruling, in type form: the authoring face carries the protocol's declaration. */
 /**
- * objectstack#28020: the contract's element is now a flat rule OR an any-of
- * group (`{ or: [rule, ...] }`), and the group is `[PLANNED — not yet
- * rendered]` there: the related list's own reader (`@object-ui/plugin-detail`)
- * types and lowers flat rules only. So this face carries the contract MINUS
- * the group until the console reads it (objectstack#28370), and the two legs
- * below hold exactly that gap — widen this face and the second leg's
- * companion together, never one alone.
+ * objectstack#28020 put an any-of group (`{ or: [rule, ...] }`) beside the flat
+ * rule in the contract's element, and objectstack#28462 widened this face to
+ * carry it, so the face is the contract again — no gap is withheld.
  */
-type FlatRulesOf<F extends readonly unknown[] | undefined> = Exclude<NonNullable<F>[number], ViewFilterOrGroup>[] | undefined;
-export type _MirrorAgreesWithTheContract = Expect<Equal<MirrorFilter, FlatRulesOf<SpecFilter>>>;
-/** …and the contract does carry the group the face withholds — so the gap is the group and nothing else. */
-export type _TheContractAlsoTakesTheGroup = Expect<Equal<NonNullable<SpecFilter>[number], ViewFilterRule | ViewFilterOrGroup>>;
+export type _MirrorAgreesWithTheContract = Expect<Equal<MirrorFilter, SpecFilter>>;
+/** …and the contract's element is exactly the rule or the group, so the pair cannot agree on something looser. */
+export type _TheContractTakesRuleOrGroup = Expect<Equal<NonNullable<SpecFilter>[number], ViewFilterRule | ViewFilterOrGroup>>;
 
 /**
- * …and that declaration is the rule ARRAY. Stated separately so a spec that
+ * …and that declaration is the element ARRAY (rule or `{ or }` group). Stated separately so a spec that
  * loosened its own key could not make the pair agree on nothing.
  */
-export type _AndThatShapeIsTheRuleArray = Expect<Equal<MirrorFilter, ViewFilterRule[] | undefined>>;
+export type _AndThatShapeIsTheRuleArray = Expect<Equal<MirrorFilter, ViewFilterElement[] | undefined>>;
 
 // @ts-expect-error objectui#10199 — the PRE-FIX declaration, asserted to be WRONG. This directive going unused (TS2578) means the face went back to `any`.
 type _AnyIsNotTheContract = Expect<Equal<MirrorFilter, any>>;
