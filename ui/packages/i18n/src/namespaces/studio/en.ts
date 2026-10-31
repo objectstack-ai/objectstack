@@ -4030,6 +4030,8 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#12810 — a create that leaves a required seed placeholder unset
   // (a dataset's base object) is refused before any request.
   'engine.validation.seedPlaceholderUnset': 'Set {fields} before saving: a new item is never saved with the placeholder its template starts from.',
+  // objectstack#28179 — a row the served form marks required, left unset.
+  'engine.validation.fieldRequired': 'This field is required.',
   'engine.embedded.saved': 'Saved.',
   'engine.embedded.readOnlyParent': 'The parent type is read-only — saving will still attempt a PUT and may be refused by the server.',
   'engine.embedded.saveIntoParent': 'Save into {parentType}',

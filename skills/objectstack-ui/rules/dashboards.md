@@ -295,12 +295,12 @@ defineDataset({
   dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
   measures: [{ name: 'signed_count', aggregate: 'count' }],
 });
-// A money measure may set `currency` (ISO 4217), e.g. `currency: 'USD'`.
-// Chain: measure `currency` → the field's `defaultCurrency` (`fixed`
-// only) → tenant `localization.currency`; omit it for counts. A
-// `currencyMode: 'record'` amount refuses `currency` and ungrouped
-// sum/avg/min/max; grouped by its code field, the column carries
-// `currencyField` (per-row code column); a `count` never does. A `fixed`
+// A money measure may set `currency` (ISO 4217, e.g. `'USD'`). Chain:
+// measure `currency` → the field's `defaultCurrency` (`fixed` only) →
+// tenant `localization.currency`; omit it for counts. A
+// `currencyMode: 'record'` amount refuses `currency`, and sum/avg/min/max
+// unless grouped by its code field; then the column carries
+// `currencyField` (the per-row code column); a `count` never does. A `fixed`
 // field refuses a different `currency` (delete it; restating is fine), and
 // a derived measure refuses operands in two `fixed` codes (derive from one
 // currency or drop one). Not judged: `currency` over a `dynamic` field, a

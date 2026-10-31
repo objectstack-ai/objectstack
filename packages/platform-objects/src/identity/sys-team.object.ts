@@ -56,6 +56,12 @@ export const SysTeam = ObjectSchema.create({
         { field: 'name', required: true },
         { name: 'organizationId', field: 'organization_id' },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Create a team in an organization (param: name; optionally organizationId, which defaults to the active organization). Teams group members for team-scoped access.',
+      },
     },
     {
       // Better-auth: `organization/update-team { teamId, data: { name } }`.
@@ -77,6 +83,12 @@ export const SysTeam = ObjectSchema.create({
       params: [
         { field: 'name', required: true, defaultFromRow: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Rename this team (the record; param: name). Membership and team-scoped access are unchanged.',
+      },
     },
     {
       // Better-auth: `organization/add-team-member { teamId, userId }` — the
@@ -102,6 +114,12 @@ export const SysTeam = ObjectSchema.create({
         // through `objectOverride` — the sys_user lookup on the membership row.
         { name: 'userId', field: 'user_id', objectOverride: 'sys_team_member', required: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Add a user to this team (the record; param: userId). The user must already be a member of the team\'s organization.',
+      },
     },
     {
       // Better-auth: `organization/remove-team { teamId, organizationId? }`.
@@ -120,6 +138,14 @@ export const SysTeam = ObjectSchema.create({
       confirmText: 'Delete this team? Members will lose any team-scoped access. This cannot be undone.',
       successMessage: 'Team deleted',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Delete a team (the record): its members lose the team-scoped access. This cannot be undone. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 
