@@ -3301,6 +3301,7 @@ const ko = {
   report: {
     total: "합계",
     totals: "합계",
+    subtotal: "소계",
     loading: "로딩 중…",
     forbiddenMessage: "이 보고서의 데이터를 볼 수 있는 권한이 없습니다.",
     dateRange: {

@@ -3369,6 +3369,7 @@ const es = {
   report: {
     total: "Total",
     totals: "Totales",
+    subtotal: "Subtotal",
     loading: "Cargando…",
     forbiddenMessage: "No tienes permiso para ver los datos de este informe.",
     dateRange: {

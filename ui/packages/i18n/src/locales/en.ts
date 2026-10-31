@@ -1778,6 +1778,7 @@ const en = {
   report: {
     total: 'Total',
     totals: 'Totals',
+    subtotal: 'Subtotal',
     loading: 'Loading…',
     // objectui#12330 — the report's no-access state; its title is `dashboard.widgetForbiddenTitle`.
     forbiddenMessage: 'You don’t have permission to view the data behind this report.',

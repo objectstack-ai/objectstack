@@ -3304,6 +3304,7 @@ const ja = {
   report: {
     total: "合計",
     totals: "合計",
+    subtotal: "小計",
     loading: "読み込み中…",
     forbiddenMessage: "このレポートのデータを表示する権限がありません。",
     dateRange: {
