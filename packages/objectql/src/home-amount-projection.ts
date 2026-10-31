@@ -35,10 +35,11 @@
  *   `CURRENCY_FRACTION_DIGITS` (Open item 3): JPY 0, USD 2, KWD 3.
  * - **The rate stored** is the rate row's own value, never rounded (D1: the
  *   amount is stored "with the rate used"; a rounded rate would not reproduce
- *   the stored home amount). A rate field whose declared `scale` keeps fewer
- *   decimals than the rate carries refuses the write at the record
- *   validator's `max_scale` seam, as every number field does; the engine
- *   never rounds a value to fit a field.
+ *   the stored home amount). The rate field is `readonly`, and a readonly
+ *   value is judged for its shape only (`ReadonlyValueScope`), so a `scale`
+ *   it declares below the rate's twelve decimals is no write constraint: the
+ *   column (every numeric column is the same exact decimal) keeps every digit,
+ *   and the declared scale reaches only the display.
  *
  * ## Who writes the two fields
  *

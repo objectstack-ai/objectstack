@@ -114,14 +114,15 @@ const refusalOf = async (p: Promise<unknown>): Promise<Thrown> => p.then(() => n
 const SYS = { context: { isSystem: true } } as const;
 const BATCH: EngineUpdateOptions = { where: { title: 'batch' }, multi: true };
 
-async function boot(object = invoice(), home: string | undefined = 'CNY') {
+/** `home: null` composes no home-currency resolver at all (no settings service). */
+async function boot(object = invoice(), home: string | null = 'CNY') {
   const engine = new ObjectQL();
   const d = makeDriver();
   engine.registerDriver(d.driver, true);
   await engine.init();
   engine.registry.registerObject(RATE_OBJECT as any);
   engine.registry.registerObject(object as any);
-  if (home !== undefined) engine.setHomeCurrencyResolver(async () => home);
+  if (home !== null) engine.setHomeCurrencyResolver(async () => home);
   const rate = (currency: string, effective_date: string, value: number) =>
     d.storeFor('sys_exchange_rate').set(`${currency}_${effective_date}`, { id: `${currency}_${effective_date}`, currency, effective_date, rate: value });
   return { engine, ...d, rate };
@@ -200,7 +201,7 @@ describe('insert: the home amount is the amount divided by the rate in force on 
 
 describe('the home currency is the organization\'s setting, never a default', () => {
   it('no resolver (no settings service) refuses ERR_HOME_CURRENCY_UNSET', async () => {
-    const t = await boot(invoice(), undefined);
+    const t = await boot(invoice(), null);
     const err = await refusalOf(t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'USD', invoice_date: '2026-03-15', amount: 1 }));
     expect({ code: err?.code, status: err?.status }).toEqual({ code: 'ERR_HOME_CURRENCY_UNSET', status: 400 });
     expect(err?.message).toContain('localization.currency');
@@ -208,7 +209,7 @@ describe('the home currency is the organization\'s setting, never a default', ()
   });
 
   it('the resolver is asked for the row\'s organization', async () => {
-    const t = await boot(invoice(), undefined);
+    const t = await boot(invoice(), null);
     const asked: Array<string | undefined> = [];
     t.engine.setHomeCurrencyResolver(async (org) => { asked.push(org); return 'CNY'; });
     await t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'CNY', amount: 1 }, { context: { isSystem: true, tenantId: 'org_a' } } as any);
@@ -260,16 +261,16 @@ describe('only the engine writes the home and rate fields', () => {
     expect(t.storeFor('fx_invoice').get(blank.id)).toMatchObject({ amount_home: null, amount_rate: null });
   });
 
-  it('a rate field whose scale keeps fewer decimals than the rate refuses max_scale — the rate is never rounded', async () => {
+  it('a rate field declaring a scale below the rate\'s decimals stores the rate unrounded, and converts with all of it', async () => {
+    // `readonly` values are judged for SHAPE only (`ReadonlyValueScope`), so a
+    // declared `scale` is no write constraint on the rate field, and every
+    // numeric column is the same exact decimal: the stored rate is the rate
+    // row's own value, and the stored home amount reproduces from it.
     const t = await boot(invoice({ rate: { scale: 4 } }));
-    t.rate('USD', '2026-01-01', 0.1389);
-    t.rate('USD', '2026-02-01', 0.138912);
-    const fits = await t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'USD', invoice_date: '2026-01-15', amount: 10000 });
-    expect(t.storeFor('fx_invoice').get(fits.id)).toMatchObject({ amount_rate: 0.1389 });
-    const err = await refusalOf(t.engine.insert('fx_invoice', { title: 'i2', currency_code: 'USD', invoice_date: '2026-02-15', amount: 10000 }));
-    expect(err?.code).toBe('VALIDATION_FAILED');
-    expect(err?.fields?.map((f) => [f.field, f.code])).toEqual([['amount_rate', 'max_scale']]);
-    expect(t.storeFor('fx_invoice').size).toBe(1);
+    t.rate('USD', '2026-02-01', 0.138912345678);
+    const row = await t.engine.insert('fx_invoice', { title: 'i1', currency_code: 'USD', invoice_date: '2026-02-15', amount: 10000 });
+    // 10000 ÷ 0.138912345678 = 71987.84…; at the rounded 0.1389 it would be 71994.24.
+    expect(t.storeFor('fx_invoice').get(row.id)).toMatchObject({ amount_home: 71987.84, amount_rate: 0.138912345678 });
   });
 });
 
