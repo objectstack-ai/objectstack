@@ -16,8 +16,6 @@ import { POSITION_PARAM } from './peopleAssignments.js';
 
 export function PositionHoldersPage() {
   const { t } = useObjectTranslation();
-  const k = (key: string, defaultValue: string, vars?: Record<string, string>) =>
-    t(`setupAssignments.${key}`, { defaultValue, ...vars });
   return (
     <CatalogAssignmentPage
       type="position"
@@ -25,21 +23,21 @@ export function PositionHoldersPage() {
       testId="setup-position-holders"
       icon={<UserCheck className="h-4 w-4" />}
       copy={{
-        title: k('positionsTitle', 'Position holders'),
-        subtitle: k(
-          'positionsSubtitle',
-          'Pick a position to see who holds it, and add or remove holders. What a position grants is defined on the position itself.',
-        ),
-        listLabel: k('positionsList', 'Positions'),
-        filterPlaceholder: k('positionsFilter', 'Filter positions'),
-        emptyTitle: k('positionsEmptyTitle', 'No positions'),
-        emptyBody: k('positionsEmptyBody', 'No position is defined in this environment yet.'),
-        pick: k('positionsPick', 'Pick a position to see its holders.'),
-        loadFailed: k('positionsLoadFailed', 'Could not read the positions.'),
-        noMatch: k('noMatch', 'Nothing matches the filter.'),
-        notFound: (name) => k('notFound', '"{{name}}" is not in this list.', { name }),
-        retry: k('retry', 'Try again'),
-        refresh: k('refresh', 'Refresh'),
+        title: t('setupAssignments.positionsTitle', { defaultValue: 'Position holders' }),
+        subtitle: t('setupAssignments.positionsSubtitle', {
+          defaultValue:
+            'Pick a position to see who holds it, and add or remove holders. What a position grants is defined on the position itself.',
+        }),
+        listLabel: t('setupAssignments.positionsList', { defaultValue: 'Positions' }),
+        filterPlaceholder: t('setupAssignments.positionsFilter', { defaultValue: 'Filter positions' }),
+        emptyTitle: t('setupAssignments.positionsEmptyTitle', { defaultValue: 'No positions' }),
+        emptyBody: t('setupAssignments.positionsEmptyBody', { defaultValue: 'No position is defined in this environment yet.' }),
+        pick: t('setupAssignments.positionsPick', { defaultValue: 'Pick a position to see its holders.' }),
+        loadFailed: t('setupAssignments.positionsLoadFailed', { defaultValue: 'Could not read the positions.' }),
+        noMatch: t('setupAssignments.noMatch', { defaultValue: 'Nothing matches the filter.' }),
+        notFound: (name) => t('setupAssignments.notFound', { defaultValue: '"{{name}}" is not in this list.', name }),
+        retry: t('setupAssignments.retry', { defaultValue: 'Try again' }),
+        refresh: t('setupAssignments.refresh', { defaultValue: 'Refresh' }),
       }}
       renderSection={(name) => <PositionHoldersSection name={name} />}
     />
