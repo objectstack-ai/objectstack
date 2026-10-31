@@ -230,6 +230,7 @@
     "ui/CalendarConfig:allDayField",
     "ui/CalendarConfig:colorField",
     "ui/CalendarConfig:endDateField",
+    "ui/CalendarConfig:initialDate",
     "ui/CalendarConfig:startDateField",
     "ui/CalendarConfig:titleField",
     "ui/ChartAggregate:field",
