@@ -38,6 +38,8 @@
     "ConnectorInstanceOAuth2AuthorizationCodeAuthSchema": "src/shared/connector-auth.zod.ts#ConnectorInstanceOAuth2AuthorizationCodeAuthSchema (const)",
     "ConnectorInstanceOAuth2ClientCredentialsAuth": "src/shared/connector-auth.zod.ts#ConnectorInstanceOAuth2ClientCredentialsAuth (type)",
     "ConnectorInstanceOAuth2ClientCredentialsAuthSchema": "src/shared/connector-auth.zod.ts#ConnectorInstanceOAuth2ClientCredentialsAuthSchema (const)",
+    "ConnectorInstanceSignedAlipayV3Auth": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAlipayV3Auth (type)",
+    "ConnectorInstanceSignedAlipayV3AuthSchema": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAlipayV3AuthSchema (const)",
     "ConnectorInstanceSignedAliyunAcs3Auth": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAliyunAcs3Auth (type)",
     "ConnectorInstanceSignedAliyunAcs3AuthSchema": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAliyunAcs3AuthSchema (const)",
     "ConnectorInstanceSignedAuth": "src/shared/connector-auth.zod.ts#ConnectorInstanceSignedAuth (type)",

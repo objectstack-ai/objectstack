@@ -165,8 +165,8 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorInstanceSignedAliyunAcs3AuthSchema, ConnectorInstanceSignedAuthSchema, ConnectorInstanceSignedTencentCloudTc3AuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorSigningSchemeSchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
-import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorInstanceSignedAliyunAcs3Auth, ConnectorInstanceSignedAuth, ConnectorInstanceSignedTencentCloudTc3Auth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorSigningScheme, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
+import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorInstanceSignedAlipayV3AuthSchema, ConnectorInstanceSignedAliyunAcs3AuthSchema, ConnectorInstanceSignedAuthSchema, ConnectorInstanceSignedTencentCloudTc3AuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorSigningSchemeSchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
+import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorInstanceSignedAlipayV3Auth, ConnectorInstanceSignedAliyunAcs3Auth, ConnectorInstanceSignedAuth, ConnectorInstanceSignedTencentCloudTc3Auth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorSigningScheme, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
 
 // Validate data
 const result = ConnectorSchema.parse(data);
@@ -310,6 +310,16 @@ const result = ConnectorSchema.parse(data);
 | **scheme** | `'tencentcloud-tc3-hmac-sha256'` | ✅ | Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256). |
 | **keyId** | `string` | ✅ | The SecretId (not a secret); sent in the `Credential` of every signature. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the SecretKey every request's signing key is derived from. Never an inline secret. |
+
+### Nested Shape: `Connector.auth[option 7][scheme='alipay-v3']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'alipay-v3'` | ✅ | Alipay OpenAPI v3 signature (ALIPAY-SHA256withRSA); responses are verified. |
+| **keyId** | `string` | ✅ | The Alipay app id (not a secret); sent as `app_id` in every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the application private key (RSA) every request is signed with. Never an inline key. |
+| **vendorPublicKeyRef** | `string` | ✅ | Secrets-layer reference resolved to the Alipay public key every response's signature is verified against. |
 
 ### Nested Shape: `Connector.actions[number]`
 
@@ -490,7 +500,7 @@ Type: `{ type: 'oauth2'; tokenUrl?: string; scopes?: string[]; resource?: string
 
 #### Option 7
 
-Type: `{ type: 'signed'; scheme: 'aliyun-acs3-hmac-sha256'; keyId: string; credentialRef: string } | { type: 'signed'; scheme: 'tencentcloud-tc3-hmac-sha256'; keyId: string; credentialRef: string }`
+Type: `{ type: 'signed'; scheme: 'aliyun-acs3-hmac-sha256'; keyId: string; credentialRef: string } | { type: 'signed'; scheme: 'tencentcloud-tc3-hmac-sha256'; keyId: string; credentialRef: string } | { type: 'signed'; scheme: 'alipay-v3'; keyId: string; credentialRef: string; … }`
 
 ---
 
@@ -614,6 +624,21 @@ This schema accepts one of the following structures:
 
 ---
 
+## ConnectorInstanceSignedAlipayV3Auth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'alipay-v3'` | ✅ | Alipay OpenAPI v3 signature (ALIPAY-SHA256withRSA); responses are verified. |
+| **keyId** | `string` | ✅ | The Alipay app id (not a secret); sent as `app_id` in every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the application private key (RSA) every request is signed with. Never an inline key. |
+| **vendorPublicKeyRef** | `string` | ✅ | Secrets-layer reference resolved to the Alipay public key every response's signature is verified against. |
+
+
+---
+
 ## ConnectorInstanceSignedAliyunAcs3Auth
 
 ### Properties
@@ -664,6 +689,22 @@ This schema accepts one of the following structures:
 
 ---
 
+#### Option 3
+
+**Type:** `signed`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'alipay-v3'` | ✅ | Alipay OpenAPI v3 signature (ALIPAY-SHA256withRSA); responses are verified. |
+| **keyId** | `string` | ✅ | The Alipay app id (not a secret); sent as `app_id` in every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the application private key (RSA) every request is signed with. Never an inline key. |
+| **vendorPublicKeyRef** | `string` | ✅ | Secrets-layer reference resolved to the Alipay public key every response's signature is verified against. |
+
+---
+
 
 ---
 
@@ -709,12 +750,13 @@ Retry strategy
 
 ## ConnectorSigningScheme
 
-Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature) or `tencentcloud-tc3-hmac-sha256` (Tencent Cloud API 3.0 signature v3).
+Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature), `tencentcloud-tc3-hmac-sha256` (Tencent Cloud API 3.0 signature v3) or `alipay-v3` (Alipay OpenAPI v3, ALIPAY-SHA256withRSA, responses verified).
 
 ### Allowed Values
 
 * `aliyun-acs3-hmac-sha256`
 * `tencentcloud-tc3-hmac-sha256`
+* `alipay-v3`
 
 
 ---
@@ -871,6 +913,16 @@ Connector type
 | **scheme** | `'tencentcloud-tc3-hmac-sha256'` | ✅ | Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256). |
 | **keyId** | `string` | ✅ | The SecretId (not a secret); sent in the `Credential` of every signature. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the SecretKey every request's signing key is derived from. Never an inline secret. |
+
+### Nested Shape: `DeclarativeConnectorEntry.auth[option 7][scheme='alipay-v3']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'alipay-v3'` | ✅ | Alipay OpenAPI v3 signature (ALIPAY-SHA256withRSA); responses are verified. |
+| **keyId** | `string` | ✅ | The Alipay app id (not a secret); sent as `app_id` in every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the application private key (RSA) every request is signed with. Never an inline key. |
+| **vendorPublicKeyRef** | `string` | ✅ | Secrets-layer reference resolved to the Alipay public key every response's signature is verified against. |
 
 ### Nested Shape: `DeclarativeConnectorEntry.actions[number]`
 
