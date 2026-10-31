@@ -1831,7 +1831,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const rowPointerTypeRef = useRef<string>('');
   // When the keyboard last opened the menu: the browser may raise its own
   // `contextmenu` for the same key press right after.
-  const rowContextMenuKeyboardAtRef = useRef(0);
+  const rowContextMenuKeyboardAtRef = useRef(Number.NEGATIVE_INFINITY);
   // Set when the menu closes because the pointer went elsewhere: focus then
   // stays where that press put it instead of jumping back to the row.
   const rowContextMenuClosedOutsideRef = useRef(false);
@@ -3222,7 +3222,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const rowEl = e.currentTarget;
     const fromKeyboard = e.type === 'keydown';
     if (!fromKeyboard) {
-      if (Date.now() - rowContextMenuKeyboardAtRef.current < 500) {
+      // Event time, not the clock: both events carry it from the same origin,
+      // and the handler stays free of a render-time impure call.
+      if (e.timeStamp - rowContextMenuKeyboardAtRef.current < 500) {
         // The browser's own echo of the key press that just opened the menu.
         e.preventDefault();
         return;
@@ -3246,7 +3248,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       x = rect.left;
       y = rect.bottom;
     }
-    if (fromKeyboard) rowContextMenuKeyboardAtRef.current = Date.now();
+    if (fromKeyboard) rowContextMenuKeyboardAtRef.current = e.timeStamp;
     const focusable = fromKeyboard ? target : target.closest<HTMLElement>('[tabindex]');
     rowContextMenuReturnFocusRef.current = focusable && rowEl.contains(focusable) ? focusable : null;
     rowContextMenuClosedOutsideRef.current = false;
@@ -4413,38 +4415,42 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
       {/* objectstack#28434 — the row context menu, opened at the pointer (or
           below the focused cell) by `openRowContextMenu`. Non-modal, so a
-          right-click on another row reaches that row and reopens it there. */}
-      <DropdownMenu
-        open={openRowContextMenuItems != null}
-        onOpenChange={(open) => { if (!open) setRowContextMenu(null); }}
-        modal={false}
-      >
-        <DropdownMenuTrigger asChild>
-          <span
-            aria-hidden
-            tabIndex={-1}
-            data-testid="row-context-menu-anchor"
-            className="pointer-events-none fixed h-px w-px"
-            style={rowContextMenu ? { left: rowContextMenu.x, top: rowContextMenu.y } : undefined}
-          />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="start"
-          className="min-w-[180px]"
-          data-testid="row-context-menu"
-          onClick={(e) => e.stopPropagation()}
-          onInteractOutside={() => { rowContextMenuClosedOutsideRef.current = true; }}
-          onCloseAutoFocus={(e) => {
-            // Esc or a chosen item: focus goes back to the row it opened on,
-            // never to the invisible anchor.
-            e.preventDefault();
-            if (!rowContextMenuClosedOutsideRef.current) rowContextMenuReturnFocusRef.current?.focus();
-            rowContextMenuClosedOutsideRef.current = false;
-          }}
+          right-click on another row reaches that row and reopens it there.
+          Mounted only while open: a closed menu draws nothing, so a table
+          nobody right-clicks renders exactly the markup it did before. */}
+      {rowContextMenu && openRowContextMenuItems != null && (
+        <DropdownMenu
+          open
+          onOpenChange={(open) => { if (!open) setRowContextMenu(null); }}
+          modal={false}
         >
-          {openRowContextMenuItems}
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <span
+              aria-hidden
+              tabIndex={-1}
+              data-testid="row-context-menu-anchor"
+              className="pointer-events-none fixed h-px w-px"
+              style={{ left: rowContextMenu.x, top: rowContextMenu.y }}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="min-w-[180px]"
+            data-testid="row-context-menu"
+            onClick={(e) => e.stopPropagation()}
+            onInteractOutside={() => { rowContextMenuClosedOutsideRef.current = true; }}
+            onCloseAutoFocus={(e) => {
+              // Esc or a chosen item: focus goes back to the row it opened on,
+              // never to the invisible anchor.
+              e.preventDefault();
+              if (!rowContextMenuClosedOutsideRef.current) rowContextMenuReturnFocusRef.current?.focus();
+              rowContextMenuClosedOutsideRef.current = false;
+            }}
+          >
+            {openRowContextMenuItems}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       {/* Column header context menu */}
       {contextMenu && (
