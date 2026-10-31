@@ -89,7 +89,7 @@ function makeRig(fail: Failing = {}) {
         insert: vi.fn(),
         delete: vi.fn(),
     };
-    const request = vi.fn(async () => new Response(
+    const request = vi.fn(async (_url: string, _init: RequestInit) => new Response(
         JSON.stringify(fail.api
             ? { success: false, error: { code: 'FORBIDDEN', message: 'The target refused.' } }
             : { success: true, data: { banned: true } }),
