@@ -371,7 +371,7 @@ describe('ADR-0143 D4, ruled B — the connection an mcp instance lists its tool
         const dispatch = (tenantId?: string) =>
             engine.resolveConnectorAction('notion', 'search')!({}, (tenantId ? { automation: { tenantId } } : {}) as never);
         await dispatch('org_b');
-        expect(orgOfToken(provider.state.sent.at(-1)!)).toBe('org_b');
+        expect(orgOfToken(provider.state.sent[provider.state.sent.length - 1])).toBe('org_b');
         // A run with no organization is still answered as D4 answers it: several connections, refused.
         await expect(dispatch()).rejects.toMatchObject({ status: 422 });
 
@@ -380,7 +380,7 @@ describe('ADR-0143 D4, ruled B — the connection an mcp instance lists its tool
         await engine.revokeConnectorConnection({ connector: 'notion', context: ADMIN_A as never });
         expect(engine.getConnectorDegradedReason('notion')).toBeUndefined();
         expect(provider.state.materialized).toHaveLength(2);
-        expect(orgOfToken(provider.state.listedWith.at(-1)!)).toBe('org_b');
+        expect(orgOfToken(provider.state.listedWith[provider.state.listedWith.length - 1])).toBe('org_b');
         await expect(dispatch()).rejects.toMatchObject({ status: 422 });
     });
 });
