@@ -9228,15 +9228,12 @@ export function AutomationsPillar({
     const flow = current;
     setError(null);
     setLedgerBusy(true);
-    let outcome;
-    try {
-      outcome = await requestFlowToggle(flow.name, !ledgerOn, {
-        http: (status) => tFormat('engine.studio.auto.ledger.toggleFailedHttp', locale, { status }),
-        network: t('engine.studio.auto.ledger.toggleFailed', locale),
-      });
-    } finally {
-      setLedgerBusy(false);
-    }
+    // Never throws: a failed request comes back as an outcome.
+    const outcome = await requestFlowToggle(flow.name, !ledgerOn, {
+      http: (status) => tFormat('engine.studio.auto.ledger.toggleFailedHttp', locale, { status }),
+      network: t('engine.studio.auto.ledger.toggleFailed', locale),
+    });
+    setLedgerBusy(false);
     // VERBATIM: the posture gate's 403 names the sanctioned path, the subflow
     // guard's 409 names the callers that would break.
     if (!outcome.ok) {
@@ -9247,7 +9244,7 @@ export function AutomationsPillar({
     setFlowStatus((m) => (m[flow.name] ? { ...m, [flow.name]: { ...m[flow.name], enabled } } : m));
     setStatusNonce((n) => n + 1);
     toast.success(
-      tFormat(outcome.enabled ? 'engine.studio.auto.ledger.switchedOn' : 'engine.studio.auto.ledger.switchedOff', locale, {
+      tFormat(enabled ? 'engine.studio.auto.ledger.switchedOn' : 'engine.studio.auto.ledger.switchedOff', locale, {
         label: flow.label || flow.name,
       }),
     );
