@@ -14,7 +14,7 @@ import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bod
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale, useLocalization } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
 import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, extractWriteErrorMessage } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
@@ -772,7 +772,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The tenant default currency (ADR-0053) a `dynamic` currency diff reads,
   // the same `useLocalization().currency` the record page's cells read.
   const { currency: tenantCurrency } = useLocalization();
-  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
+  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
   // label + confirmText + successMessage through ONE call (objectui#4265) —
   // the three keys of an `_actions.<name>` bundle entry can no longer be
   // localized apart from one another on this surface.
@@ -1354,6 +1354,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : p.options,
       }));
       const declaredDescription = actionDescription(objForI18n, action?.name, action?.description);
+      // The submit button's verb, resolved as `useConsoleActionRuntime`
+      // resolves it: the bundle entry first, then the authored `I18nLabel`
+      // collapsed to the active language; absent, the dialog says "Confirm".
+      const submitText = actionSubmitText(objForI18n, action?.name, pickLocalized(action?.submitText, language) || undefined);
       setParamState({
         open: true,
         params: localized,
@@ -1374,6 +1378,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // `${...}` holes in the description and each `helpText` are filled in
         // the runner's template scope, as `confirmText` is (objectui#12967).
         description: interpolate && declaredDescription ? interpolate(declaredDescription) : declaredDescription,
+        submitText,
         interpolate,
         resolve,
         // The runner's `run`, as `useConsoleActionRuntime` forwards it: a
@@ -1381,7 +1386,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         run,
       });
     });
-  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel]);
+  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, language]);
 
   // Global undo/redo (Ctrl+Z), backed by the dataSource — the success toast's
   // "Undo" button (for `undoable` actions) restores the record's prior values.

@@ -151,6 +151,16 @@ export interface ActionDef {
    */
   description?: UIActionSchema['description'];
   /**
+   * Label of the submit button in the param-collection dialog — the verb the
+   * button performs ("Send", "Log Call"), in place of the dialog's default
+   * "Confirm". Derived from the spec field: an `I18nLabel`, a string or an
+   * inline per-locale map. Display copy only — the runner never reads it; the
+   * console's param-collection handlers resolve it (the translation bundle's
+   * `_actions.ACTION.submitText` first, then the authored text collapsed to the
+   * active language) and the param dialog draws it.
+   */
+  submitText?: SpecActionInput['submitText'];
+  /**
    * Confirmation text — shows a confirm dialog before executing. The ONE
    * confirm spelling: `@objectstack/spec`'s action surface and the
    * TranslationBundle key (`{ns}.objects.{obj}._actions.{name}.confirmText`)
