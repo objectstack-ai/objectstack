@@ -141,8 +141,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
-          sent: "${result.email} に招待を送信しました",
-          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          sent: "{{ result.email }} に招待を送信しました",
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
         },
         params: {
           role: {
@@ -581,8 +581,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
-          sent: "${result.email} に招待を送信しました",
-          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          sent: "{{ result.email }} に招待を送信しました",
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
         },
         params: {
           role: {
@@ -673,8 +673,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
-          sent: "${result.email} に招待を送信しました",
-          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          sent: "{{ result.email }} に招待を送信しました",
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
         },
         params: {
           role: {
@@ -700,10 +700,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       update_member_role: {
         label: "ロールを変更",
-        description: "${record.user_id?.name ?? 'このメンバー'} の新しい組織ロールを選択してください。",
+        description: "{{ record.user_id.name | default:'このメンバー' }} の新しい組織ロールを選択してください。",
         successMessage: "メンバーロールを更新しました",
         outcomeMessages: {
-          permission_set_granted: "メンバーのロールを更新しました。新しいロールにより権限セット ${result.grantedPermissionSet.label} も付与されました。"
+          permission_set_granted: "メンバーのロールを更新しました。新しいロールにより権限セット {{ result.grantedPermissionSet.label }} も付与されました。"
         },
         params: {
           role: {
@@ -721,7 +721,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "選択したメンバーをこの組織の所有者にしますか？このメンバーには、組織の削除を含む所有者のすべての権限が付与されます。あなたも引き続き所有者です。退く場合は、自分のメンバーシップで「ロールを変更」を使用してください。",
         successMessage: "メンバーが所有者になりました",
         outcomeMessages: {
-          permission_set_granted: "このメンバーはオーナーになりました。新しいロールにより権限セット ${result.grantedPermissionSet.label} も付与されました。"
+          permission_set_granted: "このメンバーはオーナーになりました。新しいロールにより権限セット {{ result.grantedPermissionSet.label }} も付与されました。"
         }
       }
     }
@@ -825,8 +825,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
         successMessage: "{{ result.email }} に招待を送信しました",
         outcomeMessages: {
-          sent: "${result.email} に招待を送信しました",
-          link_only: "${result.email} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          sent: "{{ result.email }} に招待を送信しました",
+          link_only: "{{ result.email }} の招待を作成しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
         },
         params: {
           role: {
@@ -848,11 +848,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "招待を再送",
-        description: "${record.email} に招待を再送しますか？有効期限は改めて始まります。",
+        description: "{{ record.email }} に招待を再送しますか？有効期限は改めて始まります。",
         successMessage: "招待を再送しました",
         outcomeMessages: {
-          sent: "${result.email} に招待を再送しました",
-          link_only: "${result.email} の招待を更新しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
+          sent: "{{ result.email }} に招待を再送しました",
+          link_only: "{{ result.email }} の招待を更新しました。このサーバーではメールが設定されていないため、メールは配信されていません。招待の「招待リンクをコピー」で共有してください。"
         }
       },
       copy_invitation_link: {

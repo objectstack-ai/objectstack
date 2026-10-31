@@ -31,13 +31,36 @@ import { SysInvitation } from './sys-invitation.object.js';
 import { SysMember } from './sys-member.object.js';
 import { SysOrganization } from './sys-organization.object.js';
 import { SysUser } from './sys-user.object.js';
+import { templateSlotSource } from '@objectstack/spec/automation';
+
+// [#27948] An action's `description`, each param's `helpText` and each
+// `outcomeMessages` entry are `template` slots: the parsed object carries the
+// `{ dialect: 'template', source }` envelope, so the copy is read as written
+// through the template judge's one reader, `templateSlotSource` (a locale map
+// is kept as it is).
+function copyAsWritten<T>(declared: T): T {
+  const a = declared as Record<string, any> | undefined;
+  if (!a) return declared;
+  const text = (v: unknown) => templateSlotSource(v) ?? v;
+  return {
+    ...a,
+    ...(a.description !== undefined ? { description: text(a.description) } : {}),
+    ...(Array.isArray(a.params)
+      ? { params: a.params.map((p: any) => (p && p.helpText !== undefined ? { ...p, helpText: text(p.helpText) } : p)) }
+      : {}),
+    ...(a.outcomeMessages && typeof a.outcomeMessages === 'object'
+      ? { outcomeMessages: Object.fromEntries(Object.entries(a.outcomeMessages).map(([k, v]) => [k, text(v)])) }
+      : {}),
+  } as T;
+}
+
 
 type Action = Record<string, any>;
 
 function action(object: unknown, name: string): Action {
   const found = ((object as { actions?: Action[] }).actions ?? []).find((a) => a.name === name);
   if (!found) throw new Error(`no action ${name}`);
-  return found;
+  return copyAsWritten(found);
 }
 
 const MIRRORS: Array<[string, unknown]> = [
@@ -56,8 +79,8 @@ const TRANSLATED = [
 /** Any spelling of "sent" a `link_only` copy must not carry. */
 const SAYS_SENT = /\b(re)?sent\b/i;
 
-/** The interpolation `outcomeMessages` copy reads the invitee's address through. */
-const INVITEE = '${result.email}';
+/** The `outcomeMessages` hole the copy reads the invitee's address through. */
+const INVITEE = '{{ result.email }}';
 
 const bundleAction = (bundle: unknown, object: string, name: string): Action | undefined =>
   (bundle as Record<string, { _actions?: Record<string, Action> }>)?.[object]?._actions?.[name];

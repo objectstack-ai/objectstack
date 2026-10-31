@@ -24,12 +24,35 @@ import { SysInvitation } from './sys-invitation.object.js';
 import { SysMember } from './sys-member.object.js';
 import { SysOrganization } from './sys-organization.object.js';
 import { SysUser } from './sys-user.object.js';
+import { templateSlotSource } from '@objectstack/spec/automation';
+
+// [#27948] An action's `description`, each param's `helpText` and each
+// `outcomeMessages` entry are `template` slots: the parsed object carries the
+// `{ dialect: 'template', source }` envelope, so the copy is read as written
+// through the template judge's one reader, `templateSlotSource` (a locale map
+// is kept as it is).
+function copyAsWritten<T>(declared: T): T {
+  const a = declared as Record<string, any> | undefined;
+  if (!a) return declared;
+  const text = (v: unknown) => templateSlotSource(v) ?? v;
+  return {
+    ...a,
+    ...(a.description !== undefined ? { description: text(a.description) } : {}),
+    ...(Array.isArray(a.params)
+      ? { params: a.params.map((p: any) => (p && p.helpText !== undefined ? { ...p, helpText: text(p.helpText) } : p)) }
+      : {}),
+    ...(a.outcomeMessages && typeof a.outcomeMessages === 'object'
+      ? { outcomeMessages: Object.fromEntries(Object.entries(a.outcomeMessages).map(([k, v]) => [k, text(v)])) }
+      : {}),
+  } as T;
+}
+
 
 type Action = Record<string, any>;
 type Param = Record<string, any>;
 
 function action(object: unknown, name: string): Action {
-  const found = ((object as { actions?: Action[] }).actions ?? []).find((a) => a.name === name);
+  const found = copyAsWritten(((object as { actions?: Action[] }).actions ?? []).find((a) => a.name === name));
   if (!found) throw new Error(`no action ${name}`);
   return found;
 }
@@ -97,7 +120,9 @@ describe('row 8 — one role help text, a line per role', () => {
     // (`ActionParamDialog.invitationScreens-27521.test.tsx`) runs this exact
     // text through a real `ActionRunner`, and reads "this member" for a row
     // that does not expand `user_id`. A reworded declaration reds here first.
-    expect(changeRole.description).toBe("Choose the new organization role for ${record.user_id?.name ?? 'this member'}.");
+    // Written with `{{ }}` since #27948: the `default` formatter reads "this
+    // member" for a row that does not expand `user_id`.
+    expect(changeRole.description).toBe("Choose the new organization role for {{ record.user_id.name | default:'this member' }}.");
     expect(changeRole.confirmText).toBeUndefined();
   });
 });
@@ -106,7 +131,7 @@ describe('row 9 — Resend Invitation is a confirmation', () => {
   const resend = action(SysInvitation, 'resend_invitation');
 
   it('asks its question in `description`, naming the invitee', () => {
-    expect(resend.description).toContain('${record.email}');
+    expect(resend.description).toContain('{{ record.email }}');
     // The spec refuses `confirmText` beside `params` on a registered action.
     expect(resend.confirmText).toBeUndefined();
   });
@@ -146,8 +171,8 @@ describe('the new copy in the translated bundles', () => {
 
   it.each(TRANSLATED)('%s keeps the holes the console fills', (_locale, bundle) => {
     const byPath = new Map(leaves(bundle));
-    expect(byPath.get('sys_invitation.resend_invitation.description')).toContain('${record.email}');
-    expect(byPath.get('sys_member.update_member_role.description')).toMatch(/\$\{record\.user_id\?\.name \?\? '[^']+'\}/);
+    expect(byPath.get('sys_invitation.resend_invitation.description')).toContain('{{ record.email }}');
+    expect(byPath.get('sys_member.update_member_role.description')).toMatch(/\{\{ record\.user_id\.name \| default:'[^']+' \}\}/);
   });
 
   it.each(TRANSLATED)('%s keeps one help line per role', (_locale, bundle) => {

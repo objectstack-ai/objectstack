@@ -1825,7 +1825,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       outcomeMessages: {
         label: "Mensajes por resultado",
-        helpText: "Mensaje de éxito por cada resultado del manejador, en JSON: cada clave es un valor `outcome` en snake_case que el manejador devuelve en su carga útil de éxito, y cada valor es la etiqueta que se muestra para ese resultado, p. ej., {\"archived\": \"Archivado\", \"already_archived\": \"Ya estaba archivado\"}. Una etiqueta puede interpolar ${result.*}. Un resultado sin entrada muestra el mensaje de éxito; una clave que el manejador nunca devuelve no se muestra nunca. No se admite junto a un diálogo de resultado ni con `operation: 'update'`."
+        helpText: "Mensaje de éxito por cada resultado del manejador, en JSON: cada clave es un valor `outcome` en snake_case que el manejador devuelve en su carga útil de éxito, y cada valor es la etiqueta que se muestra para ese resultado, p. ej., {\"archived\": \"Archivado\", \"already_archived\": \"Ya estaba archivado\"}. Una etiqueta puede interpolar {{ result.* }}. Un resultado sin entrada muestra el mensaje de éxito; una clave que el manejador nunca devuelve no se muestra nunca. No se admite junto a un diálogo de resultado ni con `operation: 'update'`."
       },
       onSuccess: {
         label: "Al completarse",
