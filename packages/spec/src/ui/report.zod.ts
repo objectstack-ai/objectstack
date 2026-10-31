@@ -5,7 +5,7 @@ import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { ChartConfigSchema } from './chart.zod';
-import { DATE_RANGE_DEFAULT_RANGES } from './dashboard.zod';
+import { DATE_RANGE_DEFAULT_RANGES, SINGLE_SERIES_CHART_TYPES } from './dashboard.zod';
 import { ReportExportOptionsSchema } from './list-view-export-options';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { I18nLabelSchema } from './i18n.zod';
@@ -47,10 +47,13 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
   /**
    * Dataset **dimension** name whose values split the `yAxis` measure into one
    * series each (from the report's bound dataset). Omitted = one series.
+   * `ReportSchema` refuses it on a single-series `type` and when it names the
+   * `xAxis` dimension (`checkReportChartSeriesSplit`).
    */
   seriesBy: z.string().optional().describe(
     'Dataset dimension name that splits the yAxis measure into one series per value of it '
-    + '(bound-dataset dimension, not a raw field); with it set, `series[].name` names a value of this dimension',
+    + '(bound-dataset dimension, not a raw field); with it set, `series[].name` names a value of this dimension. '
+    + 'Refused on a single-series type (' + SINGLE_SERIES_CHART_TYPES.join('/') + ') and when it names the xAxis dimension',
   ),
 }));
 
@@ -137,6 +140,65 @@ function checkReportOrder(
         path: ['order'],
       });
     }
+  }
+}
+
+/**
+ * Refuse a `chart.seriesBy` split that cannot split — on a non-`joined`
+ * report (a joined report's `chart` is refused whole, so this never reaches
+ * one). Two arms, both refusals with no valid reading, at `chart.seriesBy`:
+ *
+ *  1. **Single-series arm** — `chart.type` is in `SINGLE_SERIES_CHART_TYPES`
+ *     (imported from `dashboard.zod.ts`, never restated). The split derives one
+ *     series per value of the `seriesBy` dimension and these types draw one
+ *     series, so the renderer draws its one-series refusal panel where the
+ *     chart should be. The dashboard's spelling of the same split (a widget
+ *     with a dimension and several measures on these types) is refused by
+ *     `checkDashboardWidgetChartMeasureArity` — objectui#8894 ruling D; this
+ *     is the report's spelling of it.
+ *  2. **Same-dimension arm** — `seriesBy` names the `xAxis` dimension. The
+ *     selection `[xAxis, seriesBy]` then groups by one dimension twice, so
+ *     every derived series holds exactly one point, and the chart reads as
+ *     broken with nothing saying why.
+ *
+ * The arms are exclusive: on a single-series type the first one answers,
+ * since dropping `seriesBy` is the fix for both. Whether `seriesBy` names a
+ * dimension the bound dataset DECLARES is not reachable from this schema; that
+ * is `@objectstack/lint`'s `validateChartBindings`.
+ */
+function checkReportChartSeriesSplit(
+  r: { name?: unknown; chart?: { type?: unknown; xAxis?: unknown; seriesBy?: unknown } },
+  ctx: z.RefinementCtx,
+): void {
+  const chart = r.chart;
+  if (!chart || typeof chart.seriesBy !== 'string') return;
+  const { type, xAxis, seriesBy } = chart;
+  const report = typeof r.name === 'string' && r.name.length > 0 ? `Report \`${r.name}\`` : 'This report';
+
+  if (typeof type === 'string' && (SINGLE_SERIES_CHART_TYPES as readonly string[]).includes(type)) {
+    const singleSeriesTypes = SINGLE_SERIES_CHART_TYPES.map((t) => '`' + t + '`').join(' / ');
+    ctx.addIssue({
+      code: 'custom',
+      path: ['chart', 'seriesBy'],
+      message:
+        `${report} splits its \`type: '${type}'\` chart by \`seriesBy: '${seriesBy}'\`, but \`${type}\` is a `
+        + `single-series type (${singleSeriesTypes}) that draws ONE series, so the split into one series `
+        + `per \`${seriesBy}\` value has nowhere to go and the page shows a refusal instead of the chart. `
+        + `Write a bar-family type (\`bar\` / \`column\` / \`horizontal-bar\`) for one bar per \`${seriesBy}\` `
+        + `value in each \`xAxis\` category, or drop \`seriesBy\` to keep the \`${type}\`.`,
+    });
+    return;
+  }
+
+  if (seriesBy === xAxis) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['chart', 'seriesBy'],
+      message:
+        `${report} splits its chart by \`seriesBy: '${seriesBy}'\`, the same dimension as its \`xAxis\`, so `
+        + 'every series holds exactly one point. `seriesBy` must name a different dimension than `xAxis` '
+        + '— the one each `xAxis` category is split by — or be dropped for one series.',
+    });
   }
 }
 
@@ -765,6 +827,7 @@ export const ReportSchema = lazySchema(() => strictObject({
     }
   } else {
     checkReportOrder(r, ctx);
+    checkReportChartSeriesSplit(r, ctx);
   }
 }));
 

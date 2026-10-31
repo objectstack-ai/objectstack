@@ -1246,6 +1246,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     dependsOnLabels,
     emptyHint,
     onInvalidInputChange,
+    onAutofill,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1286,8 +1287,14 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
+    // Only a relationship pick fills sibling fields (`lookupAutofill`); every
+    // other widget would spread an unknown handler onto its DOM.
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) ? { onAutofill } : {}),
   };
 }
+
+/** The registered widgets whose pick writes `lookupAutofill` targets through `onAutofill`. */
+const LOOKUP_AUTOFILL_WIDGET_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
 
 /** The registered widgets that fire `onInvalidInputChange`: the date picker's two faces. */
 const INVALID_INPUT_REPORTING_WIDGET_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
@@ -3903,6 +3910,18 @@ ComponentRegistry.register('form',
                     }
                     invalidInputMessages.set(name, message);
                     void form.trigger(name);
+                  },
+                  // A lookup pick's declared `lookupAutofill` targets, written
+                  // as edits of this form's record; the widget decides what the
+                  // overwrite rule lets it fill. A target already showing an
+                  // error is re-validated, so a filled required field clears.
+                  onAutofill: (patch: Record<string, unknown>) => {
+                    for (const [target, filled] of Object.entries(patch)) {
+                      form.setValue(target, filled, {
+                        shouldDirty: true,
+                        shouldValidate: !!form.getFieldState(target).error,
+                      });
+                    }
                   },
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static

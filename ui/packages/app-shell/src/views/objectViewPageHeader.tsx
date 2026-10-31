@@ -1,7 +1,7 @@
 /**
  * The page header of the Console `ObjectView` (`./ObjectView.tsx`): the
- * title (the view switcher, or the object's plural), managed-by badge,
- * description and icon, with the
+ * title (the object's plural ahead of the view switcher, or the plural alone),
+ * managed-by badge, description and icon, with the
  * header's actions (the create button, Import, the schema-driven toolbar and
  * the overflow menu with favorites and "Reset view") and their folded face,
  * moved out of `ObjectViewInner`'s JSX verbatim (objectstack#25992, slice 10).
@@ -10,6 +10,7 @@
 
 import { createElement } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Button,
   DropdownMenu,
@@ -32,9 +33,48 @@ import type { useObjectViewListUrlState } from './objectViewListUrlState.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
+/**
+ * The list title 「OBJECT / VIEW ▾ · COUNT」 (objectstack#27950): the page
+ * header is the one place a page is named (objectui#12461), and with the view
+ * switcher as the title (objectstack#27594) it names the object too, with the
+ * sidebar collapsed or the list opened from a link alike. The object's plural
+ * links to its default list. It never shrinks: when the row is short the view
+ * label truncates first, inside the switcher.
+ */
+function ObjectListTitle({
+    objectLabel,
+    objectListHref,
+    titleSwitcher,
+}: {
+    objectLabel: string;
+    objectListHref: string | undefined;
+    titleSwitcher: ReactNode;
+}) {
+    const crumbClass = 'shrink-0 whitespace-nowrap text-muted-foreground';
+    return (
+        <span className="flex min-w-0 max-w-full items-baseline gap-1.5" data-testid="object-list-title">
+            {objectListHref ? (
+                <Link
+                    to={objectListHref}
+                    className={`${crumbClass} rounded-sm hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
+                    data-testid="object-list-crumb"
+                >
+                    {objectLabel}
+                </Link>
+            ) : (
+                <span className={crumbClass} data-testid="object-list-crumb">{objectLabel}</span>
+            )}
+            <span aria-hidden="true" className="shrink-0 font-normal text-muted-foreground/60">/</span>
+            {titleSwitcher}
+        </span>
+    );
+}
+
 export function ObjectViewPageHeader({
     objectDef,
     titleSwitcher,
+    titleLabel,
+    objectListHref,
     objectPluralLabel,
     objectDesc,
     createButton,
@@ -55,6 +95,10 @@ export function ObjectViewPageHeader({
     objectDef: ConsoleObjectViewProps['objects'][number];
     /** The list's view switcher (`./objectViewTitleSwitcher.tsx`), or `null` with no view to switch. */
     titleSwitcher: ReactNode;
+    /** The switcher's text: the open view's label, or the plural for a view with none. */
+    titleLabel: string;
+    /** The object's default list (`/apps/APP/OBJECT`), or `undefined` off an app route. */
+    objectListHref: string | undefined;
     objectPluralLabel: ReturnType<typeof useObjectLabel>['objectPluralLabel'];
     objectDesc: ReturnType<typeof useObjectLabel>['objectDescription'];
     createButton: ReturnType<typeof useObjectViewHeaderChrome>['createButton'];
@@ -72,17 +116,25 @@ export function ObjectViewPageHeader({
     handleResetView: ReturnType<typeof useObjectViewListUrlState>['handleResetView'];
     foldedHeaderActions: ReturnType<typeof useObjectViewHeaderChrome>['foldedHeaderActions'];
 }) {
+    const pluralLabel = objectPluralLabel(objectDef);
+    // A view with no label is already called by the plural (objectui#12774):
+    // the switcher names the object, and a crumb would say it twice.
+    const title = titleSwitcher == null
+        ? pluralLabel
+        : titleLabel === pluralLabel
+            ? titleSwitcher
+            : <ObjectListTitle objectLabel={pluralLabel} objectListHref={objectListHref} titleSwitcher={titleSwitcher} />;
     return (
              <div className="hidden sm:block">
              <PageHeader
-                 // The title is the view switcher, 「VIEW ▾ · COUNT」
-                 // (objectstack#27594); the object stays named by the
-                 // sidebar's active entry and this header's icon. A view with
-                 // no label is called by the plural (objectui#12774); with no
-                 // view to switch, the page lists the object's records and is
-                 // titled with the plural, as the nav entry that opens it is
-                 // (objectui#11696); the record page keeps the singular.
-                 title={titleSwitcher ?? objectPluralLabel(objectDef)}
+                 // The title is the object's plural ahead of the view switcher,
+                 // 「OBJECT / VIEW ▾ · COUNT」 (objectstack#27594,
+                 // objectstack#27950). A view with no label is called by the
+                 // plural (objectui#12774); with no view to switch, the page
+                 // lists the object's records and is titled with the plural, as
+                 // the nav entry that opens it is (objectui#11696); the record
+                 // page keeps the singular.
+                 title={title}
                  // The kind chip, in the header's own slot after the title
                  // (objectui#12606).
                  badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
