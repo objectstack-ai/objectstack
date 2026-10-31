@@ -78,7 +78,7 @@ import {
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
   actionCopyRefusals,
   actionCopyTemplateSlot,
-  type ActionCopyKey,
+  type ActionRowCopyKey,
 } from './action-copy-template';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
@@ -3428,10 +3428,10 @@ const elementListHistory = (type: string) =>
  * built HERE, at the declaring file, so the expression-surface census sees each
  * row's position. A factory, so each row's key carries its own instance.
  */
-const actionRowCopy = (key: ActionCopyKey) => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key)), key);
+const actionRowCopy = (key: ActionRowCopyKey) => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key)), key);
 
 /** The describe of each row copy key — the row's wording, then the slot's grammar and roots. */
-const ACTION_ROW_COPY_DESCRIBE: Record<ActionCopyKey, string> = {
+const ACTION_ROW_COPY_DESCRIBE: Record<ActionRowCopyKey, string> = {
   confirmText: `Confirmation question asked before the action runs — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE}`,
   successMessage: `Toast shown when the action succeeds — ${ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE}`,
   errorMessage: `Toast shown when the action fails, in place of the raw error — ${ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE}`,

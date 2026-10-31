@@ -254,6 +254,10 @@ materialization.
   rule 5).
 - Who may connect, reconnect or revoke is a capability check the server slice declares. Whose grant a
   run then uses is the [first decision](#q1--connection-ownership-and-execution-identity).
+- That capability is the organization-scoped `manage_connector_connections`. Its default holders are platform
+  administrators and both organization-administrator sets (`organization_admin`, and
+  `organization_admin_no_bypass` through its derivation); every other position holds it only by explicit grant
+  (ruling B, record 6545223261).
 
 ### D6 — An integration grant is never a sign-in method
 

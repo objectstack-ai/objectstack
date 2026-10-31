@@ -1825,7 +1825,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       outcomeMessages: {
         label: "結果別の成功メッセージ",
-        helpText: "ハンドラーの結果ごとの成功メッセージ（JSON で記述）。各キーはハンドラーが成功時のペイロードで返す snake_case の `outcome` 値、各値はその結果に表示するラベルです（例：{\"archived\": \"アーカイブしました\", \"already_archived\": \"すでにアーカイブ済みです\"}）。ラベルには ${result.*} を埋め込めます。対応する項目がない結果には成功メッセージが表示され、ハンドラーが返さないキーは表示されることがありません。結果ダイアログや `operation: 'update'` とは併用できません。"
+        helpText: "ハンドラーの結果ごとの成功メッセージ（JSON で記述）。各キーはハンドラーが成功時のペイロードで返す snake_case の `outcome` 値、各値はその結果に表示するラベルです（例：{\"archived\": \"アーカイブしました\", \"already_archived\": \"すでにアーカイブ済みです\"}）。ラベルには {{ result.* }} を埋め込めます。対応する項目がない結果には成功メッセージが表示され、ハンドラーが返さないキーは表示されることがありません。結果ダイアログや `operation: 'update'` とは併用できません。"
       },
       onSuccess: {
         label: "成功後の遷移",

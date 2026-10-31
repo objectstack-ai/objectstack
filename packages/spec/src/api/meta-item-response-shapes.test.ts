@@ -436,3 +436,46 @@ describe('`disabledActions` beside an object: the names, `[]`, or absent (#27842
     if (!verdict.success) expect(verdict.error.issues[0]?.path).toEqual(['disabledActions', 0]);
   });
 });
+
+/**
+ * [#28001] `cascadeDeleteObjects` beside an object, on both item reads: typed
+ * as a list of object names, optional, and never defaulted — absence means no
+ * engine answered. The list read carries none.
+ */
+export type CascadeDeleteObjectsAreNamesOrAbsent = Assert< Eq< GetMetaItemResponse['cascadeDeleteObjects'], string[] | undefined > >;
+export type CachedCascadeDeleteObjectsAreNamesOrAbsent = Assert< Eq< GetMetaItemCachedResponse['cascadeDeleteObjects'], string[] | undefined > >;
+
+describe('`cascadeDeleteObjects` beside an object: the names, `[]`, or absent (#28001)', () => {
+  const LEAD = { name: 'crm_lead', fields: { name: { name: 'name', type: 'text' } } };
+
+  it('keeps the names through a parse, beside an item that does not carry them', () => {
+    const parsed = GetMetaItemResponseSchema.parse({
+      type: 'object', name: 'crm_lead', item: LEAD, cascadeDeleteObjects: ['crm_campaign_member'],
+    });
+    expect(parsed.cascadeDeleteObjects).toEqual(['crm_campaign_member']);
+    expect(parsed.item).toEqual(LEAD);
+  });
+
+  it('`[]` survives a parse as `[]`, and an absent key stays ABSENT — never defaulted to `[]`', () => {
+    expect(GetMetaItemResponseSchema.parse({ type: 'object', name: 'crm_lead', item: LEAD, cascadeDeleteObjects: [] })
+      .cascadeDeleteObjects).toEqual([]);
+    expect('cascadeDeleteObjects' in GetMetaItemResponseSchema.parse({ type: 'object', name: 'crm_lead', item: LEAD }))
+      .toBe(false);
+    expect('cascadeDeleteObjects' in GetMetaItemCachedResponseSchema.parse({ data: LEAD, notModified: false })).toBe(false);
+  });
+
+  it('the cached default door carries it beside `data`', () => {
+    const parsed = GetMetaItemCachedResponseSchema.parse({
+      data: LEAD, notModified: false, cascadeDeleteObjects: ['crm_campaign_member'],
+    });
+    expect(parsed.cascadeDeleteObjects).toEqual(['crm_campaign_member']);
+  });
+
+  it('refuses an entry that is not an object name string, located at the key', () => {
+    const verdict = GetMetaItemResponseSchema.safeParse({
+      type: 'object', name: 'crm_lead', item: LEAD, cascadeDeleteObjects: [{ object: 'crm_campaign_member' }],
+    });
+    expect(verdict.success).toBe(false);
+    if (!verdict.success) expect(verdict.error.issues[0]?.path).toEqual(['cascadeDeleteObjects', 0]);
+  });
+});

@@ -27,6 +27,9 @@ import { I18nLabelSchema, InlineLocaleMapSchema } from './i18n.zod';
 import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import {
   ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE,
+  ACTION_DESCRIPTION_TEMPLATE_DESCRIBE,
+  ACTION_OUTCOME_MESSAGE_TEMPLATE_DESCRIBE,
+  ACTION_PARAM_HELP_TEXT_TEMPLATE_DESCRIBE,
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
   actionCopyRefusals,
   actionCopyTemplateSlot,
@@ -159,6 +162,24 @@ const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =
   + `\`SelectOptionSchema\`. It exists only inside objectui's own `
   + `\`SelectOptionMetadata\` type, which no metadata path populates and no widget reads. An `
   + `action param's options are \`{ label, value, visibleWhen }\`; drop the key.`;
+
+/**
+ * [#24814, ADR-0032 Decisions 2–3] A registered action's `confirmText` /
+ * `successMessage` — a `template` slot over the roots the console's runner
+ * binds, one family with the page action rows' copy keys
+ * (`./action-copy-template.ts`), which also keeps the inline locale map
+ * `I18nLabelSchema` took. The `template` input is built HERE, at the declaring
+ * file, so the expression-surface census sees every position.
+ *
+ * [#27948, ruling A, step 2] The param dialog's `description` and each
+ * `outcomeMessages` entry joined the family with their locale map; a param's
+ * `helpText` joined it without one (it was a plain string, so a map was never
+ * its shape — {@link actionParamHelpText}).
+ */
+const actionCopy = (key: 'confirmText' | 'successMessage' | 'description' | 'outcomeMessages') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
+
+/** [#27948] A param's `helpText`: the copy family's slot, with no locale map (it was a plain string). */
+const actionParamHelpText = () => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals('helpText')), 'helpText');
 
 /**
  * Action Parameter Schema
@@ -368,8 +389,11 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   })).optional().meta({ title: 'Options' }),
   /** Placeholder override. */
   placeholder: z.string().optional().meta({ title: 'Placeholder' }),
-  /** Help/description override. */
-  helpText: z.string().optional().meta({ title: 'Help Text' }),
+  /**
+   * Help/description override — the hint under this input in the param
+   * dialog. A `template` slot over `confirmText`'s roots (#27948).
+   */
+  helpText: actionParamHelpText().optional().meta({ title: 'Help Text' }).describe(`Hint shown under this input in the action's param dialog — ${ACTION_PARAM_HELP_TEXT_TEMPLATE_DESCRIBE}`),
   /**
    * Default value for the dialog input — prefilled into the control when the
    * dialog opens, and SUBMITTED VERBATIM if the user does not touch the field
@@ -879,16 +903,6 @@ const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInpu
 });
 
 /**
- * [#24814, ADR-0032 Decisions 2–3] A registered action's `confirmText` /
- * `successMessage` — a `template` slot over the roots the console's runner
- * binds, one family with the page action rows' copy keys
- * (`./action-copy-template.ts`), which also keeps the inline locale map
- * `I18nLabelSchema` took. The `template` input is built HERE, at the declaring
- * file, so the expression-surface census sees both positions.
- */
-const actionCopy = (key: 'confirmText' | 'successMessage') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
-
-/**
  * [#26619] `disabledReason` — the sentence a greyed action shows to say WHY it
  * is unavailable, beside the `disabled` predicate that greys it.
  *
@@ -1100,7 +1114,7 @@ const actionObject = () => strictObject({
    * (≥40 chars, required when `ai.exposed`); this one is human-facing dialog
    * copy and is never sent to a model.
    */
-  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing `ai.description`.'),
+  description: actionCopy('description').optional().describe(`Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing \`ai.description\`. It is ${ACTION_DESCRIPTION_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence.`),
 
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),
@@ -1483,13 +1497,18 @@ const actionObject = () => strictObject({
    *
    * **Selection** (the console's, after an `api` or `script` action
    * succeeds): the success payload's top-level `outcome` — the payload
-   * `${result.*}` reads, i.e. `${result.outcome}` — names the entry; failing
+   * `{{ result.* }}` reads, i.e. `{{ result.outcome }}` — names the entry; failing
    * a match, `successMessage`; failing that, the runner's default text.
    *
-   * **Interpolation**: each message, like `successMessage`, may interpolate
-   * `${result.X}` — the scope `onSuccess.navigate` declares
-   * (for `type: 'api'` the `target` call's response body, for
-   * `type: 'script'` the handler's return value). No second dialect.
+   * **Interpolation**: each message is a `template` slot like
+   * `successMessage` (#27948, ruling A): its `{{ }}` holes read `result` —
+   * for `type: 'api'` the `target` call's response body, for
+   * `type: 'script'` the handler's return value — and `record`. One dialect:
+   * a `${…}` token is refused at the doors. Stored copy is rewritten to
+   * `{{ }}` by hand: the semantic migration entry
+   * `action-dialog-outcome-copy-template-holes` (`os migrate meta` lists it)
+   * names the edit and registers no conversion, since a `${…}` token can hold
+   * an expression with no mechanical `{{ }}` spelling.
    *
    * **Where it is refused** (`refuseInertOutcomeMessages`, and the
    * declarative-update table): on a type with no server response to report
@@ -1507,10 +1526,10 @@ const actionObject = () => strictObject({
    * (objectui#11344) and is `live` now; the reader — the action runner picks
    * `outcomeMessages[outcome]` off the handler's return value, falls back to
    * `successMessage` and then to the runner's default text, and fills
-   * `${result.*}` in whichever it shows — is recorded by symbol in
+   * the holes of whichever it shows — is recorded by symbol in
    * `packages/spec/liveness/action.json`, row `outcomeMessages`.
    */
-  outcomeMessages: z.record(SnakeCaseIdentifierSchema, I18nLabelSchema).optional().describe("Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate ${result.*}, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome)."),
+  outcomeMessages: z.record(SnakeCaseIdentifierSchema, actionCopy('outcomeMessages')).optional().describe(`Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case \`outcome\` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message is ${ACTION_OUTCOME_MESSAGE_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. An outcome with no entry here falls back to \`successMessage\`, then to the default text. Not allowed beside \`resultDialog\` (which suppresses the success toast) or \`operation: 'update'\` (no handler, so no outcome).`),
   // Runtime (ActionRunner) already honours this — declared here so authors can
   // set a friendly failure toast instead of surfacing the raw error string.
   errorMessage: I18nLabelSchema.optional().describe('Error message to show when the action fails (overrides the raw error).'),

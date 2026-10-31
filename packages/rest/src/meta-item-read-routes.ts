@@ -782,11 +782,24 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         const cachedDisabledActions = metaType === 'object' && result.disabledActions !== undefined
                             ? { disabledActions: result.disabledActions }
                             : {};
-                        const cachedBeside = { ...cachedRegistration, ...cachedDisabledActions };
+                        // [#28001] …and the objects a delete of one of its
+                        // records can cascade into, beside the document on
+                        // the same terms as `disabledActions`: read live,
+                        // folded into the validator below
+                        // (`cascadeDeleteObjectsFingerprint`), so an object
+                        // registered later that cascades into this one moves
+                        // the ETag.
+                        const cachedCascadeDeleteObjects = metaType === 'object' && result.cascadeDeleteObjects !== undefined
+                            ? { cascadeDeleteObjects: result.cascadeDeleteObjects }
+                            : {};
+                        const cachedBeside = { ...cachedRegistration, ...cachedDisabledActions, ...cachedCascadeDeleteObjects };
                         // Only what is beside the document and in NO
                         // validator stands the 304 down — `registration`.
                         const besideJudged = Object.keys(cachedRegistration).length > 0;
                         const disabledActionsFingerprint = cachedDisabledActionsFingerprint(cachedDisabledActions.disabledActions);
+                        const cascadeDeleteObjectsFingerprint = cachedDisabledActionsFingerprint(
+                            cachedCascadeDeleteObjects.cascadeDeleteObjects,
+                        );
 
                         if (result.notModified) {
                             res.status(304).send();
@@ -882,18 +895,24 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // does the switched-off list served beside an
                             // object: a switch flipped off or on is never
                             // answered a `304` for the list it replaced.
+                            // [#28001] …and so does the cascade list served
+                            // beside an object: a cascading object registered
+                            // or removed is never answered a `304`.
                             const value = foldVisibilityFingerprintIntoEtag(
                                 foldVisibilityFingerprintIntoEtag(
                                     foldVisibilityFingerprintIntoEtag(
                                         foldVisibilityFingerprintIntoEtag(
-                                            foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
-                                            runtimeView.fingerprint,
+                                            foldVisibilityFingerprintIntoEtag(
+                                                foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                                runtimeView.fingerprint,
+                                            ),
+                                            intakeFingerprint,
                                         ),
-                                        intakeFingerprint,
+                                        audienceFingerprint,
                                     ),
-                                    audienceFingerprint,
+                                    disabledActionsFingerprint,
                                 ),
-                                disabledActionsFingerprint,
+                                cascadeDeleteObjectsFingerprint,
                             );
                             const etagValue = result.etag.weak
                                 ? `W/"${value}"`
@@ -1254,6 +1273,9 @@ function anonymousFormIntakeFingerprint(warnings: ReadonlyArray<{ path: string; 
  * the representation sent. Absent (no ledger answered) folds nothing and keeps
  * the ETag byte-identical; `[]` (a ledger that switches none of them off) folds
  * a fingerprint of its own, so a ledger attaching or detaching moves it too.
+ *
+ * [#28001] The same dimension, on the same terms, for the
+ * `cascadeDeleteObjects` served beside an object: a name list hashed as served.
  */
 function cachedDisabledActionsFingerprint(disabledActions: readonly string[] | undefined): string {
     return disabledActions === undefined ? '' : objectFieldVisibilityFingerprint([JSON.stringify(disabledActions)]);

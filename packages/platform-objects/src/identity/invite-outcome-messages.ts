@@ -12,22 +12,22 @@
  * for `sys_invitation.resend_invitation`. ⛔ A `link_only` message never says
  * the invitation was sent: nothing left the server.
  *
- * `${result.email}` is the `outcomeMessages` interpolation (the scope
- * `onSuccess.navigate` declares), the invitee's address on the row.
+ * `{{ result.email }}` is an `outcomeMessages` `template` hole over `result`,
+ * the payload invite-member answers (#27948): the invitee's address on the row.
  */
 
 /** `invite_user.outcomeMessages`, on all four mirrors. */
 export const INVITE_USER_OUTCOME_MESSAGES = {
-  sent: 'Invitation sent to ${result.email}',
+  sent: 'Invitation sent to {{ result.email }}',
   link_only:
-    'Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. '
+    'Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. '
     + 'Use Copy Invite Link on the invitation to share it.',
 } as const;
 
 /** `sys_invitation.resend_invitation.outcomeMessages`. */
 export const RESEND_INVITATION_OUTCOME_MESSAGES = {
-  sent: 'Invitation resent to ${result.email}',
+  sent: 'Invitation resent to {{ result.email }}',
   link_only:
-    'Invitation renewed for ${result.email}. Mail is not configured on this server, so no email went out. '
+    'Invitation renewed for {{ result.email }}. Mail is not configured on this server, so no email went out. '
     + 'Use Copy Invite Link on the invitation to share it.',
 } as const;

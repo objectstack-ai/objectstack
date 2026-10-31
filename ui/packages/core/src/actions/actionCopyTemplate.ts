@@ -51,6 +51,25 @@ export function actionCopySource(copy: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * A copy value with a `template` envelope reduced to its text, for a reader
+ * that takes a string or an `I18nLabel` locale map: the envelope's `source`
+ * (`undefined` when it carries none), anything else — a string, a locale map,
+ * `undefined` — handed back unchanged.
+ *
+ * The slots an action's param dialog and success toast read beside
+ * `confirmText` — `description`, each param's `helpText`, an
+ * `outcomeMessages` entry — are `template` slots too (objectstack#27948,
+ * ruling A, step 2), so a served value can be the envelope where it was a
+ * string. The readers that localize them (a bundle lookup over the literal,
+ * `pickLocalized` over a locale map) take a string, so the envelope is
+ * reduced here first; a locale map stays one, as its own reader resolves it.
+ */
+export function actionCopyText<T>(copy: T): Exclude<T, { dialect?: 'template'; source?: unknown }> | string | undefined {
+  if (isActionCopyEnvelope(copy)) return actionCopySource(copy);
+  return copy as Exclude<T, { dialect?: 'template'; source?: unknown }>;
+}
+
 /** A `{{ … }}` hole, as the template engine delimits one. */
 const TEMPLATE_HOLE = /\{\{[^}]*\}\}/;
 

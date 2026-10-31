@@ -641,6 +641,22 @@ export type MetadataAuthoringClient = z.input<typeof MetadataAuthoringClientSche
  *   Absent on a draft read, whose pending body is not what the doors
  *   dispatch from.
  *
+ * [#28001] `cascadeDeleteObjects` is the delete twin of `disabledActions`, on
+ * an `object` read: the objects a delete of one of its records can cascade
+ * into (ruling B on #28001), so a delete confirmation can name what else goes.
+ * It is the data engine's answer from the rule its delete walk runs
+ * (`IObjectQLEngine.getCascadeDeleteObjects`), read through the kernel's
+ * service table as `disabledActions` is, so the confirmation and the delete
+ * cannot disagree, and the client keeps no copy of which relations cascade.
+ * It takes `disabledActions`' four positions: beside `item`, never inside it
+ * (it is derived from other objects' definitions, so it is no part of this
+ * one, and never authorable); absent where no engine answered, `[]` where one
+ * answered that nothing cascades; on the cached default door too, folded into
+ * the REST door's ETag, so a cascading object registered later moves the
+ * validator; absent on a draft read. It names objects, never fields: a field
+ * of another object can be withheld from this caller by that object's
+ * ADR-0106 mask, and an object read withholds no object.
+ *
  * [#24298] `draftChanges` is a pending draft's per-key provenance: for each
  * changed key path of the draft body, which authoring surface (`copilot`,
  * `mcp`, `studio`, `api`) last changed it, under which actor, and when. It is what
@@ -745,6 +761,19 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     + 'a draft read. The ledger '
     + 'is the answering process\'s engine\'s. Beside `item`, never inside it: `item.actions` is served as '
     + 'declared, a switched-off action included.',
+  ),
+  cascadeDeleteObjects: z.array(z.string()).optional().describe(
+    'The objects, by name, that deleting a record of this object can also delete: every object whose '
+    + 'relation into it cascades (a `master_detail` by default, a `lookup` or `tree` that declares '
+    + '`deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
+    + 'order the delete reaches them. This object itself is named only when a cascading relation leads back '
+    + 'to it. A `restrict` or `set_null` relation removes nothing and is not named. Read from the rule the '
+    + 'delete runs, and object-level: it never says which records or how many. Present only on an `object` '
+    + 'read answered by a process whose data engine answers it, and then `[]` when nothing cascades. Absent '
+    + 'otherwise, and absence means no engine answered, never that nothing cascades. Unlike the protection '
+    + 'keys it is published by the cached branch too, read live and folded into the ETag; it is absent on a '
+    + 'draft read. Beside `item`, never inside it: it is derived from other objects\' definitions and is not '
+    + 'authorable.',
   ),
   draftChanges: z.array(z.object({
     path: z.array(z.string().min(1)).describe(
@@ -2436,6 +2465,11 @@ export const GetMetaItemCachedRequestSchema = lazySchema(() => z.object({
  * `GET /meta/object/:name` does not rely on that stand-down: it folds the
  * served list into the ETag it checks (#28044), so its 304 is safe and comes
  * back only while the switched-off set is unchanged.
+ *
+ * [#28001] …and `cascadeDeleteObjects`, on the same terms as
+ * `disabledActions`: an object registered later that cascades into this one
+ * moves no byte of this document, so this method stands its 304 down for a
+ * read that carries the list, and the REST door folds it into its ETag.
  */
 export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheResponseSchema.extend({
   registration: FlowRegistrationSchema.optional().describe(
@@ -2452,6 +2486,14 @@ export const GetMetaItemCachedResponseSchema = lazySchema(() => MetadataCacheRes
     + 'for a read that carries it (the REST door folds the served list into the ETag it checks instead, so its '
     + '304 comes back only while the switched-off set is unchanged). Absent otherwise, and absence means no ledger answered, never that nothing is '
     + 'switched off.',
+  ),
+  cascadeDeleteObjects: z.array(z.string()).optional().describe(
+    'The objects, by name, that deleting a record of the object in `data` can also delete (the item read\'s '
+    + '`cascadeDeleteObjects`), read live on every call and never part of `etag`. Present only for an '
+    + '`object` read answered by a process whose data engine answers it, `[]` when nothing cascades; this '
+    + 'method never answers `notModified` for a read that carries it (the REST door folds the served list '
+    + 'into the ETag it checks instead). Absent otherwise, and absence means no engine answered, never that '
+    + 'nothing cascades.',
   ),
 }));
 
@@ -2739,6 +2781,34 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
   withheldMentions: z.array(z.string()).optional().describe(WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION),
   notice: z.string().min(1).optional().describe(WRITE_ANSWER_NOTICE_DESCRIPTION),
 }));
+
+/**
+ * Public Form Submit Response (#28005)
+ *
+ * The WHOLE body of `POST /forms/:slug/submit`, the anonymous public-form
+ * submission: the created record's `id`, plus — only when the form's
+ * `thank-you` panel names fields of the record as `{{record.field_name}}` —
+ * `fields`, holding exactly those fields' stored values.
+ *
+ * The answer echoes nothing else the insert stored, and that is the point of
+ * the shape. The stored row can carry values a `beforeInsert` / `afterInsert`
+ * hook derived, an elevated (`runAs: 'system'`) one included, from records
+ * the anonymous form grant may never read. The panel may therefore name only
+ * fields the ENGINE generates on insert (`RUNTIME_OWNED_FIELD_TYPES`, today
+ * `autonumber`); the authoring rule that judges a form's names refuses any
+ * other, and `thankYouRecordFieldNames` (`ui/view.zod.ts`) is the one reading
+ * of which names a panel holds. Strict, so a key beyond these two is a
+ * conformance failure rather than a silent widening of what an anonymous
+ * caller is shown.
+ */
+export const PublicFormSubmitResponseSchema = lazySchema(() => z.object({
+  id: z.string().describe('The ID of the newly created record.'),
+  fields: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe(
+    'The stored values of exactly the fields the form\'s `thank-you` panel names as `{{record.field_name}}`, '
+    + 'keyed by field name — each one a field the engine generates on insert (an `autonumber` field, e.g. a case '
+    + 'number). Present only when the panel names at least one; never any other field of the record.',
+  ),
+}).strict());
 
 /**
  * Clone Data Response (#11924)
@@ -4119,6 +4189,8 @@ export type GetDataRequest = z.input<typeof GetDataRequestSchema>;
 export type GetDataResponse = z.input<typeof GetDataResponseSchema>;
 export type CreateDataRequest = z.input<typeof CreateDataRequestSchema>;
 export type CreateDataResponse = z.input<typeof CreateDataResponseSchema>;
+/** The `POST /forms/:slug/submit` body — see {@link PublicFormSubmitResponseSchema} (#28005). */
+export type PublicFormSubmitResponse = z.input<typeof PublicFormSubmitResponseSchema>;
 /** The `POST /data/:object/:id/clone` body — see {@link CloneDataResponseSchema} (#11924). */
 export type CloneDataResponse = z.input<typeof CloneDataResponseSchema>;
 export type ValidateDataIssue = z.input<typeof ValidateDataIssueSchema>;
