@@ -606,6 +606,21 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
   },
 
+  // [#27627] The app metadata bundle (`GET {metaPath}/app/:appId/bundle`),
+  // declared in the PR that created it. The two write sites are the bundle body,
+  // under `no-store` and under its validator: answered BARE, the `/meta` item
+  // reads' own convention, because its members ARE those reads' envelopes. Every
+  // refusal goes through an existing emitter (the item read's own
+  // `sendMetaReadRefusal`, the shared absence and field-visibility emitters,
+  // `handleRouteError`), so `ok` / `err` are 0. It moves to the shared pair with
+  // the rest of the `/meta` family under #9559 option 1, never alone.
+  'packages/rest/src/meta-app-bundle-routes.ts': {
+    responses: 2,
+    ok: 0,
+    err: 0,
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+  },
+
   // [#23050 slice 1] `RestServer#registerDataActionEndpoints`' body — record
   // clone, the import doors and import-job reads, the export — moved out of
   // `rest-server.ts` whole. A MOVE, no wire answer changed, so it is held to
