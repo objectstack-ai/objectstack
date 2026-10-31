@@ -371,6 +371,7 @@ const SINGLE: unknown = {
       ],
       posture: 'TENANT_ADMIN',
       systemPermissions: [
+        'manage_connector_connections',
         'manage_mailboxes',
         'manage_org_users',
         'setup.access',
@@ -561,6 +562,7 @@ const WALLED: unknown = {
       ],
       posture: 'TENANT_ADMIN',
       systemPermissions: [
+        'manage_connector_connections',
         'manage_mailboxes',
         'manage_org_users',
         'setup.access',
