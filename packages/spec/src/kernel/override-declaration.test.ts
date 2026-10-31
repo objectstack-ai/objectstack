@@ -73,7 +73,7 @@ describe('OverrideDeclarationSchema — the shape', () => {
   });
 
   it('publishes the refusal into the JSON Schema as a pattern (no dropped refinement)', () => {
-    const json = z.toJSONSchema(OverrideDeclarationSchema) as { properties: { package: { pattern?: string } } };
+    const json = z.toJSONSchema(OverrideDeclarationSchema) as unknown as { properties: { package: { pattern?: string } } };
     const pattern = new RegExp(json.properties.package.pattern ?? '');
     expect(pattern.test('com.acme.crm')).toBe(true);
     expect(pattern.test(`com.acme.crm${CUSTOMIZATION_PACKAGE_SUFFIX}`)).toBe(false);

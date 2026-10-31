@@ -150,7 +150,7 @@ describe('the pair\'s dependency range — `^<major>` of the base version', () =
 });
 
 describe('the closed overridable-type list, pinned to the registry', () => {
-  const registryTypes = DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type).sort();
+  const registryTypes: string[] = DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type).sort();
   const classified = Object.keys(OVERRIDE_TYPE_CLASSIFICATION).sort();
 
   it('classifies every registry type — a type added to the registry without a row here fails', () => {
@@ -173,7 +173,7 @@ describe('the closed overridable-type list, pinned to the registry', () => {
   });
 
   it('a `not_runtime_creatable` row is one the registry really closes', () => {
-    const byType = new Map(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => [e.type, e]));
+    const byType = new Map<string, (typeof DEFAULT_METADATA_TYPE_REGISTRY)[number]>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => [e.type, e]));
     for (const [type, row] of Object.entries(OVERRIDE_TYPE_CLASSIFICATION)) {
       if (row.basis === 'not_runtime_creatable') expect(byType.get(type)?.allowRuntimeCreate, type).toBe(false);
     }

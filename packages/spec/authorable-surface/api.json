@@ -365,6 +365,7 @@
     "api/CreateFlowRequest:label",
     "api/CreateFlowRequest:name",
     "api/CreateFlowRequest:nodes",
+    "api/CreateFlowRequest:overrides",
     "api/CreateFlowRequest:protection",
     "api/CreateFlowRequest:requiredPermissions",
     "api/CreateFlowRequest:runAs",
