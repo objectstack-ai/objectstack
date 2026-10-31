@@ -78,7 +78,11 @@ export interface ConnectorCredentialSourceDeps {
     generation(): number;
 }
 
-type Lendable = LendableConnectorItem & { name: string; provider: string; auth: Exclude<ConnectorInstanceAuth, { type: 'none' }> };
+type Lendable = LendableConnectorItem & {
+    name: string;
+    provider: string;
+    auth: Exclude<ConnectorInstanceAuth, { type: 'none' | 'oauth2' | 'app-credential' | 'signed' }>;
+};
 
 function findDeclared(items: readonly unknown[] | undefined, name: string): LendableConnectorItem | undefined {
     for (const raw of items ?? []) {
@@ -110,6 +114,23 @@ function lendRefusal(connector: string, item: LendableConnectorItem | undefined)
     if (!auth || typeof auth !== 'object' || auth.type === 'none') {
         return `${subject} declares no auth credential, so there is nothing to borrow. Declare its auth, or remove `
             + 'external.connector from the datasource if the upstream needs no credential.';
+    }
+    // ADR-0143 D4 — a grant-bearing kind's token is obtained and refreshed per
+    // dispatch, which this server does not run yet: refused by name rather
+    // than lent as a handle that could only ever answer nothing.
+    if (auth.type === 'oauth2' || auth.type === 'app-credential') {
+        return `${subject} declares \`auth: { type: '${auth.type}' }\`, a grant-bearing kind whose token is obtained and `
+            + 'refreshed per dispatch (ADR-0143 D4). This server does not run that resolution yet, so the instance '
+            + 'cannot lend its credential to a datasource. Declare a static kind (bearer, api-key or basic) on it, or '
+            + 'remove external.connector from the datasource.';
+    }
+    // ADR-0143 D2.3 — a `signed` instance has no credential to lend: its key
+    // signs each request by the vendor's canonical form, which a datasource
+    // driver does not run, and the key itself never leaves the host.
+    if (auth.type === 'signed') {
+        return `${subject} declares \`auth: { type: 'signed' }\`, which signs each of its own requests with a key that `
+            + 'never leaves the server, so it has no credential a datasource can borrow. Point external.connector at an '
+            + 'instance with a static kind (bearer, api-key or basic), or remove it from the datasource.';
     }
     if (item.enabled === false) {
         return `${subject} is disabled (enabled: false), which turns the vendor off for this datasource's records as for `

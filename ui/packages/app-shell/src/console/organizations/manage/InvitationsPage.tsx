@@ -307,7 +307,9 @@ export function InvitationsPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', { defaultValue: 'Cancel' })}</AlertDialogCancel>
+            {/* Says what dismissing does: beside "Cancel invitation", a bare
+                "Cancel" reads as the same verb. */}
+            <AlertDialogCancel>{t('organization.invitations.keepAction', { defaultValue: 'Keep invitation' })}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleCancel}

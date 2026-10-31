@@ -4,7 +4,7 @@
 // `provider: 'rest'` connector instance from providerConfig + resolved auth.
 
 import { describe, it, expect } from 'vitest';
-import type { ConnectorProviderContext, RetryConfig } from '@objectstack/spec/integration';
+import type { ConnectorProviderContext, ConnectorRequestSigner, RetryConfig } from '@objectstack/spec/integration';
 import { RetryConfigSchema } from '@objectstack/spec/integration';
 import { createRestProviderFactory, REST_PROVIDER_KEY } from './rest-provider.js';
 
@@ -244,5 +244,83 @@ describe('rest provider factory (ADR-0097)', () => {
             // here the point is only that the surviving timeout still travels.
             expect(Object.keys(def)).not.toContain('connectionTimeoutMs');
         });
+    });
+});
+
+// ADR-0143 D2.3 — a `signed` instance arrives with a request signer instead of
+// a credential. The provider signs every attempt with it (a retry included),
+// runs its response verification before answering, and says it does so.
+describe('rest provider factory — a signed instance (ADR-0143 D2.3)', () => {
+    function signerDouble(over: Partial<ConnectorRequestSigner> = {}) {
+        const signed: string[] = [];
+        const signer: ConnectorRequestSigner = {
+            connector: 'aliyun_ecs',
+            scheme: 'aliyun-acs3-hmac-sha256',
+            async sign(request) {
+                signed.push(`${request.method} ${request.url}`);
+                return { headers: { authorization: `SIG-${signed.length}` } };
+            },
+            ...over,
+        };
+        return { signer, signed };
+    }
+
+    function statusFetch(statuses: number[]) {
+        const calls: Array<{ url: string; init: RequestInit }> = [];
+        const impl = (async (url: string, init: RequestInit) => {
+            calls.push({ url, init });
+            return new Response('{"RequestId":"r"}', { status: statuses.shift() ?? 200, headers: { 'content-type': 'application/json' } });
+        }) as unknown as typeof fetch;
+        return { impl, calls };
+    }
+
+    it('signs every attempt, a retry included, and says it applies the signer', async () => {
+        const { signer, signed } = signerDouble();
+        const { impl, calls } = statusFetch([503, 200]);
+        const materialization = await createRestProviderFactory({ fetchImpl: impl })(ctx({
+            name: 'aliyun_ecs',
+            providerConfig: { baseUrl: 'https://ecs.cn-shanghai.aliyuncs.com' },
+            requestSigner: signer,
+            retryConfig: policy({ strategy: 'fixed_delay', maxAttempts: 2, initialDelayMs: 100, retryableStatusCodes: [503], jitter: false }),
+        }));
+        expect(materialization.requestSignerApplied).toBe(true);
+
+        const out = await materialization.handlers.request({ method: 'POST', path: '/', query: { RegionId: 'cn-shanghai' } }, {});
+        expect(out).toEqual({ status: 200, ok: true, body: { RequestId: 'r' } });
+        expect(signed).toEqual([
+            'POST https://ecs.cn-shanghai.aliyuncs.com/?RegionId=cn-shanghai',
+            'POST https://ecs.cn-shanghai.aliyuncs.com/?RegionId=cn-shanghai',
+        ]);
+        expect(calls.map((c) => (c.init.headers as Record<string, string>).authorization)).toEqual(['SIG-1', 'SIG-2']);
+    });
+
+    it('a response that fails the scheme\'s verification fails the dispatch', async () => {
+        const { signer } = signerDouble({ async verifyResponse() { throw new Error('response signature does not verify'); } });
+        const { impl } = statusFetch([200]);
+        const { handlers } = await createRestProviderFactory({ fetchImpl: impl })(ctx({
+            providerConfig: { baseUrl: 'https://ecs.cn-shanghai.aliyuncs.com' },
+            requestSigner: signer,
+        }));
+        await expect(handlers.request({ path: '/' }, {})).rejects.toThrow(/does not verify/);
+    });
+
+    it('CONTROL: a static instance carries no signer acknowledgement and its credential is applied as before', async () => {
+        const { impl, calls } = stubFetch();
+        const materialization = await createRestProviderFactory({ fetchImpl: impl })(ctx({
+            providerConfig: { baseUrl: 'https://api.example.com' },
+            auth: { type: 'api-key', key: 'k', headerName: 'X-API-Key' },
+        }));
+        expect('requestSignerApplied' in materialization).toBe(false);
+        await materialization.handlers.request({ path: '/ping' }, {});
+        expect((calls[0].init.headers as Record<string, string>)['X-API-Key']).toBe('k');
+    });
+
+    it('refuses a static credential and a signer together', async () => {
+        const { signer } = signerDouble();
+        await expect(Promise.resolve().then(() => createRestProviderFactory({})(ctx({
+            providerConfig: { baseUrl: 'https://api.example.com' },
+            auth: { type: 'bearer', token: 't' },
+            requestSigner: signer,
+        })))).rejects.toThrow(/authenticated one way/);
     });
 });

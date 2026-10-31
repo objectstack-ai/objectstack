@@ -56,6 +56,10 @@ export * from './utils/unmaterialized-fields.js';
 // because a consumer that reaches for one must be able to see the other and
 // know which one the platform actually served.
 export * from './utils/column-sortability.js';
+// [objectstack#27504] The served packaged-action activation: which declared
+// actions the installation switched off, stamped by the data layer and asked
+// by every action gate beside the capability check.
+export * from './utils/action-activation.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.
 export {
@@ -160,6 +164,9 @@ export * from './utils/number-display.js';
 // below could not import, so a date-valued measure rendered its raw ISO
 // string. `@object-ui/fields` re-exports these names unchanged.
 export * from './utils/date-display.js';
+// The display face of a `YYYY-MM` month bucket key (`Oct 2025`) — read by the
+// chart axis, which keeps the key itself as the bucket's identity.
+export * from './utils/date-bucket-label.js';
 // The native date/time control adapters (objectui#3127), moved down from
 // `@object-ui/fields` so `@object-ui/components`' data table can share them
 // instead of keeping private copies (objectui#10625). `@object-ui/fields`

@@ -25,10 +25,12 @@
  *   plain optional boolean with no `default`, under the same
  *   `additionalProperties: false`.
  * - §5 THE STATUS: the describe carries no `[PLANNED` marker (the runtime
- *   half, #25573, reads the key in `plugin-approvals`) and names
- *   the subjects an author needs — `submitter_id` (who is removed),
- *   `onEmptyApprovers` (where an emptied slate goes) and `'auto_approve'` (the
- *   one policy refused beside it, §6). The prose itself is not pinned.
+ *   half, #25573, reads the key in `plugin-approvals`) and names the subjects
+ *   an author edits — `onEmptyApprovers` (where an emptied slate goes) and
+ *   `'auto_approve'` (the one policy refused beside it, §6). It is also the
+ *   Studio inspector's field help, so its first sentence names none of them:
+ *   who the submitter is in storage (`submitter_id`) lives in the JSDoc
+ *   (#27838). The prose itself is not pinned.
  * - §6 THE REFUSED PAIR (#25635, ruling 6386627950, letter A):
  *   `excludeSubmitter: true` beside `onEmptyApprovers: 'auto_approve'` is
  *   refused at the parse, ONE issue at `onEmptyApprovers` — the key the ruled
@@ -199,13 +201,19 @@ describe('§5 the describe declares the key live and names its two subjects', ()
   };
 
   it('carries no planned marker: the approval engine reads the key (#25573)', () => {
-    expect(doc()).toMatch(/^Segregation of duties/);
+    expect(doc().length).toBeGreaterThan(0);
     expect(doc()).not.toContain('PLANNED');
   });
 
-  it('names who is removed (submitter_id) and where an emptied slate goes (onEmptyApprovers)', () => {
-    expect(doc()).toContain('`submitter_id`');
+  it('opens in business words: no key, column or policy literal in the first sentence (#27838)', () => {
+    const first = doc().split(/\.(?:\s|$)/)[0] ?? '';
+    expect(first.length).toBeGreaterThan(0);
+    expect(first).not.toMatch(/`|'[a-z_]+'|submitter_id|onEmptyApprovers|excludeSubmitter/);
+  });
+
+  it('names where an emptied slate goes (onEmptyApprovers), and leaves the storage column to the JSDoc', () => {
     expect(doc()).toContain('`onEmptyApprovers`');
+    expect(doc()).not.toContain('submitter_id');
   });
 
   it("names the one policy refused beside it ('auto_approve'), so an author reading it is not surprised by §6", () => {

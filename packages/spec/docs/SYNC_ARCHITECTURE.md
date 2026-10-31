@@ -219,6 +219,10 @@ Complete, production-grade integration with external systems. Includes authentic
 > same per-row verdicts. Every binding failure (a plugin-registered connector, an
 > `ok: false` answer, a non-array at `recordsPath`, an `update` / `upsert` with no
 > `upsertKey`, an unmapped `watermark.field`) is refused before anything is written.
+> The input the call would send, the watermark parameter included, is judged against
+> the read action's declared `inputSchema` first, as a `connector_action` flow node's
+> is: a missing required parameter or a wrong type is refused with `VALIDATION_ERROR`
+> naming it, and the action is not called.
 >
 > - **Watermark — read from the target.** Nothing stores it: the starting point sent as
 >   `query[watermark.param]` is the highest value already stored in the target field a
@@ -284,14 +288,13 @@ const sapConnector: Connector = {
   type: 'saas',
   description: 'Enterprise-grade SAP ERP integration',
 
-  // OAuth2 Authentication
+  // Runtime authentication, supplied by host code: one of the four static
+  // kinds. (`type: 'oauth2'` sat here until ADR-0143 D7 retired it — it
+  // inlined a client secret and nothing ran its lifecycle. OAuth2 is declared
+  // on a provider-bound instance's `auth`, the secret as a `credentialRef`.)
   authentication: {
-    type: 'oauth2',
-    authorizationUrl: 'https://sap.example.com/oauth/authorize',
-    tokenUrl: 'https://sap.example.com/oauth/token',
-    clientId: process.env.SAP_CLIENT_ID!,
-    clientSecret: process.env.SAP_CLIENT_SECRET!,
-    scopes: ['read:orders', 'write:orders']
+    type: 'bearer',
+    token: process.env.SAP_API_TOKEN!
   },
 
   // (`syncConfig` and `fieldMappings` sat here until ADR-0049 retired them —
@@ -335,15 +338,23 @@ const sapConnector: Connector = {
 
 ### Authentication Methods
 
+The runtime `authentication` takes the four static kinds:
+
 | Method | Type | Use Case |
 |--------|------|----------|
-| `oauth2` | OAuth 2.0 | Modern SaaS applications (Salesforce, Google) |
-| `jwt` | JSON Web Token | Microservices, API gateways |
-| `saml` | SAML 2.0 | Enterprise SSO (Okta, Azure AD) |
 | `api-key` | API Key | Simple API authentication |
 | `basic` | Basic Auth | Legacy systems, simple authentication |
 | `bearer` | Bearer Token | Token-based APIs |
 | `none` | No Auth | Public APIs |
+
+A token obtained from a token endpoint (OAuth 2.0 `authorization_code` or
+`client_credentials`, or a Feishu, DingTalk or WeCom app credential) is declared
+on a provider-bound instance's `auth` as `oauth2` or `app-credential`, with the
+secret behind a `credentialRef` (ADR-0143). An upstream that authenticates
+each request by a signature over the request itself is declared as `signed`,
+with a closed `scheme`, the public `keyId` and the signing key behind a
+`credentialRef`; the platform signs every attempt (ADR-0143 D2.3). See
+[Connectors](../../../content/docs/automation/connectors.mdx).
 
 ### Best Practices
 

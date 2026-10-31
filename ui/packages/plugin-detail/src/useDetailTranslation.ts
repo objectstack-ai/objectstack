@@ -164,6 +164,7 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.listFormat': 'List',
   'detail.inlineCode': 'Inline code',
   'detail.mentionSomeone': 'Mention someone',
+  'detail.mentionedPeople': 'Mentioned',
   'detail.preview': 'Preview',
   'detail.submitComment': 'Submit (Ctrl+Enter)',
   'detail.sendComment': 'Send',

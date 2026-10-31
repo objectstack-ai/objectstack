@@ -28,16 +28,16 @@
  * @module views/RecordFormPage
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { ArrowLeft, Building2, Database } from 'lucide-react';
 import { toast } from 'sonner';
-import { getRecordDisplayName } from '@object-ui/core';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation, useObjectLabel, recordSaveMessage } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
+import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
 import {
   ExpressionProvider,
   createExpressionEvaluator,
@@ -165,32 +165,39 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
       : t('form.editTitle', { object: label });
 
   // objectstack-ai/objectstack#26461 — the save toast names the record it
-  // wrote (`ux-conventions.write-feedback`), as the dialog paths in
-  // `console/AppContent.tsx` (`recordSaveMessage`) have since
-  // objectstack-ai/objectstack#26172: `Task "Quarterly review" created`. Same
-  // resolver, same floor, same keys. The name is the saved record's display
-  // name from the ONE ADR-0079 resolver, read through this page's object;
-  // `ObjectForm` hands the write's result to `onSuccess`. The resolver's floor
-  // (`Record #<id>`, or the empty fallback for an id-less row) is not a name,
-  // so a record with nothing nameable keeps the object-label toast. The two
-  // named keys are in all ten packs, so they pass bare like every key above.
+  // wrote (`ux-conventions.write-feedback`): `Task "Quarterly review" created`.
+  // The message is the ONE builder every record save surface shares
+  // (`recordSaveMessage` in `@object-ui/i18n`), read through this page's
+  // object; `ObjectForm` hands the write's result to `onSuccess`. Its keys are
+  // in all ten packs, so they pass bare like every key above.
+  //
+  // objectstack-ai/objectstack#27999 — and it is the save's ONE toast: while
+  // this page is open, the write-warning channel parks the answer warnings of
+  // the write the page makes (this record's update, or a create of this
+  // object) on the claim below instead of toasting them, and this toast
+  // carries them.
+  const answerWarningClaim = useRef<AnswerWarningClaim | null>(null);
+  useEffect(() => {
+    if (!dataSource || !objectName) return;
+    if (mode === 'edit' && !recordId) return;
+    const claim = claimAnswerWarnings(dataSource, mode === 'edit'
+      ? { operation: 'update', resource: objectName, id: recordId }
+      : { operation: 'create', resource: objectName });
+    answerWarningClaim.current = claim;
+    return () => {
+      if (answerWarningClaim.current === claim) answerWarningClaim.current = null;
+      claim.release();
+    };
+  }, [dataSource, mode, objectName, recordId]);
+
   const handleSuccess = useCallback((saved?: any) => {
-    const resolved = saved && typeof saved === 'object'
-      ? getRecordDisplayName(objectDef, saved, { fallback: '' })
-      : '';
-    const id = saved?.id ?? saved?._id;
-    const title = resolved && !(id !== null && id !== undefined && resolved === `Record #${id}`)
-      ? resolved
-      : undefined;
-    if (mode === 'create') {
-      toast.success(title
-        ? t('form.createdNamed', { object: label, title })
-        : t('form.createSuccess', { object: label }));
-    } else {
-      toast.success(title
-        ? t('form.updatedNamed', { object: label, title })
-        : t('form.updateSuccess', { object: label }));
-    }
+    const warnings = answerWarningClaim.current?.take(saved) ?? [];
+    toastRecordSave(toast, recordSaveMessage(t, {
+      label,
+      objectDef,
+      saved,
+      mode,
+    }), warnings);
     goBack();
   }, [mode, t, label, objectDef, goBack]);
 

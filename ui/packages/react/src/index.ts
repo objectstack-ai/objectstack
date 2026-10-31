@@ -12,6 +12,9 @@ export * from './hooks/index.js'; // will be empty for now
 export * from './context/index.js'; // will be empty for now
 export * from './LazyPluginLoader.js';
 export * from './data-invalidation.js';
+// A record save's one toast: the claim the write-warning channel parks a save
+// surface's answer warnings on (objectstack-ai/objectstack#28216).
+export * from './record-save-feedback.js';
 // PageComponentSchema.dataSource — mapping the spec's per-element data binding
 // onto the schema keys each object-bound block reads (objectstack#6953).
 export * from './element-data-source/ElementDataSourceGate.js';
@@ -84,7 +87,7 @@ export type { PredicateGateKind } from './utils/visibilityDiagnostic.js';
 
 // Write-error surfacing utilities (shared by drag-write plugins so a failed
 // PATCH — e.g. an RLS 403 — is never silently swallowed).
-export { extractWriteErrorMessage, isPermissionError, extractFieldErrors, classifyLoadError, declaredUserMessage, delegationScopeMessage } from './utils/error-message.js';
+export { extractWriteErrorMessage, isPermissionError, extractFieldErrors, classifyLoadError, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from './utils/error-message.js';
 export type { WriteFieldError, LoadErrorKind } from './utils/error-message.js';
 
 // Built-in i18n support

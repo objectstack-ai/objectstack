@@ -93,7 +93,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Idioma",
-        help: "Idioma preferido para las notificaciones de este usuario, como una etiqueta de idioma, por ejemplo zh-CN o ja-JP. Si no se define, se aplica el idioma predeterminado del despliegue."
+        help: "Idioma en el que este usuario ve la interfaz y recibe las notificaciones, como una etiqueta de idioma, por ejemplo zh-CN o ja-JP. Si no se define, se aplica el idioma predeterminado del despliegue."
       },
       manager_id: {
         label: "Gerente",
@@ -146,6 +146,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -195,13 +196,12 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Usuario creado",
-          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
           acknowledge: "Hecho",
           fields: {
             "user.email": "Correo electrónico",
             "user.phoneNumber": "Número de teléfono",
             permissionSet: "Conjunto de permisos",
-            temporaryPassword: "Contraseña temporal"
+            temporaryPassword: "Contraseña temporal: cópiela ahora, se muestra una sola vez y no se almacena"
           }
         }
       },
@@ -222,10 +222,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "Contraseña actualizada",
-          description: "Si se generó una contraseña temporal, cópiela ahora: se muestra una sola vez y no se almacena.",
           acknowledge: "Hecho",
           fields: {
-            temporaryPassword: "Contraseña temporal"
+            temporaryPassword: "Contraseña temporal: cópiela ahora, se muestra una sola vez y no se almacena"
           }
         }
       },
@@ -587,6 +586,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -678,6 +678,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -690,11 +691,25 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       add_member: {
         label: "Añadir miembro",
-        successMessage: "Miembro añadido"
+        successMessage: "Miembro añadido",
+        params: {
+          role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él."
+          }
+        }
       },
       update_member_role: {
         label: "Cambiar rol",
-        successMessage: "Rol del miembro actualizado"
+        description: "Elija el nuevo rol en la organización para ${record.user_id?.name ?? 'este miembro'}.",
+        successMessage: "Rol del miembro actualizado",
+        outcomeMessages: {
+          permission_set_granted: "Rol del miembro actualizado. El nuevo rol también concedió el conjunto de permisos ${result.grantedPermissionSet.label}."
+        },
+        params: {
+          role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él."
+          }
+        }
       },
       remove_member: {
         label: "Eliminar miembro",
@@ -704,7 +719,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       transfer_ownership: {
         label: "Hacer propietario",
         confirmText: "¿Hacer propietario de esta organización al miembro seleccionado? Obtendrá todos los privilegios de propietario, incluido eliminar la organización. Tú sigues siendo propietario; para dejar de serlo, usa «Cambiar rol» en tu propia membresía.",
-        successMessage: "El miembro ahora es propietario"
+        successMessage: "El miembro ahora es propietario",
+        outcomeMessages: {
+          permission_set_granted: "El miembro ahora es propietario. El nuevo rol también concedió el conjunto de permisos ${result.grantedPermissionSet.label}."
+        }
       }
     }
   },
@@ -812,6 +830,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -829,6 +848,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Reenviar invitación",
+        description: "¿Reenviar la invitación a ${record.email}? Su plazo de vencimiento vuelve a empezar.",
         successMessage: "Invitación reenviada",
         outcomeMessages: {
           sent: "Invitación reenviada a ${result.email}",

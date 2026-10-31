@@ -52,7 +52,7 @@ import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject, strictObjectError, type StrictObjectOptions } from '../shared/strict-object';
-import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
+import { SnakeCaseIdentifierSchema, SystemIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
 import { VISIBILITY_STRICT_OPTIONS } from '../shared/visibility-strict-options';
@@ -2060,6 +2060,51 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
       'Field to group columns by (usually status/select). NO leading or trailing whitespace: the '
       + 'board reads this name off every card verbatim, so a padded spelling collapses the whole '
       + 'board into one `Uncategorized` lane.',
+    ),
+  /**
+   * The lanes the board draws, in order: stored option values of the
+   * `groupByField` field. Without it a board grouped on a select field draws
+   * one lane per declared option, so a lane the view's own `filter` always
+   * keeps empty (a task board that filters out completed tasks still drawing
+   * its `completed` lane) cannot be left off, and the lanes cannot be put in
+   * any order but the options' own.
+   *
+   * Why an ordered list and not a `hideEmptyLanes` flag: a flag hides a lane
+   * whenever its data happens to be empty, so a lane appears and disappears as
+   * records move and an empty lane is no longer there to drop a card into; and
+   * a flag cannot order. The list is stable, says which lanes and in what
+   * order, and answers the measured case on its own.
+   *
+   * A CHOICE of lanes, ⛔ not a record filter. A record whose value is not in
+   * the list lands in the board's `Uncategorized` lane, exactly as a record
+   * whose value matches no lane does today, so the board never hides a record
+   * the view selects. To keep records off the board, filter the view.
+   *
+   * Each entry has the grammar of a select option's stored `value`
+   * (`SelectOptionSchema.value`), so a display label (`'In Progress'`) is
+   * refused here rather than drawing a lane no record can fall into. Whether
+   * each entry is an option of `groupByField`, and whether one is listed
+   * twice, is judged where `groupByField` itself is judged against the bound
+   * object (`validate-list-view-field-refs` in `@objectstack/lint`, which
+   * `os validate` and the publish gate run): membership needs the object, and
+   * keeping the duplicate check beside it leaves this key with no refinement
+   * the published JSON Schema cannot state (`dropped-refinements.baseline.json`).
+   *
+   * ⛔ No spec-side default: absence keeps every board stored before this key
+   * exactly as it was, one lane per option.
+   *
+   * Lands ahead of its reader: the board draws one lane per option until the
+   * console half reads this key where it builds its lanes.
+   */
+  lanes: z.array(SystemIdentifierSchema)
+    .min(1, { message: '`kanban.lanes` lists at least one lane. To draw one lane per option, omit the key.' })
+    .optional()
+    .describe(
+      'The lanes the board draws, in this order: stored option values of the groupByField field '
+      + '(the option `value`, not its label). Omit to draw one lane per option in the options\' own '
+      + 'order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` '
+      + 'lane, as a record whose value matches no lane does. To keep records off the board, filter '
+      + 'the view. List each value once.',
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
   /**

@@ -1190,11 +1190,16 @@ plus short-text/enum fields), so naming a field outside that set can never widen
 search — and over the REST/protocol ingress it is `400 INVALID_FIELD` outright (#4254),
 because the engine-side intersection alone used to drop the unknown name and fall back to
 scanning the full searchable set. Internal callers reaching `engine.find()` directly keep
-the tolerant intersection, but not a search with nothing to scan: when no
+the tolerant intersection for an override naming at least one searchable field (the other
+names are dropped), but an override naming none of them is refused there too,
+`400 INVALID_FIELD`, rather than widened to the full set. Nor is a search with nothing to
+scan answered: when no
 `searchableFields` entry names a stored field and the auto-default finds none
 (`internal: true` fields never count), the engine itself refuses a non-blank `search`
 with `400 INVALID_FIELD` (`param: 'search'`) on `find`, `findOne`, `count` and
-`aggregate` alike, rather than answering every row. Multiple whitespace-separated terms are AND-ed and
+`aggregate` alike, rather than answering every row. An override that names no field (`searchFields: []`,
+`search.fields: []`, or a comma string with no name in it) is refused there too, `400 VALIDATION_ERROR`, as
+at the ingress: leave the key out to search the default set. Multiple whitespace-separated terms are AND-ed and
 fields are OR-ed. Case sensitivity comes from the operator the expansion emits, not
 from the expansion: it emits `$icontains`, which ignores **ASCII case** by the
 rule in [Case Sensitivity](#case-sensitivity) above. So a user typing `acme` does

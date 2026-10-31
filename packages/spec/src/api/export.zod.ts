@@ -488,12 +488,21 @@ export const IMPORT_JOB_MAX_ROWS = 50_000;
 /**
  * Import Job Status — the states the import worker actually moves a job
  * through (`succeeded`, not `completed`, is the success terminal).
+ *
+ * `succeeded` and `failed` split on whether the job accomplished anything, not
+ * on whether some row failed (maintainer ruling B, record 6509036166). A job
+ * that had at least one row and created, updated or skipped none of them ends
+ * `failed`, as does a job aborted on a fatal error. A job with no rows, a job
+ * whose every row was skipped and a job whose rows only partly failed end
+ * `succeeded`. A dry run follows the same rule. A cancel wins over that
+ * counting rule, so over both of its outcomes, but not over a fatal abort: an
+ * error thrown after the job was cancelled still ends it `failed`.
  */
 export const ImportJobStatus = z.enum([
   'pending',    // Row persisted, worker not yet started
   'running',    // Worker streaming through the batch
-  'succeeded',  // Finished (rows may still have per-row errors)
-  'failed',     // Aborted on a fatal error
+  'succeeded',  // Finished with a row created, updated or skipped, or with no rows (other rows may still have per-row errors)
+  'failed',     // Aborted on a fatal error, or every row failed (rows existed and none was created, updated or skipped)
   'cancelled',  // Cancelled by the caller before completion
 ]);
 export type ImportJobStatus = z.input<typeof ImportJobStatus>;
@@ -539,7 +548,10 @@ export const ImportJobProgressSchema = lazySchema(() => z.object({
   percentComplete: z.number().min(0).max(100).describe('processed / total as a percentage'),
   undoable: z.boolean().describe('Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted)'),
   revertedAt: z.string().optional().describe('When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows.'),
-  error: z.string().optional().describe('Fatal error message (when status = failed)'),
+  error: z.string().optional().describe(
+    'Why the job failed (when status = failed): the fatal error that aborted it, or, when every row failed, '
+    + 'one sentence pointing at the job\'s `results`, which carry each row\'s reason',
+  ),
   startedAt: z.string().optional().describe('Processing start timestamp (ISO 8601)'),
   completedAt: z.string().optional().describe('Completion timestamp (ISO 8601)'),
   createdAt: z.string().describe('Job creation timestamp (ISO 8601)'),

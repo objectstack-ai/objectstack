@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: one in-process boot of the real stack, then a sandboxed body or host handler run through the real doors per reader context, verb and caller; slowest CI reading 16.31 s (run 40200279306, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up; the first loads already paid at module scope
 
 /**
  * The in-process reader contexts over the stored-metadata-body family

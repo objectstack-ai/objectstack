@@ -484,6 +484,24 @@ function bootRest(callerName: CallerName, opts: Boot = {}) {
     return { read, protocol };
 }
 
+/**
+ * [#23181] The census blocks (row A, the item read, the layered route, the book
+ * tree) read every cell through ONE booted pair per caller, booted on its first
+ * cell and reused after. They booted a fresh pair per caller per cell, about
+ * 3,100 boots, and `bootRest`'s `registerRoutes()` was half the file's time.
+ * Reuse changes no answer: neither transport keeps one between two GET reads
+ * (`RestServer`'s per-request memo is keyed on the request object, and the
+ * dispatcher's membership cache on an environment no read here names), and
+ * every protocol-double read clones its fixture. The blocks that assert on a
+ * double's calls, or boot with options, still boot their own.
+ */
+const censusPairs = new Map<CallerName, { dispatcher: ReturnType<typeof bootDispatcher>; rest: ReturnType<typeof bootRest> }>();
+function censusPair(who: CallerName) {
+    let pair = censusPairs.get(who);
+    if (!pair) censusPairs.set(who, (pair = { dispatcher: bootDispatcher(who), rest: bootRest(who) }));
+    return pair;
+}
+
 const text = (a: Answer): string => JSON.stringify(a.body ?? null);
 const names = (items: any[] | undefined): string[] => (items ?? []).map((i: any) => i?.name);
 const brief = (a: Answer) => ({
@@ -636,8 +654,8 @@ describe('[#20320] row A: the dispatcher lists what RestServer lists — every t
             it(`GET /meta/${type} ${probe.label}`, async () => {
                 const mismatches: unknown[] = [];
                 for (const who of LIST_CALLERS) {
-                    const dispatcher = await bootDispatcher(who).read(`/meta/${type}`, probe.query, probe.headers);
-                    const rest = await bootRest(who).read(`/meta/${type}`, probe.query, probe.headers);
+                    const dispatcher = await censusPair(who).dispatcher.read(`/meta/${type}`, probe.query, probe.headers);
+                    const rest = await censusPair(who).rest.read(`/meta/${type}`, probe.query, probe.headers);
                     const same = dispatcher.status === rest.status
                         && dispatcher.code === rest.code
                         && JSON.stringify(dispatcher.items) === JSON.stringify(rest.items)
@@ -996,8 +1014,8 @@ describe('[#20408] the item read: the dispatcher answers what RestServer answers
             it(`GET ${path} ${probe.label}`, async () => {
                 const mismatches: unknown[] = [];
                 for (const who of ITEM_CALLERS) {
-                    const dispatcher = await bootDispatcher(who).read(path, probe.query, probe.headers);
-                    const rest = await bootRest(who).read(path, probe.query, probe.headers);
+                    const dispatcher = await censusPair(who).dispatcher.read(path, probe.query, probe.headers);
+                    const rest = await censusPair(who).rest.read(path, probe.query, probe.headers);
                     if (!sameAnswer(dispatcher, rest)) mismatches.push(mismatchOf(who, dispatcher, rest));
                 }
                 expect(mismatches).toEqual([]);
@@ -1059,8 +1077,8 @@ describe('[#20478] GET /meta/:type/:name/layers: the dispatcher serves the route
             it(`GET ${path}/layers ${probe.label}`, async () => {
                 const mismatches: unknown[] = [];
                 for (const who of ITEM_CALLERS) {
-                    const dispatcher = await bootDispatcher(who).read(`${path}/layers`, probe.query, probe.headers);
-                    const rest = await bootRest(who).read(`${path}/layers`, probe.query, probe.headers);
+                    const dispatcher = await censusPair(who).dispatcher.read(`${path}/layers`, probe.query, probe.headers);
+                    const rest = await censusPair(who).rest.read(`${path}/layers`, probe.query, probe.headers);
                     if (!sameAnswer(dispatcher, rest)) mismatches.push(mismatchOf(who, dispatcher, rest));
                 }
                 expect(mismatches).toEqual([]);
@@ -1226,8 +1244,8 @@ describe('[#20408] GET /meta/book/:name/tree: the dispatcher serves the route Re
             it(`GET /meta/book/${book}/tree ${probe.label}`, async () => {
                 const mismatches: unknown[] = [];
                 for (const who of TREE_CALLERS) {
-                    const dispatcher = await bootDispatcher(who).read(`/meta/book/${book}/tree`, probe.query, probe.headers);
-                    const rest = await bootRest(who).read(`/meta/book/${book}/tree`, probe.query, probe.headers);
+                    const dispatcher = await censusPair(who).dispatcher.read(`/meta/book/${book}/tree`, probe.query, probe.headers);
+                    const rest = await censusPair(who).rest.read(`/meta/book/${book}/tree`, probe.query, probe.headers);
                     if (!sameAnswer(dispatcher, rest)) mismatches.push(mismatchOf(who, dispatcher, rest));
                 }
                 expect(mismatches).toEqual([]);

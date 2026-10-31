@@ -3,6 +3,7 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
+import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
 /**
  * The BCP-47 shape `sys_user.locale` accepts — a 2–3 letter language subtag
@@ -38,6 +39,15 @@ import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
  * spellings are byte-identical and names what breaks if they are not.
  */
 export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$';
+
+/**
+ * The label of the `temporaryPassword` field on the `create_user` and
+ * `set_user_password` result dialogs. It carries the copy-it-now instruction
+ * because the dialog skips a field absent from the response, and the server
+ * returns `temporaryPassword` only when it generated one: the instruction
+ * shows exactly when there is a password to copy.
+ */
+const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
  * sys_user — System User Object
@@ -129,7 +139,7 @@ export const SysUser = ObjectSchema.create({
         // (`INVITATION_ROLE_GRANTORS`), so a delegated_admin is offered
         // `member` alone. Declared on the param, not inherited from the
         // field, so the gate narrows this dialog and no other picker.
-        { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+        { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
     },
 
@@ -318,11 +328,12 @@ export const SysUser = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'User Created',
-        // Hedged for both outcomes: a typed password returns no
-        // `temporaryPassword`, so the dialog must not claim one to copy.
-        // Same sentence and button as `set_user_password` below.
-        description:
-          'If a temporary password was generated, copy it now — it is shown only once and never stored.',
+        // No dialog-level description: it shows on both outcomes, and a typed
+        // password returns no `temporaryPassword`, so any copy-it-now sentence
+        // there talks about a password that is not on screen. The instruction
+        // rides the `temporaryPassword` field's own label instead, which the
+        // dialog draws only when the server minted one. Same shape and button
+        // as `set_user_password` below.
         acknowledge: 'Done',
         fields: [
           // The dialog skips fields whose path is absent from the response, so
@@ -331,7 +342,7 @@ export const SysUser = ObjectSchema.create({
           { path: 'user.email', label: 'Email', format: 'text' },
           { path: 'user.phoneNumber', label: 'Phone Number', format: 'text' },
           { path: 'permissionSet', label: 'Permission Set', format: 'text' },
-          { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
+          { path: 'temporaryPassword', label: TEMPORARY_PASSWORD_LABEL, format: 'secret' },
         ],
       },
     },
@@ -388,11 +399,10 @@ export const SysUser = ObjectSchema.create({
       ],
       resultDialog: {
         title: 'Password Updated',
-        description:
-          'If a temporary password was generated, copy it now — it is shown only once and never stored.',
+        // No description, for the reason given on `create_user` above.
         acknowledge: 'Done',
         fields: [
-          { path: 'temporaryPassword', label: 'Temporary Password', format: 'secret' },
+          { path: 'temporaryPassword', label: TEMPORARY_PASSWORD_LABEL, format: 'secret' },
         ],
       },
     },
@@ -740,7 +750,9 @@ export const SysUser = ObjectSchema.create({
       // has no feature gate, and on a deployment with 2FA off (the default)
       // it read a dead "No" on every row. The state is shown on the user's
       // own record page, in the Security tab, behind the `twoFactor` gate.
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'source', 'created_at'],
+      // `banned` and `role` sit beside the email so a banned user or an
+      // admin is spotted from the list, without opening each record.
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'banned', 'role', 'source', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },
@@ -1076,8 +1088,8 @@ export const SysUser = ObjectSchema.create({
       maxLength: 35,
       group: 'Profile',
       description:
-        'Preferred language for this user\'s notifications, as a language tag such as zh-CN or ja-JP. ' +
-        'When unset, the deployment\'s default language applies.',
+        'The language this user sees the interface in and receives notifications in, as a language tag ' +
+        'such as zh-CN or ja-JP. When unset, the deployment\'s default language applies.',
     }),
 
     // ── Organization ─────────────────────────────────────────────

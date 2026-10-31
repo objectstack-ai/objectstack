@@ -2358,7 +2358,8 @@ function namedProseCandidates(rows) {
     .map((r) => {
       const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
       if (r.state === 'closed') {
-        const word = r.unmerged === true ? 'CLOSED UNMERGED' : 'CLOSED';
+        // The same three words `namedTargets` prints, in this list's own case.
+        const word = r.unmerged === true ? 'CLOSED UNMERGED' : r.merged === true ? 'MERGED' : 'CLOSED';
         return `${ref} ${word}${r.closedAt ? ` (${r.closedAt})` : ''}`;
       }
       if (r.state === 'unresolved') return `${ref} UNRESOLVED${r.detail ? ` (${r.detail})` : ''}`;
@@ -5150,6 +5151,17 @@ export function needsBlockerLivenessComments(issue) {
  * missing `merged_at` on a PR reads as unmerged: the one direction that cannot
  * release a card.
  *
+ * ## A merged PR is NAMED merged, never a bare closed
+ *
+ * The other side of the same field: a closed PR whose `merged_at` is set
+ * carries `merged: true`, the row key `scheduled-full-run.mjs`'s refresh
+ * carries for its note, so the renderers that name a target (`namedTargets`,
+ * `namedProseCandidates`) can say `merged DATE` instead of the `closed` an
+ * issue reads. The flag is a WORD, not a verdict: every reader that judges a
+ * row asks `state` and `unmerged`, and a merged row keeps `state: 'closed'`
+ * exactly as before. `merged` and `unmerged` never sit on the same row, and an
+ * issue (no `pull_request` key) carries neither.
+ *
  * @param {{ key: string, repo: string, number: number, local: boolean }} target
  * @param {{ state?: string, closed_at?: string|null, labels?: any[],
  *   pull_request?: { merged_at?: string|null } }} row
@@ -5157,6 +5169,7 @@ export function needsBlockerLivenessComments(issue) {
 export function blockerResolutionFromRow(target, row) {
   const state = row?.state === 'closed' ? 'closed' : 'open';
   const unmerged = state === 'closed' && row?.pull_request != null && !row.pull_request.merged_at;
+  const merged = state === 'closed' && Boolean(row?.pull_request?.merged_at);
   return {
     ...target,
     state,
@@ -5164,6 +5177,7 @@ export function blockerResolutionFromRow(target, row) {
     detail: null,
     labels: labelNames(row ?? {}),
     ...(unmerged ? { unmerged: true } : {}),
+    ...(merged ? { merged: true } : {}),
   };
 }
 
@@ -5192,7 +5206,9 @@ function namedTargets(rows) {
     .map((r) => {
       const ref = `\`${r.local ? `#${r.number}` : r.key}\``;
       if (r.state === 'closed') {
-        const word = r.unmerged === true ? 'closed UNMERGED' : 'closed';
+        // A PR is named by what its close MEANT: merged, or closed UNMERGED.
+        // An issue (neither mark) reads the bare `closed` it always did.
+        const word = r.unmerged === true ? 'closed UNMERGED' : r.merged === true ? 'merged' : 'closed';
         return `${ref}${r.closedAt ? ` (${word} ${r.closedAt})` : ` (${word})`}`;
       }
       if (r.state === 'unresolved') {
@@ -7662,7 +7678,7 @@ export function h28StaleBodyBlockerLine(issue, resolutions, commentBodies, owner
 
   return (
     `\`pm:blocked\` whose BODY names ${spent.length} \`Blocked-by:\` target(s) no longer OPEN ` +
-    `(${namedTargets(spent)} — an issue reads closed, a PR reads closed by its MERGE, and a PR that ` +
+    `(${namedTargets(spent)} — an issue reads closed, a merged PR reads merged, and a PR that ` +
     'closed UNMERGED is named so: it released nothing, but the body line is spent either way) ' +
     `while a COMMENT names ${live.length} that ${live.length === 1 ? 'is' : 'are'} ` +
     `still OPEN (${namedTargets(live)}) and appear(s) nowhere in the body — so the body line is ` +
@@ -12687,8 +12703,24 @@ export const CONTRACT_REVIEW_HEAD_SHA_LINE = new RegExp(
  * open fence (a nested ``` inside a ```` block, a ~~~ inside a ``` block), and
  * reading past either would read fenced content as the record's line. An
  * unclosed fence runs to the end of the body, as it renders.
+ *
+ * An OPENING fence may carry an info string after the run (```md); a CLOSING
+ * fence may not — a run followed by anything but whitespace is content of the
+ * open fence, not its close (`FENCE_CLOSE_LINE`), as CommonMark renders it.
+ * Measured in the delta review of the fence-tracking reader (2026-10-30): a
+ * ``` followed by prose closed the fence here while the renderer kept it open,
+ * so a `Head-sha:` line after it was read; 0 of 713 live records carry one.
+ *
+ * A BACKTICK fence's info string may not contain a backtick (CommonMark §4.5):
+ * a line opening on three backticks whose rest carries one more is a paragraph
+ * holding code spans, not a fence, so it opens nothing and the lines below it
+ * are read. A tilde fence's info string may hold anything, backticks included.
+ * Measured in the #28103 review (F16, 2026-10-30): the opener read such a line
+ * as a fence and skipped the record's own line below it, in the fail-closed
+ * direction; 0 of 713 live records carry one.
  */
-const FENCE_LINE = /^[ ]{0,3}(`{3,}|~{3,})/;
+const FENCE_LINE = /^[ ]{0,3}(`{3,}(?!.*`)|~{3,})/;
+const FENCE_CLOSE_LINE = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/;
 
 /**
  * The head a contract-review record names — the span on the first `Head-sha:`
@@ -12702,14 +12734,17 @@ const FENCE_LINE = /^[ ]{0,3}(`{3,}|~{3,})/;
  * ABOVE the record's own line — read as the head, so the record was found at
  * the cited head and absent at the real one. None is prose to a first-line
  * reader, and all four shapes are what a quotation looks like. So: lines
- * before the first UNQUOTED heading-marker line are skipped — the heading is
- * read with `CONTRACT_REVIEW_HEADING_MARKER`, but a blockquoted heading opens
- * nothing here, because a fully quoted record (heading, head line and
- * signature all under `>`) followed by a plain line opening `Head-sha:` would
- * otherwise hand the quoted record's signature to the plain line's head; the
- * locator still finds such a comment as a record, and it then names no head.
- * A fenced line is skipped, fence boundaries included, with the fence closed
- * only by its own character and length (`FENCE_LINE`); and
+ * before the first UNQUOTED, UNINDENTED heading-marker line are skipped — the
+ * heading is read with `CONTRACT_REVIEW_HEADING_MARKER`, but a blockquoted
+ * heading opens nothing here, because a fully quoted record (heading, head
+ * line and signature all under `>`) followed by a plain line opening
+ * `Head-sha:` would otherwise hand the quoted record's signature to the plain
+ * line's head; nor does a heading indented four spaces or a tab, which is an
+ * indented code block to the renderer, held to the same three-space bound as
+ * the key line itself; the locator still finds such a comment as a record,
+ * and it then names no head. A fenced line is skipped, fence boundaries
+ * included, with the fence closed only by its own character and length on a
+ * line of its own (`FENCE_LINE`, `FENCE_CLOSE_LINE`); and
  * `CONTRACT_REVIEW_HEAD_SHA_LINE` itself refuses the blockquote, the bullet
  * and an indented-code line. Among the lines that remain, the FIRST wins, as
  * `readServedTier` reads its key: a record is one comment and names one head,
@@ -12729,15 +12764,18 @@ export function contractReviewHeadSha(body) {
   let fence = null; // the OPEN fence — its character and run length — or null outside one
   let belowHeading = false;
   for (const line of String(body ?? '').split(/\r?\n/)) {
-    const f = FENCE_LINE.exec(line);
-    if (f !== null) {
-      if (fence === null) fence = { ch: f[1][0], len: f[1].length };
-      else if (f[1][0] === fence.ch && f[1].length >= fence.len) fence = null;
+    if (fence !== null) {
+      const c = FENCE_CLOSE_LINE.exec(line);
+      if (c !== null && c[1][0] === fence.ch && c[1].length >= fence.len) fence = null;
       continue;
     }
-    if (fence !== null) continue;
+    const f = FENCE_LINE.exec(line);
+    if (f !== null) {
+      fence = { ch: f[1][0], len: f[1].length };
+      continue;
+    }
     if (!belowHeading) {
-      belowHeading = CONTRACT_REVIEW_HEADING_MARKER.test(line) && !/^\s*>/.test(line);
+      belowHeading = CONTRACT_REVIEW_HEADING_MARKER.test(line) && /^[ ]{0,3}#/.test(line);
       continue;
     }
     const m = CONTRACT_REVIEW_HEAD_SHA_LINE.exec(line);
@@ -25098,6 +25136,9 @@ async function selfTest() {
   const abandonedPrRow = { state: 'closed', closed_at: '2026-10-28T18:30:39Z', labels: [], pull_request: { merged_at: null } };
   t('H4 prose PR: a prose-named MERGED PR is released — the row says the block already expired', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('ALREADY CLOSED'), true);
   t('H4 prose PR: …and says where the card is due back', proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('due back in `pm:queue`'), true);
+  t('H4 prose PR: …and names the candidate MERGED with its date, never CLOSED (#28083)', [proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('`#27888` MERGED (2026-10-30T03:29:36Z)'), proseRow(['nothing'], [proseFromRow(27888, mergedPrRow)]).includes('`#27888` CLOSED')].join(), 'true,false');
+  t('H4 prose PR: a MERGED PR with no close time is named MERGED, bare', proseRow(['nothing'], [proseFromRow(27888, { ...mergedPrRow, closed_at: null })]).includes('`#27888` MERGED.'), true);
+  t('H4 prose PR control: a closed ISSUE candidate still reads CLOSED', proseRow(['nothing'], [proseFromRow(16293, { state: 'closed', closed_at: '2026-09-06T00:00:00Z', labels: [] })]).includes('`#16293` CLOSED (2026-09-06T00:00:00Z)'), true);
   t('H4 prose PR: a prose-named PR that closed UNMERGED is NOT released', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('ALREADY CLOSED'), false);
   t('H4 prose PR: …and the row never says the card is due back', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('due back'), false);
   t('H4 prose PR: …and names the candidate with its unmerged mark', proseRow(['nothing'], [proseFromRow(27296, abandonedPrRow)]).includes('`#27296` CLOSED UNMERGED (2026-10-28T18:30:39Z)'), true);
@@ -27306,11 +27347,18 @@ async function selfTest() {
   b(BATTERY_PR_MERGE, 'H19 PR: a closed PR whose merged_at is absent reads unmerged (the side that cannot release)', resolvedFrom(1, { state: 'closed', labels: [], pull_request: {} }).unmerged, true);
   b(BATTERY_PR_MERGE, 'H19 PR: an open PR reads open, unmarked', [resolvedFrom(1, openPr19).state, resolvedFrom(1, openPr19).unmerged].join(), 'open,');
   b(BATTERY_PR_MERGE, 'H19 PR: an ISSUE (no pull_request key) is judged by state alone, as before', [resolvedFrom(27846, issue27846).state, resolvedFrom(27846, issue27846).unmerged].join(), 'closed,');
+  // The merged mark (#28083): a WORD for the renderers, carried only where
+  // `merged_at` is set, never beside `unmerged`, never on an issue.
+  b(BATTERY_PR_MERGE, 'H19 PR: a merged PR carries merged: true, and nothing else is marked', [resolvedFrom(27888, merged27888).merged, resolvedFrom(27296, abandoned27296).merged, resolvedFrom(1, { state: 'closed', labels: [], pull_request: {} }).merged, resolvedFrom(1, openPr19).merged, resolvedFrom(27846, issue27846).merged].map(String).join(), 'true,undefined,undefined,undefined,undefined');
+  b(BATTERY_PR_MERGE, 'H19 PR: merged and unmerged never share a row', [merged27888, abandoned27296, issue27846, openPr19].some((row) => resolvedFrom(1, row).merged === true && resolvedFrom(1, row).unmerged === true), false);
+  b(BATTERY_PR_MERGE, 'H19 PR: the merged mark is a key only when it is true (a row with none keeps its shape)', Object.hasOwn(resolvedFrom(27846, issue27846), 'merged'), false);
   b(BATTERY_PR_MERGE, 'H19 PR: …and the projection keeps the close time and the labels the other rows read', [resolvedFrom(27846, issue27846).closedAt, resolvedFrom(1, { ...openPr19, labels: [{ name: 'pm:on-hold' }] }).labels.join()].join(' '), '2026-10-30T05:23:54Z pm:on-hold');
   const prCard = blockedCard(27925, 'Blocked-by: #27888');
   const mergedRow = h19row(prCard, [resolvedFrom(27888, merged27888)], REPO_OS);
   b(BATTERY_PR_MERGE, 'H19 PR: MERGED -> outlived: the row fires', mergedRow.includes('outlived its blocker'), true);
   b(BATTERY_PR_MERGE, 'H19 PR: …as a full discharge', mergedRow.includes('Every target it names is closed'), true);
+  b(BATTERY_PR_MERGE, 'H19 PR: …naming the target merged with its date, never a bare closed (#28083)', [mergedRow.includes('`#27888` (merged 2026-10-30T03:29:36Z)'), mergedRow.includes('`#27888` (closed')].join(), 'true,false');
+  b(BATTERY_PR_MERGE, 'H19 PR: a merged PR with no close time is named merged, bare', h19row(prCard, [resolvedFrom(27888, { ...merged27888, closed_at: null })], REPO_OS).includes('`#27888` (merged)'), true);
   b(BATTERY_PR_MERGE, 'H19 PR: CLOSED UNMERGED -> held: no row', h19BlockOutlivedBlocker(blockedCard(27925, 'Blocked-by: #27296'), [resolvedFrom(27296, abandoned27296)], REPO_OS), null);
   b(BATTERY_PR_MERGE, 'H19 PR: OPEN -> held: no row', h19BlockOutlivedBlocker(blockedCard(27925, 'Blocked-by: #2'), [resolvedFrom(2, openPr19)], REPO_OS), null);
   // An abandoned PR beside a closed issue withholds the discharge and is named.
@@ -27320,6 +27368,11 @@ async function selfTest() {
   b(BATTERY_PR_MERGE, 'H19 PR: …⛔ never claiming every target is closed', mixedPr19.includes('Every target it names is closed'), false);
   b(BATTERY_PR_MERGE, 'H19 PR: …and names the abandoned PR as closed UNMERGED', mixedPr19.includes('`#27296` (closed UNMERGED 2026-10-28T18:30:39Z)'), true);
   b(BATTERY_PR_MERGE, 'H19 PR: …and never as the closed target the row is founded on', mixedPr19.includes('CLOSED (`#27846` (closed 2026-10-30T05:23:54Z))'), true);
+  // A merged PR beside an abandoned one: the same partial verdict, each named by what its close meant.
+  const mergedBesideAbandoned = h19row(blockedCard(27925, 'Blocked-by: #27888, #27296'), [resolvedFrom(27888, merged27888), resolvedFrom(27296, abandoned27296)], REPO_OS);
+  b(BATTERY_PR_MERGE, 'H19 PR: a merged PR beside an abandoned one is the same PARTIAL discharge', [mergedBesideAbandoned.includes('1 of 2 `Blocked-by:` target(s)'), mergedBesideAbandoned.includes('PARTIAL')].join(), 'true,true');
+  b(BATTERY_PR_MERGE, 'H19 PR: …founded on the merge, named so', mergedBesideAbandoned.includes('CLOSED (`#27888` (merged 2026-10-30T03:29:36Z))'), true);
+  b(BATTERY_PR_MERGE, 'H19 PR: …beside the abandoned PR, named so', mergedBesideAbandoned.includes('`#27296` (closed UNMERGED 2026-10-28T18:30:39Z)'), true);
   // The UNJUDGED row names it too, and the archive keeps its old power only.
   const unjudgedPr = h19row(blockedCard(1, 'Blocked-by: #2, #27296'), [target(2, 'unresolved', { detail: 'HTTP 404' }), resolvedFrom(27296, abandoned27296)], REPO_OS);
   b(BATTERY_PR_MERGE, 'H19 PR: an UNJUDGED row names a judged abandoned PR', [unjudgedPr.includes('UNJUDGED, not confirmed'), unjudgedPr.includes('closed UNMERGED')].join(), 'true,true');
@@ -30781,10 +30834,19 @@ async function selfTest() {
   // either way (the wait it states is over), so the row still fires -- but the
   // target is named with its unmerged mark, never as a bare close.
   const abandonedStale = String(h28StaleBodyBlockerLine(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z', unmerged: true }), target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack') ?? '');
-  t('H28: an UNMERGED PR as the spent body target still fires the row', abandonedStale.includes('the body line is '), true);
+  t('H28: an UNMERGED PR as the spent body target still fires the row', abandonedStale.includes('spent either way'), true);
   t('H28: …naming it with its unmerged mark, as `namedTargets` renders it', abandonedStale.includes('`#9255` (closed UNMERGED 2026-08-19T11:28:26Z)'), true);
   t('H28: …and never calls it a CLOSED target', abandonedStale.includes('names 1 CLOSED'), false);
   t('H28: …while saying it released nothing', abandonedStale.includes('it released nothing'), true);
+  // A body target that is a MERGED PR (#28083): the renderer names the merge
+  // itself, so the legend no longer has to explain a bare `closed` on a PR.
+  const mergedStale = String(h28StaleBodyBlockerLine(reparked, [target(9255, 'closed', { closedAt: '2026-08-19T11:28:26Z', merged: true }), target(11501, 'open')], [REPARK_COMMENT], 'objectstack-ai/objectstack') ?? '');
+  t('H28: a MERGED PR as the spent body target fires the row', mergedStale.includes('spent either way'), true);
+  t('H28: …naming it merged, as `namedTargets` renders it', mergedStale.includes('`#9255` (merged 2026-08-19T11:28:26Z)'), true);
+  t('H28: …and never as a bare closed', mergedStale.includes('`#9255` (closed'), false);
+  t('H28: …with a legend that says a merged PR reads merged', mergedStale.includes('a merged PR reads merged'), true);
+  t('H28: …and no longer claims a PR reads closed by its merge', mergedStale.includes('reads closed by its MERGE'), false);
+  t('H28 control: an ISSUE as the spent body target still reads closed', stale9592Row.includes('`#9255` (closed 2026-08-19T11:28:26Z)'), true);
 
   // -- H32 — a HELD seat idle over a non-empty lane queue (#11706) ------------
   //
@@ -33545,6 +33607,12 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // ⛔ A fence closes only on its OWN character and a run at least as long: a nested ``` inside ````, a ~~~ inside ```,
   // are content, and a `Head-sha:` line between them stays fenced; a longer closing run closes; a never-closed one runs out.
   t('⛔ record reader: a nested or mismatched fence does not close the open one — the `Head-sha:` line inside stays fenced; a longer run closes; an unmatched run leaves it open to the end', [contractReviewHeadSha(UNDER51('````', '```', `Head-sha: \`${HEAD51}\``, '```', '````', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', '~~~', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', `Head-sha: \`${HEAD51}\``, '`````', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```', '~~~', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``))].join('|'), [OLDHEAD51, OLDHEAD51, OLDHEAD51, ''].join('|'));
+  // ⛔ A closing run with TRAILING TEXT is fence content, not a close (CommonMark): the fence stays open past it, so a
+  // `Head-sha:` line after such a line is still fenced; a bare run later closes it; whitespace after the run still closes.
+  t('⛔ record reader: a fence is closed only by a run on a line of its OWN — a run with trailing text is content, so the line after it stays fenced; a bare run later closes; trailing whitespace still closes', [contractReviewHeadSha(UNDER51('```', '``` not a close', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```', '``` not a close', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('~~~', '~~~ tail', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``, '```  ', `Head-sha: \`${OLDHEAD51}\``))].join('|'), ['', OLDHEAD51, OLDHEAD51, OLDHEAD51].join('|'));
+  // ⛔ A heading indented as CODE (four spaces or a tab) opens no scope — the same three-space bound the key line is held
+  // to — while one indented up to three spaces does; the marker itself keeps its tolerance for the locator.
+  t('⛔ record reader: a `## Contract review` heading indented four spaces or a tab opens no scope, one indented three does; the marker still finds the indented one', [contractReviewHeadSha(['    ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), contractReviewHeadSha(['\t## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), contractReviewHeadSha(['   ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n')), latestContractReviewOnHead([cm51(1, ['    ## Contract review', `Head-sha: \`${HEAD51}\``].join('\n'), T51)], HEAD51), CONTRACT_REVIEW_HEADING_MARKER.test('    ## Contract review')].join('|'), ['', '', HEAD51, '', 'true'].join('|'));
   t('⛔ record reader: the key folded INTO the span, a bare hex value, a lowercase key and a sub-floor span name no head', [contractReviewHeadSha(UNDER51(`\`Head-sha: ${HEAD51}\``)), contractReviewHeadSha(UNDER51(`Head-sha: ${HEAD51}`)), contractReviewHeadSha(UNDER51(`head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('Head-sha: `ba3d95`'))].join('|'), '|||');
   // ⛔ The shapes the review of the line-form reader probed (2026-10-30): a `Head-sha:` line naming ANOTHER head above the
   // record's own — placed before the heading, blockquoted, bulleted or fenced. Each is a citation, not the record's line,
@@ -33558,6 +33626,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('⛔ record reader: a `Head-sha:` line before the heading, blockquoted, bulleted or fenced — naming another head ABOVE the record\'s own — is NO review of that head', Object.values(CITED51).map((body) => latestContractReviewOnHead([cm51(1, body, T51)], HEAD51)).join('|'), '|||');
   t('⭐ record reader: …and each IS the review of the head its own line names — the cited line is prose to the reader', Object.values(CITED51).map((body) => latestContractReviewOnHead([cm51(1, body, T51)], OLDHEAD51)?.sha).join(), [OLDHEAD51, OLDHEAD51, OLDHEAD51, OLDHEAD51].join());
   t('⛔ record reader: a quoted, bulleted or fenced line ALONE names no head, nor does a line with NO heading above it, nor one inside an unclosed fence', [contractReviewHeadSha(UNDER51(`> Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51(`- **Head-sha:** \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``, '```')), contractReviewHeadSha(`Head-sha: \`${HEAD51}\``), contractReviewHeadSha(UNDER51('```', `Head-sha: \`${HEAD51}\``))].join('|'), '||||');
+  t('⛔ #28111 · record reader: a backtick run whose info string carries a BACKTICK opens no fence (CommonMark) — the line below it reads; a backtick-free info string opens one, and so does a tilde run with a backtick in its info string', [contractReviewHeadSha(UNDER51('``` a`b', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('```md `x`', `Head-sha: \`${HEAD51}\``, '```', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(UNDER51('```md', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('~~~ a`b', `Head-sha: \`${HEAD51}\``)), contractReviewHeadSha(UNDER51('````', '``` a`b', `Head-sha: \`${HEAD51}\``, '````', `Head-sha: \`${OLDHEAD51}\``))].join('|'), [HEAD51, HEAD51, '', '', OLDHEAD51].join('|'));
   t('record reader: a tilde fence is a fence too, and CRLF line endings read', [contractReviewHeadSha(UNDER51('~~~', `Head-sha: \`${HEAD51}\``, '~~~', `Head-sha: \`${OLDHEAD51}\``)), contractReviewHeadSha(`## Contract review\r\nHead-sha: \`${HEAD51}\`\r\n`)].join(), [OLDHEAD51, HEAD51].join());
   t('⛔ record reader: the RETIRED dialects — head in the heading (two spellings), on the first body line, in an adoption sentence — name no head', [DIALECT_A, DIALECT_B, DIALECT_C, DIALECT_D].map((d) => latestContractReviewOnHead([cm51(1, d(HEAD51), T51)], HEAD51)).join('|'), '|||');
 

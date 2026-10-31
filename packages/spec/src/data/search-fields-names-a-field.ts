@@ -27,9 +27,9 @@ import { z } from 'zod';
  * rule lives beside it in `./projection-names-a-field.ts`.
  *
  * [#27683] The declarations joined the door, which refuses this set since
- * #27484. The engine-side `searchFields` declarations
- * (`EngineQueryOptionsSchema` and its aggregate and count siblings) do not
- * take it yet: the in-process engine still reads an empty override as absent.
+ * #27484. [#28059] The engine-side `searchFields` declarations
+ * (`EngineQueryOptionsSchema` and its aggregate and count siblings) take the
+ * array arm too, so no published declaration of the override admits `[]`.
  */
 export const SEARCH_FIELDS_NAMES_NO_FIELD =
   'Name at least one field, or leave the key out to search the default search fields';

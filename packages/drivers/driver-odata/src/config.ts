@@ -49,11 +49,11 @@ export const ODataDriverConfigSchema = z.strictObject({
     }, 'serviceRoot must not carry credentials; declare external.credentialsRef on the datasource instead')
     .refine((value) => new URL(value).search === '', 'serviceRoot must not carry a query string')
     .describe('The OData service root, e.g. https://erp.example.com/odata/v4/sales/'),
-  version: z.literal('4.0').default('4.0')
-    .describe('The OData protocol version the service speaks. Only 4.0 is shipped; a v2 dialect is a new file.'),
+  version: z.enum(['4.0', '2.0']).default('4.0')
+    .describe('The OData protocol version the service speaks: 4.0 (the default) or 2.0.'),
   auth: AuthSchema.default({ scheme: 'none' }),
   pageSize: z.number().int().min(1).max(5000).default(DEFAULT_PAGE_SIZE)
-    .describe('Rows asked for per server page (Prefer: odata.maxpagesize).'),
+    .describe('Rows asked for per server page (Prefer: odata.maxpagesize). A v2 service has no such preference and pages by its own size.'),
   requestTimeoutMs: z.number().int().min(1).max(600_000).default(DEFAULT_REQUEST_TIMEOUT_MS)
     .describe('Per-request timeout in milliseconds.'),
 });

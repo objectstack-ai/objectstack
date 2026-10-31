@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
-import type { ConnectorProviderContext } from '@objectstack/spec/integration';
+import type { ConnectorProviderContext, ConnectorRequestSigner } from '@objectstack/spec/integration';
 import { isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { ConnectorOpenApiPlugin } from './connector-openapi-plugin.js';
@@ -564,5 +564,80 @@ describe('openapi provider — path-item-level parameters', () => {
             },
             required: ['path'],
         });
+    });
+});
+
+// ADR-0143 D2.3 — a `signed` instance arrives with a request signer instead of
+// a credential. Every generated action signs every attempt with it (a retry
+// included), runs its response verification before answering, and the
+// provider says it does so — the host serves a `signed` instance on nothing less.
+describe('openapi provider — a signed instance (ADR-0143 D2.3)', () => {
+    function signerDouble(over: Partial<ConnectorRequestSigner> = {}) {
+        const signed: string[] = [];
+        const signer: ConnectorRequestSigner = {
+            connector: 'pets',
+            scheme: 'aliyun-acs3-hmac-sha256',
+            async sign(request) {
+                signed.push(`${request.method} ${request.url}`);
+                return { headers: { authorization: `SIG-${signed.length}` } };
+            },
+            ...over,
+        };
+        return { signer, signed };
+    }
+
+    function statusFetch(statuses: number[]) {
+        const calls: Array<{ url: string; init: RequestInit }> = [];
+        const impl = (async (url: string, init: RequestInit) => {
+            calls.push({ url, init });
+            return new Response('[{"id":1}]', { status: statuses.shift() ?? 200, headers: { 'content-type': 'application/json' } });
+        }) as unknown as typeof fetch;
+        return { impl, calls };
+    }
+
+    it('signs every attempt, a retry included, and says it applies the signer', async () => {
+        const { signer, signed } = signerDouble();
+        const { impl, calls } = statusFetch([503, 200]);
+        const materialization = await createOpenApiProviderFactory({ fetchImpl: impl })(ctx({
+            providerConfig: { spec: petstore },
+            requestSigner: signer,
+            retryConfig: policy({ strategy: 'fixed_delay', maxAttempts: 2, initialDelayMs: 100, retryableStatusCodes: [503], jitter: false }),
+        }));
+        expect(materialization.requestSignerApplied).toBe(true);
+
+        const out = await materialization.handlers.listPets({ query: { limit: 2 } }, {});
+        expect(out).toEqual({ status: 200, ok: true, body: [{ id: 1 }] });
+        expect(signed).toEqual(['GET https://petstore.example.com/pets?limit=2', 'GET https://petstore.example.com/pets?limit=2']);
+        expect(calls.map((c) => (c.init.headers as Record<string, string>).authorization)).toEqual(['SIG-1', 'SIG-2']);
+    });
+
+    it("a response that fails the scheme's verification fails the dispatch", async () => {
+        const { signer } = signerDouble({ async verifyResponse() { throw new Error('response signature does not verify'); } });
+        const { impl } = statusFetch([200]);
+        const { handlers } = await createOpenApiProviderFactory({ fetchImpl: impl })(ctx({
+            providerConfig: { spec: petstore },
+            requestSigner: signer,
+        }));
+        await expect(handlers.listPets({}, {})).rejects.toThrow(/does not verify/);
+    });
+
+    it('CONTROL: a static instance carries no signer acknowledgement and its credential is applied as before', async () => {
+        const { impl, calls } = statusFetch([200]);
+        const materialization = await createOpenApiProviderFactory({ fetchImpl: impl })(ctx({
+            providerConfig: { spec: petstore },
+            auth: { type: 'bearer', token: 'tok' },
+        }));
+        expect('requestSignerApplied' in materialization).toBe(false);
+        await materialization.handlers.listPets({}, {});
+        expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    });
+
+    it('refuses a static credential and a signer together', async () => {
+        const { signer } = signerDouble();
+        await expect(createOpenApiProviderFactory({})(ctx({
+            providerConfig: { spec: petstore },
+            auth: { type: 'bearer', token: 't' },
+            requestSigner: signer,
+        }))).rejects.toThrow(/authenticated one way/);
     });
 });

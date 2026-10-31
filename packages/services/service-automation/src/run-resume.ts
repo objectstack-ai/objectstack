@@ -23,9 +23,11 @@ import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
+import { noteTenantCurrencyReadFault } from './builtin/template.js';
+import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
-// `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`
-// and `applyResumeSignal`) are read only inside the function bodies, at call
+// `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`,
+// `applyResumeSignal` and `engineBuilt`) are read only inside the function bodies, at call
 // time, never while a module is evaluating, so the import cycle with
 // ./engine.js is safe under ESM live bindings; the tsup bundle is one file and
 // has no cycle.
@@ -37,6 +39,7 @@ import {
     isRetryableResumeRefusal,
     carriesSubflowChildOutput,
     applyResumeSignal,
+    engineBuilt,
     type AutomationEngine,
     type ChildRunRefusal,
     type ExecutionLogEntry,
@@ -74,6 +77,7 @@ export interface RunResumeHost {
     readonly resolveSuspendedNodeType: AutomationEngine['resolveSuspendedNodeType'];
     readonly resolveResumeAuthority: AutomationEngine['resolveResumeAuthority'];
     readonly resolveDeclaredResumeAuthority: AutomationEngine['resolveDeclaredResumeAuthority'];
+    readonly getRun: AutomationEngine['getRun'];
     readonly resolveCanonicalDescriptor: AutomationEngine['resolveCanonicalDescriptor'];
     readonly loadSuspendedRunStrict: AutomationEngine['loadSuspendedRunStrict'];
     readonly store: AutomationEngine['store'];
@@ -165,13 +169,15 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
     // every trigger type, like the identity above. A context that already
     // carries one (a `subflow` / `map` child, a resumed leg) keeps it. A failed
     // or empty read leaves it unset: such a hole then refuses by name, and no
-    // currency is guessed.
+    // currency is guessed. [#28056] A FAILED read (the resolver rejected) is
+    // noted beside this context, so that refusal is graded a runtime failure,
+    // not a guard refusal (`gradeAfterTenantCurrencyReadFault`).
     if (runContext.currency === undefined && this.tenantCurrencyResolver) {
         try {
             const currency = await this.tenantCurrencyResolver(runContext.tenantId);
             if (typeof currency === 'string' && currency !== '') runContext.currency = currency;
-        } catch {
-            // Tolerated, like the grants resolver: the hole's own refusal is the loud answer.
+        } catch (err) {
+            noteTenantCurrencyReadFault(runContext, err);
         }
     }
 
@@ -202,6 +208,11 @@ export async function seedRunGrants(
     const needsGrants = !Array.isArray(runContext.permissions);
     const needsPeers = runOrgUserIds(runContext) === undefined;
     const needsEmail = !runContext.email;
+    // A rung a door forwarded without grants (#28099) is never kept beside
+    // grants it was not derived from: the resolution below re-seeds the rung
+    // with the grants, and a run whose grants stay unresolved (the resolver
+    // throws, answers nothing, or is not wired) carries none.
+    if (needsGrants) delete (runContext as SeededRunContext).posture;
     if (
         runContext.runAs !== 'system' &&
         runContext.userId &&
@@ -215,6 +226,11 @@ export async function seedRunGrants(
                     runContext.positions = Array.isArray(grants.positions) ? grants.positions : [];
                     runContext.permissions = Array.isArray(grants.permissions) ? grants.permissions : [];
                     if (grants.tenantId && !runContext.tenantId) runContext.tenantId = grants.tenantId;
+                    // The rung the resolver derived from these same grants,
+                    // as the user's request carries it. Seeded with them and
+                    // only with them: carried grants keep the rung they came
+                    // with, so a narrowed ceiling never gains a wider rung.
+                    if (grants.posture) (runContext as SeededRunContext).posture = grants.posture;
                 }
                 if (needsPeers && Array.isArray(grants.org_user_ids)) {
                     (runContext as SeededRunContext).org_user_ids = grants.org_user_ids;
@@ -276,7 +292,9 @@ export async function resolveDecisionSegmentContext(
  * the persisted one carries none: a run parked before run setup seeded
  * `currency` would otherwise refuse a `{{ amount | currency }}` hole whose
  * remedy, the setting, is already in place. A copy, never the persisted
- * context; a failed or empty read leaves it as it was.
+ * context; an empty read leaves it as it was. [#28056] A failed read answers a
+ * copy noted as such, as at run setup: the note is this segment's, and the
+ * persisted context never carries it into a later resume.
  */
 async function withTenantCurrency(
     this: Pick<RunResumeHost, 'tenantCurrencyResolver'>,
@@ -286,8 +304,10 @@ async function withTenantCurrency(
     try {
         const currency = await this.tenantCurrencyResolver(context?.tenantId);
         if (typeof currency === 'string' && currency !== '') return { ...(context ?? {}), currency } as AutomationContext;
-    } catch {
-        // Tolerated, as at run setup: the hole's own refusal is the loud answer.
+    } catch (err) {
+        const noted = { ...(context ?? {}) } as AutomationContext;
+        noteTenantCurrencyReadFault(noted, err);
+        return noted;
     }
     return context;
 }
@@ -309,6 +329,10 @@ async function deciderSegmentContext(
     delete switched.positions;
     delete switched.permissions;
     delete switched.org_user_ids;
+    // The trigger user's rung is theirs: kept under the decider's id, a
+    // platform administrator's submission would hand a member's decision
+    // segment the deployment-level rows. Seeded for the decider below.
+    delete switched.posture;
     // The trigger user's email is theirs too: kept under the decider's id,
     // it would admit the decider to every row an email-keyed policy grants
     // the submitter. Removed on both postures, and seeded for the decider
@@ -372,8 +396,9 @@ export async function expandDeclaredLookups(this: Pick<RunResumeHost, 'recordExp
 
 /** The body of {@link AutomationEngine.resume}, moved unedited; that method's docblock is its contract. */
 export async function resume(this: Pick<RunResumeHost, 'refuseGatedResume' | 'resumeInternal'>, runId: string, signal?: ResumeSignal): Promise<AutomationResult> {
-    const refusal = await this.refuseGatedResume(runId, signal);
-    if (refusal) return refusal;
+    const gated = await this.refuseGatedResume(runId, signal);
+    if (gated && 'continueWith' in gated) return this.resumeInternal(runId, gated.continueWith, false);
+    if (gated) return gated;
     // An ABSENT signal is an EMPTY caller submission, never an exemption
     // (commit 7307191db). This is the in-process door, and `resume(runId)` used to
     // skip the screen contract that `resume(runId, {})` is held to:
@@ -404,8 +429,19 @@ export async function resume(this: Pick<RunResumeHost, 'refuseGatedResume' | 're
  */
 export const MAP_ITEM_PENDING_REFUSAL_CODE: NonNullable<AutomationResult['code']> = 'RESUME_CHILD_PENDING';
 
+/**
+ * [#27971] What the gate hands {@link resume} when a resume may go on past a
+ * `map` item whose run was cancelled: the signal to continue with, which tells
+ * that map to record the item as cancelled. Not a refusal, and not a plain
+ * pass either — the caller's own signal alone would advance the map past the
+ * item with nothing recorded.
+ */
+export interface GatedResumeContinuation {
+    readonly continueWith: ResumeSignal;
+}
+
 /** The body of {@link AutomationEngine.refuseGatedResume}; that method's docblock is its contract. */
-export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveSuspensionChain' | 'resolveSuspendedNodeType' | 'resolveResumeAuthority' | 'resolveDeclaredResumeAuthority' | 'logger'>, runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
+export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveSuspensionChain' | 'resolveSuspendedNodeType' | 'resolveResumeAuthority' | 'resolveDeclaredResumeAuthority' | 'getRun' | 'logger'>, runId: string, signal?: ResumeSignal): Promise<AutomationResult | GatedResumeContinuation | null> {
     const chain = await this.resolveSuspensionChain(runId);
     const run = chain[chain.length - 1];
     if (!run) return null;
@@ -417,7 +453,7 @@ export async function refuseGatedResume(this: Pick<RunResumeHost, 'resolveSuspen
     // The owning service's stamp IS the recorded decision's tail, not a way
     // around it.
     if (!nodeType || this.resolveResumeAuthority(nodeType) !== 'service' || signal?.[RESUME_AUTHORITY_SERVICE]) {
-        return refuseMapItemSkip.call(this, runId, chain);
+        return refuseMapItemSkip.call(this, runId, chain) ?? (await continuePastCancelledMapItem.call(this, runId, chain, nodeType, signal));
     }
 
     // Refusing. Which of the two reasons? A second registry walk, on the
@@ -493,6 +529,71 @@ function refuseMapItemSkip(this: Pick<RunResumeHost, 'logger'>, runId: string, c
         };
     }
     return null;
+}
+
+/**
+ * [#27971] The resume of a run whose deepest link is a `map:` one with no
+ * successor in `chain` — the map is parked on an item whose suspension row is
+ * gone. Re-running the map would advance it past that item, so what the item's
+ * run history says decides the answer:
+ *
+ *  - `cancelled` (an operator's `cancelRun`, which never touches the parent):
+ *    the map may go on, and the continuation tells it to record the item's
+ *    {@link MapItemCancelledMarker} in its slot;
+ *  - anything else — no history row, an unreadable store (`getRun` degrades to
+ *    `null`), a run that completed without bubbling, a consumed strand: the map
+ *    cannot record what happened to the item, so the resume is refused with
+ *    #27877's code before any state is touched.
+ *
+ * `null` when the chain ends anywhere but on such a link parked at the built-in
+ * `map` node (the one executor that reads the handoff; another type that mints
+ * a `map:` correlation records nothing from it), and when the caller's signal
+ * writes the engine's `$` namespace: that bag is refused `INVALID_SIGNAL` by
+ * `resumeInternal` with the run left parked, and folding it into an
+ * engine-built signal would exempt it from that guard.
+ */
+async function continuePastCancelledMapItem(
+    this: Pick<RunResumeHost, 'getRun' | 'logger'>,
+    runId: string,
+    chain: readonly SuspendedRun[],
+    nodeType: string | undefined,
+    signal?: ResumeSignal,
+): Promise<AutomationResult | GatedResumeContinuation | null> {
+    const link = chain[chain.length - 1]!;
+    if (nodeType !== 'map') return null;
+    if (typeof link.correlation !== 'string' || !link.correlation.startsWith('map:')) return null;
+    const itemRunId = link.correlation.slice('map:'.length);
+    if (!itemRunId) return null;
+
+    const item = await this.getRun(itemRunId);
+    if (item?.status !== 'cancelled') {
+        const at = link.runId === runId ? `'${link.nodeId}'` : `'${link.nodeId}' (linked run '${link.runId}')`;
+        const found = item ? `its run history records '${item.status}', not 'cancelled'` : 'no run history for it can be read';
+        this.logger.warn(
+            `[automation] refused resume of run '${runId}': parked on map node ${at}, whose item run ` +
+                `'${itemRunId}' is no longer suspended and ${found} — resuming here would advance the map past ` +
+                `that item with nothing recorded for it`,
+        );
+        return {
+            success: false,
+            code: MAP_ITEM_PENDING_REFUSAL_CODE,
+            error:
+                `Run '${runId}' is ${link.runId === runId ? '' : `waiting on run '${link.runId}', which is `}paused at ` +
+                `map node '${link.nodeId}' on item run '${itemRunId}', which is no longer suspended, and ${found}. ` +
+                `The map records an item only when it completes or when its run was cancelled, so resuming here ` +
+                `would advance the map past that item with nothing recorded for it. Nothing was changed. To end the ` +
+                `batch, cancel run '${link.runId}'${link.runId === runId ? '' : ` and run '${runId}', which waits on it`}; ` +
+                `if the run history store was unreachable, retry once it is readable`,
+        };
+    }
+
+    if (signal && applyResumeSignal(new Map(), signal, link.nodeId).length > 0) return null;
+    return {
+        continueWith: engineBuilt({
+            ...(signal ?? {}),
+            variables: { ...(signal?.variables ?? {}), [mapItemCancelledVariable(link.nodeId)]: itemRunId },
+        }),
+    };
 }
 
 /** The body of {@link AutomationEngine.refuseUndeclaredSuspension}, moved unedited; that method's docblock is its contract. */

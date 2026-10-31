@@ -38,7 +38,7 @@
  * `tryFind`'s `catch` — read that before changing anything on this path.
  */
 
-import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+import { AuthzStoreUnavailableError, isAuthzStoreUnavailableError } from './authz-store-unavailable.js';
 // [commit 6a180e42d, ruled 2026-08-30] `isMissingTableError` is the one "was this READ
 // failure just an unprovisioned table?" predicate. It was `@objectstack/metadata`'s
 // until this resolver needed it; metadata depends on core, so the ruling relocated
@@ -2216,14 +2216,17 @@ type LocalizationResult = {
   locale: string;
   currency?: string;
   /**
-   * Present only when the direct `sys_setting` read THREW (a backend fault),
-   * on a fresh read and on a memoized one alike: every value above is then the
-   * built-in default, not a stored answer. Absent, a missing `currency` means
-   * the read succeeded and the organization has no default, which is permanent
-   * until someone sets one; present, it means nothing was learned, and a caller
-   * that would refuse work for want of a default retries instead. A
-   * settings-service refusal never sets it (#11877), and it does not lengthen
-   * the failure memo. (#27257)
+   * Present only when the direct `sys_setting` read could not be answered
+   * because the store failed: the read itself THREW (a backend fault), on a
+   * fresh read and on a memoized one alike (#27257), or the `sys_organization`
+   * probe that decides whose rows it may read threw
+   * `AuthzStoreUnavailableError`, so it never ran (#27733). Every value above
+   * is then the built-in default, not a stored answer. Absent, a missing
+   * `currency` means the read succeeded and the organization has no default,
+   * which is permanent until someone sets one; present, it means nothing was
+   * learned, and a caller that would refuse work for want of a default retries
+   * instead. A settings-service refusal never sets it (#11877), and it does
+   * not lengthen the failure memo; a probe fault writes no memo at all.
    */
   readFailed?: true;
 };
@@ -2647,7 +2650,9 @@ function putLocalizationEntry(ql: object, key: string, entry: LocalizationCacheE
  * every request (#10221). A settings-service refusal is not a backend fault
  * and never populates that memo (#11877). Such an answer carries
  * `readFailed: true`, fresh and memoized alike, so a caller can tell "the read
- * failed" from "the read found no default" (#27257).
+ * failed" from "the read found no default" (#27257). So does an answer whose
+ * `sys_organization` probe failed and so read no row (#27733); that one is
+ * cached in neither memo, since it holds no value to keep.
  *
  * A SUCCESSFUL read is cached too, since #11966 (leg C of #11633) — but only
  * when the engine carries the write-epoch and middleware seams, and only until
@@ -2684,11 +2689,19 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
     }
   }
 
-  const { value: read, backendFailed } = await resolveLocalizationContextUncached(input);
+  const { value: read, backendFailed, probeFailed } = await resolveLocalizationContextUncached(input);
   // [#27257] The kind travels ON the answer, and the memo stores that same
   // answer, so a hit inside the failure TTL still says the read failed.
-  const value: LocalizationResult = backendFailed ? { ...read, readFailed: true } : read;
+  const value: LocalizationResult = backendFailed || probeFailed ? { ...read, readFailed: true } : read;
   if (!cacheable) return value;
+
+  if (probeFailed) {
+    // [#27733] No read ran, so there is no value to memoise: the next request
+    // asks again. Only the entry this answer superseded is dropped (no LIVE
+    // one was found above), so no earlier answer outlives it either.
+    localizationCache.get(ql)?.delete(cacheKey);
+    return value;
+  }
 
   if (backendFailed) {
     putLocalizationEntry(ql, cacheKey, {
@@ -2734,7 +2747,11 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
  *    ({@link resolveGuestOrganization}) under that same posture.
  *
  * A failed derivation reads nothing (`unowned`): no organization's row is read
- * on a guess, and the built-in defaults answer. This fallback is reached only
+ * on a guess, and the built-in defaults answer. When it failed because the
+ * store did (`AuthzStoreUnavailableError` from the `sys_organization` probe),
+ * `probeFailed` says so, and the answer carries `readFailed` (#27733); any
+ * other throw (an unreadable posture) is not transient and says nothing more.
+ * This fallback is reached only
  * when the settings service is absent or has just failed, so it takes no
  * inputs that service would supply.
  *
@@ -2742,24 +2759,29 @@ export async function resolveLocalizationContext(input: ResolveLocalizationInput
  * the one in force, and a failed derivation degraded where the service
  * propagates it — both make this fallback the stricter reader.
  */
-async function localizationFallbackReach(ql: any, organizationId: string | undefined): Promise<OrganizationReach> {
+async function localizationFallbackReach(
+  ql: any,
+  organizationId: string | undefined,
+): Promise<{ reach: OrganizationReach; probeFailed: boolean }> {
   try {
-    return await resolveOrganizationReach({
+    const reach = await resolveOrganizationReach({
       callerOrganizationId: organizationId,
       wallStands: () => postureEnforcesWall(resolveTenancyPosture()),
       deriveOrganization: () => resolveGuestOrganization(ql, resolveTenancyPosture()),
     });
-  } catch {
-    // The organization could not be derived (`AuthzStoreUnavailableError`):
-    // no organization's row is read on a guess. Not the direct read's own
-    // backend fault, so it does not populate the failure memo (#10221).
-    return UNOWNED_ORGANIZATION_REACH;
+    return { reach, probeFailed: false };
+  } catch (err) {
+    // The organization could not be derived: no organization's row is read on
+    // a guess. Not the direct read's own backend fault, so it does not
+    // populate the failure memo (#10221); a store fault is still a read that
+    // learned nothing (#27733).
+    return { reach: UNOWNED_ORGANIZATION_REACH, probeFailed: isAuthzStoreUnavailableError(err) };
   }
 }
 
 async function resolveLocalizationContextUncached(
   input: ResolveLocalizationInput,
-): Promise<{ value: LocalizationResult; backendFailed: boolean }> {
+): Promise<{ value: LocalizationResult; backendFailed: boolean; probeFailed: boolean }> {
   const { ql, settings, organizationId, userId } = input;
   // ONLY the direct `sys_setting` read below sets this. The settings-service
   // legs deliberately do not — see the cache doc above (#11877).
@@ -2816,7 +2838,7 @@ async function resolveLocalizationContextUncached(
       const locale = coerceLocale(localeRes?.value);
       const currency = coerceCurrency(currencyRes?.value);
       if (tz || locale || currency) {
-        return { value: { timezone: tz ?? 'UTC', locale: locale ?? 'en-US', currency }, backendFailed: false };
+        return { value: { timezone: tz ?? 'UTC', locale: locale ?? 'en-US', currency }, backendFailed: false, probeFailed: false };
       }
     }
   } catch {
@@ -2826,7 +2848,7 @@ async function resolveLocalizationContextUncached(
   // [ADR-0131 D8] The organization this read may draw on — the reach the
   // settings service itself reads with (#25226): never another organization's
   // row, and a row with no organization only where no organization can exist.
-  const reach = await localizationFallbackReach(ql, organizationId);
+  const { reach, probeFailed } = await localizationFallbackReach(ql, organizationId);
   // One read for all three keys instead of a query per key (`$in` on `key`).
   // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
   // as opposed to a legitimate empty result — is visible to the caller above,
@@ -2866,5 +2888,6 @@ async function resolveLocalizationContextUncached(
       currency: coerceCurrency(valueOf('currency')),
     },
     backendFailed,
+    probeFailed,
   };
 }

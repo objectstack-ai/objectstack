@@ -93,7 +93,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "言語",
-        help: "このユーザーへの通知に使用する優先言語。zh-CN や ja-JP のような言語タグで指定します。未設定の場合はデプロイのデフォルト言語が適用されます。"
+        help: "このユーザーの画面表示と通知に使用する言語。zh-CN や ja-JP のような言語タグで指定します。未設定の場合はデプロイのデフォルト言語が適用されます。"
       },
       manager_id: {
         label: "マネージャー",
@@ -146,6 +146,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -195,13 +196,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "ユーザーを作成しました",
-          description: "一時パスワードが生成された場合は今すぐコピーしてください。表示は一度きりで、保存されません。",
           acknowledge: "完了",
           fields: {
             "user.email": "メールアドレス",
             "user.phoneNumber": "電話番号",
             permissionSet: "権限セット",
-            temporaryPassword: "一時パスワード"
+            temporaryPassword: "一時パスワード：今すぐコピーしてください。表示は一度きりで、保存されません"
           }
         }
       },
@@ -222,10 +222,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         resultDialog: {
           title: "パスワードを更新しました",
-          description: "一時パスワードが生成された場合は今すぐコピーしてください。表示は一度きりで、保存されません。",
           acknowledge: "完了",
           fields: {
-            temporaryPassword: "一時パスワード"
+            temporaryPassword: "一時パスワード：今すぐコピーしてください。表示は一度きりで、保存されません"
           }
         }
       },
@@ -587,6 +586,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -678,6 +678,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -690,11 +691,25 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       add_member: {
         label: "メンバーを追加",
-        successMessage: "メンバーを追加しました"
+        successMessage: "メンバーを追加しました",
+        params: {
+          role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。"
+          }
+        }
       },
       update_member_role: {
         label: "ロールを変更",
-        successMessage: "メンバーロールを更新しました"
+        description: "${record.user_id?.name ?? 'このメンバー'} の新しい組織ロールを選択してください。",
+        successMessage: "メンバーロールを更新しました",
+        outcomeMessages: {
+          permission_set_granted: "メンバーのロールを更新しました。新しいロールにより権限セット ${result.grantedPermissionSet.label} も付与されました。"
+        },
+        params: {
+          role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。"
+          }
+        }
       },
       remove_member: {
         label: "メンバーを削除",
@@ -704,7 +719,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       transfer_ownership: {
         label: "所有者にする",
         confirmText: "選択したメンバーをこの組織の所有者にしますか？このメンバーには、組織の削除を含む所有者のすべての権限が付与されます。あなたも引き続き所有者です。退く場合は、自分のメンバーシップで「ロールを変更」を使用してください。",
-        successMessage: "メンバーが所有者になりました"
+        successMessage: "メンバーが所有者になりました",
+        outcomeMessages: {
+          permission_set_granted: "このメンバーはオーナーになりました。新しいロールにより権限セット ${result.grantedPermissionSet.label} も付与されました。"
+        }
       }
     }
   },
@@ -812,6 +830,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "所有者：組織を完全に管理でき、組織の削除もできます。\n管理者：メンバー、招待、チーム、組織の設定を管理します。\n委任管理者：ユーザーを招待し、管理者から委任された範囲にのみ配置できます。\nメンバー：権限セットで付与されたアクセス権で組織のアプリを利用します。\n外部メンバー：仕入先や顧客など組織外のユーザーで、共有されたものだけを閲覧できます。",
             options: {
               owner: "所有者",
               admin: "管理者",
@@ -829,6 +848,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "招待を再送",
+        description: "${record.email} に招待を再送しますか？有効期限は改めて始まります。",
         successMessage: "招待を再送しました",
         outcomeMessages: {
           sent: "${result.email} に招待を再送しました",

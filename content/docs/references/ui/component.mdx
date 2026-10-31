@@ -1882,6 +1882,7 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **statusField** | `string` | ✅ | Field name representing the current status/stage |
 | **stages** | `{ value: string; label: string \| Record<string, string>; terminal?: Enum<'won' \| 'lost'> }[]` | optional | Explicit stage definitions (if not using field metadata) |
+| **allowStageChange** | `boolean` | optional | Let the reader change the record's stage by pressing a stage on the path. Absent or `false`: the path is a read-only progress rail, as today. Each press asks for confirmation and saves `statusField` through the ordinary record update, so the object's state machine validation and the field's edit rights decide; stages appear pressable only to readers who may edit `statusField`, and a refused move is shown in place. |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 ### Nested Shape: `RecordPathProps.stages[number]`

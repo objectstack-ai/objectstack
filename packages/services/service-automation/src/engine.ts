@@ -165,6 +165,7 @@ import {
     forgetSuspendedRun,
     evictConsumedSuspension,
     takeSubflowParentStrand,
+    type GatedResumeContinuation,
 } from './run-resume.js';
 // [#25222] The dispatch and suspension claims' bodies: claiming, settling and
 // reading a dispatch, pruning the expired in-process claims, minting a run id,
@@ -802,6 +803,15 @@ export interface FlowUserGrants {
    * reads it drops out: the run sees less, never more.
    */
   email?: string;
+  /**
+   * The user's posture rung, derived from the grants above by the resolver a
+   * request's envelope is built through (`resolveUserAuthzGrants`' own field,
+   * under its own name). Run setup seeds it beside the positions and
+   * permission sets ({@link SeededRunContext.posture}). A resolver that omits
+   * it leaves the run without one, so every reader of the rung answers as for
+   * a principal below it: the run sees less, never more.
+   */
+  posture?: SeededRunContext['posture'];
 }
 
 /**
@@ -828,10 +838,16 @@ export type FlowUserGrantsResolver = (
  * `{{ amount | currency }}` hole with no argument formats in it. Injected by
  * the host — the automation plugin bridges it to `@objectstack/core`'s
  * `resolveLocalizationContext`, the read a request resolves
- * `ExecutionContext.currency` with. Returns `undefined` (or throws, tolerated)
- * when the organization has none; run setup then leaves
+ * `ExecutionContext.currency` with. Returns `undefined` when the read succeeded
+ * and the organization has none; run setup then leaves
  * {@link AutomationContext.currency} unset, and such a hole refuses the node by
- * name. When unwired, the same: nothing is guessed.
+ * name, a guard refusal. When unwired, the same: nothing is guessed.
+ *
+ * [#28056] Rejects when the read FAILED: it learned nothing, so it is never
+ * read as `undefined`. Run setup leaves `currency` unset and notes the failure
+ * for that run, and a hole that then refuses for want of a default fails its
+ * node as a runtime failure instead: a `fault` edge routes it, and the run can
+ * succeed once the read does (`gradeAfterTenantCurrencyReadFault`).
  */
 export type FlowTenantCurrencyResolver = (
   tenantId: string | undefined,
@@ -1532,7 +1548,7 @@ export function isRetryableResumeRefusal(code: AutomationResult['code']): boolea
 const ENGINE_BUILT_SIGNAL = Symbol('objectstack.automation.resume.engineBuilt');
 
 /** Tag a signal the engine constructed for its own continuation. */
-function engineBuilt(signal: ResumeSignal): ResumeSignal {
+export function engineBuilt(signal: ResumeSignal): ResumeSignal {
     return Object.assign(signal, { [ENGINE_BUILT_SIGNAL]: true });
 }
 
@@ -4988,8 +5004,24 @@ export class AutomationEngine implements IAutomationService {
      * The `FLOW_DISABLED` refusal MESSAGE, which is where the ledger-vs-status
      * distinction rides (ADR-0126 §7.2 reuses the CODE deliberately, so the
      * message is the only channel left).
+     *
+     * [#27966] The ledger sentence is written for the caller, in the shape
+     * the switched-off action refusal reads as (`describeTurnedOffPackagedItem`,
+     * `@objectstack/types`), so it names no table and no ADR. Those, with the
+     * code and the flow's name, go to the log line written here: both refusal
+     * exits ask for this message exactly when they refuse, so this is the one
+     * place every ledger refusal passes that holds the logger. It is `info`,
+     * not `warn`: the refusal is handed to the caller, and nothing is degraded
+     * (AGENTS.md "Degradation log levels").
      */
     private describeDisabledFlow(flowName: string): string {
+        if (this.flowLedgerDisabled.has(flowName)) {
+            this.logger.info(
+                `FLOW_DISABLED: packaged flow '${flowName}' refused — it is switched off in the activation ledger ` +
+                    '(sys_metadata_activation, ADR-0126 §7.2).',
+                { flow: flowName, refusal: 'FLOW_DISABLED' },
+            );
+        }
         // The body lives in ./subflow-guards.ts (#25222).
         const host: ThisParameterType<typeof describeDisabledFlow> = {
             flowLedgerDisabled: this.flowLedgerDisabled,
@@ -5655,7 +5687,8 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Seed a `runAs:'user'` run context's authorization facts — `positions`,
-     * `permissions`, the peer list `org_user_ids` and the user's `email` — for
+     * `permissions` with the posture rung derived from them, the peer list
+     * `org_user_ids` and the user's `email` — for
      * its `userId`, through the wired grants resolver: the one resolver the
      * request path seeds a request's envelope through
      * (`resolveUserAuthzGrants`, bridged by the automation plugin). Mutates
@@ -6435,6 +6468,13 @@ export class AutomationEngine implements IAutomationService {
      * still suspended answers a coded refusal naming that child's run id, and
      * nothing moves. Resuming the child is the door; the map continues when it
      * completes. See {@link refuseGatedResume}.
+     *
+     * **A cancelled item is recorded, never skipped (#27971).** When the item's
+     * run was cancelled (`cancelRun`, which leaves the parent parked), resuming
+     * the map's run advances it and the item keeps its slot in the results as
+     * `{ $status: 'cancelled', $itemRunId }`, outside `count`. An item whose
+     * suspension is gone WITHOUT a `cancelled` history row is refused with the
+     * same code: the map has nothing true to record for it.
      */
     resume(runId: string, signal?: ResumeSignal): Promise<AutomationResult> {
         // The body lives in ./run-resume.ts (#25222).
@@ -6471,7 +6511,10 @@ export class AutomationEngine implements IAutomationService {
      * Authority is judged first, so a service-owned item keeps its 403; an item
      * open to this route is refused with a coded 409 naming the child run id to
      * resume instead, before any state is touched. A `subflow` link is not a
-     * skip — the signal is delegated to the child — and is unchanged.
+     * skip — the signal is delegated to the child — and is unchanged. A map
+     * whose item row is gone answers by that item's run history (#27971):
+     * `cancelled` hands {@link resume} a continuation that records the item's
+     * marker; anything else is refused with the same code.
      *
      * **An UNDECLARED node type is refused, not deferred** (#5561 step two). It
      * used to be let through on the schema default's inherited `'any'`; a pause
@@ -6485,13 +6528,14 @@ export class AutomationEngine implements IAutomationService {
      * never declared — the failure mode this whole issue is about, restated as a
      * log line.
      */
-    private refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | null> {
+    private refuseGatedResume(runId: string, signal?: ResumeSignal): Promise<AutomationResult | GatedResumeContinuation | null> {
         // The body lives in ./run-resume.ts (#25222).
         const host: ThisParameterType<typeof refuseGatedResume> = {
             resolveSuspensionChain: (...a) => this.resolveSuspensionChain(...a),
             resolveSuspendedNodeType: (...a) => this.resolveSuspendedNodeType(...a),
             resolveResumeAuthority: (...a) => this.resolveResumeAuthority(...a),
             resolveDeclaredResumeAuthority: (...a) => this.resolveDeclaredResumeAuthority(...a),
+            getRun: (...a) => this.getRun(...a),
             logger: this.logger,
         };
         return refuseGatedResume.call(host, runId, signal);
@@ -6687,10 +6731,12 @@ export class AutomationEngine implements IAutomationService {
      * and each `map:` link with a successor is an item still parked under it
      * (#27877). Empty when nothing is suspended under that id; stops at the
      * last resolvable link when a child row is gone (that run is where
-     * `resumeInternal` will continue).
+     * `resumeInternal` will continue). The caller's own id is seen before the
+     * walk starts, so a corrupt correlation cycle back to it ends the chain
+     * there instead of listing the caller's run again as its own child.
      */
     private async resolveSuspensionChain(runId: string): Promise<SuspendedRun[]> {
-        const seen = new Set<string>();
+        const seen = new Set<string>([runId]);
         const chain: SuspendedRun[] = [];
         let run = await this.loadSuspendedRun(runId);
         for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {
@@ -6826,6 +6872,37 @@ export class AutomationEngine implements IAutomationService {
         if (!run) return undefined;
         const target = resolveResumeTarget(this.flows, runId, run);
         return 'cause' in target ? target.cause : undefined;
+    }
+
+    /**
+     * [#28230] The run parked at a `map` node on `itemRunId`, read through the
+     * item's own linkage: the `$parentRunId` / `$parentMapNode` the `map` node
+     * launched it with, then the parent's suspension by that id. Two keyed
+     * reads, never a listing — {@link listSuspendedRunsDurable} reads one
+     * capped page of a DB-backed store, so past 1000 parked runs a parent
+     * another process parked may not be on it.
+     *
+     * Answers the parent only while it is parked on `map:<itemRunId>` at the
+     * node the item names, and `undefined` otherwise: no suspension under
+     * `itemRunId`, an item no `map` launched, a parent that is gone or has
+     * moved on. Read it BEFORE {@link cancelRun}, which removes the item's
+     * suspension and with it the linkage.
+     *
+     * Read-only. THROWS when the store cannot be read, as
+     * {@link hasSuspendedRun} does: an outage means "unknown", never "no
+     * parent".
+     */
+    async suspendedMapParentOf(
+        itemRunId: string,
+    ): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined> {
+        const item = await this.loadSuspendedRunStrict(itemRunId);
+        const ctx = item?.context as Record<string, unknown> | undefined;
+        const parentRunId = ctx?.$parentRunId;
+        const mapNode = ctx?.$parentMapNode;
+        if (typeof parentRunId !== 'string' || !parentRunId) return undefined;
+        const parent = await this.loadSuspendedRunStrict(parentRunId);
+        if (!parent || parent.nodeId !== mapNode || parent.correlation !== `map:${itemRunId}`) return undefined;
+        return { runId: parent.runId, flowName: parent.flowName, nodeId: parent.nodeId, correlation: parent.correlation };
     }
 
     /**
@@ -9027,12 +9104,10 @@ export class AutomationEngine implements IAutomationService {
      * `assignments`
      * through `builtin/value-slot-map.ts`, the one per-slot resolver
      * (`resolveValueSlotMap`, `resolveValueSlot`, `resolveCollectionSlot`).
-     * One slot reaches it undeclared: a `connector_action`'s
-     * `connectorConfig.input` map (#27327), evaluated through the same
-     * resolver. The ledger addresses only `node.config`, and `connectorConfig`
-     * is a sibling block, so registration does not judge an envelope there
-     * yet — a malformed one registers and faults at run time — until #27968
-     * declares it.
+     * So does a `connector_action`'s `connectorConfig.input` map (#27327),
+     * evaluated through the same resolver — the one entry the ledger roots in
+     * a sibling block rather than `config` (#27968), so registration judges an
+     * envelope there like every other.
      * The two legacy
      * `assignment` shapes the executor still normalizes (the
      * `assignments: [{ variable, value }]` array and the bare

@@ -155,6 +155,7 @@ export const en: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'HTTP Deliveries' },
         nav_datasources: { label: 'Datasources' },
+        nav_connector_credentials: { label: 'Connector Credentials' },
 
         // Advanced
         //

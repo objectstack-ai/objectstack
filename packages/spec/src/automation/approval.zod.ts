@@ -97,15 +97,22 @@ export const ApproverType = z.enum([
   // ⛔ Tracker ids stay out of the string itself — it reaches authors and
   // generated surfaces, neither of whom can resolve one (`check:doc-authoring`
   // Rule 3).
+  //
+  // The string is also the help line under the approver Type column in the
+  // Studio flow inspector, which shows about two lines before "Learn more".
+  // So the first sentence is for the admin choosing a type, in business words
+  // (no column names, no enum literals); the pointer follows it. The column
+  // the `manager` rung reads is the submitter's `sys_user.manager_id`, which is
+  // not a profile field an author edits — "until an administrator records each
+  // user's manager" is that fact in the admin's words.
   .describe(
-    'Approval step approver type. `manager` is resolved from the directory rather than configured ' +
-    "here: it reads the submitter's `sys_user.manager_id` at runtime, and that column is not a " +
-    'profile field an author edits, so until an operator populates it, a manager step resolves to ' +
-    "nobody and the request falls to the node's `onEmptyApprovers` policy. `os lint` reports that at " +
-    'authoring time as `approval-approvers-may-resolve-empty`, and ' +
-    '`os explain approval-approvers-may-resolve-empty` carries the graded population routes and the ' +
-    'full remedy, the node-level `onEmptyApprovers` fallback included; the Approvals guide states the ' +
-    'same remedy in prose.',
+    'How this step finds its approvers. Prefer a role in the organization (manager, position, ' +
+    'department, team) over one named person, who may leave or not exist in another environment. ' +
+    "A manager step only finds someone once an administrator has recorded each user's manager in the " +
+    "user directory; until then it finds nobody and the request follows the node's `onEmptyApprovers` " +
+    'policy. `os lint` reports that at authoring time as `approval-approvers-may-resolve-empty`, and ' +
+    '`os explain approval-approvers-may-resolve-empty` carries the ways to fill the directory in and ' +
+    'the full remedy; the Approvals guide states the same remedy in prose.',
   );
 export type ApproverType = z.input<typeof ApproverType>;
 
@@ -538,9 +545,15 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
   // `expression` is intentionally ABSENT from the map: an unmapped type keeps
   // the value as free text, so the designer renders a plain input for the CEL
   // source until a dedicated expression editor lands (objectui follow-up).
+  //
+  // The description is the Value column's help in the Studio inspector: the
+  // first sentence says what to pick in the admin's words; the CEL roots an
+  // expression may read follow it, because an author writing one needs them.
   value: z.string().optional().meta({
-    description: 'User id / membership tier / position / team / department / field / queue name — per `type`; '
-      + 'for `expression`, a CEL expression over `current.*` / `trigger.*` / `vars.*`',
+    description: 'Who exactly, for the chosen type: the user, membership tier, position, team, department '
+      + 'or queue, or the record field that holds the approver. Leave it empty for a manager step. For an '
+      + 'expression step, write the CEL expression that returns the approvers; it may read `current.*`, '
+      + '`trigger.*` and `vars.*`.',
     xRef: {
       kindFrom: 'type',
       objectSource: '$trigger',
@@ -578,7 +591,10 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
    * sign-off per returned department), keyed by that value.
    */
   resolveAs: z.enum(['user', 'department', 'position', 'team']).optional()
-    .describe("How an `expression` result is expanded into approvers (default 'user')"),
+    .describe(
+      "Expression steps only: what the expression's results name. By default each result is a person; "
+      + 'choose departments, positions or teams to make all their members approvers.',
+    ),
   /**
    * Optional group label (#3266). With `behavior: 'per_group'`, approvers that
    * share a label form one group and the node advances only once EACH group has
@@ -586,7 +602,11 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
    * by other behaviors. Approvers without a label each form their own group
    * (keyed by position), so a plain per-approver list still behaves sensibly.
    */
-  group: z.string().optional().describe('Group label for per_group sign-off (e.g. "legal", "finance")'),
+  group: z.string().optional().describe(
+    'Group name for one-from-each-group sign-off: approvers with the same name form one group, and the '
+    + 'step needs approval from every group (e.g. "legal", "finance"). Read only when approvers combine '
+    + 'per group.',
+  ),
   /**
    * [ADR-0105 D9] Which organization's directory this approver is resolved
    * AGAINST. Default (omitted): the request's own organization — today's
@@ -615,11 +635,17 @@ export const ApprovalNodeApproverSchema = lazySchema(() => strictObject(
    * under the `group` tenancy posture; elsewhere the runtime refuses rather
    * than silently ignoring, so a posture migration cannot quietly reroute
    * approvals.
+   *
+   * The description below is the Organization column's help in the Studio
+   * inspector, so it opens with what the setting does to the request, in the
+   * admin's words; the decision id lives here, never in that string.
    */
   organization: z.string().optional().meta({
     description:
-      'ADR-0105 D9 — organization whose directory resolves this approver: `$root` (group org), '
-      + '`$parent` (one level up), or an organization slug. Omitted = the request\'s own organization.',
+      "Look this approver up in another organization of the same group instead of the request's own, "
+      + 'for example a group CFO approving a plant\'s purchase order. Leave it empty to use the request\'s '
+      + 'organization. Write `$root` for the top of the group, `$parent` for one level up, or an '
+      + "organization's slug.",
     xRef: { kind: 'organization', symbols: [...APPROVER_ORG_SYMBOLS] },
   }),
 }));
@@ -642,7 +668,9 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
   },
   {
   /** The output key — what the flow receives as `<nodeId>.<key>`. */
-  key: z.string().min(1).describe('Output key (the flow variable name under the node id)'),
+  key: z.string().min(1).describe(
+    "Name of the answer the approver fills in; later steps read it as a flow variable under this step's id",
+  ),
   /** Display label for the decision-dialog field; defaults to a title-cased key. */
   label: z.string().optional().describe('Field label in the decision dialog'),
   /**
@@ -659,11 +687,12 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
    */
   type: z.enum(['text', 'user', 'department', 'position', 'team']).optional()
     .describe(
-      "Decision-dialog input widget (default 'text'). The user, department and team pickers commit "
-      + 'record ids; the position picker commits position machine names',
+      'What the approver answers with: free text (the default), or a picker of users, departments, '
+      + 'positions or teams. The user, department and team pickers store record ids; the position picker '
+      + 'stores position machine names',
     ),
   /** Collect an array of what the picker commits instead of a single value (multi-select picker). */
-  multiple: z.boolean().optional().describe('Collect multiple values (an array of what the picker commits)'),
+  multiple: z.boolean().optional().describe('Let the approver pick more than one value (stored as a list)'),
   /**
    * The approver must supply this output to APPROVE (objectui#2955).
    *
@@ -679,7 +708,7 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
    * the rejection. Outputs are still accepted on a reject if the approver
    * filled them in.
    */
-  required: z.boolean().optional().describe('Approver must supply this output to approve'),
+  required: z.boolean().optional().describe('The approver must fill this in to approve; a rejection never needs it'),
 }));
 export type DecisionOutputDef = z.input<typeof DecisionOutputDefSchema>;
 
@@ -780,7 +809,10 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
   // off — which is what the sweep, its behaviour tests and every teaching
   // surface have always meant. Declared in DEFAULT_CHANGES_BY_MAJOR (17) and
   // the `approval-escalation-enabled-default-flip` semantic migration entry.
-  enabled: z.boolean().default(true).describe('SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all'),
+  // Engineer reading of the string below: an escalation block carrying
+  // `timeoutHours` is live unless `enabled` is explicitly false; the
+  // feature-level switch is whether the block exists at all.
+  enabled: z.boolean().default(true).describe("Turns this step's deadline on or off. It is on by default once a deadline is set: switch it off to keep the settings without acting on them, or remove the escalation to drop the deadline altogether"),
   /**
    * Wall-clock SLA. The approvals service adds `timeoutHours` to the request's
    * `created_at` as elapsed milliseconds (hours × 3_600_000), so the deadline
@@ -791,9 +823,9 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
    * exists because only one clock exists: a key with a single legal value would
    * be declared-but-inert (ADR-0049).
    */
-  timeoutHours: z.number().min(1).describe('Calendar (wall-clock) hours before escalation triggers — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with timeoutHours 4 escalates at 21:00 that same Friday'),
+  timeoutHours: z.number().min(1).describe('How many hours a request may wait before the escalation runs. These are calendar (wall-clock) hours — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with 4 hours escalates at 21:00 that same Friday'),
   action: z.enum(['reassign', 'auto_approve', 'auto_reject', 'notify']).default('notify')
-    .describe('Action on escalation timeout'),
+    .describe('What happens when the deadline passes: hand the request to someone else, approve it, reject it, or notify someone (the default)'),
   // Escalation hands the request to a position (the common case — e.g. an
   // approvals supervisor); the Studio designer renders a position picker, but
   // free text is still accepted for a specific user id. The engine expands a
@@ -804,11 +836,12 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
   // (DEAD_ESCALATION_TARGET_PREFIXES); whether the rest resolve is runtime state.
   escalateTo: z.string().superRefine(checkEscalationTargetShape).optional().meta({
     description:
-      "User id, email, position machine name or 'position:<name>' to escalate to. A 'team:', "
+      'Who takes over or is notified when the deadline passes: usually a position, or a specific person. '
+      + "Write a position machine name or 'position:<name>', a user id or an email. A 'team:', "
       + "'department:', 'org_membership_level:' or 'role:' address is refused: no approver acts under one",
     xRef: { kind: 'position' },
   }),
-  notifySubmitter: z.boolean().default(true).describe('Notify the original submitter on escalation'),
+  notifySubmitter: z.boolean().default(true).describe('Tell the person who submitted the request when it escalates'),
 }));
 export type ApprovalEscalation = z.input<typeof ApprovalEscalationSchema>;
 /** Post-parse shape of {@link ApprovalEscalation} — defaults applied, transforms run (ADR-0122). */
@@ -989,7 +1022,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
   },
   {
   /** Who may act on this step. */
-  approvers: z.array(ApprovalNodeApproverSchema).min(1).describe('Allowed approvers for this node'),
+  approvers: z.array(ApprovalNodeApproverSchema).min(1).describe('Who can approve this step'),
 
   /**
    * Segregation of duties: keep the request's submitter off the slate this
@@ -1028,16 +1061,20 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * record is the `liveness/flow.json` `_note` (the ledger walk ends at
    * `flow/nodes.config`, a record of `unknown`, so no row can carry a
    * node-config key).
+   *
+   * - **The description.** It is the field help in the Studio flow
+   *   inspector, which shows about two lines before "Learn more", so its first
+   *   sentence says what the switch does to the request in the admin's words.
+   *   The submitter column (`submitter_id`) and the route names stay in this
+   *   JSDoc; the description names only the sibling key and the one refused
+   *   policy an author has to edit.
    */
   excludeSubmitter: z.boolean().optional().describe(
-    'Segregation of duties for this step: when true, the request\'s submitter '
-    + '(the user whose action started the flow run, recorded on the approval request as `submitter_id`) is '
-    + 'removed from the slate `approvers` resolves to, whatever approver type produced them. If that leaves '
-    + 'nobody, the request takes the node\'s `onEmptyApprovers` route (`admin_rescue` by default, or '
-    + '`fallbackApprovers` under `\'fallback\'`) and never passes silently, and the approval record shows that '
-    + 'the exclusion changed the route. `onEmptyApprovers: \'auto_approve\'` is refused beside '
-    + '`excludeSubmitter: true`, because it would approve exactly the request this option exists to stop; '
-    + 'choose `\'admin_rescue\'`, `\'fail\'` or `\'fallback\'`. Omitted or false (the default), the slate stays as resolved.',
+    'Stops people approving their own requests: when on, whoever submitted the request is taken off this '
+    + "step's approvers, whichever way they were found. If that leaves no one, the request goes where the "
+    + "step's `onEmptyApprovers` policy sends it (the organization's administrators by default, or the backup "
+    + 'approvers you name) and is never approved automatically; the approval record notes the reason. '
+    + "So `'auto_approve'` cannot be chosen alongside this option. Off by default: the approvers stay as found.",
   ),
 
   /**
@@ -1052,7 +1089,10 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * (objectstack-ai/cloud#861), not here.
    */
   behavior: z.enum(['first_response', 'unanimous', 'quorum', 'per_group']).default('first_response')
-    .describe('How to combine multiple approvers'),
+    .describe(
+      'How several approvers decide: the first answer wins (the default), everyone must approve, a minimum '
+      + 'number must approve, or one from each group must approve. Any single rejection rejects the step',
+    ),
 
   /**
    * Threshold for `quorum` (total approvals required, M of N) and `per_group`
@@ -1063,12 +1103,12 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    */
   minApprovals: z.number().int().min(1).optional()
     .describe(
-      'Approvals required — total (quorum) or per group (per_group). '
-      + 'Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group',
+      'How many approvals this step needs: in total when a minimum number must approve, or from each group '
+      + 'when one from each group signs off. Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group',
     ),
 
   /** Lock the triggering record from edits while this node is pending. */
-  lockRecord: z.boolean().default(true).describe('Lock the record from editing while pending'),
+  lockRecord: z.boolean().default(true).describe('Stop anyone editing the record while it waits for this approval'),
 
   /**
    * Field on the business object to mirror the request status onto
@@ -1082,7 +1122,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
     // trigger object (the record this approval acts on). A single `.meta()`
     // carries both description and the annotation so neither is dropped.
     .meta({
-      description: 'Business-object field to mirror request status onto',
+      description: 'A field on the record that shows where its approval stands (pending, approved, rejected or recalled); make it read-only',
       xRef: { kind: 'object-field', objectSource: '$trigger' },
     }),
 
@@ -1122,9 +1162,11 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    */
   onEmptyApprovers: z.enum(['admin_rescue', 'fail', 'auto_approve', 'fallback']).default('admin_rescue')
     .describe(
-      'Behavior when no concrete approver resolves at node entry — '
-      + "'admin_rescue' (default) opens the request on the organization's administrators; "
-      + "'fallback' opens it on fallbackApprovers instead, naming who decides",
+      'What happens when this step finds no one to approve: by default the organization\'s administrators '
+      + 'decide; you can instead name backup approvers, fail the step, or approve it automatically. '
+      + "'admin_rescue' (default) opens the request on the administrators; 'fallback' opens it on "
+      + "fallbackApprovers instead, naming who decides; 'fail' fails the step; 'auto_approve' approves it "
+      + 'with no one deciding',
     ),
 
   /**
@@ -1144,7 +1186,9 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * `{ type: 'org_membership_level', value: 'owner' }`.
    */
   fallbackApprovers: z.array(ApprovalNodeApproverSchema).min(1).optional()
-    .describe("Approvers the request opens on when onEmptyApprovers is 'fallback'"),
+    .describe(
+      "Backup approvers who decide when this step finds no one else. Read only when onEmptyApprovers is 'fallback'",
+    ),
 
   /**
    * #3447 P2: keys a decision may carry as structured outputs
@@ -1172,10 +1216,13 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
     z.string(),
     DecisionOutputDefSchema,
   ])).optional()
-    .describe('Author-declared decision outputs — bare keys or typed { key, type, multiple } declarations'),
+    .describe(
+      "Extra answers the approver gives with the decision, such as who approves a later step; later steps read "
+      + 'them. Each entry is a plain name (a text box) or { key, type, multiple } to show a picker',
+    ),
 
   /** Optional per-node SLA escalation. */
-  escalation: ApprovalEscalationSchema.optional().describe('Per-node SLA escalation'),
+  escalation: ApprovalEscalationSchema.optional().describe('A deadline for this step, and what happens when it passes'),
 
   /**
    * ADR-0044: maximum send-backs-for-revision per (run, node). A send-back
@@ -1185,7 +1232,7 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * auto-rejects). Only meaningful when the node has a `revise` out-edge.
    */
   maxRevisions: z.number().int().min(0).default(3)
-    .describe('Max send-backs for revision before auto-reject (0 = send-back disabled)'),
+    .describe('How many times a request can be sent back for changes before it is rejected automatically (0 turns send-back off)'),
 }).superRefine(checkFallbackApproversPairing).superRefine(checkExcludeSubmitterPolicyPairing));
 export type ApprovalNodeConfig = z.input<typeof ApprovalNodeConfigSchema>;
 /** Post-parse shape of {@link ApprovalNodeConfig} — defaults applied, transforms run (ADR-0122). */

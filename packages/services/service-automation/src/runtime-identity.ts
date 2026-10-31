@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
+import { AuthzPostureSchema, type AuthzPosture } from '@objectstack/spec/security';
 import { markGuardRefusal } from './guard-refusal.js';
 
 /**
@@ -80,6 +81,16 @@ export interface RunIdentityContext {
    * run, whose `isSystem` short-circuit precedes every policy.
    */
   email?: string;
+  /**
+   * The acting user's posture rung (ADR-0095 D2/D3), the kernel
+   * `ExecutionContext.posture`: what the readers keyed on the rung read, the
+   * ledger's deployment-level rows among them (`PLATFORM_ADMIN` alone is
+   * served those). Present on a `runAs:'user'` run whose setup seeded it
+   * ({@link runPosture}); without it every such reader answers as for a
+   * principal below the rung, which narrows. Never set on a `runAs:'system'`
+   * run, whose `isSystem` short-circuit precedes every reader of it.
+   */
+  posture?: AuthzPosture;
   /** Acting user's tenant/org id. */
   tenantId?: string;
   /**
@@ -179,6 +190,18 @@ export interface RunDataContext extends RunIdentityContext {
 export interface SeededRunContext extends AutomationContext {
   org_user_ids?: string[];
   /**
+   * The acting user's posture rung, as the same resolver derives it for the
+   * same user's request (`resolveUserAuthzGrants`, which
+   * `resolveAuthzContext` copies onto a request's `ExecutionContext.posture`).
+   * Seeded with the positions and permission sets it was derived from, and
+   * only with them: a context that carries its own grants (a door's resolved
+   * envelope, an agent's narrowed ceiling) gets no rung from a re-resolution,
+   * so a rung never stands beside grants it was not derived from. It rides
+   * the run context as `org_user_ids` does, and the decision switch removes
+   * it with the rest of the trigger user's facts.
+   */
+  posture?: AuthzPosture;
+  /**
    * Who TRIGGERED the run, recorded when a human decision moved the run's
    * acting identity (`userId`) to the decider (ruling A on `FlowSchema.runAs`;
    * `AutomationEngine.resolveDecisionSegmentContext` is the only writer).
@@ -217,6 +240,17 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
 }
 
 /**
+ * The posture rung run setup seeded on `context` ({@link SeededRunContext}),
+ * or `undefined` when there is none or it names no rung. `undefined` is never
+ * filled in: every reader of the rung then answers as for a principal below
+ * it, which narrows (fail closed).
+ */
+export function runPosture(context: AutomationContext | undefined): AuthzPosture | undefined {
+  const parsed = AuthzPostureSchema.safeParse((context as SeededRunContext | undefined)?.posture);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
  * Translate a flow run's {@link AutomationContext} into the ObjectQL `context`
  * its CRUD nodes must pass, honoring `runAs` (ADR-0049 / #1888):
  *
@@ -248,7 +282,7 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *    empty: the actor label + `flowRunId` are its provenance, and ADR-0118 D1
  *    forbids inventing a sentinel or pseudo-user in its place.
  *  - `runAs:'user'` (default) → the triggering user's identity
- *    (`{ userId, positions, permissions, org_user_ids?, email?, tenantId? }`), so the
+ *    (`{ userId, positions, permissions, org_user_ids?, email?, posture?, tenantId? }`), so the
  *    security middleware enforces that user's row-level security. The run can
  *    never exceed the triggering user's grants. Empty `positions` falls back to
  *    the platform's baseline permission set, exactly like a fresh member's own
@@ -258,7 +292,10 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
  *    it, every policy that reads it drops out. `email` is the user's, run setup
  *    seeded or the trigger carried ({@link AutomationContext.email}): with it,
  *    an owner policy on `current_user.email` admits the rows it admits for the
- *    same user's request; without it, that policy drops out.
+ *    same user's request; without it, that policy drops out. `posture` is the
+ *    rung run setup seeded ({@link runPosture}): with it, a reader keyed on the
+ *    rung answers as for the same user's request; without it, as for a
+ *    principal below the rung.
  *  - neither (an effective `runAs:'user'` run with no trigger user) → **throws**
  *    {@link UnscopedRunDataAccessError} (#3760). This used to return a
  *    provenance-only envelope and let the run proceed UNSCOPED — the #1888
@@ -371,6 +408,8 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   const orgUserIds = runOrgUserIds(context);
   if (orgUserIds) out.org_user_ids = orgUserIds;
   if (context.email) out.email = context.email;
+  const posture = runPosture(context);
+  if (posture) out.posture = posture;
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   if (locale) out.locale = locale;

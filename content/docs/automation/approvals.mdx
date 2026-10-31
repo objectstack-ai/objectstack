@@ -735,7 +735,11 @@ flow's `revise` edge. The submitter reworks the record and `resubmit`s (a fresh
 round opens for all approvers) or `recall`s (abandons it). Past the node's
 `maxRevisions` budget (default 3) a send-back **auto-rejects** instead. The
 flow's approval node must declare a `revise` edge, and that edge must target an
-`approval_revise` node, for send-back to be available.
+`approval_revise` node, for send-back to be available. A recall from the revise
+window cancels the run; when that run is an item of a batch sign-off (a `map`
+over approval items), the recall also wakes the batch, which records the item's
+slot as the cancelled marker `{ $status: 'cancelled', $itemRunId }` and moves on
+to its next item or its end.
 
 The window is deliberately **not** an ordinary `wait`: `resubmit` is what
 authorizes (submitter-only), orders (latest round) and records (an audit row) the

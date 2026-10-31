@@ -2248,6 +2248,91 @@ function refuseDishonestReferenceDeletedWhen(
   }
 }
 
+/** Field types whose stored value the engine computes, so a filled value never stands. */
+const LOOKUP_AUTOFILL_COMPUTED_TYPES: ReadonlySet<string> = new Set(['formula', 'summary', 'autonumber']);
+
+/**
+ * [#27945] Each `lookupAutofill` pair's `target` names a field of THIS object
+ * that an author writes: a pick fills it on the form, and the form saves it as
+ * an ordinary write. A target the write path drops or recomputes would show a
+ * value the save then loses, and a target named twice would have two writers
+ * on one pick — each parses and fills nothing that lasts (ADR-0049 declared =
+ * enforced).
+ *
+ * Refused, one located issue per offending pair at
+ * `['fields', <field>, 'lookupAutofill', <i>, 'target']`, when the target:
+ *
+ *  - is the declaring lookup itself (a pick already writes it);
+ *  - names no declared field of this object;
+ *  - is `readonly: true` (a non-system write drops it from the payload);
+ *  - is computed — `formula`, `summary`, `autonumber`, or a stored field with
+ *    an `expression` (the engine writes it, so a client value never stands);
+ *  - is named by an earlier pair of the same field.
+ *
+ * Judged here, in the object's `superRefine` beside
+ * {@link refuseDishonestReferenceDeletedWhen}: `FieldSchema` sees one field at
+ * a time and refuses only the half it can see (the key off a single-value
+ * relationship). The SOURCE half needs the referenced object, which only the
+ * stack holds — `collectLookupAutofillErrors` in `stack.zod.ts`. Judged at
+ * parse, so every door — `defineStack`, a raw `.parse()`, the save door —
+ * refuses it; the key is new, so no metadata at rest carries it.
+ */
+function refuseDishonestLookupAutofill(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const fieldMap = fields as Record<string, unknown>;
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const pairs = (fieldDef as { lookupAutofill?: unknown } | null)?.lookupAutofill;
+    if (!Array.isArray(pairs)) continue;
+    const seen = new Set<string>();
+    pairs.forEach((pair: unknown, i: number) => {
+      const target = (pair as { target?: unknown } | null)?.target;
+      if (typeof target !== 'string') return;
+      const path = ['fields', fieldName, 'lookupAutofill', i, 'target'];
+      const where = `Field \`${fieldName}\` on object \`${objectName}\` declares \`lookupAutofill[${i}].target: '${target}'\``;
+      const prescription =
+        '`lookupAutofill[].target` must name a field of this object, other than the lookup itself, that an '
+        + 'author writes — not `readonly`, not computed — and each target once.';
+      const refuse = (reason: string): void => {
+        ctx.addIssue({ code: 'custom', path, message: `${where}, ${reason} ${prescription}` });
+      };
+      if (target === fieldName) {
+        refuse('which is the lookup itself: a pick already writes the picked id there.');
+        return;
+      }
+      if (!Object.prototype.hasOwnProperty.call(fieldMap, target)) {
+        refuse(`but the object declares no field \`${target}\`.`);
+        return;
+      }
+      const targetDef = fieldMap[target] as
+        | { type?: unknown; readonly?: unknown; expression?: unknown }
+        | null
+        | undefined;
+      if (typeof targetDef?.type === 'string' && LOOKUP_AUTOFILL_COMPUTED_TYPES.has(targetDef.type)) {
+        refuse(`a \`${targetDef.type}\` field: the engine computes its value, so a filled value never stands.`);
+        return;
+      }
+      if (targetDef?.expression !== undefined) {
+        refuse('a field computed from its `expression` on every write, so a filled value never stands.');
+        return;
+      }
+      if (targetDef?.readonly === true) {
+        refuse('a `readonly` field: a non-system write drops it from the payload, so the filled value is never saved.');
+        return;
+      }
+      if (seen.has(target)) {
+        refuse('a target an earlier pair of this field already fills: one pick would write it twice.');
+        return;
+      }
+      seen.add(target);
+    });
+  }
+}
+
 /**
  * [#23809, maintainer ruling on the card: 「同意」] The field an object's
  * `stageField` names declares a `kind` on EVERY option — `open`, `won` or
@@ -2387,8 +2472,8 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * `@objectstack/formula`, the pair `os build` / `os validate` run, and no other
  * field-existence check. A block is on `record` only where `record` is a row
  * the declaring service SERVED, so the validator reads this key only at those
- * sites: an action's `visible` and `disabled` predicates (`SERVED_ROW_SITES`
- * in `@objectstack/lint`). There each declared block name joins the names
+ * sites: an action's `visible`, `disabled` and `pressed` predicates
+ * (`SERVED_ROW_SITES` in `@objectstack/lint`). There each declared block name joins the names
  * `record.<x>` may resolve to, and `@objectstack/formula`'s field-existence
  * pass judges the SECOND segment of `record.<block>.<leaf>` against the
  * block's declared leaves, under its existing `unknown-field` refusal — so
@@ -3808,6 +3893,9 @@ const ObjectSchemaBase = strictObject(
   // predicate names a declared single-value `select` sibling and one of its
   // options — the same door: only the object holds the sibling map.
   refuseDishonestReferenceDeletedWhen(object.name, object.fields, ctx);
+  // [#27945] Each `lookupAutofill` target is a writable field of this object,
+  // named once — the same door: only the object holds the field map.
+  refuseDishonestLookupAutofill(object.name, object.fields, ctx);
   // [#23809] Every option of the field `stageField` names declares its
   // lifecycle `kind` — the same door: only the object knows which field is
   // its stage.

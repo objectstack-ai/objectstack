@@ -221,6 +221,32 @@ describe('DefaultLoginPage — the "Sign up" link follows the audience posture (
   });
 });
 
+describe('DefaultLoginPage — an invitee without the link is told to open it (objectstack#27521 row 11)', () => {
+  const HINT = en.login.invitationLinkHint;
+
+  it('under invite_only on a deployment with an owner, says so under the form', async () => {
+    renderAt('/login', configFor('invite_only'));
+    await loginConfigApplied();
+    expect(await screen.findByText(HINT)).toBeInTheDocument();
+    expect(screen.queryByRole('link', SIGN_UP_LINK)).toBeNull();
+  });
+
+  it('is not drawn where a sign-up is offered, for an invitation redirect, or with sign-up off', async () => {
+    for (const [path, config, hasOwner] of [
+      ['/login', configFor('open'), true],
+      ['/login', configFor('invite_only'), false],
+      [`/login${INVITE_QUERY}`, configFor('invite_only'), true],
+      ['/login', configFor('invite_only', SIGN_UP_OFF), true],
+    ] as const) {
+      renderAt(path, config, { hasOwner });
+      await loginConfigApplied();
+      await settle();
+      expect(screen.queryByText(HINT), `${path} ${JSON.stringify(config.features)} owner=${hasOwner}`).toBeNull();
+      cleanup();
+    }
+  });
+});
+
 describe('DefaultRegisterPage — explains invitation-only registration before the form (objectui#11705)', () => {
   it('under invite_only without an invitation, explains instead of rendering the form', async () => {
     renderAt('/register', configFor('invite_only'));

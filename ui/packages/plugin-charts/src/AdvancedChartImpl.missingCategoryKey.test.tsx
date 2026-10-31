@@ -100,7 +100,8 @@ describe('AdvancedChartImpl — unreadable-data guard (framework#4033)', () => {
 
     expect(container.querySelector('[data-chart-error="missing-category-key"]')).toBeNull();
     expect(container.querySelector('svg')).not.toBeNull();
-    expect(container.textContent).toContain('2026-01');
+    // The month bucket key draws its display face (objectstack#27520).
+    expect(container.textContent).toContain('Jan 2026');
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });

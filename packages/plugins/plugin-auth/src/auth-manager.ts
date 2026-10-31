@@ -58,6 +58,7 @@ import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
+import { roleChangeGrantDepsFor, type RoleChangeGrantDeps } from './role-change-granted-set.js';
 import { isExternalMembershipRole } from './external-membership.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
@@ -1701,6 +1702,7 @@ export class AuthManager {
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
       resolvePasswordChangeUserId: (...a) => this.resolvePasswordChangeUserId(...a),
       resolvePasswordHasher: (...a) => this.resolvePasswordHasher(...a),
+      roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
       sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       signUpForcedOff: (...a) => this.signUpForcedOff(...a),
@@ -4782,6 +4784,16 @@ export class AuthManager {
       },
       isExternalRole: isExternalMembershipRole,
     };
+  }
+
+  /**
+   * [#27862] The reads the role-change hooks make to name the set a role change
+   * granted, bound to this manager's engine under the system read context. With
+   * no engine there is nothing to read, so no answer names a set.
+   */
+  private roleChangeGrantDeps(): RoleChangeGrantDeps | undefined {
+    const engine = this.config.dataEngine;
+    return engine ? roleChangeGrantDepsFor(engine, withSystemReadContext(engine) as any) : undefined;
   }
 
   private resolveActor(

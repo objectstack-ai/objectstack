@@ -148,8 +148,8 @@ import { useHomeInbox } from '../useHomeInbox';
  * channel; the 10 s measured in the header above is the cadence of its day.
  */
 const INBOX_POLL_MS = 60_000;
-/** The declared backgrounded cadence (`HIDDEN_POLL_MS`). */
-const HIDDEN_POLL_MS = 60_000;
+/** The declared backgrounded cadence (`HIDDEN_POLL_MS`), 3 minutes since objectstack#28084. */
+const HIDDEN_POLL_MS = 180_000;
 /** The measurement window both counting cases use. */
 const WINDOW_MS = 60_000;
 /**
@@ -266,7 +266,8 @@ describe('objectui#7249 — the inbox feed holds ONE declared cadence', () => {
   });
 
   it('throttles to HIDDEN_POLL_MS while the tab is backgrounded', async () => {
-    // The hidden cadence measured on the real page (1 pair per 60 s), pinned so
+    // The hidden cadence (1 pair per HIDDEN_POLL_MS; 60 s when measured on the
+    // real page, 3 minutes since objectstack#28084), pinned so
     // a future change cannot let a backgrounded tab poll at the foreground rate
     // — the regression #4225 explicitly refused to let ride along.
     setHidden(true);

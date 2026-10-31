@@ -260,7 +260,8 @@ export const OrdersPullJob = defineJob({
   [Data sync is defined on the target](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/docs/SYNC_ARCHITECTURE.md#data-sync-is-defined-on-the-target)
   for the watermark and the one-response limit.
 - **How a run is recorded.** A pull the platform refuses — the mapping is gone,
-  the connector is degraded, the upstream answered `ok: false` — rejects, so the
+  the connector is degraded, the input breaks the read action's declared
+  `inputSchema`, the upstream answered `ok: false` — rejects, so the
   run is `failed` and the `retryPolicy` applies. A pull whose rows the import
   runner refused completes as `degraded`, with the counts as its reason; retrying
   would refuse the same rows. Otherwise the run is `success`, including a pull

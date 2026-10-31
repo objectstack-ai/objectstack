@@ -578,8 +578,43 @@ async function readRecordLock(objectName: string, recordId: string): Promise<{ l
   }
 }
 
+/**
+ * What the record page's ONE read answered for this record's approvals
+ * (objectstack#27627): the request rows, the pending one already enriched by
+ * `getRequest`, and the record lock (`null` when the deployment answers no
+ * lock). A refused part rejects with the refusal's `status`, as `fetchJson`
+ * throws a refused read.
+ */
+export interface SeededRecordApprovals {
+  requests: ApprovalRequestLite[];
+  lock: { locked: boolean } | null;
+}
+
+/**
+ * Hand the record's approvals read to the payload the record page asked
+ * before any consumer mounted (objectstack#27627): it becomes the read on the
+ * wire for this record, which every consumer that mounts while it is out
+ * joins, and its answer is published exactly as a read's. A read already on
+ * the wire for the record is left as it is. `refresh()` still reads.
+ */
+export function seedRecordApprovals(
+  objectName: string,
+  recordId: string,
+  answer: Promise<SeededRecordApprovals>,
+): void {
+  const key = JSON.stringify([objectName, recordId]);
+  if (inFlight.has(key)) return;
+  void startRead(key, objectName, recordId, true, answer);
+}
+
 /** Send the record's read and publish its answer to every consumer of the key. */
-function startRead(key: string, objectName: string, recordId: string, readsLock: boolean): Promise<void> {
+function startRead(
+  key: string,
+  objectName: string,
+  recordId: string,
+  readsLock: boolean,
+  seeded?: Promise<SeededRecordApprovals>,
+): Promise<void> {
   const seq = ++readSeq;
   latestSeq.set(key, seq);
   const entry = entries.get(key);
@@ -587,6 +622,23 @@ function startRead(key: string, objectName: string, recordId: string, readsLock:
   publish(key, { loading: true });
   const promise = (async () => {
     try {
+      if (seeded) {
+        // The payload asked the list, the pending row's `getRequest` and the
+        // lock as one read; the rows come enriched and the lock is answered
+        // whether or not a pending row decides it, so it is read as below.
+        const answer = await seeded;
+        const rows = answer.requests ?? [];
+        const pending = rows.find((r) => r.status === 'pending');
+        if (!answer.lock) recordLockAbsent = true;
+        if (latestSeq.get(key) !== seq) return;
+        publish(key, {
+          rows,
+          available: true,
+          answered: true,
+          recordLock: !pending && answer.lock ? { locked: answer.lock.locked === true } : null,
+        });
+        return;
+      }
       const reqResp = await fetchJson<{ data: ApprovalRequestLite[] }>(
         `/approvals/requests?object=${encodeURIComponent(objectName)}&recordId=${encodeURIComponent(recordId)}`,
       );

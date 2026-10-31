@@ -437,6 +437,14 @@ import { isWritablePackage, resolveAppPackageIdKey, shouldDropStorage, uninstall
 import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
+// [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
+import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress } from './protocol-environment-rows.js';
+// [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
+import { foldStoredCollection } from './protocol-stored-collection-fold.js';
+// [#25467 cut 35] The environment-wide package uninstall verb.
+import { deletePackage } from './protocol-package-uninstall.js';
+// [#25467 cut 35] The unmanaged import: the names it would collide with, and the rollback of a failed one.
+import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-unmanaged-import.js';
 // [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 
@@ -1313,7 +1321,7 @@ function withoutProtectionBlock(type: string, item: unknown): unknown {
  * at most five named) and its package-less row. The receipt names them
  * instead of claiming the item gone or back at its artifact default.
  */
-function remainingRowsPhrase(packageIds: readonly string[], unbound: boolean, noun: 'row' | 'draft'): string {
+export function remainingRowsPhrase(packageIds: readonly string[], unbound: boolean, noun: 'row' | 'draft'): string {
     const parts: string[] = [];
     if (packageIds.length > 0) {
         const shown = packageIds.slice(0, 5).map((id) => `'${id}'`).join(', ');
@@ -2836,7 +2844,7 @@ interface StoredRowPlace {
  * It decides content only. The lock is selected separately, from every row in
  * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
  */
-function servedOverlayRowCandidates(address: {
+export function servedOverlayRowCandidates(address: {
     /**
      * [#23715] `null` addresses the package-unbound row alone: the strict
      * draft read naming no package, at the draft its `version` names
@@ -2980,7 +2988,7 @@ export function servedViewExpansion<E extends { packageId: string | undefined }>
  * @param unseated [#21817] The scoped list's record of stand-ins no
  *        contribution has seated yet (see the stand-in bullet above).
  */
-function mergePackageAwareOverlay(
+export function mergePackageAwareOverlay(
     type: string,
     baseItems: unknown[],
     records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
@@ -4228,7 +4236,7 @@ export function metadataStoreUnavailableError(cause: unknown): Error {
  * either builds the refusal INSTEAD of the 503, or leaves the 503 exactly as
  * it was.
  */
-function metadataReadFailureError(cause: unknown): Error {
+export function metadataReadFailureError(cause: unknown): Error {
     // {@link declaredUserMessage} is THE read — "never with an inline `typeof`
     // probe" is that function's own instruction, and it is why a blank or
     // non-string `userMessage` is not a declaration here either.
@@ -5178,18 +5186,28 @@ export interface StoredMetadataSearchSchema {
  *   string or an array) — naming one is refused, `INVALID_FIELD` / 400, the
  *   evaluate refusals' envelope, under the caller's wire spelling of the slot
  *   (`wireSpelling`, the door's; the bare canonical name when absent);
+ * - [#28120] an explicit list that names NO field — an empty array, a blank or
+ *   comma-only string, an array with no string entry — is not "names none": it
+ *   is passed through untouched, for the engine's own refusal to answer
+ *   (`400 VALIDATION_ERROR` for an empty one, #27732; `400 INVALID_FIELD` for
+ *   one naming no searchable field). Narrowing it here wrote a non-empty set
+ *   back over the caller's list, so an override the door and the engine both
+ *   refuse was served. The door never reaches this with one: its ingress gate
+ *   refuses it first;
  * - a search that names none is NARROWED: the object's resolved searchable set
  *   ({@link resolveSearchFieldResolution}) minus those columns is returned, for
  *   the caller to run as `searchFields` — the engine intersects an override
  *   with that set and never widens it;
  * - a set that narrows to nothing is refused rather than returned empty: an
- *   empty override is ABSENT to the engine, which would then scan the whole
- *   default set, these columns included.
+ *   empty override is refused by the engine as one naming no field, a
+ *   caller's mistake this caller did not make, so the family's own refusal
+ *   names the cause instead.
  *
  * Returns `undefined` when the query runs as it is — an object outside the
- * family, no search, an explicit list that passes, or no readable field map
- * (the engine has none to expand a search over either; the same rule the door's
- * field gates apply: a non-object, array or empty `fields`). Throws the refusal.
+ * family, no search, an explicit list that passes or names no field, or no
+ * readable field map (the engine has none to expand a search over either; the
+ * same rule the door's field gates apply: a non-object, array or empty
+ * `fields`). Throws the refusal.
  */
 export function narrowStoredMetadataSearch(
     object: string,
@@ -5214,6 +5232,8 @@ export function narrowStoredMetadataSearch(
         if (refusal) throw refusal;
         return undefined;
     }
+    // [#28120] A list naming no field is the engine's to refuse, never narrowed.
+    if (typeof explicit === 'string' || Array.isArray(explicit)) return undefined;
     if (search == null) return undefined;
     const fields = schema?.fields;
     if (!fields || typeof fields !== 'object' || Array.isArray(fields) || Object.keys(fields).length === 0) {
@@ -5473,7 +5493,8 @@ function collectCompositeKeyHeadHits(
 /**
  * Phase 3a-destructive: detect changes between an existing object schema
  * and an incoming overlay that would break runtime data — removed fields,
- * field type narrowing, required toggled on without a default. Returned
+ * field type narrowing, required toggled on without a default, a stored
+ * amount switched to `currencyMode: 'record'` (rows left codeless). Returned
  * issues are surfaced as HTTP 409 `destructive_change` unless the caller
  * sets `force: true`, letting the admin UI render a warning dialog before
  * proceeding.
@@ -5593,6 +5614,36 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
                 code: 'field_required_no_default',
                 field: fname,
                 message: `Field '${fname}' is now required but has no default value — existing rows with null values may fail validation.`,
+            });
+        }
+        // [ADR-0144, ruling 6492000994] An existing amount switched to
+        // `currencyMode: 'record'` — the sibling of `field_required_no_default`:
+        // a one-word config edit that leaves every stored row owing a value.
+        // The rows already stored hold an amount and no code; the switch is
+        // allowed (the write guard refuses such a row only when a write
+        // touches the pair), so this finding acknowledges it and names the
+        // explicit backfill. Like its siblings it reads no row: whether the
+        // table holds any is not this gate's to judge, and a finding over an
+        // empty table costs one `force`. Judged by what the STORED side holds,
+        // so a previously unstored field (a formula) raises nothing.
+        if (
+            nextField?.type === 'currency'
+            && nextField.currencyConfig?.currencyMode === 'record'
+            && prevField.currencyConfig?.currencyMode !== 'record'
+            && isStored(prevField)
+        ) {
+            const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
+            const codeField = typeof nextField.currencyConfig.currencyField === 'string'
+                ? `'${nextField.currencyConfig.currencyField}'`
+                : 'its currency code field';
+            issues.push({
+                code: 'currency_mode_to_record',
+                field: fname,
+                message: `Field '${fname}' switched to currencyMode 'record' — rows already stored with an amount and a blank ${codeField} `
+                    + 'display as a plain number, fall into the null group of a grouped aggregate, and sit outside every '
+                    + 'currency-paired filter until they hold a code; once saved, write it with '
+                    + `\`os migrate record-currency-codes --object ${objectName} --field ${fname} --code <ISO 4217 code>\``
+                    + ' (a dry run; add --apply to write).',
             });
         }
     }
@@ -7406,101 +7457,15 @@ export class ObjectStackProtocolImplementation implements
         singularType: string,
         pluralType: string,
     ): Promise<unknown[]> {
-        if (typeof this.engine?.find !== 'function') return registered;
-        let rows: Record<string, unknown>[];
-        try {
-            // [ADR-0131 D6] The environment's rows only: a legacy
-            // organization-scoped row is refused at boot, never read
-            // (the v18 boot refusal, ADR-0131 D10 item 5).
-            const read = async (type: string): Promise<Record<string, unknown>[]> => {
-                // [#21911] The explicit system opt-in — see findServedOverlayRow.
-                const rs = await this.findEnvironmentRows('sys_metadata', {
-                    where: { type, state: 'active' },
-                    context: { isSystem: true },
-                });
-                return (rs ?? []) as Record<string, unknown>[];
-            };
-            // The same singular/plural retry the registry half and
-            // `getMetaItems` both perform: rows written through a plural
-            // URL spelling are stored under it.
-            rows = await read(singularType);
-            if (rows.length === 0) rows = await read(pluralType);
-        } catch (error) {
-            if (!isMissingTableError(error, 'sys_metadata')) {
-                console.warn(
-                    `[Protocol] the runtime authoring gate could not read stored '${singularType}' `
-                    + `metadata: ${(error as { message?: string } | null)?.message ?? String(error)}. `
-                    + `This write is NOT blocked, and nothing it saves is at risk — but the gate is `
-                    + `judging references against the SchemaRegistry alone for this write, so a `
-                    + `reference to a runtime-authored ${singularType} may be refused as unknown.`,
-                );
-            }
-            return registered;
-        }
-        if (rows.length === 0) return registered;
-
-        // Every readable row, in the shape {@link mergePackageAwareOverlay}
-        // consumes: the converted body plus the row's own package provenance.
-        // Reading a row is the only thing that can fail here, so it is the only
-        // thing this loop does.
-        const overlays: Array<{ data: unknown; packageId: string | undefined }> = [];
-        for (const row of rows) {
-            const name = row.name;
-            if (typeof name !== 'string') continue;
-            let body: unknown;
-            try {
-                const raw = row.metadata;
-                body = this.convertStoredItem(
-                    singularType,
-                    typeof raw === 'string' ? JSON.parse(raw) : raw,
-                );
-            } catch (error) {
-                // One unreadable row must not cost the other rows their place
-                // in the universe — but it is said out loud, because dropping
-                // it silently is the same manufactured phantom as above, one
-                // name narrower.
-                console.warn(
-                    `[Protocol] stored ${singularType}/${name} could not be read into the runtime `
-                    + `authoring gate's resolution context: `
-                    + `${(error as { message?: string } | null)?.message ?? String(error)}. `
-                    + `References to it may be refused as unknown until the row is re-saved.`,
-                );
-                continue;
-            }
-            if (!body || typeof body !== 'object') continue;
-            overlays.push({
-                data: body,
-                packageId: typeof row.package_id === 'string' ? row.package_id : undefined,
-            });
-        }
-        if (overlays.length === 0) return registered;
-
-        // [#16224] The read API's OWN merge, with the read API's own transform
-        // — not a second implementation of it. `mergePackageAwareOverlay` keys
-        // by ADR-0048 package slot rather than by bare name, so an overlay
-        // shadows the entry it actually overrides and two installed packages
-        // shipping one `type/name` are still two entries; the transform is the
-        // #8027 fold that keeps a winning `object` body at its RESOLVED shape.
-        // Together they are the two lines {@link getMetaItems} runs, which is
-        // the point: the gate's universe is now the same universe the platform
-        // answers `GET /meta/:type` from, by construction rather than by
-        // agreement.
-        const merged = mergePackageAwareOverlay(singularType, registered, overlays, (data) =>
-            this.foldObjectExtendersFromRegistry(
-                singularType, (data as { name?: unknown } | null)?.name, data,
-            ),
-        );
-
-        // A registry entry with no `name` is not addressable by any reference,
-        // so the merge above has no slot for it and drops it. It is carried
-        // through anyway: the rules that judge a collection's own coherence
-        // (`measure-aggregate-incoherent` and its siblings) walk the list by
-        // index and would lose a finding, and this method's contract is that
-        // the universe GROWS. Empty in every ordinary deployment.
-        const unaddressable = registered.filter(
-            (item) => !(item && typeof item === 'object' && 'name' in item),
-        );
-        return unaddressable.length > 0 ? [...merged, ...unaddressable] : merged;
+        // [#25467 cut 35] The body moved to `protocol-stored-collection-fold.ts` (see `StoredCollectionFoldHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof foldStoredCollection> = {
+            convertStoredItem: (...a) => this.convertStoredItem(...a),
+            get engine() { return readEngine(); },
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            foldObjectExtendersFromRegistry: (...a) => this.foldObjectExtendersFromRegistry(...a),
+        };
+        return foldStoredCollection.call(host, registered, singularType, pluralType);
     }
 
     /**
@@ -10238,18 +10203,14 @@ export class ObjectStackProtocolImplementation implements
      * refuses a legacy commit by name; each reads the column itself.
      */
     private async findEnvironmentRows(table: string, query: { where: Record<string, unknown>; context?: unknown; [key: string]: unknown }): Promise<any[]> {
-        const rows = (await this.engine.find(table, query as never)) as any[] | null | undefined;
-        if (query.limit === undefined && query.offset === undefined) {
-            return this.withoutLegacyOrganizationRows(table, rows, query.context);
-        }
-        // An offset counts rows before the page, so any legacy row can shift
-        // it; a limit alone, only one the page itself holds.
-        if ((!rows || rows.length === 0) && query.offset === undefined) return rows ?? [];
-        const legacy = await this.legacyOrganizationRowsOf(table, query.context);
-        if (legacy.size === 0) return rows ?? [];
-        if (query.offset === undefined && !(rows ?? []).some((row) => legacy.has(String(row?.id)))) return rows ?? [];
-        const where = { $and: [query.where, { id: { $nin: [...legacy.keys()] } }] };
-        return ((await this.engine.find(table, { ...query, where } as never)) as any[] | null | undefined) ?? [];
+        // [#25467 cut 35] The body moved to `protocol-environment-rows.ts` (see `EnvironmentRowsHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof findEnvironmentRows> = {
+            get engine() { return readEngine(); },
+            legacyOrganizationRowsOf: (...a) => this.legacyOrganizationRowsOf(...a),
+            withoutLegacyOrganizationRows: (...a) => this.withoutLegacyOrganizationRows(...a),
+        };
+        return findEnvironmentRows.call(host, table, query);
     }
 
     /**
@@ -10259,12 +10220,13 @@ export class ObjectStackProtocolImplementation implements
      * (`null` when there is none).
      */
     private async findEnvironmentRow(table: string, query: { where: Record<string, unknown>; context?: unknown; [key: string]: unknown }): Promise<any> {
-        const row = await this.engine.findOne(table, query as never);
-        if (!row) return row ?? null;
-        const legacy = await this.legacyOrganizationRowsOf(table, query.context);
-        if (!legacy.has(String((row as { id?: unknown }).id))) return row;
-        const rows = (await this.engine.find(table, query as never)) as any[] | null | undefined;
-        return (rows ?? []).find((r) => !legacy.has(String(r?.id))) ?? null;
+        // [#25467 cut 35] The body moved to `protocol-environment-rows.ts` (see `EnvironmentRowsHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof findEnvironmentRow> = {
+            get engine() { return readEngine(); },
+            legacyOrganizationRowsOf: (...a) => this.legacyOrganizationRowsOf(...a),
+        };
+        return findEnvironmentRow.call(host, table, query);
     }
 
     private async withoutLegacyOrganizationRows<R>(table: string, rows: R[] | null | undefined, context?: unknown): Promise<R[]> {
@@ -10476,35 +10438,11 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
         member?: string;
     }, activeRows?: readonly StoredOverlayRow[]): Promise<{ row: any } | undefined> {
-        // [#21804] The order is {@link servedOverlayRowCandidates}, the one
-        // the list's merge takes over the rows it read: the canonical
-        // spelling then the other, and within each, the package's
-        // own row then the package-less row (never another package's, or a
-        // collision would serve package B's customization for a package A
-        // read); with no package context (legacy/runtime reader), any row.
-        const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-        for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId })) {
-            const type = candidate.spelling === 'canonical' ? args.type : other;
-            if (type === undefined) continue;
-            const where: Record<string, unknown> = {
-                type, name: args.name, state: args.state,
-                // [#22877] A by-name read of a bundled type answers the member
-                // its selector named, else its CANONICAL member, as the
-                // registry's bare-name read does; nothing for every other type.
-                ...overlayMemberWhere(type, args.member),
-            };
-            if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
-            // [#21911, ADR-0096] The explicit system opt-in: a platform store
-            // read, which no caller's grants scope — the door that asked
-            // already authorized the caller, and the protocol scopes the row
-            // itself ({@link findEnvironmentRow}: the environment's rows only).
-            // It no longer reaches the data engine as a principal-less context.
-            const row = activeRows !== undefined && args.state === 'active'
-                ? activeRows.find((stored) => rowMatchesOverlayWhere(stored, where))
-                : await this.findEnvironmentRow('sys_metadata', { where, context: { isSystem: true } });
-            if (row) return { row };
-        }
-        return undefined;
+        // [#25467 cut 35] The body moved to `protocol-environment-rows.ts` (see `EnvironmentRowsHost`).
+        const host: ThisParameterType<typeof findServedOverlayRow> = {
+            findEnvironmentRow: (...a) => this.findEnvironmentRow(...a),
+        };
+        return findServedOverlayRow.call(host, args, activeRows);
     }
 
     /**
@@ -13798,9 +13736,24 @@ export class ObjectStackProtocolImplementation implements
         // — the engine reports them through the write's own options, so a
         // nested write a hook makes inside this one never adds to them.
         const warnings: ValidationAdvisoryEvent[] = [];
+        // [#27703] The mentioned users the mention recipient gate withheld on
+        // THIS write, answered as `withheldMentions` to this request alone: the
+        // mention writer reads the listener off its `after*` hook's
+        // `ctx.input.options`, which is this bag, so neither a nested write
+        // nor any other request's answer ever carries them, and nothing is
+        // stored on the comment.
+        const withheldMentions = new Set<string>();
+        // [#28000] The one message a hook on THIS write set to tell the
+        // requester what the save set in motion, answered as `notice`. The hook
+        // reads the listener off `ctx.input.options`, which is this bag, so a
+        // nested write's hook never reaches it; a later call replaces an
+        // earlier one, and anything but a non-empty string sets nothing.
+        let notice: string | undefined;
         const opts: any = {
             onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
             onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
+            onMentionsWithheld: (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); },
+            onNotice: (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; },
         };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.insert(request.object, request.data, opts);
@@ -13818,6 +13771,8 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
+            ...(notice !== undefined ? { notice } : {}),
         };
     }
 
@@ -13966,6 +13921,13 @@ export class ObjectStackProtocolImplementation implements
         // (see `createData`).
         const warnings: ValidationAdvisoryEvent[] = [];
         opts.onValidationAdvisory = (e: ValidationAdvisoryEvent) => { warnings.push(e); };
+        // [#27703] The mentions this update ADDED that the gate withheld,
+        // answered as `withheldMentions` (see `createData`).
+        const withheldMentions = new Set<string>();
+        opts.onMentionsWithheld = (ids: readonly string[]) => { for (const id of ids) withheldMentions.add(id); };
+        // [#28000] The hook-set message answered as `notice` (see `createData`).
+        let notice: string | undefined;
+        opts.onNotice = (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; };
         // [#6479] At THIS ingress the row is the one the caller named — `request.id`,
         // the path `:id` — and nothing in the payload gets to move it.
         //
@@ -14042,6 +14004,8 @@ export class ObjectStackProtocolImplementation implements
             record: result,
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
+            ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
+            ...(notice !== undefined ? { notice } : {}),
         };
     }
 
@@ -17218,26 +17182,12 @@ export class ObjectStackProtocolImplementation implements
         /** [#24371] The item's active rows as {@link readItemActiveRows} read them: selected from, not read again. */
         activeRows?: readonly StoredOverlayRow[],
     ): Promise<{ packageId: string | null; candidates: readonly string[]; unbound: boolean }> {
-        let rows: Array<{ package_id?: unknown }> | null | undefined;
-        const where = { type, name, state, ...overlayMemberWhere(type, member) };
-        try {
-            // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            rows = activeRows !== undefined && state === 'active'
-                ? activeRows.filter((row) => rowMatchesOverlayWhere(row, where))
-                : await this.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } });
-        } catch (error) {
-            // [#5532] An unprovisioned store holds no row, so no binding; any
-            // other failure is a read that did not happen, never "no binding".
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        const bindings = new Set<string>();
-        let unbound = false;
-        for (const row of rows ?? []) {
-            if (typeof row?.package_id === 'string' && row.package_id !== '') bindings.add(row.package_id);
-            else unbound = true;
-        }
-        const candidates = [...bindings].sort();
-        return { packageId: candidates.length === 1 ? candidates[0] ?? null : null, candidates, unbound };
+        // [#25467 cut 35] The body moved to `protocol-environment-rows.ts` (see `EnvironmentRowsHost`).
+        const host: ThisParameterType<typeof packagelessAddress> = {
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return packagelessAddress.call(host, type, name, member, state, activeRows);
     }
 
     /**
@@ -24912,306 +24862,19 @@ export class ObjectStackProtocolImplementation implements
      *  7. the uninstall cleanups — each refusal is reported in `cleanups[]`.
      */
     async deletePackage(request: DeletePackageRequest): Promise<DeletePackageResponse> {
-        // [ADR-0131 D6/D12] An uninstall is environment-wide by construction:
-        // every `sys_metadata` row bound to the package, in this environment,
-        // whatever organization a legacy row was stored under. The
-        // `organizationId` / `allTenants` request keys that once chose between
-        // one organization's rows and every organization's (#7780) name
-        // nothing now, and retire: a request still carrying either is refused
-        // whole, before anything is read, rather than read past — the caller
-        // believes the key still scopes something. Who may uninstall is the
-        // package door's operator gate, not a request key.
-        for (const retired of ['organizationId', 'allTenants'] as const) {
-            if (Object.prototype.hasOwnProperty.call(request, retired)) {
-                const err = new Error(
-                    `Refusing to uninstall '${request.packageId}': the '${retired}' request key is retired. `
-                    + `An uninstall is environment-wide — it removes every row bound to the package in this `
-                    + `environment — so no organization scope is stated or confirmed. Retry without '${retired}'. `
-                    + `See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.`
-                );
-                (err as any).code = 'INVALID_REQUEST';
-                (err as any).status = 400;
-                throw err;
-            }
-        }
-        const where: Record<string, unknown> = { package_id: request.packageId };
-        // [#8136] This read is the uninstall's FIRST database touch, and until
-        // now it sat outside every `try` in this method — the per-item `catch`
-        // below wraps only the `deleteMetaItem` loop. So a driver failure here
-        // propagated whole, out of the protocol and onto the wire: measured as
-        // `500 INTERNAL_ERROR / "SQLITE_ERROR: no such table: sys_metadata"`
-        // from `DELETE /api/v1/packages/:id`, a physical table name shipped to
-        // a client.
-        //
-        // Declared rather than swallowed: {@link metadataStoreUnavailableError}
-        // is this file's EXISTING answer for "a `sys_metadata` read failed" —
-        // 503 / `SERVICE_UNAVAILABLE`, a message that quotes nothing, and the
-        // driver error carried on `cause` so the operator still gets it whole.
-        // Reusing it rather than minting a second sentence for one condition is
-        // the point; see its docblock for why the verdict is 503.
-        //
-        // ⛔ Deliberately NOT routed through {@link
-        // rethrowUnlessMetadataStoreUnprovisioned}, which returns normally for
-        // `isMissingTableError` and would license the caller to treat the
-        // overlay as absent. On a READ that is right — there are genuinely no
-        // rows. Here it would turn an unreachable store into `rows = []`, and
-        // this method reports that as a completed uninstall that deleted
-        // nothing. An outage answered as "there was nothing to remove" is the
-        // ADR-0110 D3 confusion in its most damaging direction, on a
-        // destructive verb. Every failure stays a failure; only the disclosure
-        // changes.
-        let rows: any[];
-        try {
-            // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            rows = (await this.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } })) as any[];
-        } catch (e) {
-            // [#12536] …through the classifier: a marked application refusal
-            // is not a store fault. See {@link metadataReadFailureError}.
-            throw metadataReadFailureError(e);
-        }
-
-        // [#21276] THE REGISTRY'S UNINSTALL REFUSAL, ASKED BEFORE THE STORE
-        // DELETE. `SchemaRegistry` refuses an uninstall when another package
-        // `extend`s an object this one owns (ADR-0029), and it decides that
-        // before it mutates (#7970). Here that refusal used to be met only at
-        // the registry withdrawal below, after the stored row, the metadata rows
-        // and the tables were already gone. `assertPackageUninstallable` asks
-        // the same predicate (the one copy `unregisterObjectsByPackage` itself
-        // calls) without performing the uninstall, so the refusal is thrown
-        // here, as is, with nothing removed. The HTTP door answers it through
-        // its `catch` around this verb: `500`, nothing changed.
-        //
-        // The registry is reached the way the withdrawal below reaches it. A
-        // registry that does not carry the method (an engine double, a host on
-        // a registry without it) is not asked, and this verb behaves as it did
-        // before the method existed: the refusal surfaces at the withdrawal.
-        const packageRegistry = (this.engine as any)?.registry;
-        if (typeof packageRegistry?.assertPackageUninstallable === 'function') {
-            packageRegistry.assertPackageUninstallable(request.packageId);
-        }
-
-        // [#23473, ADR-0048] THE SHARED-OBJECT REFUSAL, ALSO ASKED BEFORE THE
-        // STORE DELETE. A `sys_metadata` row is keyed by its package, so an
-        // object this package holds can also be held by another package's row,
-        // or by the package-less row, all served over the ONE table its name
-        // maps to. The per-item delete below drops an object's table only with
-        // its last stored row and otherwise refuses `409`
-        // ({@link dropStorageRemainingRowsRefusal}). Met there, that refusal
-        // came after the stored package row was gone, so it left the package
-        // half-uninstalled: no `sys_packages` row, and its row of the shared
-        // object still stored and served.
-        //
-        // So the same question is asked here, of the same rows, before anything
-        // durable: for each active object row whose table this uninstall would
-        // drop ({@link shouldDropStorage}), the per-item delete's own address
-        // read ({@link packagelessAddress}, the type folded as that delete
-        // folds it). An object this package holds there beside any other row
-        // refuses the whole uninstall, with nothing removed, as step 3 does
-        // for an extended object. ⛔ Not "uninstall and keep the shared table":
-        // dropping the tables is this verb's declared default, and an
-        // uninstall that quietly drops fewer than it says is an opt-in the
-        // runtime does not honour.
-        //
-        // With `keepData: true` no table is dropped, so sharing decides
-        // nothing and nothing is read. `RESOURCE_CONFLICT` / 409, no code
-        // minted: the per-item refusal's code for the same rows (environment
-        // state, not the request: the same uninstall is accepted once the other
-        // rows, or this package's row, are gone). A failed read is this verb's
-        // step-2 read failure ({@link metadataReadFailureError}), never "not
-        // shared". The prescription first: a 4xx message can be truncated.
-        if (request.keepData !== true) {
-            const shared: string[] = [];
-            const asked = new Set<string>();
-            for (const row of rows) {
-                if (row?.state === 'draft' || typeof row?.name !== 'string') continue;
-                const canonical = canonicalMetaType(String(row.type));
-                const type = PLURAL_TO_SINGULAR[canonical] ?? canonical;
-                if (!this.shouldDropStorage(type, row.name, true, 'active') || asked.has(row.name)) continue;
-                asked.add(row.name);
-                let at: { candidates: readonly string[]; unbound: boolean };
-                try {
-                    at = await this.packagelessAddress(type, row.name, undefined, 'active');
-                } catch (e) {
-                    throw metadataReadFailureError(e);
-                }
-                if (!at.candidates.includes(request.packageId)) continue;
-                const others = at.candidates.filter((id) => id !== request.packageId);
-                if (others.length === 0 && !at.unbound) continue;
-                shared.push(`'${row.name}' (${remainingRowsPhrase(others, at.unbound, 'row')})`);
-            }
-            if (shared.length > 0) {
-                const more = shared.length > 5 ? `; and ${shared.length - 5} more` : '';
-                const err = new Error(
-                    `Uninstall package '${request.packageId}' with keepData (?keepData=true; keepData: true in `
-                    + 'process), which keeps all its object tables, or first delete, without dropStorage, its row '
-                    + 'or the other rows of each object below (DELETE /api/v1/meta/object/NAME?package=ID). '
-                    + "Nothing was removed: an uninstall drops an object's table only with the object's last row, and "
-                    + (shared.length === 1
-                        ? 'an object of this package is'
-                        : `${shared.length} objects of this package are`)
-                    + ` also held by other rows: ${shared.slice(0, 5).join('; ')}${more}.`,
-                ) as Error & { code: 'RESOURCE_CONFLICT'; status: 409 };
-                err.code = 'RESOURCE_CONFLICT';
-                err.status = 409;
-                throw err;
-            }
-        }
-
-        // [#21276] THE STORE DELETE COMES FIRST, and its refusal is this verb's
-        // refusal. Triage's ruling: refuse before withdrawing, not undo. Every
-        // step above this one only reads; every step below it — the per-item
-        // `sys_metadata` deletes and table teardown, the registry withdrawal,
-        // the uninstall cleanups — runs only after the store has deleted the
-        // package's row.
-        //
-        // #2532's reason for deleting the row at all still holds:
-        // `PackageServicePlugin.start()` hydrates `sys_packages` back into the
-        // registry at boot, so a row left behind brings the package back on the
-        // next restart. This delete used to run AFTER the metadata deletes and
-        // inside a `catch` that turned both of the service's failure channels
-        // into a `console.warn` ("sys_packages cleanup skipped"): a returned
-        // `{ success: false }` was never read, and a thrown failure was only
-        // logged. So a refused delete answered success over a package whose
-        // metadata, tables and grants were already gone, and the next boot
-        // brought it back. Measured at `DELETE /api/v1/packages/:id` on SQLite,
-        // with a trigger refusing the delete: 200, then 404 in the same process,
-        // then 200 after a restart.
-        //
-        // Both channels (`PackageDeleteResult`, `service-package`) answer
-        // through {@link packagePersistFailureError}, the error install and
-        // edit throw for a refused store write (#21243): a declared 4xx leaves
-        // as the producer answered it; anything else is a 500 that quotes
-        // nothing, with the original on `cause`.
-        //
-        // ⛔ No undo: nothing durable has happened yet, so there is nothing to
-        // put back. Without a `package` service there is no stored row to
-        // delete (the install's in-memory-only path), and this step is skipped.
-        const packageStore = this.getServicesRegistry?.()?.get('package') as
-            | { delete?: (id: string) => Promise<unknown> }
-            | undefined;
-        if (typeof packageStore?.delete === 'function') {
-            let refusal: { cause: unknown } | undefined;
-            try {
-                const out = await packageStore.delete(request.packageId);
-                if (typeof out === 'object' && out !== null && (out as { success?: unknown }).success === false) {
-                    refusal = { cause: out };
-                }
-            } catch (cause) {
-                refusal = { cause };
-            }
-            if (refusal) throw packagePersistFailureError(refusal.cause, request.packageId, 'delete');
-        }
-
-        const dropStorage = request.keepData !== true;
-        // Delete drafts before active so an object's table is dropped once (on
-        // the active delete), not pre-empted by a draft delete.
-        const ordered = [...rows].sort((a, b) => (a.state === 'draft' ? 0 : 1) - (b.state === 'draft' ? 0 : 1));
-
-        const deleted: Array<{ type: string; name: string; state: string }> = [];
-        const failed: Array<{ type: string; name: string; error: string; code?: string }> = [];
-
-        for (const row of ordered) {
-            const state: 'active' | 'draft' = row.state === 'draft' ? 'draft' : 'active';
-            try {
-                await this.deleteMetaItem({
-                    type: row.type,
-                    name: row.name,
-                    state,
-                    // [#23165, ADR-0048] The package being uninstalled
-                    // owns this row, so the delete names it. Named no
-                    // package, the delete of a name a second package also
-                    // holds was a driver-order pick between the two rows
-                    // (and is now refused).
-                    packageId: request.packageId,
-                    ...(request.actor ? { actor: request.actor } : {}),
-                    ...(dropStorage ? { dropStorage: true } : {}),
-                });
-                deleted.push({ type: row.type, name: row.name, state });
-            } catch (e: any) {
-                // [#8136] NO filter here, deliberately, and this comment is why
-                // the absence is a decision rather than an oversight.
-                //
-                // This `try` wraps exactly one call, and every exit
-                // `deleteMetaItem` has is now either a refusal it DECLARED
-                // (its two-tier authorization block and `assertLockAllowsDelete`
-                // — 4xx with a catalogued code) or one of its two re-wraps,
-                // which withhold at the source via {@link
-                // overlayDeleteFailureMessage}. Its one engine touch outside
-                // its own `try`, `getEffectiveLock`, has been fail-closed
-                // through `rethrowUnlessMetadataStoreUnprovisioned` since
-                // #5706, so that arrives as the non-quoting 503 too.
-                //
-                // So `failed[].error` — which rides onto the
-                // `PACKAGE_DELETE_PARTIAL` 400 inside `details`, out of reach
-                // of any boundary's message withhold — is clean BECAUSE the
-                // producer is, which is the whole shape of this fix. Adding a
-                // second filter here would be consumer-side tolerance over a
-                // producer that no longer needs it (Prime Directive #12), and
-                // it would blank the per-item refusals that make a partial
-                // uninstall actionable.
-                // [#12536] …and the per-item path follows the SAME
-                // classification the read seam now applies (maintainer ruling,
-                // 2026-08-27): a marked application refusal is reported as one,
-                // in the author's own words, rather than dissolving into a row
-                // that reads like a store failure. `failed[]` had no channel
-                // for the mark at all — `error` is the diagnostic sentence and
-                // `code` is the closed vocabulary — so `userMessage` is the
-                // member that carries it, absent (never `''`) when the item's
-                // failure declared none, so nothing invents a marked refusal.
-                const itemUserMessage = declaredUserMessage(e);
-                failed.push({
-                    type: row.type,
-                    name: row.name,
-                    error: e?.message ?? 'delete failed',
-                    ...(e?.code ? { code: e.code } : {}),
-                    ...(itemUserMessage !== undefined ? { userMessage: itemUserMessage } : {}),
-                });
-            }
-        }
-
-        // [#2747] Unregister from the in-memory SchemaRegistry too, so the
-        // running kernel stops serving the package without waiting for a
-        // restart. [#21276] The HTTP door no longer unregisters before calling
-        // this verb; it withdraws only after this verb has answered, and skips
-        // that when this step already did it.
-        //
-        // [#21276] The registry's own refusal (ADR-0029 extenders) was asked
-        // before the store delete, through `assertPackageUninstallable`, so it
-        // does not arrive here. The `catch` stays as a safety net for a
-        // registry that lacks that method, or a throw nothing asked ahead of
-        // time: it is logged, not fatal, because the durable row is already
-        // gone and the next boot is clean either way.
-        //
-        // [ADR-0090 D5] What the package declared is captured first: the
-        // withdrawal releases its names, and the cleanups below revoke the
-        // grants that name them.
-        const declared = captureUninstallDeclared((this.engine as any)?.registry, request.packageId, rows);
-        try {
-            (this.engine as any)?.registry?.uninstallPackage?.(request.packageId);
-        } catch (e) {
-            console.warn(
-                `[protocol.deletePackage] registry unregistration skipped for '${request.packageId}': ${(e as Error)?.message}`,
-            );
-        }
-
-        // [#2747] Data-plane cleanups registered by domain plugins (mirror of
-        // the publish materializers): revoke what the package's metadata
-        // granted — e.g. plugin-security revokes every grant naming a set the
-        // package declared. Best-effort per cleanup;
-        // outcomes ride on the response so a failed revocation (ghost grants —
-        // a security condition) is visible to the caller, never silent.
-        // [#21490] Through the registry's one runner, which install-local's
-        // uninstall door calls too.
-        const cleanups = await this.runUninstallCleanups({ ...request, ...(declared ? { declared } : {}) });
-
-        return {
-            success: failed.length === 0 && deleted.length > 0,
-            deletedCount: deleted.length,
-            failedCount: failed.length,
-            deleted,
-            failed,
-            cleanups,
+        // [#25467 cut 35] The body moved to `protocol-package-uninstall.ts` (see `PackageUninstallHost`).
+        const readEngine = () => this.engine;
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof deletePackage> = {
+            deleteMetaItem: (...a) => this.deleteMetaItem(...a),
+            get engine() { return readEngine(); },
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+            runUninstallCleanups: (...a) => this.runUninstallCleanups(...a),
+            shouldDropStorage: (...a) => this.shouldDropStorage(...a),
         };
+        return deletePackage.call(host, request);
     }
 
     /**
@@ -26121,45 +25784,13 @@ export class ObjectStackProtocolImplementation implements
     private async unmanagedImportCollisions(
         items: ReadonlyArray<{ type: string; name: string; expands: readonly string[] }>,
     ): Promise<Array<{ type: string; name: string; heldBy: string }>> {
-        const wanted = new Map<string, { type: string; name: string }>();
-        for (const item of items) {
-            wanted.set(`${item.type}/${item.name}`, { type: item.type, name: item.name });
-            for (const view of item.expands) wanted.set(`view/${view}`, { type: 'view', name: view });
-        }
-        const found = new Map<string, { type: string; name: string; heldBy: string }>();
-        const names = [...new Set([...wanted.values()].map((slot) => slot.name))];
-        try {
-            for (let at = 0; at < names.length; at += 200) {
-                // [#21911] The explicit system opt-in — see findServedOverlayRow.
-                const rows = (await this.findEnvironmentRows('sys_metadata', {
-                    where: { name: { $in: names.slice(at, at + 200) } },
-                    context: { isSystem: true },
-                })) as Array<{ type?: unknown; name?: unknown; package_id?: unknown }>;
-                for (const row of rows ?? []) {
-                    const type = PLURAL_TO_SINGULAR[String(row.type)] ?? String(row.type);
-                    const key = `${type}/${String(row.name)}`;
-                    if (!wanted.has(key) || found.has(key)) continue;
-                    found.set(key, {
-                        type,
-                        name: String(row.name),
-                        heldBy: typeof row.package_id === 'string' && row.package_id !== ''
-                            ? `an environment item of package '${row.package_id}'`
-                            : 'an environment item',
-                    });
-                }
-            }
-        } catch (error) {
-            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        }
-        // The managed side asks the save door's own predicate and nothing else:
-        // it answers whether a package ships the name, not which one, and a
-        // second spelling of the registry lookup to name it would be the
-        // drift the predicate exists to prevent.
-        for (const [key, slot] of wanted) {
-            if (found.has(key) || !this.isArtifactBacked(slot.type, slot.name)) continue;
-            found.set(key, { ...slot, heldBy: 'shipped by a managed package' });
-        }
-        return [...found.values()];
+        // [#25467 cut 35] The body moved to `protocol-unmanaged-import.ts` (see `UnmanagedImportHost`).
+        const host: ThisParameterType<typeof unmanagedImportCollisions> = {
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            isArtifactBacked: (...a) => this.isArtifactBacked(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return unmanagedImportCollisions.call(host, items);
     }
 
     /**
@@ -26184,44 +25815,11 @@ export class ObjectStackProtocolImplementation implements
             actor?: string;
         },
     ): Promise<Error> {
-        const { sourcePackageId, targetPackageId, failed, copiedCount, actor } = context;
-        let residue: string | undefined;
-        try {
-            const outcome = await this.deletePackage({ packageId: targetPackageId, ...(actor ? { actor } : {}) });
-            if (outcome.failedCount > 0) {
-                residue = `${outcome.failedCount} of its items could not be removed`;
-            }
-        } catch (rollbackError) {
-            residue = `the uninstall failed: ${clientFacingFailureText(rollbackError, 'uninstall failed')}`;
-        }
-        if (residue !== undefined) {
-            console.error(
-                `[protocol.importUnmanagedPackage] the unmanaged install of '${sourcePackageId}' failed and its base `
-                + `'${targetPackageId}' was NOT fully removed (${residue}): the environment still holds a partial copy `
-                + `while the install answered failure. Uninstall the package '${targetPackageId}' to remove it.`,
-            );
-        }
-        const rolledBack = residue === undefined
-            ? `the new base '${targetPackageId}' was removed, so nothing of the package remains`
-            : `the new base '${targetPackageId}' could NOT be fully removed (${residue}) — uninstall it to finish`;
-        return Object.assign(
-            new Error(
-                `The unmanaged install of '${sourcePackageId}' was rolled back: ${failed.type} '${failed.name}' could not `
-                + `be written — ${clientFacingFailureText(cause, 'write failed')}. ${rolledBack}.`,
-            ),
-            {
-                ...(typeof cause?.code === 'string' ? { code: cause.code } : {}),
-                ...(typeof cause?.status === 'number' ? { status: cause.status } : {}),
-                ...(typeof cause?.statusCode === 'number' ? { statusCode: cause.statusCode } : {}),
-                ...(Array.isArray(cause?.issues) ? { issues: cause.issues } : {}),
-                details: {
-                    failedItem: { type: failed.type, name: failed.name },
-                    copiedBeforeFailure: copiedCount,
-                    rolledBack: residue === undefined,
-                },
-                cause,
-            },
-        );
+        // [#25467 cut 35] The body moved to `protocol-unmanaged-import.ts` (see `UnmanagedImportHost`).
+        const host: ThisParameterType<typeof rollBackUnmanagedImport> = {
+            deletePackage: (...a) => this.deletePackage(...a),
+        };
+        return rollBackUnmanagedImport.call(host, cause, context);
     }
 
     /**

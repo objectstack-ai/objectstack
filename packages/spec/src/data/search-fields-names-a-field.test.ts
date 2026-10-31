@@ -3,7 +3,9 @@
 /**
  * [#27683] The published search-field override declarations —
  * `QueryTransportParamsSchema.$searchFields`, `QuerySchema.searchFields` and
- * `FullTextSearchSchema.fields` — refuse a value naming no field, the set the
+ * `FullTextSearchSchema.fields`, and since #28059 the engine-side
+ * `searchFields` (`EngineQueryOptionsSchema` and its aggregate and count
+ * siblings) — refuse a value naming no field, the set the
  * protocol door refuses with a 400 since #27484: a blank string, only commas
  * and spaces, an empty list, and an empty structured `search.fields`. They used
  * to admit all of it, so the published JSON Schema admitted what the door
@@ -133,18 +135,46 @@ describe('the declarations state the accept set they enforce', () => {
     ['QueryTransportParamsSchema.$searchFields', QueryTransportParamsSchema.shape.$searchFields],
     ['QuerySchema.searchFields', (QuerySchema as unknown as { shape: Record<string, { description?: string }> }).shape.searchFields],
     ['FullTextSearchSchema.fields', FullTextSearchSchema.shape.fields],
+    ['EngineQueryOptionsSchema.searchFields', EngineQueryOptionsSchema.shape.searchFields],
+    ['EngineAggregateOptionsSchema.searchFields', EngineAggregateOptionsSchema.shape.searchFields],
+    ['EngineCountOptionsSchema.searchFields', EngineCountOptionsSchema.shape.searchFields],
   ];
   it.each(members)('%s carries the shared sentence', (_name, member) =>
     expect(member?.description).toContain(SEARCH_FIELDS_ACCEPT_SET));
 });
 
-describe('stage boundary: the engine-side searchFields declarations are the next stage', () => {
-  // The in-process engine still reads an empty override as absent, and its own
-  // declarations still say so; the engine stage moves them together.
-  it.each([
+/**
+ * [#28059] The engine-side declarations take the same array arm, so the
+ * declaration never admits what `FullTextSearchSchema.fields` (the structured
+ * `search` they share) and the engine refuse.
+ */
+describe('the engine-side searchFields declarations', () => {
+  const ENGINE_SCHEMAS = [
     ['EngineQueryOptionsSchema', EngineQueryOptionsSchema],
     ['EngineAggregateOptionsSchema', EngineAggregateOptionsSchema],
     ['EngineCountOptionsSchema', EngineCountOptionsSchema],
-  ] as const)('%s.searchFields still admits an empty list', (_name, schema) =>
-    expect((schema as Schema).safeParse({ searchFields: [] }).success).toBe(true));
+  ] as const;
+
+  it.each(ENGINE_SCHEMAS)('%s.searchFields refuses an empty list with the accept-set sentence', (_name, schema) => {
+    const issue = firstIssue(schema as Schema, { searchFields: [] });
+    expect(issue.path).toEqual(['searchFields']);
+    expect(issue.message).toBe(SEARCH_FIELDS_NAMES_NO_FIELD);
+  });
+
+  it.each(ENGINE_SCHEMAS)('%s.searchFields answers `[]` as its structured `search.fields` does', (_name, schema) => {
+    const bare = firstIssue(schema as Schema, { searchFields: [] });
+    const structured = firstIssue(schema as Schema, { search: { query: 'x', fields: [] } });
+    expect(bare.message).toBe(structured.message);
+  });
+
+  for (const [name, schema] of ENGINE_SCHEMAS) {
+    it.each(KEPT_LISTS)(`${name}.searchFields keeps %s unchanged`, (_label, value) => {
+      const parsed = (schema as Schema).safeParse({ search: 'x', searchFields: value });
+      expect(parsed.success).toBe(true);
+      expect(parsed.data?.searchFields).toEqual(value);
+    });
+
+    it(`${name} still admits no searchFields at all`, () =>
+      expect((schema as Schema).safeParse({ search: 'x' }).success).toBe(true));
+  }
 });
