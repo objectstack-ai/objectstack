@@ -74,7 +74,7 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
 // A field `picklist` that names no picklist the stack declares — the walk
 // `os validate` step 2d runs, over the same judge.
-import { judgePicklistReferences, printPicklistReferenceNotices } from '../utils/picklist-references.js';
+import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -509,9 +509,8 @@ export default class Compile extends Command {
           await emitJson({ success: false, errors: picklistJudgement.refusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
           this.exit(1);
         }
-        const n = picklistJudgement.refusals.length;
         console.log('');
-        printError(`A picklist reference names a picklist this stack does not declare (${n} reference${n > 1 ? 's' : ''})`);
+        printError(picklistRefusalHeading(picklistJudgement.refusals));
         printAuthoringRuleErrors(picklistJudgement.refusals, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
