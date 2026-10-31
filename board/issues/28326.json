@@ -2,8 +2,8 @@
   "number": 28326,
   "kind": "issue",
   "title": "connector connections (ADR-0143 S1): harden the OAuth2 connection door — seal the pending PKCE verifier, update the connection row by revision, revoke vendor-side on disconnect",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:automation",
     "domain:server",
     "finding",
-    "pm:blocked",
     "priority:p1",
     "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-zhuang"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T04:56:34Z",
-  "updated_at": "2026-10-31T05:55:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T11:30:32Z",
+  "closed_at": "2026-10-31T11:29:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28326",
   "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: should-fixes SF2, SF3 and SF6 of the contract review of PR #28317 (#26702, ADR-0143 S1; record 6539266538). Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: every organization that connects an OAuth2 connector instance once S1 lands.\nReader who acts: `domain:server` (`packages/services/service-automation/src/connector-connections.ts`, `src/oauth2-grant/*`).\n\n## What the code does (read, not measured, on the PR head)\n\n- **SF2.** The pending authorization (state → PKCE verifier, user, organization) is held in cluster KV or memory in plaintext for 600 s. The key is hashed, and exploiting it needs the code plus the same user's `manage_metadata` session, but the plan proposed sealing it with the host `ICryptoProvider`.\n- **SF3.** `recordRefresh` / `markReconnectRequired` read the row and then update it. They do not use a conditional `where: { id, revision }` update, so the revision invariant rests on in-process single flight plus `ILock`.\n- **SF6.** `DELETE …/connection` forgets the tokens locally and does no RFC 7009 revocation at the vendor.\n\n## Wanted (route is triage's)\n\n- Seal or authenticate the pending-authorization value, and document the KV trust boundary.\n- Make the revision update conditional.\n- Call the vendor's `revocation_endpoint` on disconnect when one is known (S2 discovery supplies it). Until then, state the gap in the route ledger row and the docs.\n\n## Dedupe\n\nRead the open titles for `PKCE`, `connector connection`, `revocation`: none. **New.**\n\nLinks back: #26702, PR #28317\n\nBlocked-by: #28317\n"

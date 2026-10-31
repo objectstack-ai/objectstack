@@ -1,0 +1,35 @@
+{
+  "number": 28388,
+  "kind": "pull_request",
+  "title": "fix(objectql): list a runtime-authored bound action on the object it names",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T09:29:31Z",
+  "updated_at": "2026-10-31T10:56:33Z",
+  "closed_at": "2026-10-31T10:56:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T10:56:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28388",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-zhuang\"} -->\n_Requested by **Sam** · [project thread](https://claude.ai/code/project/chan_01LjZwNRFiG2fkp8SNf6rHNx?thread=cmsg_01LjZwNRFiG2fkp8SNf6rHNxQLLDJM47eag51AoZaxz8Ha)_\n\nFixes #28356\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 运行时经元数据入口（`PUT /api/v1/meta/action/NAME`、Studio、AI）保存的、带 `objectName` 的独立 action，现在会挂到它所指对象的 `actions` 上；删除后立即从对象上撤下。\n- **为什么改：** 之前注册表只把代码包发布的绑定 action 挂到对象上，运行时保存的 action 能执行却不出现在任何对象界面上，保存成功但用户找不到按钮。\n- **风险与回滚：** 只改 `SchemaRegistry` 读时挂接的取数范围与两处删除时的缓存失效；启动期审计仍只看代码包 action。回滚即 revert 本 PR。\n- **先看：** `packages/objectql/src/registry.ts` 的 `boundServedActions`（同名 bare key 遮蔽 composite key 的那一行）；同文件 `removeOverlayEntry` / `removeRuntimeShadow` 新增的 `invalidateAll`；`packages/objectql/src/bound-action-foreign-object.test.ts` 新增 describe 块。\n- **两分钟验证：** `pnpm --filter @objectstack/objectql exec vitest run src/bound-action-foreign-object.test.ts`，预期 23 passed；新块 5 条覆盖保存、重存、删除、无目标对象、overlay 替换。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- `SchemaRegistry.attachBoundActions` now attaches every bound standalone `action` the registry serves (new private `boundServedActions`), not only code-shipped ones. A runtime row reaches the registry through the save door's write-through and the boot's `sys_metadata` hydration; it was dispatchable through the router's rung 2 but listed on no served object, so no client drew it.\n- One item per name, with `getItem`'s precedence: a bare-key entry (an ADR-0005 overlay) shadows the composite entries of its name, so the attached entry is the declaration rung 2 resolves.\n- The boot audits (`findUnboundActionTargets`, the bound-action collision audit) keep reading the code-only population, so a runtime action naming a missing object never fails a boot.\n- `removeOverlayEntry` and `removeRuntimeShadow` (the delete heal's tiers) now drop the cached object folds when they retire an `action` entry, as `unregisterItem` already did. Without it a deleted runtime action stayed listed on the cached object.\n- The registry holds no org-scoped row (the protocol's hydration declines one), so the attach crosses no organization.\n\n## Tests\n\n- New describe block in `packages/objectql/src/bound-action-foreign-object.test.ts` (real `ObjectStackProtocolImplementation` + real registry):\n  - saved action is listed by `getMetaItem` object, `getMetaItems` object and `registry.getObject`, after the owner's own actions; control object unchanged;\n  - attached entry is the rung 2 declaration by reference;\n  - re-save serves the new body; delete withdraws it from the cached object and from the served read;\n  - a runtime action naming a missing object is listed nowhere and `findUnboundActionTargets()` stays empty;\n  - a bare-key overlay of a packaged bound action is attached in its place, and lifting the shadow serves the packaged one again.\n- Ablations (each through `scripts/ablation-replace.mjs`, mutation landed on disk, restored to the HEAD blob, `git diff HEAD` empty):\n  - attach population back to `boundCodeActions` ⇒ 4 of the new cases red;\n  - invalidation removed from `removeOverlayEntry` ⇒ the delete case red;\n  - invalidation removed from `removeRuntimeShadow` ⇒ the shadow-lift case red.\n  - A first attempt at the second ablation was a no-op (replacement contained the anchor); the tool refused it before running, and it was redone with a marker.\n- `pnpm --filter @objectstack/objectql typecheck && pnpm --filter @objectstack/objectql test` at 0b2103fc6: 505 files / 9828 tests passed (lock VERDICT command-exit 0).\n\n## Acceptance notes\n\n- Not measured: a restart that rehydrates the stored row from `sys_metadata` (the dev server's `--fresh` store dies with the process). The hydrated row registers under the bare key, which the new population includes; the unit cases drive the write-through path.\n- Out of scope, noted: `removeOverlayEntry` / `removeRuntimeShadow` also skip the fold invalidation for `picklist` entries, which `registerItem` / `unregisterItem` do invalidate. Not measured.\n- The console side needs no change: `useConsoleActionRuntime` reads `objectDef.actions`, which now carries the action.\n\n## Verification\n\n<details><summary>Live: fresh todo server, before and after</summary>\n\n`examples/app-todo` with `pnpm dev -- --fresh`, signed in as the seeded admin, then `PUT /api/v1/meta/action/rt_probe_action` with `objectName: todo_task`, `type: url`.\n\n- origin/main 80b561be1: PUT 200; `GET /meta/action` lists `rt_probe_action`; `GET /meta/object/todo_task` and `GET /meta/object` list the 8 packaged actions only.\n- This branch (objectql rebuilt): both object reads list the 8 actions then `rt_probe_action`; after `DELETE /meta/action/rt_probe_action` (200) the object lists the 8 again.\n\n</details>\n\n<details><summary>Derived gates at 0b2103fc6</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 62 commands, all run, exit codes captured before any pipe.\n\n- 60 exit 0.\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` exit 3 on the shallow clone (positive-control commit unreachable); after fetching that commit, exit 0 (48 cases pass).\n- `pnpm check:dual-build-cjs-loads` exit 3, PREREQUISITE NOT MET (workspace not fully built): NOT MEASURED locally, CI's Lint and Repo Gates runs it.\n- `--ran` reconciliation: 62 derived, 61 run, 1 NOT-MEASURED (the one above).\n- `eslint --no-inline-config` on the two changed source files: exit 0. Repo-wide `pnpm lint` is CI's.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QUs3BsEVeiZG9ncdEjdtiu)_\n"
+}

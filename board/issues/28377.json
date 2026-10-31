@@ -2,9 +2,9 @@
   "number": 28377,
   "kind": "pull_request",
   "title": "fix(deps): resolve @azure/identity 4.14.1 so msal-node leaves GHSA-xcx6-jx8p-x3h5",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "os-zhuang",
     "id": 277994282,
@@ -12,7 +12,8 @@
   },
   "labels": [
     "dependencies",
-    "size/xs"
+    "size/xs",
+    "skip-changeset"
   ],
   "assignees": [
     "os-zhuang"
@@ -20,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T07:54:01Z",
-  "updated_at": "2026-10-31T08:00:05Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-31T10:09:08Z",
+  "closed_at": "2026-10-31T10:09:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T10:09:06Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28377",

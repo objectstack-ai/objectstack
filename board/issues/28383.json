@@ -1,0 +1,37 @@
+{
+  "number": 28383,
+  "kind": "issue",
+  "title": "service-messaging: an idle delivery dispatcher tick costs 18 + 10 statements (8 partition probes each, an unconditional reap UPDATE), so a resident tenant kernel reads its database 56 times a minute with nothing queued",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T09:04:08Z",
+  "updated_at": "2026-10-31T12:39:59Z",
+  "closed_at": "2026-10-31T12:38:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28383",
+  "body": "repo:cloud#2 · os-zhuang · session_01QUs3BrsCUYNHwvQFTMk7x6\n\nFiling gate ①: a product defect with a named locus and a measured reach. The framework half of cloud#3413 (cloud's half: objectstack-ai/cloud PR linked from that issue).\n\n## 维护者速读\n\n一个空闲的租户内核（outbox 全空）每次轮询都要发 28 条语句：通知调度器 18 条、HTTP 调度器 10 条。原因是每个分区各查一次（默认 8 个分区，通知还要再查一次 digest），而且回收过期 claim 时不管查没查到都会再发一条 UPDATE。框架默认 30 秒的空闲上限下，这就是每分钟 56 条；冷启动后的第一分钟还有退避爬坡的 140 条和生命周期清扫的 94 条。cloud 那边已经把上限调到 5 分钟（稳态每分钟 5.6 条，一次 30 分钟的访问从 1,858 条降到 458 条），但每次 tick 的固定开销和第一分钟只能在框架里修。\n\n## Reach (measured)\n\nMeasured on cloud's hosted tenant composition (`ArtifactKernelFactory` with `HOSTED_FORCED_REQUIRES`, production `TursoDriver` in remote mode over a local libSQL file, every statement counted at the client), framework pin `99a6a781`, with `scripts/dev-local/bootstrap-curve.mjs --hosted --objects 0 --first-boot --hold 420 --hold-slice 60 --hold-shapes` in objectstack-ai/cloud:\n\n| Minute after first boot | Statements | What |\n|---|---|---|\n| 1st | 234 | 5 backoff-ramp ticks × 28 = 140, plus the objectql lifecycle sweep's one run 60 s after boot (retention reads + counts and the dangling-reference audit) = 94 |\n| every later minute | **56** | 2 ticks × 28 |\n| one 30-minute visit | **1,858** | 234 + 29 × 56 |\n\nOne idle tick, by statement shape:\n\n| Dispatcher | Statements | Shape |\n|---|---|---|\n| `NotificationDispatcher` | 16 | `SELECT \"id\" FROM \"sys_notification_delivery\" WHERE \"status\" = ? AND \"partition_key\" = ? …` — a claim probe and a digest probe for each of the 8 partitions |\n| | 1 + 1 | the once-per-tick reap: `SELECT * … WHERE \"status\" = ? AND \"claimed_at\" < ?`, then an `UPDATE` **even when the SELECT returned no rows** |\n| `HttpDispatcher` | 8 | `SELECT \"id\" FROM \"sys_http_delivery\" WHERE \"status\" = ? AND \"partition_key\" = ? …` per partition |\n| | 1 + 1 | the reap, same shape |\n\n`DbQueueAdapter` issued nothing in that window; nothing else polls.\n\nEvery tenant kernel with `automation` mounts messaging (cloud's `resolveCapabilityDependencies`), and each is its environment's only node: the memory cluster lock is always free, so every partition is probed by the same process every tick. On a 2,000-organization launch day with each environment opened once and left for the 30-minute free idle eviction, the framework defaults come to 1,858 statements per visit, 3.7 million in all; cloud#3413's 5-minute ceiling brings a visit to 458 (0.92 million), and the rest is this card. These reads count against Turso's rows-read quota (cloud#2177 got a staging account suspended for reads).\n\n## Expected\n\nAn idle tick costs a few statements, not 28, and the backoff does not pay its ramp at full per-tick price. Candidates, for whoever picks it up:\n\n1. **Skip the reap's UPDATE when its SELECT found no expired claim** (`sql-outbox.ts` / `sql-http-outbox.ts` `reap()`): −2 a tick.\n2. **Probe all partitions in one statement when this process holds every partition lock** (single-node cluster, or the memory lock that never contends): `partition_key IN (…held…)` or no partition predicate, then hand rows to their partitions. −7 (HTTP) and −14 (notification) a tick. Note `partition_key` is stored at enqueue, so lowering `partitionCount` on a live environment would strand rows: not a fix.\n3. **Digest probe only when batched rows can exist** (fold into the claim probe, or skip while no `digest_key` row is pending).\n4. **Wake at the next due time instead of a blind ceiling**: one `MIN(next_attempt_at)` (and digest window close, claim expiry) read lets an idle loop sleep until the first deferred row is due. With it, a long idle ceiling costs no latency on retries, quiet hours or digests — the price cloud#3413 had to state for its 5-minute ceiling.\n\n5. **The lifecycle sweep's first run is 60 s after every boot** (`DEFAULT_LIFECYCLE_INITIAL_DELAY_MS`), so a kernel that lives 30 minutes pays its 94 statements once per visit rather than once an hour. A persisted last-swept watermark would let a rebuilt kernel skip a sweep that ran minutes ago.\n\nWith 1–3 an idle tick is about 5 statements: every later minute 10 at the framework's own 30 s ceiling, 1 at cloud's 5 minutes, and a 30-minute visit about 160 statements (of which 94 are item 5).\n\n## Done when\n\nThe same reading (`--hold-slice 60`) on a kernel at the new pin shows an idle tick of both dispatchers at ≤ 6 statements, and the outbox claim / reap / digest tests still pass. cloud then re-measures under cloud#3413.\n\n## Business reason\n\n- Who benefits: every hosted environment's database reads (Turso bill and quota) and runtime CPU on launch day; self-hosted single-node deployments the same.\n- If not done: reads scale with visits rather than with use, the pattern that suspended staging's Turso account once (cloud#2177), and cloud can only trade latency for it with a longer ceiling.\n\n## Reader who acts\n\nobjectstack triage routes it to the lane owning `packages/services/service-messaging` (outbox claim and reap) and `packages/core/src/dispatch-loop.ts` (item 4).\n\n## Dedup\n\nSearched objectstack issues, open and closed: \"notification dispatcher idle poll partition probes reap statements\" → 5 hits, of which #17610 and #17623 (both closed) are the relevant ones; \"DispatchLoop idle backoff next due time outbox\" → 0. #17610 / #17623 (and #17612 for the queue) moved the reap to once a tick and added the idle backoff. This card is what is left after them: the per-partition probes, the reap UPDATE that runs with nothing to reap, and the ramp's per-tick price."
+}

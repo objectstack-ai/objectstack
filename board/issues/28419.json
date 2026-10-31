@@ -1,0 +1,34 @@
+{
+  "number": 28419,
+  "kind": "pull_request",
+  "title": "docs(automation): connectors page describes the served rest/openapi credential handle and app-credential exchanges",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T12:43:27Z",
+  "updated_at": "2026-10-31T13:16:21Z",
+  "closed_at": "2026-10-31T13:16:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T13:16:20Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28419",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoHgewSpchhjBvPu7yhxUUJx)_\n\nPart of #26702\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: the skills half (skills/objectstack-automation/references/integration-recipes.md) is #28299, the skills lane's card; this PR touches no skills/** file.\n\n## 维护者速读\n\n- 改了什么：只改文档 `content/docs/automation/connectors.mdx`，把连接器页面里已经过时的说法改正：`rest` 和 `openapi` 现在会使用凭证句柄，飞书、钉钉、企业微信的应用凭证换取也已经在运行；只有 `mcp` 仍列为暂不支持。\n- 为什么改：#28399 合入后，页面仍写着「应用凭证的厂商换取尚未运行」「内置 rest / openapi 不使用凭证句柄」，这两句现在是错的，会误导作者把实例声明成静态凭证。\n- 风险与回滚：纯文档，不发布任何包，不影响运行时；回滚即还原本 PR。\n- 先看：「How the server serves them」开头新增的应用凭证段落和三家厂商的表格，以及下方「What is not served yet」段落。\n- 两分钟验证：`pnpm check:doc-authoring && pnpm check:doc-anchors`，预期退出码 0。\n- 需要你做的：无，席位审阅并落地（本 PR 需要 `skip-changeset` 标签）。\n\n## What changes\n\n`content/docs/automation/connectors.mdx`, three places, all in the grant-bearing auth section and the failure table:\n\n- **\"How the server serves them\"** now opens with what serves both grant-bearing kinds: the credential handle the built-in `rest` and `openapi` providers ask on every request (`registerConnectorProvider(…, { credentialHandle: true })`), and what an `openapi` document's `security` decides for such an instance (`security: []` is anonymous; an `apiKey` scheme's parameter is filled by the platform and left out of the input schema).\n- **New `app-credential` paragraph and table**: the fixed per-vendor exchange (Feishu, DingTalk v1.0, WeCom) and where each token rides on a call; the token belongs to the app and nothing is connected; it is held in memory only and obtained afresh inside the 30 s skew or once on a `401`; one exchange is shared by concurrent requests; WeCom's in-answer `errcode` `40014` / `42001` obtains the token afresh once and repeats the call once, and a second such answer fails it; no redirect is followed; no answer / `429` / `5xx` is `CONNECTOR_UPSTREAM_UNAVAILABLE`, a refused app id or secret is a `503` naming the instance and at most the vendor's error code. The existing `oauth2` text follows unchanged, now introduced as \"An `oauth2` instance's access token is …\".\n- **\"What is not served yet is held degraded\"** no longer lists `app-credential` or the `rest` / `openapi` providers. It now lists a grant-bearing instance on a provider that does not ask the handle (the built-in `mcp` provider, or a plugin provider registered without the option), the `mcp` instance that leaves its endpoints to discovery, and the non-https `oauth2` endpoint rule, as before.\n- **Failure-modes table**: the grant-bearing row now reads \"on a provider that does not ask the credential handle (the built-in `mcp` provider, for now)\".\n\nUntouched by design: the `(404)` hunk near line 404 that draft #28346 edits, and every `skills/**` file.\n\nEvery fact was read from the merged code: `packages/services/service-automation/src/oauth2-grant/app-credential.ts` (exchanges, `present`, skew via `BORROWED_CREDENTIAL_SKEW_MS = 30_000`, `retryOnVendorTokenRefusal`), `plugin.ts` (`credentialHandleNotAppliedReason`), `connector-openapi/src/openapi-connector.ts` (the `security` rules), and `connector-credential-source.ts` (datasource lending still `422`).\n\n## Tests\n\nNone: a docs-only change. The docs gates below judge it.\n\n## Verification\n\n- `dispatch-gates --commands`: 43 families derived for this one path; all exit 0. `check:docs` and `check:skill-examples` exited 1 / 3 at first because `packages/spec/json-schema` was older than `src` in this worktree (a build prerequisite, not a finding); after `pnpm --filter @objectstack/spec build` both exit 0.\n- `--ran` reconcile: 43 derived, 43 run, 0 NOT-MEASURED, 0 unrun.\n- No changeset: nothing published changes, so the PR carries `skip-changeset`.\n\n## Acceptance notes\n\n- `mcp` stays listed as not served: its half of ADR-0143 S2 is a separate PR that waits on the discovery-organization ruling.\n- The `oauth2` revoke sentence still says the discovery that would supply a revocation endpoint is ADR-0143 S2; that remains true until the `mcp` half lands, so it is left as is.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (`packages/spec` is not touched.)\n- [x] 2. Every name I added uses the casing for its kind. (No names added.)\n- [x] 3. No formatter ran; the docs gates pass.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset: this one publishes nothing (`skip-changeset`); both declaration lines are filled in above.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibwa6RkD7A2gK6rYRNT\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 28384,
+  "kind": "issue",
+  "title": "copy_invitation_link: a sys_invitation still status=pending past expires_at is offered the action and answered a link (visible and the handler read status only)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "domain:server",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T09:18:06Z",
+  "updated_at": "2026-10-31T09:55:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28384",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: a framework defect found by reading the code, not by a measured run. The cloud#3386 thread found it while surfacing `copy_invitation_link` on cloud's team page (PR objectstack-ai/cloud#3429).\n\n## 维护者速读\n\n「复制邀请链接」只看邀请的 `status` 字段。如果一条邀请已经过了 `expires_at`、但状态还是 pending（没有任务把它改成 expired），这个操作仍然显示，也仍然给出链接。对方点开时才会被拒，管理员却已经把一个失效的链接发出去了。\n\n## Facts (framework pin 99a6a781)\n\n- The `visible` expression on `sys_invitation`'s `copy_invitation_link` row action reads `status == 'pending'` only.\n- The handler checks status only, and answers the accept URL.\n\n## Expected\n\nThe action is hidden, and the handler answers 409, when `expires_at` is in the past, whatever the stored status says. The same rule applies to `resend` if it shares the check. Tests cover a pending row past `expires_at`.\n\n## Reader who acts\n\nFramework triage (the `sys_invitation` actions). cloud needs no change; its page uses the framework's action as-is.\n\n## Dedup\n\nI searched objectstack issues for \"copy_invitation_link expires_at pending expired invitation\": no open card."
+}

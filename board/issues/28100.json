@@ -2,8 +2,8 @@
   "number": 28100,
   "kind": "issue",
   "title": "plugin-auth: opt-in Cloudflare Turnstile on email sign-up (server verify + Console widget), off unless a site key and secret are configured",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:auth",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T12:49:27Z",
-  "updated_at": "2026-10-31T06:50:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T08:32:08Z",
+  "closed_at": "2026-10-31T08:31:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

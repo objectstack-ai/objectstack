@@ -1,0 +1,31 @@
+{
+  "number": 28382,
+  "kind": "issue",
+  "title": "Mark the fields an update action will require before it is pressed (requiredWhen over the action's patch)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T08:59:18Z",
+  "updated_at": "2026-10-31T09:56:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28382",
+  "body": "domain:ui#1 · os-tesla · session_01L9qibzC6RxMfB59EsgAoNN\n\nFiling gate: ② the remainder of #27520 row 11 that PR #28378 (merged `0ac6dabc`) left out by ruling. The seat's amendment 6539593257 named this half as a separate card, and contract review 6541234847 ③ confirmed it. The seat files it here.\nBusiness reason: in the showcase, an admin presses **Submit for Sign-off** on a draft invoice and is refused with `Issued On is required`. Since #28378 the refusal says \"Fill in Issued On, then run “Submit for Sign-off” again\", but only after a failed attempt. While editing the draft, nothing tells the author that Issued On will be needed to submit. Any app that gates a status move behind `requiredWhen` behaves the same way, so the first submit fails every time.\nReader who acts: triage decides the domain (see the options). The seat's reading is `domain:ui` only.\nDuplicate search: open issues with \"requiredWhen\", \"required for\", \"submission\" or \"action required\" in the title found none. **New.**\n\n## Measured (on `origin/main` `0ac6dabc`)\n\n- `examples/app-showcase/src/data/objects/invoice.object.ts`: `issued_on` declares `requiredWhen: P\\`record.status in ['sent', 'paid']\\``. The server's rule validator enforces it over the merged record.\n- `examples/app-showcase/src/ui/actions/index.ts`: `showcase_submit_signoff` declares `operation: 'update'` and `patch: { status: 'sent' }`.\n- `ActionSchema.patch` (`packages/spec/src/ui/action.zod.ts:1293`) is documented as **static** field values merged under the dialog's `params`.\n- The edit form evaluates `requiredWhen` against the record as it stands (`status: draft`), so Issued On is not marked. Nothing evaluates it against the record as an update action would leave it.\n\n## Wanted\n\nWhile a record is being edited, a field that a visible update action's `patch` would make required is marked as required for that action, for example \"Required to Submit for Sign-off\". It is not marked as required for Save. Optionally, the action button can say what is missing before it is pressed. The server's refusal stays the source of truth.\n\n## Options (for triage)\n\n- **A, ui only (seat's recommendation).** The console already has both inputs. For each visible `operation: 'update'` action with a static `patch`, evaluate each field's `requiredWhen` over `{ ...record, ...patch }` and draw a note on the fields that come out true and are empty. No spec key. Presentation only, like `requiredWhen` on grid columns. Actions with `params`, or a body whose writes are not in `patch`, are skipped.\n- **B, a spec key.** An action declares the fields it requires (for example `requires: ['issued_on']`), and lint checks it against the fields' `requiredWhen`. It is explicit, but it is a second declaration of the same rule, and the two can drift.\n\nDedupe words: required to submit marker, requiredWhen action patch preview, mark fields required for submission, first submit always refused.\n\nRelated: #27520 (row 11), PR #28378, #28179.\n"
+}

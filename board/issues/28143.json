@@ -2,8 +2,8 @@
   "number": 28143,
   "kind": "issue",
   "title": "cloud-connection: install-local's held-datasource-name check fails open on a metadata read fault, and a rehydrate does not re-judge a name a Setup row took before #28039",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-zhuang"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T13:52:45Z",
-  "updated_at": "2026-10-30T15:03:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T13:15:34Z",
+  "closed_at": "2026-10-31T13:15:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28143",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\n## Finding\n\nFrom the contract review of PR #28132 (#28039, comment 6524451070, head `9ae8fc16`). PR #28132 makes `POST /api/v1/marketplace/install-local` refuse `409 RESOURCE_CONFLICT` a package that declares a datasource name the runtime already holds (step 2a), and connects a package's declared datasources at install and at every restart's rehydrate. Three edges are left open; none blocked that PR.\n\n1. **Fail-open read.** In 2a, a `metadata.get` that throws, or a kernel with no `metadata` service, is skipped, so the install proceeds. Every holder #28132 names is in the in-memory registry and is seen, but a holder visible only through a loader is missed during a loader outage.\n2. **Engine-only holder.** A datasource registered on the engine only (the legacy `onEnable` bridge) is not seen by 2a. The install then goes ahead and the answer reports that datasource as `already-registered`.\n3. **Collision that predates #28039.** Before #28039 a package could be installed with a datasource name that a Setup-created row also uses, because the name was not code-defined. 2a runs only at install, so the restart's rehydrate does not judge it. `registerInMemory` overwrites the Setup item, `connectDeclared` answers `already-registered` from the Setup pool, and the name joins the code set. The Setup row turns read-only, and a later uninstall's `disconnect` evicts the Setup pool.\n\n## Expected\n\n- (1) and (2): decide whether 2a fails closed (refuse when the holder cannot be read) or reads the engine as well.\n- (3): the rehydrate notices a name held by a non-package holder and reports it (log and the install record) rather than silently taking it over. The uninstall then must not evict a pool it did not open.\n\n## Scope\n\n`packages/cloud-connection/src/marketplace-install-local-plugin.ts` (2a), `packages/runtime/src/declared-datasources.ts`, tests. Lands after PR #28132 merges."

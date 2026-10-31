@@ -1,0 +1,32 @@
+{
+  "number": 28410,
+  "kind": "issue",
+  "title": "metadata-protocol: the override write gate — only the base's paired `.custom` may declare; undeclared same names and a dependent's `overrides` are refused at publish, `os validate` and install",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T12:04:35Z",
+  "updated_at": "2026-10-31T12:20:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28410",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P1, cut after ADR-0146's rewrite merged in #28295) · carries the N-09 riders (6541767586, amended by 6542181562) and #28390 ruling A (6542177429), copied, not re-derived. ⛔ Not a claim.\n\nBlocked-by: #28390, #28404\n\nPart of #28236 (P1, child **N-09**) · governs: ADR-0146 D2, D6, D10 (gate points); Supersede rows ADR-0126 D1, ADR-0048 §3.4 · lane: `domain:server` (`packages/metadata-protocol`, `packages/cli` validate; code only — no `docs/adr` hunk, see item 5) · size: L.\n\n**Implements ruling A, not the ADR's current text.** Where ADR-0146 or its Rollout line says \"any closure package may declare\" or \"second declarer\", this card follows #28390 A: only the paired `<base>.custom` declares; a dependent's same-named item has one fix, rename; a dependent carrying `overrides` is refused at publish, `os validate` and install. Rider 3 of 6540351677 is withdrawn; #28390 writes A into the ADR. N-08 supplies the schema, pair predicate and type list.\n\n**Business reason.** A name is overridden only because its author said so, from the one package that holds the customer's changes. Today a partner package can silently take over a base view by reusing its name (#28238), and the customer's `.custom` has no way to declare a replacement.\n\n**Measured (`75ecaf4ad8`).** `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts:56#refusePackagedBaseOverride` runs only when `isSealedManagedItem` (`protocol.ts:15642`: artifact-backed, not an `allowEnvironmentOverlay` type): a same-named write onto a shipped flow, page or app gets 403 `NOT_OVERRIDABLE` / `ITEM_LOCKED` with the clone sentence; onto the five overlay types it passes silently (#28238: 200). Closure: `protocol-write-package-scope.ts:56#resolveWritePackageScope`. Doors: `protocol.ts:22638#publishMetaItem`, `:23781#publishPackageDrafts`, `protocol-package-install.ts:130#installPackage`, `packages/cli/src/commands/validate.ts`. None reads `overrides`.\n\n**Wanted.**\n1. **Admit:** an item of `<base>.custom` that carries a base item's name, declares `overrides.package` as the package that ships that name, and has a type on N-08's list. `flow` and `action` stay refused (Not here).\n2. **Refuse**, each with its own named sentence: (a) an undeclared same name inside the closure — in `.custom` \"declare or rename\", in any other dependent \"rename\"; (b) `overrides` on any package that is not the base's pair (the former second-declarer case, tested as such); (c) an `overrides.package` that is not the shipping package or lies outside the closure, with the existing \"declare a dependency\" sentence; (d) an excluded type (D6), pointing to \"new similar\"; (e) an `object`, pointing to extension (D10). The sealed-write sentence says \"declare or rename\" instead of \"clone\". Codes and statuses stay.\n3. **Gate points** (gap 1): publish, `os validate` and `installPackage`. At install a dependent artifact may carry no `overrides` and no base item's name; a `.custom` artifact is judged as at publish.\n4. **A base upgrade adds a name a dependent or `.custom` already holds** (gap 3): (a) the install/upgrade door names every such collision in its result instead of passing silently; (b) the cost line in ADR-0146's cost list is written by #28390's amendment PR (item 5), not here. Showing the orphan in the layered read is N-10's half.\n5. **ADR text lands in #28390, not here.** Maintainer, verbatim, in the desktop PM session: 「同意」 to moving N-09's ADR edits into #28390's amendment PR (#28390 comment, below). Those edits are the two remaining wording residues — D9's action paragraph gains \"an undeclared same-name `action` in a dependent is refused like any other kind; until action override opens, the only fix is rename\", and D9's tense (#27842 and #27504 closed on 2026-10-30; the action ledger switch is no longer pending) — and item 4(b)'s cost line. This PR touches no `docs/adr` file and keeps its normal tier.\n6. **Precondition** (rider 5 of 6540351677): before writing code, count the existing closure same-name rows in the examples and test deployments. Zero: proceed; otherwise the list goes to the maintainer before a migration is chosen. Package-less rows are out of this count (N-16).\n\n**Tests.** `protocol.packaged-base-refusal.test.ts` gains every admit and refuse line at publish, validate (exit code) and install, including an install carrying an undeclared same name, an install of a dependent artifact carrying `overrides`, and an upgrade collision report; each refusal has an ablation. `protocol.org-scoped-write-refused.test.ts` stays green, unchanged.\n\n**Not here.** Opening `flow` override: this card refuses a declared `flow` override with \"flow customization is not yet available\"; N-11 (after N-12) opens it in this same gate, no second gate (D9 item 4). `action` stays refused for the whole epic. The read (N-10), the ensure door (N-13), the migration and closing the package-less write (N-16), `__c` enforcement (N-23b).\n\n**Dedupe.** #28238 (closed; read side), #28390 (amendment), #11665 (closed design). Searched `same-name dependent publish`, `overrides install`, `packaged-base override`: none.\n\nLinks back: #28236, #28390, comments 6541767586, 6542181562, 6542177429, 6540351677, ADR-0146 D2, D6, D9, D10, ADR-0048 §3.4, ADR-0126 D1.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

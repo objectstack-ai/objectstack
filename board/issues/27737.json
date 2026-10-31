@@ -1,7 +1,7 @@
 {
   "number": 27737,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 4 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 4 — 🟢 os-zhuang · 由 os-zhuang 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-zhuang"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T21:50:22Z",
-  "updated_at": "2026-10-31T05:45:25Z",
+  "updated_at": "2026-10-31T08:25:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27737",
-  "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966 and seat 3 is #26761 (⛔ this post is none of them).\n\n<sub>Created 2026-10-29T21:52Z (seated). Vacated 2026-10-31T05:44Z.</sub>\n\n## Current PM\n\n⏳ vacant. Prior PM: `os-elon-musk` · `session_016WV4d1Np3hU7RQnA13YZcL` (project thread \"Server 车道派发(第二席)\"), seated 2026-10-29T21:52Z, signed off by the maintainer's order in that project: 「当前任务处理完，合并后就下班」 (2026-10-31T05:34Z). `check-handover.mjs` exited 0 before this body was written. Stay-behind: none.\n- Next seat: `/pm-dispatch 接手`, read this post first, then the project's standing rules (project-wide concurrency cap of 10 card threads, from the maintainer 2026-10-30T15:42Z).\n\n## Handover ledger\n\n- **Decision inbox (`needs-user-decision`), released this sign-off:**\n  - #27949: waits on the maintainer's placement ruling for ruling C′'s loud refusal (A overlay load / B save door, B recommended). Resume-from `claude/project-thread-hrozea` @ `2a499b92` (pushed, no PR). See Release 6539646736.\n  - #27767 (p1, security): step 2 waits on the maintainer's word. Resume-from is held off GitHub in the project's private materials. See Release 6539653511.\n- **Back to `pm:queue`:** #27778 (p3 rider; rides the next `service-storage` PR). See Release 6539680833.\n- **Queue snapshot (`domain:server`, at sign-off):**\n  - Untriaged, waiting on the triage seat's first touch: #28238 (p2), #28117, #28250, #28194, #28168, #28143, #28135, #27190, #28271, #28275.\n  - p3 carry-only: #28080, #28055, #28054, #27928, #27855.\n  - Blocked behind open PRs: #28149, #27381, #27192–#27198, #26702.\n- **Findings this seat filed, open:** #28160, #28172 (taken by seat 3), #28230 (landed), #28248 (landed), #28271, #28275.\n- **Landed this term:** 17 cards. Each card's `Landed` comment is the record.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- No mailbox was opened for this seat, so none is closed.\n"
+  "body": "domain:server#4 · os-zhuang · session_01QUs3BtyH9zgxKzYrJiH18J\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966 and seat 3 is #26761 (⛔ this post is none of them).\n\n<sub>Seated 2026-10-31T08:24Z.</sub>\n\n## Current PM — 🟢 os-zhuang\n\n- **Holder:** `os-zhuang` · `session_01QUs3BtyH9zgxKzYrJiH18J` · held by the os-zhuang account's project (thread \"Dispatch server PM seat 1\"; 由 os-zhuang 账户的项目负责).\n- **Summons:** 「加一个 server 车道」, 「也是并发5」 (the maintainer, 2026-10-31). No `domain:server` 🟢 line named this account, so the vacant seat 4 was taken. Opening mark: 6541100052.\n- **Mailbox:** PR #28379 (subscribed). Hourly patrol routine bound to the seat session.\n- **Posture, ledger and round reports live in the project** (pointer only; claims and records on the cards and PRs).\n\n## Ledger\n\n- Inherited from the previous term (the prior body revision, `os-elon-musk` `session_016WV4d1Np3hU7RQnA13YZcL`, vacated with `check-handover` exit 0): no stay-behind, no in-flight claim. Its released cards (#27949, #27767 to the decision inbox; #27778 back to `pm:queue`) are read from their own Release comments.\n\n## Hot-file serial queue\n\n- None held by this seat. The lane's queue is kept on seat 1 (#6367); re-derived from live claims before each dispatch.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Seats 1–3 are 🟢. Lane cards are taken by the full order; collisions are settled by the claim timestamp. Claims name `Seat: domain:server#4` explicitly.\n"
 }

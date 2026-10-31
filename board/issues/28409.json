@@ -1,0 +1,32 @@
+{
+  "number": 28409,
+  "kind": "issue",
+  "title": "metadata-protocol: one effective read — package-less, base-named, layered, the env-wide list and export serve the `.custom` declared override, and a withdrawn public form stays withdrawn",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T12:04:31Z",
+  "updated_at": "2026-10-31T12:04:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28409",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P1, cut after ADR-0146's rewrite merged in #28295) · also carries #28238's list half, moved here by the ruling of option 3 (6542882536). ⛔ Not a claim.\n\nBlocked-by: #28404\n\nPart of #28236 (P1, child **N-10**) · governs: ADR-0146 D8 items 1–3 and merge item 5 · lane: `domain:server` (`packages/metadata-protocol`, the export in `packages/runtime`, the form doors in `packages/rest`) · size: L.\n\n**Follows #28390 ruling A** (6542177429): where D8.2 reads \"whichever closure package declared it\", read \"the `.custom` item that declares it\".\n\n**Business reason.** The same item has to look the same everywhere: an administrator who customizes HotCRM's view in `hotcrm.custom` sees that exact view on the package-less read, the base-named read, the layered read, the app's list and the export. A partner's same-named row never stands in for HotCRM's item, and fixing the list never re-opens a public form a customer has withdrawn.\n\n**Measured (`75ecaf4ad8`).**\n- The by-name half landed in #28304: `packages/metadata-protocol/src/protocol-environment-rows.ts:198#packagelessContentPackage` counts the shipping code package as a candidate for `getMetaItem` (`protocol.ts:10729`) and the layered `effective` (`getMetaItemLayered`, :11484); the write address `packagelessAddress` (:138) is unchanged.\n- The env-wide list has not. `getMetaItems` (`protocol.ts:9560`) calls `readFlattenedMetaItems` (:9611), which calls `mergePackageAwareOverlay` (:2993, at :9735); that merge keeps one item per package per name under the [#21934] rule (:9801–9806). The console keys items by name and the last wins, so the base app still renders a dependent's same-named view (#28238).\n- The anonymous form doors read that list: in `packages/rest/src/form-routes.ts`, `resolveFormBySlug` (:175) calls `getMetaItems({ type: 'view' })` with no package (:192) and `findPublicFormView` (:133) judges withdrawal with `anonymousFormIntakeWithdrawnIn` (:141) against it. `packages/rest/src/public-form-withdrawal.test.ts` injects the list, so it stays green through a regression (6542017888).\n- Export: `packages/runtime/src/domains/packages.ts:2383` builds from the `sys_metadata` rows bound to the package; not verified whether it keeps an unknown body key such as `overrides`. No read consults `overrides` yet; the key arrives with N-08.\n\n**Wanted.**\n1. Under the address of a name X ships, X's `.custom` item that declares `overrides.package = X` is the document served by every read: the package-less read, `?package=X`, the layered read (`code` = X's document, `override` = the `.custom` item, `effective` = the one served), `GET /api/v1/meta/:type` scoped to X or not, and X's app. A declaration from a package that is not X's pair is ignored (second line of defence behind N-09). \"Is this row the served override of X's name\" — bound to X's pair by the row's own `package_id`, never a body stamp, and declaring `overrides.package = X` — is **one exported predicate** in `packages/metadata-protocol`; N-11, N-15 and N-16 consume it. ⛔ No second predicate.\n2. **The env-wide list joins the one read** (#28238's list half). A same-named row bound to another dependent package no longer replaces X's item in the list. A package-unbound row keeps winning until N-16 migrates it; pin that on the list too.\n3. ⛔ **Hard requirement** (6542882536): a public form withdrawn by any row the anonymous form doors honour today is never re-opened; `resolveFormBySlug` / `findPublicFormView` → `anonymousFormIntakeWithdrawnIn` judge withdrawal against the effective read, never a list narrower than today's.\n4. The pair's export (`GET /packages/hotcrm.custom/export`, as D8 item 3 writes it) carries the overriding item with its `overrides` block. The base's own export is unchanged.\n5. Orphans (N-10's half of N-09 gap 3, rider 6541767586): a `.custom` or dependent item whose name a later base version also ships is shown in the layered read, never silently dropped.\n6. A same-named item from a package outside X's closure is still served under its own address only.\n\n**Tests.** One agreement pin across the five reads for one item. One pin driving `resolveFormBySlug` through the real list, not an injected one, with an ablation that goes red if withdrawal reads the narrowed list. A pin that the unbound row still wins in the list. `protocol.item-read-overlay-cache.test.ts` and `packages/objectql/src/environment-overlay-five-types.test.ts` keep their meaning.\n\n**Not here.** The write gate (N-09), arming flows (N-11), the per-package customization read (N-15), the migration (N-16), console rendering (N-17, N-19).\n\n**Dedupe.** #28238 (closed on its by-name half; the list half is this card), #21967, #22057, #23291 (closed; other package-less read shapes).\n\nLinks back: #28236, #28238, comments 6542882536, 6542017888, 6541767586, #28390, ADR-0146 D8, ADR-0048 §3.3.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

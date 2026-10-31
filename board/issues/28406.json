@@ -1,0 +1,34 @@
+{
+  "number": 28406,
+  "kind": "issue",
+  "title": "Studio: publishing takes a change note and item history names the person — the note reaches publish-drafts, the actor is the session user, and it is shown by name, not id",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T12:04:21Z",
+  "updated_at": "2026-10-31T13:40:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28406",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P1, cut after ADR-0146's rewrite merged in #28295) · plan of record: ADR-0146 Rollout P1, \"N-06 change note and actor name (after N-05)\"; N-05 is #28239, closed by PR #28296. ⛔ Not a claim.\n\nPart of #28236 (P1, child **N-06**) · governs: ADR-0146 D1 (Studio owns history with rollback and audit) · lane: `domain:ui` (declared server surface: the publish-drafts door in `packages/runtime/src/domains/packages.ts` and its protocol method) · size: M.\n\n**Business reason.** Studio's item toolbar (N-05) lists every version of an item, but each row reads \"by owY7mdy6…\", an opaque user id, and says nothing about why the item changed. Once customizations of HotCRM live in `hotcrm.custom` and are reviewed, exported and rolled back as a package (D2), an administrator picking a version to roll back to has to see who changed it and what they meant.\n\n**Measured (`75ecaf4ad8`).**\n- The note is already stored. `packages/metadata-core/src/objects/sys-metadata-history.object.ts:130` declares `change_note`; `packages/metadata-protocol/src/sys-metadata-repository.ts:1241` writes it from `opts.message`, and the history read maps it back as `message` (:1048, :1936).\n- The single-item publish door forwards it: `packages/rest/src/meta-item-history-routes.ts:621` reads `body.message`, and the actor comes from `resolveMetaWriteActor` (:619).\n- The package door Studio uses does not. `packages/runtime/src/domains/packages.ts:1889` calls `publishPackageDrafts` with `body.actor` and `backfill`, never `message`. The protocol method accepts `message` (`packages/metadata-protocol/src/protocol.ts:23785`) but writes it only into the package commit (`recordPackageCommit`, :24385); the per-item promote (`promoteDraftForPublish`, called at :24303) hard-codes every history row's note as `publish app package 'hotcrm'` (:24345). The console sends an empty body (`ui/packages/app-shell/src/preview/usePublishAllDrafts.ts:103`).\n- The package doors take `actor` from the request body (:1891 and six sibling doors at :2074, :2239, :2301, :2327, :2422, :2467). Nothing between the route and the protocol rewrites it, and `promoteDraftForPublish` passes `request.actor` into each history row, so a caller holding `manage_metadata` can record any name as the actor. Not executed end to end: what a console publish records today.\n- The history panel shows the raw id: `ui/packages/app-shell/src/views/item-tools/ResourceHistoryPage.tsx:292–295` renders `by` plus the id in mono, and its `HistoryEvent` type has no `message`.\n\n**Wanted.**\n1. Studio's publish review takes an optional change note. It reaches `POST /packages/:id/publish-drafts`, the runtime door forwards it, and the protocol threads it into each item's promote in place of the hard-coded sentence, so every history row that publish writes carries it; the package commit keeps it too.\n2. The publish-drafts door records the request's authenticated identity, the rule the single-item door follows; a body `actor` is ignored. The six sibling doors are the same defect with a wider reach and are carried by #28414 (`domain:server` bug, split on the maintainer's 「同意」); whichever of the two lands first owns the shared identity helper.\n3. The history panel shows the actor's display name, falling back to the id marked as unresolved, and the change note under the row, wherever `HistoryPanel` is mounted.\n4. Contract: the publish-drafts request schema gains `message` in `packages/spec` (Zod first); route ledger, SDK client and OpenAPI regenerated. The PR fills its `Clause-②` and `Metadata-protocol` lines truthfully.\n5. zh and en strings go through the console i18n bundle.\n\n**Tests.** A publish-drafts call with a note gives every history row it writes that `change_note`. A body `actor` is ignored and the session user is recorded. The panel shows the name and the note, and falls back to the id for a deleted user. A component test covers the note field in the publish review.\n\n**Not here.** The rollback note wording (\"Rolled back to version n\"). Who-did-it display on the audit tab. The per-package commit timeline. The six sibling doors' actor fix (#28414).\n\n**Dedupe.** Related: #22510 (closed: `sys_activity.actor_name` never written; record History, not metadata history). Searched `change_note`, `history actor name`, `publish note`, `publish-drafts actor`: no open card covers this.\n\nLinks back: #28236, #28239, PR #28296, ADR-0146 D1, ADR-0067.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

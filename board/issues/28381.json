@@ -1,0 +1,32 @@
+{
+  "number": 28381,
+  "kind": "issue",
+  "title": "plugin-auth lockout (ADR-0069 D2): answer a locked account like a wrong password, let a password reset clear the lock, and stamp the failure before checking (found by cloud#3406)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p2",
+    "security",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T08:36:11Z",
+  "updated_at": "2026-10-31T08:54:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28381",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: framework follow-ups measured while cloud turned on the ADR-0069 D2 lockout. The cloud work is objectstack-ai/cloud#3406, PR objectstack-ai/cloud#3422. It came out of the pre-GA security pass, cloud#3390.\n\n## 维护者速读\n\ncloud 两个平面已经打开了框架的账号锁定（10 次失败锁 15 分钟）。它有三个框架层面的缺口，cloud 现在只能自己补：\n- 锁定时框架回 403 `ACCOUNT_LOCKED`，而只有真实存在的账号会触发它，所以能用来探测账号是否存在。cloud 只好把它改写成和密码错误一样的 401。\n- 重置密码不会解除锁定。\n- 并发猜测在锁定生效前都会被逐一校验。\n\n## Facts (framework pin 99a6a781, measured in cloud#3422)\n\n1. A locked account answers 403 `ACCOUNT_LOCKED`. An unknown address cannot earn it, so the answer reveals that the account exists. cloud rewrites it on both planes to the wrong-password 401 body, plus one scrypt at better-auth's cost.\n2. The lock clears only on a successful sign-in after it expires, or on an admin unlock. A password reset leaves it in place.\n3. Check-then-stamp: 60 concurrent wrong guesses are all verified before `locked_until` lands.\n\n## Expected\n\n1. plugin-auth answers a locked account exactly as it answers a wrong password, in status, body and timing, with an opt-in for deployments that want the explicit code. cloud then drops its rewrite (`service-cloud/src/sign-in-lockout-refusal.ts`, `app-cloud/src/sign-in-lockout.ts`).\n2. A completed password reset clears `failed_login_count` and `locked_until`.\n3. The failure is stamped atomically (an increment, then a compare) so concurrency cannot exceed the threshold.\n4. The console's `invalidCredentials` copy can mention that repeated failures pause sign-in and point to reset, in 4 locales.\n\n## Reader who acts\n\nFramework triage (plugin-auth, console copy). cloud's half has landed or is armed in cloud#3422.\n\n## Dedup\n\nI searched objectstack issues for \"lockout ACCOUNT_LOCKED enumeration reset clears lock\": no open card on these three points."
+}
