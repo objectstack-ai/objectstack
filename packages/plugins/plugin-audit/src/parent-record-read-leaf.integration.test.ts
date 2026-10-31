@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: two in-process kernel boots on a real SQL driver, the first seeding 2,600 records through the real CRUD mirror (each pays its activity row and its ledger row) to sit past the 2,000-row window the leaf gate replaced; slowest CI reading 35.78 s (run 40204927516, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up; read before this file reused its at-rest reads and paid its first boot at module scope
 
 /**
  * [ADR-0139 E5] The parent-record read gates on the LEAF path, through a real
@@ -210,10 +211,10 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
   /**
    * [#23181] Every row of an object at rest, as the system reads it — read once
    * and reused. No case in this describe writes after `beforeAll`, so each such
-   * read answered the same rows: the cases made about sixty of them, over tables
-   * of 2,600 to 7,000 rows. Each reuse counts the object first and re-reads on a
-   * moved count, so a case that adds or removes rows is never judged against an
-   * older ground truth.
+   * read answered the same rows: the cases made nearly seventy of them, most
+   * over tables of thousands of rows. Each reuse counts the object first and
+   * re-reads on a moved count, so a case that adds or removes rows is never
+   * judged against an older ground truth.
    */
   const atRestCache = new Map<string, { count: number; rows: Row[] }>();
   const atRestOf = async (object: string): Promise<Row[]> => {

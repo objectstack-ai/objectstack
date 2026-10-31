@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: three in-process kernel boots on a real SQL driver, the first seeding 2,600 comments on 260 docs through the real writers to sit past the 2,000-row window the comment gate replaced; slowest CI reading 28.07 s (run 40204927516, refresh PR #25960's window (hourly runs 40200279306 to 40272142430)) x 1.25, rounded up; read before this file seeded its comments ten to a doc and paid its first boot at module scope
 
 /**
  * [ADR-0139 E7] The comment-thread read gate on the LEAF path, over
