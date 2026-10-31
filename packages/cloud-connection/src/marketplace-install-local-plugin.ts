@@ -1812,7 +1812,28 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     hand the package's objects that holder's pool (the connect is
         //     idempotent on the name), and recording the name as code would
         //     make the holder's own datasource read-only to the admin door.
+        //     [#28143] Judged by the runtime's ONE judge, which reads the data
+        //     engine as well (a driver the legacy `onEnable` bridge registered
+        //     has no metadata item), and a holder that cannot be read refuses
+        //     `503`: a check that did not run is never taken for "no holder".
         const heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        if (heldDatasource && 'reading' in heldDatasource) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] install of ${manifestId} refused: whether another holder owns its datasource `
+                + `'${heldDatasource.name}' could not be judged — ${heldDatasource.reading} could not be read (${heldDatasource.error})`,
+            );
+            return c.json({
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: `Package '${manifestId}' cannot be installed now: it declares the datasource '${heldDatasource.name}', `
+                        + `and whether another holder already owns that name could not be checked (${heldDatasource.reading} `
+                        + 'could not be read). A check that did not run is never taken for "no holder". Nothing was installed '
+                        + 'or written. Retry once that store answers.',
+                    details: { datasource: heldDatasource.name, reading: heldDatasource.reading },
+                },
+            }, 503);
+        }
         if (heldDatasource) {
             return c.json({
                 success: false,
@@ -3601,36 +3622,53 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
     /**
      * [#28039] The first datasource `manifest` declares whose name another
-     * holder already owns, with that holder: the host's `default`, or a
-     * datasource in the metadata service not stamped with this package (one
-     * created in Setup, the boot artifact's, another package's). A datasource
-     * this package's earlier install registered is its own, so a reinstall
-     * passes. `undefined` when nothing collides or nothing can be read.
+     * holder already owns, with that holder — or [#28143] whose holder could
+     * not be read, with what could not be. `undefined` when every name is free.
+     *
+     * The judge is the runtime's `datasourceNameHolder`, the one the
+     * rehydrate's `connectPackageDatasources` leaves a held name alone on: the
+     * host's `default`, a datasource item in the metadata registry not stamped
+     * with this package (one created in Setup, another package's), a name in
+     * the host's code-datasource set this package did not record, and a driver
+     * registered on the data engine with no metadata item. This package's own
+     * earlier registration is its own, so a reinstall passes.
+     *
+     * ⛔ Never `undefined` on a read fault: a holder that cannot be read is the
+     * `reading` answer, which the door refuses `503`. A runtime without the
+     * judge is that answer too.
      */
     private findHeldDatasourceName = async (
         ctx: PluginContext,
         manifest: unknown,
         manifestId: string,
-    ): Promise<{ name: string; holder: string } | undefined> => {
+    ): Promise<{ name: string; holder: string } | { name: string; reading: string; error: string } | undefined> => {
         const names = declaredDatasources(manifest)
             .map((ds) => ds?.name)
             .filter((name): name is string => typeof name === 'string' && name.length > 0);
         if (names.length === 0) return undefined;
-        if (names.includes('default')) return { name: 'default', holder: "the host's primary datasource" };
-        let metadata: { get?: (type: string, name: string) => Promise<unknown> } | undefined;
-        try { metadata = ctx.getService('metadata'); } catch { return undefined; }
-        for (const name of names) {
-            let item: unknown;
-            try { item = await metadata?.get?.('datasource', name); } catch { continue; }
-            if (!isPlainObject(item)) continue;
-            const owner = item._packageId;
-            if (owner === manifestId) continue;
+        let judge: typeof import('@objectstack/runtime')['datasourceNameHolder'] | undefined;
+        let loadError: unknown;
+        try {
+            const mod: any = await import('@objectstack/runtime');
+            if (typeof mod?.datasourceNameHolder === 'function') judge = mod.datasourceNameHolder;
+        } catch (err) {
+            loadError = err;
+        }
+        if (!judge) {
             return {
-                name,
-                holder: typeof owner === 'string' && owner.length > 0
-                    ? `the package '${owner}'`
-                    : item.origin === 'runtime' ? 'a datasource created in Setup' : 'a datasource',
+                name: names[0],
+                reading: "the runtime's datasource-name judge",
+                error: loadError !== undefined
+                    ? String((loadError as Error)?.message ?? loadError)
+                    : '@objectstack/runtime has no datasourceNameHolder — upgrade it alongside @objectstack/cloud-connection',
             };
+        }
+        for (const name of names) {
+            const holding = await judge(ctx, manifestId, name);
+            if (holding.status === 'held') return { name, holder: holding.holder };
+            if (holding.status === 'unreadable') {
+                return { name, reading: holding.reading, error: String((holding.cause as Error)?.message ?? holding.cause) };
+            }
         }
         return undefined;
     };
