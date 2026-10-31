@@ -185,6 +185,7 @@ const ko = {
     dialogDescriptionFallback: "양식 필드를 작성한 다음 제출하거나 취소하세요.",
     deniedDescription: "이 필드를 편집할 권한이 없습니다.",
     serverDefaultHint: "저장 시 자동으로 설정됩니다.",
+    requiredForAction: "'{{action}}' 실행에 필요합니다.",
     maxFileSize: "최대 크기: {{size}}",
     masterDetail: {
       loadingColumns: "열 로드 중…",
