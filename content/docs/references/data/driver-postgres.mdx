@@ -46,7 +46,7 @@ PostgreSQL connection configuration
 | **port** | `integer` | optional (default: `5432`) | Port number |
 | **database** | `string` | optional | Database name |
 | **username** | `string` | optional | Authentication user |
-| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` |
+| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config`. A datasource defined in code (`defineDatasource`) leaves the credential out of the declaration: it is read at connect time from the runtime environment variable derived from the datasource name (`OS_DATASOURCE_WAREHOUSE_PASSWORD` for a datasource named `warehouse`), which `os serve` / `os start` honour by default (`OS_DATASOURCE_ENV_CREDENTIALS=on`). |
 | **ssl** | `boolean` | optional | Enable TLS. Certificates go in the datasource-level `ssl` block. |
 | **schema** | `string` | optional (default: `"public"`) | Default schema (knex searchPath) |
 | **applicationName** | `string` | optional | Postgres application_name |
