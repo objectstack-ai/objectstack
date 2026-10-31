@@ -98,6 +98,14 @@ describe('RecordTabRow (objectstack#27524, Target 8)', () => {
     expect(more()?.textContent).toBe('+4');
   });
 
+  it('on a phone (objectstack#27058): the row a 390 px page draws (366 px inside its padding) shows Overview, Activity and at least one related tab, then 「+N ▾」', () => {
+    rowWidth = 366;
+    render(<RecordTabRow tabs={TABS} activeId={RECORD_TAB_OVERVIEW} onSelect={vi.fn()} />);
+    // Budget 366 - 40 - 16 = 310: Overview · Activity · Tasks · Events (250), then +2.
+    expect(shownIds()).toEqual(['overview', 'timeline', 'task.lead_id', 'event.lead_id']);
+    expect(more()?.textContent).toBe('+2');
+  });
+
   it('the active tab is always on the row, in the last slot when it would have folded', () => {
     rowWidth = 480;
     render(<RecordTabRow tabs={TABS} activeId="campaign_member.lead_id" onSelect={vi.fn()} />);
