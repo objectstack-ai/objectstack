@@ -4248,6 +4248,7 @@ const ja = {
     approveOneTitle: '「{{title}}」を承認しますか？',
     approveOneBody: 'あなたの名義でこのリクエストを承認します。コメントや添付を付ける場合は、リクエストを開いて操作してください。',
     flowOrigin: 'フロー起動',
+    submittedByYou: 'あなたが提出',
     sortBy: '並び替え',
     sortRecent: '新しい順',
     sortOldest: '古い順',

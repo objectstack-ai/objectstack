@@ -4246,6 +4246,7 @@ const de = {
     approveOneTitle: '„{{title}}“ genehmigen?',
     approveOneBody: 'Die Anfrage wird mit Ihrer Identität genehmigt. Um einen Kommentar oder Anhang hinzuzufügen, öffnen Sie die Anfrage.',
     flowOrigin: 'Vom Flow gestartet',
+    submittedByYou: 'Von Ihnen eingereicht',
     sortBy: 'Sortieren',
     sortRecent: 'Neueste zuerst',
     sortOldest: 'Älteste zuerst',

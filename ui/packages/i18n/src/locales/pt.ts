@@ -4329,6 +4329,7 @@ const pt = {
     approveOneTitle: 'Aprovar "{{title}}"?',
     approveOneBody: 'Isso aprova a solicitação com a sua identidade. Para adicionar um comentário ou anexo, abra a solicitação.',
     flowOrigin: 'Iniciada por fluxo',
+    submittedByYou: 'Enviado por você',
     sortBy: 'Ordenar',
     sortRecent: 'Mais recentes primeiro',
     sortOldest: 'Mais antigas primeiro',

@@ -4439,6 +4439,7 @@ const zh = {
     approveOneTitle: '通过“{{title}}”？',
     approveOneBody: '将以你的身份通过该请求。如需填写审批意见或附件，请打开该请求处理。',
     flowOrigin: '流程发起',
+    submittedByYou: '由你提交',
     sortBy: '排序',
     sortRecent: '最新优先',
     sortOldest: '最早优先',

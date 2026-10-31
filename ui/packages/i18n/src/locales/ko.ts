@@ -4245,6 +4245,7 @@ const ko = {
     approveOneTitle: '"{{title}}"을(를) 승인할까요?',
     approveOneBody: '내 이름으로 이 요청을 승인합니다. 의견이나 첨부 파일을 추가하려면 요청을 열어 처리하세요.',
     flowOrigin: '플로우 시작',
+    submittedByYou: '내가 제출함',
     sortBy: '정렬',
     sortRecent: '최신순',
     sortOldest: '오래된순',
