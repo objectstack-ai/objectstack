@@ -1517,11 +1517,12 @@ export const FieldSchema = lazySchema(() => {
    *     `25%`, at the field's `scale`), no bar.
    * Display only: it changes no stored value, no validation and no width.
    *
-   * Declared spec-first: the console's percent face does not read it yet (the
-   * renderer half is its own `domain:ui` card), so the liveness row is
-   * `planned` and the describe says so until that reader lands.
+   * Read by the console's percent face (`PercentCellRenderer` under `ui/`) on
+   * every read-only host: list-grid cells, the record page's fields and its
+   * header chips. The liveness row is `live` and names the relay sites that
+   * carry the key to that renderer.
    */
-  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged. Declared ahead of its renderer: the Studio UI does not read it yet, so every percent field still draws the bar until it does.'),
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
