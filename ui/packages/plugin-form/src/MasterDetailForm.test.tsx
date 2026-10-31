@@ -128,7 +128,7 @@ describe('MasterDetailForm — submit feedback (never silent)', () => {
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it('shows an error toast when the atomic write fails (rollback)', async () => {
+  it('says the failure when the atomic write fails (rollback)', async () => {
     const batchTransaction = vi.fn().mockRejectedValue(new Error('BATCH_ERROR: rolled back'));
     const ds = makeDataSource({ batchTransaction });
 
@@ -155,7 +155,8 @@ describe('MasterDetailForm — submit feedback (never silent)', () => {
     fireEvent.click(screen.getByRole('button', { name: /create/i }));
 
     await waitFor(() => expect(batchTransaction).toHaveBeenCalled());
-    await waitFor(() => expect(toastError).toHaveBeenCalled()); // <- failure is surfaced
+    // The failure is surfaced, once, by the form's banner (objectstack-ai/objectstack#27520).
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 });
@@ -211,7 +212,7 @@ describe('MasterDetailForm — non-atomic fallback (emulation via runBatchTransa
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it('create: a failing child create compensates by deleting the just-created parent + error toast', async () => {
+  it('create: a failing child create compensates by deleting the just-created parent + says the failure', async () => {
     const create = vi.fn(async (object: string, data: any) => {
       if (object === 'po_line') throw new Error('child create failed');
       return { id: 'po1', ...data };
@@ -226,7 +227,7 @@ describe('MasterDetailForm — non-atomic fallback (emulation via runBatchTransa
     // Best-effort compensation removes the orphan parent that was created before
     // the child failed — the non-atomic path's stand-in for a rollback.
     await waitFor(() => expect(del).toHaveBeenCalledWith('po', 'po1'));
-    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 });
