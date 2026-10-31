@@ -36,7 +36,7 @@ import type {
   MetadataClient,
 } from '@object-ui/data-objectstack';
 import { AuditPanel } from './AuditPanel';
-import { translateConsoleValue } from './i18n';
+import { translateConsoleValue } from '../metadata-admin/i18n';
 
 afterEach(cleanup);
 

@@ -72,6 +72,7 @@ import {
   useStudioTabRowFold,
   type StudioItemStatus,
 } from './StudioItemHeader.js';
+import { StudioItemTools } from '../item-tools/StudioItemTools.js';
 import {
   StudioPendingDraftsContext,
   useStudioItemDraftStatus,
@@ -5621,6 +5622,32 @@ export function InterfacesPillar({
               {t('engine.studio.if.openInData', locale)}
             </button>
           )}
+          {/* objectstack#28239 — the item tools Setup's item page opens. An
+              object entry's item is the object, edited in Data: its source
+              here is the served body, read-only. */}
+          {current && (draftLoaded || isObjectLeaf) && (
+            <StudioItemTools
+              type={current.type}
+              name={current.name}
+              packageId={packageId}
+              readOnly={readOnly}
+              source={
+                isObjectLeaf
+                  ? undefined
+                  : {
+                      value: draft,
+                      onChange: isEditable
+                        ? (next) => {
+                            setDraft(next);
+                            setIfDirty(true);
+                          }
+                        : undefined,
+                    }
+              }
+              onRolledBack={() => setLeafReloadNonce((n) => n + 1)}
+              locale={locale}
+            />
+          )}
           {canvasModeToggleEl}
           {itemMoreEl}
           {canCollapseInspector && (
@@ -7757,6 +7784,26 @@ export function DataPillar({
                     })}
                   </span>
                 ) : null}
+                {/* objectstack#28239 — the item tools Setup's item page opens. */}
+                {current && objLoaded && (
+                  <StudioItemTools
+                    type="object"
+                    name={current.name}
+                    packageId={packageId}
+                    readOnly={readOnly}
+                    source={{
+                      value: objDraft,
+                      onChange: objIsExternal
+                        ? undefined
+                        : (next) => {
+                            setObjDraft(next);
+                            setDirty(true);
+                          },
+                    }}
+                    onRolledBack={() => setObjReloadNonce((n) => n + 1)}
+                    locale={locale}
+                  />
+                )}
                 {/* objectui#12511 — the header holds no actions of its own, so
                     it reads the same on every tab. Object settings retired: the
                     Settings tab is that control. Add field is a field action,
@@ -9594,6 +9641,26 @@ export function AutomationsPillar({
                   </span>
                 )}
                 {flowSwitchEl}
+                {/* objectstack#28239 — the item tools Setup's item page opens. */}
+                {current && flowLoaded && (
+                  <StudioItemTools
+                    type="flow"
+                    name={current.name}
+                    packageId={packageId}
+                    readOnly={readOnly}
+                    source={{
+                      value: draft,
+                      onChange: isEditable
+                        ? (next) => {
+                            setDraft(next);
+                            setAutoDirty(true);
+                          }
+                        : undefined,
+                    }}
+                    onRolledBack={() => setFlowReloadNonce((n) => n + 1)}
+                    locale={locale}
+                  />
+                )}
                 {!flowTabsEl && autoReadOnlyLinkEl}
                 {current && flowLoaded && !readOnly && packageId !== null && (
                   <FlowItemMoreMenu

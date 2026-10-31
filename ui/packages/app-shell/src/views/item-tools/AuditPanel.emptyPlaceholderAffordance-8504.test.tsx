@@ -52,7 +52,7 @@ import type {
   MetadataClient,
 } from '@object-ui/data-objectstack';
 import { AuditPanel } from './AuditPanel';
-import { t, translateConsoleValue } from './i18n';
+import { t, translateConsoleValue } from '../metadata-admin/i18n';
 
 afterEach(cleanup);
 
