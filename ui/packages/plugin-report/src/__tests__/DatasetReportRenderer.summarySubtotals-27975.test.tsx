@@ -263,7 +263,7 @@ describe('summary report subtotals (objectstack-ai/objectstack#27975)', () => {
     const src = makeSource(TWO_LEVEL);
     render(
       <DatasetReportRenderer
-        report={{ name: 'j', type: 'joined', blocks: [{ name: 'b1', ...SUMMARY }] } as never}
+        report={{ name: 'j', type: 'joined', blocks: [{ ...SUMMARY, name: 'b1' }] } as never}
         dataSource={src}
       />,
     );
