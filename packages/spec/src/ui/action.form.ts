@@ -114,6 +114,11 @@ export const actionForm = defineForm({
         // map resolves to its own branch and opens the raw JSON editor rather
         // than being read as text.
         { field: 'description', widget: 'textarea', helpText: "Explanatory line under the title of this action's param dialog. On an action that collects params, the confirm question goes here rather than in confirmText — one dialog, not two. Not ai.description, which is the text an AI agent reads." },
+        // `submitText` is an I18nLabel too, the same node as `description` above,
+        // so it takes the same plain row and the renderer derives the same face.
+        // Not gated on `params`: the parse refuses the key beside an empty
+        // `params` by name, so a misplaced label is refused, never kept unshown.
+        { field: 'submitText', label: 'Submit button label', helpText: 'Label of the submit button in this action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"). Only for an action that collects params. Leave empty to show "Confirm".' },
         { field: 'confirmText', helpText: 'Confirmation message (e.g., "Are you sure?")' },
         { field: 'successMessage', helpText: 'Success message after completion' },
         // `errorMessage` is the twin of the row above: same node (I18nLabel), same

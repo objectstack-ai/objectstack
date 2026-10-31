@@ -358,6 +358,8 @@ const ActionGroupRenderer = forwardRef<HTMLDivElement, { schema: ActionGroupSche
           // and found here by `check:action-forward-parity`).
           label: action.label,
           description: (action as any).description,
+          // The param dialog's submit-button verb, read by the same dialog.
+          submitText: action.submitText,
           target: action.target,
           openIn: (action as any).openIn,
           endpoint: action.endpoint,

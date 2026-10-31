@@ -929,7 +929,17 @@ export interface UIActionSchema {
   
   /** Action description */
   description?: string;
-  
+
+  /**
+   * The label of the submit button in the dialog the action opens to collect
+   * its `params` (`ActionSchema.submitText`) — the verb the button performs
+   * ("Send", "Log Call"), in place of the dialog's default "Confirm". DERIVED
+   * from the spec: an `I18nLabel`, a string or an inline per-locale map, the
+   * console collapses to the active language after the translation bundle's
+   * `_actions.ACTION.submitText` entry.
+   */
+  submitText?: SpecAction['submitText'];
+
   /** Permission required to execute */
   permission?: string;
   
