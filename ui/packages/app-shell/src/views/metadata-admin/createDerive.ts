@@ -19,9 +19,9 @@ import type { CreateDeriveRule } from './registry.js';
  * Strategy: NFKD-normalise, lowercase, replace runs of non-alphanum
  * with `_`, trim, strip leading digit, clamp to 64 chars.
  *
- * Non-Latin scripts (CJK, Arabic, …) leave the result empty — the
- * caller surface is expected to detect that and prompt the user to
- * enter `name` manually rather than silently writing garbage.
+ * Non-Latin scripts (CJK, Arabic, …) leave the result empty rather than
+ * silently writing garbage; {@link underivableTargets} is how the create
+ * form detects that and prompts the user to enter `name` manually.
  */
 export function slugify(input: string): string {
   if (typeof input !== 'string') return '';
@@ -111,6 +111,28 @@ export function applyTransform(
   }
 }
 
+/**
+ * The targets a `slugify` rule cannot fill: the source holds text whose slug
+ * is empty (a label written all in Chinese or Japanese keeps no `[a-z0-9]`)
+ * and the target is still empty. The create form says so next to each one
+ * (objectstack#28232); a target the author has typed into drops out.
+ */
+export function underivableTargets(
+  rules: readonly CreateDeriveRule[] | undefined,
+  draft: Record<string, unknown>,
+): string[] {
+  const out: string[] = [];
+  for (const rule of rules ?? []) {
+    if (rule.transform !== 'slugify' || out.includes(rule.to)) continue;
+    const source = draft[rule.from];
+    if (typeof source !== 'string' || source.trim() === '') continue;
+    const target = draft[rule.to];
+    if (target != null && String(target).trim() !== '') continue;
+    if (slugify(source) === '') out.push(rule.to);
+  }
+  return out;
+}
+
 // ── React hook ────────────────────────────────────────────────────────
 
 export interface UseCreateDeriveArgs<T extends Record<string, unknown>> {
@@ -132,6 +154,11 @@ export interface UseCreateDeriveResult {
   markTouched: (path: string) => void;
   /** Read-only set of currently touched target paths. */
   touched: ReadonlySet<string>;
+  /**
+   * The targets the author has to type: {@link underivableTargets} of the
+   * current draft, empty when derivation is suspended.
+   */
+  underivable: readonly string[];
 }
 
 /**
@@ -178,8 +205,8 @@ export function useCreateDerive<T extends Record<string, unknown>>(
       // Don't fight other rules in the same batch.
       if (rule.to in patch) continue;
       const derived = applyTransform(rule.transform, fromVal);
-      // Empty derivations (e.g. CJK → slugify) just clear the target;
-      // that's intentional — the UI then knows to prompt for manual entry.
+      // Empty derivations (e.g. CJK → slugify) just clear the target; the
+      // form prompts for manual entry from `underivable` below.
       if (draft[rule.to] !== derived) {
         patch[rule.to] = derived;
       }
@@ -196,7 +223,11 @@ export function useCreateDerive<T extends Record<string, unknown>>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, enabled]);
 
-  return { markTouched, touched: touchedRef.current };
+  return {
+    markTouched,
+    touched: touchedRef.current,
+    underivable: enabled ? underivableTargets(rules, draft) : [],
+  };
 }
 
 // ── Default field selection ───────────────────────────────────────────

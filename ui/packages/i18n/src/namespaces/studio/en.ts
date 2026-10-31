@@ -1709,6 +1709,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.keyPattern': 'Key must match {pattern}',
   'engine.form.invalidJson': 'Invalid JSON',
   'engine.form.rootJsonObject': 'Root must be a JSON object',
+  // objectstack#28232 — under a create form's Name the label could not fill.
+  'engine.create.nameNotDerived': "This label can't be turned into a name; type one in snake_case.",
   // objectui#8218 — the metadata-admin form is now the Studio 「界面」 property
   // panel an AI-build maker edits, so every literal it still printed in English
   // landed inside an otherwise-Chinese surface. Swept from `widgets.tsx` +

@@ -1520,6 +1520,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.form.keyPattern': '键名必须匹配 {pattern}',
   'engine.form.invalidJson': 'JSON 无效',
   'engine.form.rootJsonObject': '根节点必须是 JSON 对象',
+  'engine.create.nameNotDerived': '此标签无法转换为名称，请手动输入（snake_case）。',
   // objectui#8218 — zh half of the same sweep. Wording targets the AI-build
   // maker who now reads this panel, not a metadata administrator.
   'engine.form.machineName': '机器名',
