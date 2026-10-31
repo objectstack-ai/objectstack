@@ -893,6 +893,36 @@ export function objectHasOwnershipQueue(objectDef: unknown): boolean {
 const WITHHELD_FILTER_GROUP: FilterBuilderRowGroup = { id: 'root', logic: 'and', conditions: [] };
 const WITHHELD_USER_FILTER_CONDITIONS: unknown[] = [];
 
+/**
+ * Whether a filter-panel row is FINISHED: it applies to the query. The same
+ * test `convertFilterGroupToAST` keeps a row by, so the badge, the stored list
+ * state and the query never disagree about what is filtered.
+ */
+function isAppliedFilterRow(row: { operator: string; value?: unknown }): boolean {
+  return isValuelessFilterOperator(row.operator) || isFilterValueComplete(row.operator, row.value as never);
+}
+
+/**
+ * The filter-panel group with its unfinished rows left out (objectstack#27520
+ * row 7): a row with no value yet is not a filter. It is not counted on the
+ * Filter badge, it does not make the list a "no matching records" list, and it
+ * is not what the host stores as the user's list state, so it does not come
+ * back after a reload. The panel itself keeps the whole group, so the user can
+ * still finish the row.
+ *
+ * A record-mode amount's currency companion goes with its amount row: kept
+ * while the amount row is kept, never left behind as a filter of its own.
+ *
+ * Returns `group` itself when every row is finished, so an emit with nothing
+ * to drop hands the host the identity it had before.
+ */
+function appliedFilterGroup(group: FilterBuilderRowGroup): FilterBuilderRowGroup {
+  const rows = group.conditions ?? [];
+  const finished = rows.filter(isAppliedFilterRow);
+  const kept = finished.filter((c) => !isCurrencyCompanion(c, group) || isCurrencyCompanion(c, { ...group, conditions: finished }));
+  return kept.length === rows.length ? group : { ...group, conditions: kept };
+}
+
 export function convertFilterGroupToAST(group: FilterBuilderRowGroup): any[] {
   if (!group || !group.conditions || group.conditions.length === 0) return [];
 
@@ -1026,6 +1056,7 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.firstRunMessage': 'Create your first record to get started.',
   'list.noMatches': 'No matching records',
   'list.noMatchesMessage': 'No records match your current filters or search. Try adjusting or clearing them.',
+  'list.clearSearch': 'Clear search',
   // Emptied by the VIEW's own declared filter, with no user filter or search
   // applied (objectui#11687): the "your filters" wording above would name
   // filters the user never set.
@@ -1804,6 +1835,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // slots. `position: 'both'` renders both buttons — it used to collapse
       // to `top` through a binary ternary (#2941).
       showAddRecord: addRecordEnabled,
+      // objectstack#27520 row 17 — the empty-state Create, read apart from
+      // the inline add-record slots: withheld only by an explicit opt-out.
+      emptyStateAddRecord: schema.addRecord?.enabled !== false && ua?.addRecordForm !== false,
       showAddRecordTop: addRecordEnabled && addRecordPlacement.top,
       showAddRecordBottom: addRecordEnabled && addRecordPlacement.bottom,
     };
@@ -3834,6 +3868,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     onSearchChange?.(value);
   }, [onSearchChange]);
 
+  // objectstack#27520 row 17 — see `toolbarFlags.emptyStateAddRecord`.
+  const emptyStateOffersCreate = toolbarFlags.emptyStateAddRecord && !!props.onAddRecord;
+
   // --- NavigationConfig support ---
   // No assertion, deliberately. `schema.navigation` is the spec-derived
   // `ListViewSchema['navigation']` and the hook's `NavigationConfig` is now the
@@ -4730,10 +4767,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // otherwise `editable` keeps the pre-verdict answer for the session.
   }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
-  const hasFilters = currentFilters.conditions && currentFilters.conditions.length > 0;
   // The count the toolbar shows: a record-mode amount's code condition is
-  // part of its amount row (objectstack#27188), not a filter of its own.
-  const shownFilterCount = (currentFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, currentFilters)).length;
+  // part of its amount row (objectstack#27188), not a filter of its own, and a
+  // row with no value yet is not a filter at all (objectstack#27520).
+  const appliedPanelFilters = React.useMemo(() => appliedFilterGroup(currentFilters), [currentFilters]);
+  const shownFilterCount = (appliedPanelFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, appliedPanelFilters)).length;
+  const hasFilters = shownFilterCount > 0;
 
   /**
    * Every field this view can name, before any per-builder rule narrows it.
@@ -4989,7 +5028,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // URL sort; the picker never offers one), so the list IS sorted by the
     // stored ID: said in one line under the rows, only while it is true.
     let picked = false;
-    const fields: Array<{ value: string; label: string; disabled?: boolean }> = [];
+    const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
     for (const field of candidateFields) {
       const readable = canReadField(perms, schema.objectName, field.value);
       if (!readable && !inUse.has(field.value)) continue;
@@ -4997,8 +5036,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       const platformSortable = platformSortability
         ? isPlatformSortableField(platformSortability, field.value)
         : !UNMATERIALIZED_FIELD_TYPES.has(field.type);
+      // `type` lets the picker name a date's direction as time
+      // (objectstack#27520): "Oldest → Newest", not "A → Z".
       if (readable && !relational && platformSortable) {
-        fields.push({ value: field.value, label: field.label });
+        fields.push({ value: field.value, label: field.label, type: field.type });
         continue;
       }
       if (inUse.has(field.value)) {
@@ -5831,8 +5872,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   value={currentFilters}
                   extraOperators={LIST_VIEW_EXTRA_OPERATORS}
                   onChange={(newFilters) => {
+                    // The panel keeps every row; the host stores only the
+                    // filter that applies (objectstack#27520).
                     setCurrentFilters(newFilters);
-                    if (onFilterChange) onFilterChange(newFilters);
+                    if (onFilterChange) onFilterChange(appliedFilterGroup(newFilters));
                   }}
                 />
               </div>
@@ -6356,6 +6399,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                       variant="ghost"
                       size="sm"
                       className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5 p-0 hover:bg-muted-foreground/20"
+                      aria-label={t('list.clearSearch')}
                       onClick={() => handleSearchChange('')}
                     >
                       <X className="h-3 w-3" />
@@ -6539,9 +6583,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               !!(searchTerm && searchTerm.trim()) ||
               (Array.isArray(appliedUserFilterConditions) && appliedUserFilterConditions.length > 0) ||
               appliedQueueSittingConditions.length > 0 ||
-              (Array.isArray(appliedFilters?.conditions) && appliedFilters.conditions.length > 0)
+              // A panel row with no value yet is not the user's query
+              // (objectstack#27520): the list is not "no matches" for it.
+              (Array.isArray(appliedFilters?.conditions) && appliedFilterGroup(appliedFilters).conditions.length > 0)
             }
-            onAddRecord={toolbarFlags.showAddRecord ? () => props.onAddRecord?.() : undefined}
+            // objectstack#27520 row 17 — the empty list offers Create whenever
+            // the host hands a create path (the console hands its header New's
+            // create only when that New is offered, objectui#13089) and the
+            // user may create (`mayCreate`). The view no longer has to author
+            // an inline `addRecord` block for an empty list to say how to
+            // start; an author's explicit `addRecord: { enabled: false }`, or
+            // `userActions.addRecordForm: false`, still withholds it.
+            onAddRecord={emptyStateOffersCreate ? () => props.onAddRecord?.() : undefined}
+            // objectstack#27520 row 7 — the search persists across
+            // navigation, so a user can come back to a list their own search
+            // emptied: the empty state offers the way out.
+            onClearSearch={searchTerm && searchTerm.trim() ? () => handleSearchChange('') : undefined}
             t={t}
             displayLocale={displayLocale}
           />

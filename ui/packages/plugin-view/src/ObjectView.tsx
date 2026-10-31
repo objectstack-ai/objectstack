@@ -3192,7 +3192,11 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
         onRowClick: handleRowClick,
         className: 'h-full',
         refreshKey,
-        onAddRecord: handleCreate,
+        // objectstack#27520 row 17 — the list's empty state offers Create
+        // whenever it is handed a create path, so it is handed one only where
+        // the author left Create on (the same two switches as the New button
+        // below; the create grant is the list's own `mayCreate` read).
+        onAddRecord: schema.showCreate !== false && operations.create !== false ? handleCreate : undefined,
       });
     }
     // #endregion object-view HOST-COMPOSITION SURFACE (objectui#5097)
