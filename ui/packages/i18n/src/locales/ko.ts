@@ -483,6 +483,7 @@ const ko = {
       undonePrefix: "되돌림 — ",
       succeeded: "성공 {{count}} / {{total}}",
       resultFailed: " · 실패 {{count}}",
+      succeededRecords: "성공한 레코드",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
       cancel: "취소",

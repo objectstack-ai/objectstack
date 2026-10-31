@@ -720,6 +720,7 @@ const zh = {
       undonePrefix: '已撤销 — ',
       succeeded: '成功 {{count}} / {{total}}',
       resultFailed: ' · 失败 {{count}}',
+      succeededRecords: '成功的记录',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',
       cancel: '取消',

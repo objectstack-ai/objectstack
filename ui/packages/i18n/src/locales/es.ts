@@ -498,6 +498,7 @@ const es = {
       undonePrefix: "Deshecho: ",
       succeeded: "Correctos {{count}} / {{total}}",
       resultFailed: " · Fallidos {{count}}",
+      succeededRecords: "Registros correctos",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
       cancel: "Cancelar",

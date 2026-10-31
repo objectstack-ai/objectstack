@@ -493,6 +493,7 @@ const fr = {
       undonePrefix: "Annulé — ",
       succeeded: "Réussis {{count}} / {{total}}",
       resultFailed: " · Échecs {{count}}",
+      succeededRecords: "Enregistrements réussis",
       retry: "Réessayer",
       downloadErrorCsv: "Télécharger le CSV d'erreurs",
       cancel: "Annuler",

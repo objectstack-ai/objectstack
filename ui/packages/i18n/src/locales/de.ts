@@ -483,6 +483,7 @@ const de = {
       undonePrefix: "Rückgängig gemacht — ",
       succeeded: "Erfolgreich {{count}} / {{total}}",
       resultFailed: " · Fehlgeschlagen {{count}}",
+      succeededRecords: "Erfolgreiche Datensätze",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",
       cancel: "Abbrechen",

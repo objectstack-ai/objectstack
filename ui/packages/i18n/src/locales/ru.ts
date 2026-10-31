@@ -506,6 +506,7 @@ const ru = {
       undonePrefix: "Отменено — ",
       succeeded: "Успешно {{count}} / {{total}}",
       resultFailed: " · Ошибок {{count}}",
+      succeededRecords: "Успешные записи",
       retry: "Повторить",
       downloadErrorCsv: "Скачать CSV с ошибками",
       cancel: "Отмена",

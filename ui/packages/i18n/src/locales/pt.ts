@@ -493,6 +493,7 @@ const pt = {
       undonePrefix: "Desfeito — ",
       succeeded: "Concluídos {{count}} / {{total}}",
       resultFailed: " · Falhas {{count}}",
+      succeededRecords: "Registros concluídos",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",

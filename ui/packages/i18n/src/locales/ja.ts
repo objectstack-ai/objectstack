@@ -483,6 +483,7 @@ const ja = {
       undonePrefix: "取り消し済み — ",
       succeeded: "成功 {{count}} / {{total}}",
       resultFailed: " · 失敗 {{count}}",
+      succeededRecords: "成功したレコード",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
       cancel: "キャンセル",

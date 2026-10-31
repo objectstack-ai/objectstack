@@ -529,6 +529,7 @@ const ar = {
       undonePrefix: "تم التراجع — ",
       succeeded: "نجح {{count}} / {{total}}",
       resultFailed: " · فشل {{count}}",
+      succeededRecords: "السجلات الناجحة",
       retry: "إعادة المحاولة",
       downloadErrorCsv: "تنزيل ملف CSV للأخطاء",
       cancel: "إلغاء",

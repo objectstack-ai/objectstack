@@ -956,6 +956,7 @@ const en = {
       undonePrefix: 'Undone \u2014 ',
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
+      succeededRecords: 'Records that succeeded',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
