@@ -1663,12 +1663,6 @@ const UNPUBLISHED_EXEMPTIONS: Record<string, string> = {
     'Unpublished by measurement (objectui#13047): read by nothing on a page `list-view` node. The node draws, queries and hands its view the same thing with and without it — the view\'s own `name` is its identity in metadata, which an embedded list has no use for.',
   'list-view.sharing':
     'Unpublished by measurement (objectui#13047): `sharing.type` draws a Share button with no click handler, and the sharing config is enforced nowhere in the renderer. Publishing it would advertise a dead control (objectui#13047\'s report).',
-  // Spec-first opt-in (objectstack#28061): the spec half landed before the
-  // console half, so the path renderer does not read it yet. The console card
-  // that makes `record-path.tsx` honour it publishes the input, and the stale
-  // check above then demands this entry's deletion in the same change.
-  'record:path.allowStageChange':
-    'Unpublished until the renderer reads it (objectstack#28061): the spec declares the opt-in that turns path stages into presses requesting that status, and `record-path.tsx` still draws a read-only rail. Publishing it now would advertise a control that does nothing.',
 };
 
 /**

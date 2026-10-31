@@ -3637,6 +3637,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.validation.nameRequired': '名称必填。',
   // objectui#12810 — 见英文表同名条目。
   'engine.validation.seedPlaceholderUnset': '请先设置 {fields} 再保存：新建项不会带着模板的占位值保存。',
+  // objectstack#28179 — 见英文表同名条目。
+  'engine.validation.fieldRequired': '此项为必填项。',
   'engine.embedded.saved': '已保存。',
   'engine.embedded.readOnlyParent': '父类型为只读；仍会尝试 PUT 保存，但服务器可能拒绝。',
   'engine.embedded.saveIntoParent': '保存到 {parentType}',
@@ -3757,6 +3759,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.translationPreview.more': '另有 {count} 项…',
   'engine.translationPreview.keyCountOne': '{{count} 个键}',
   'engine.translationPreview.keyCountOther': '{{count} 个键}',
+  // Studio 项工具栏：Setup 项页面的项工具,在每个支柱的项头部提供（objectstack#28239）。
+  'engine.studio.itemTools.group': '项工具',
+  'engine.studio.itemTools.sourceReadOnly': '只读：此项无法在这里编辑。',
+  'engine.studio.itemTools.layersFailed': '无法读取此项的分层：{message}',
+  'engine.studio.itemTools.layersRetry': '重试',
 };
 
 export default STUDIO_ZH;

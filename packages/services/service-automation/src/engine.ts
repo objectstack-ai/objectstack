@@ -6906,6 +6906,26 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#28271] Where `runId` is parked — its flow, node and correlation — or
+     * `undefined` when it is not suspended. One keyed read through the strict,
+     * store-authoritative loader {@link hasSuspendedRun} uses, never a listing:
+     * {@link listSuspendedRunsDurable} reads one capped page of a DB-backed
+     * store, so past 1000 parked runs a run another process parked may not be
+     * on it.
+     *
+     * Read-only. THROWS when the store cannot be read, as
+     * {@link hasSuspendedRun} does: an outage means "unknown", never "not
+     * parked".
+     */
+    async suspensionOf(
+        runId: string,
+    ): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined> {
+        const run = await this.loadSuspendedRunStrict(runId);
+        if (!run) return undefined;
+        return { runId: run.runId, flowName: run.flowName, nodeId: run.nodeId, correlation: run.correlation };
+    }
+
+    /**
      * Credit a completed child run's totals to the parent step waiting on it
      * (#4354).
      *

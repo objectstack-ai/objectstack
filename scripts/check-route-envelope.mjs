@@ -1619,6 +1619,14 @@ const EXPRESS_RESPONSE_MODULES = {
   // route-module-based walk would never have reached a middleware.
   'packages/runtime/src/security/inbound-rate-limit.ts': {},
 
+  // [#27627] FIRST AUDIT, verdict conformant. Not a route module: the send
+  // half of the `/meta` reads' body-hash validator, called by
+  // `meta-collection-routes.ts` and `meta-item-read-routes.ts`. It BUILDS no
+  // body. Its one `res.json(body)` relays the answer the calling route already
+  // built (relayed, so invisible here, and still counted in that route's own
+  // entry), and its revalidation exit is a bodiless `304` (`status(304).send()`).
+  'packages/rest/src/meta-representation-validator.ts': {},
+
   // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
   //
   // [#9937] FIRST AUDIT, both entries. The two shared query-parameter refusal

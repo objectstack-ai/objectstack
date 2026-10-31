@@ -94,6 +94,12 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
     'plugin-security/src/bootstrap-platform-admin.ts — recordPlatformAdminStandingChange, '
       + 'row shape in plugin-security/src/platform-admin-standing-audit.ts (#18412)',
   ],
+  [
+    'action_invocation',
+    'plugin-audit/src/action-invocation-audit.ts — createActionInvocationAuditWriter on the `audit` '
+      + 'slot; called by runtime/src/domains/actions.ts (REST door) and runtime/src/action-execution.ts + '
+      + 'runtime/src/domains/mcp.ts (MCP run_action / resume_run) (#27908)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */

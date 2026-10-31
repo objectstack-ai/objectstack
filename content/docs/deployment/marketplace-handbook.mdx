@@ -214,8 +214,12 @@ the detail.
    `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and
    `…/purge-sample-data`, both requiring `manage_metadata`.
 7. **Enable and disable.** **Setup → Installed Apps** lists the apps installed
-   from the marketplace. **Disable** is offered only for a writable package:
-   for a package provided by code or by an installed app, the runtime answers
+   from the marketplace. An admin with `manage_metadata` may disable a writable
+   package, and a **module of an installed app**: a `type: 'module'` package
+   that declares an installed `type: 'app'` package in its
+   `manifest.dependencies` ([Disabling a module](#disabling-a-module) below).
+   For every other package provided by code or by an installed app (the app
+   itself, a plugin, a platform package), the runtime answers
    `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`.
    To take an installed app away, uninstall it.
 8. **Upgrading.** You publish a new version; nothing running changes. An
@@ -254,6 +258,45 @@ An app ships extras in one of two shapes:
 - **A module built into the same artifact** — a `type: 'module'` package
   composed at build time, which travels inside your App rather than as a
   listing of its own ([A project is a multi-package artifact](/docs/getting-started/examples#a-project-is-a-multi-package-artifact)).
+
+### Disabling a module
+
+A customer who does not use one of your modules can switch it off, per
+environment, with `PATCH /api/v1/packages/:id/disable`, and back on with
+`PATCH /api/v1/packages/:id/enable`. The module qualifies when its manifest
+says `type: 'module'` and declares your app in `dependencies`, the way every
+module of a suite already does:
+
+```ts
+manifest: {
+  id: 'app.example.suite.orders',
+  type: 'module',
+  namespace: 'suite',
+  dependencies: { 'app.example.suite': '^1.0.0' },
+  navigationContributions: [/* its menu entries in the app's groups */],
+},
+```
+
+Disabled has one meaning: the module is hidden, refused on the data plane, and
+its data is kept.
+
+- **Data plane.** `/api/v1/data/<object>` and the by-name metadata reads answer
+  the module's objects `404 OBJECT_PACKAGE_DISABLED`. Records stay in the
+  database and come back on enable.
+- **Navigation.** The module's `navigationContributions` leave the app's menu.
+- **Flows.** Record-change flows on the module's objects do not run while it is
+  disabled, whoever writes the record.
+- **Restart.** The choice is kept per environment and survives a restart.
+- **Authoring.** A disabled module is still read-only: edit, publish, revert
+  and delete keep answering `422 WRITABLE_PACKAGE_REQUIRED`.
+
+**What your app's own code meets.** A hook of your app that reads or writes a
+module's object through `ctx.api.object('<object>')` runs inside the server,
+not through the data plane, and it is **not** refused: a `find` returns the
+module's kept records, and a write lands (no record-change flow runs on it).
+There is no `OBJECT_PACKAGE_DISABLED` error to catch there. A browser or API
+client reading the module's objects does meet the `404 OBJECT_PACKAGE_DISABLED`
+refusal while the module is off.
 
 ## Related
 

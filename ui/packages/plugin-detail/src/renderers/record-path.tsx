@@ -26,15 +26,13 @@
  * mouseup → click) left the record's status untouched. Users spent clicks
  * on it before concluding it was decoration.
  *
- * There is no write path to spend those clicks on: this renderer's only
- * channel is `useRecordContext()`, whose value (`RecordContextValue` in
- * `@object-ui/react`) exposes `data` / `refresh` / `headerSystemActions` /
- * `onToggleFavorite` and NO record-field mutation. Editing goes through
- * `record:details`' `<InlineEditProvider>` + `<InlineEditSaveBar>`
- * (`dataSource.update(..., { ifMatch })`) or an action via
- * `useActionEngine`; neither reaches here. Click-to-advance is a separate,
- * approved-on-its-own-appetite feature — until it exists, the pixels must
- * not promise it.
+ * Unless the author opts in with `allowStageChange: true`, nothing on the
+ * path writes, so the pixels must not promise a press. Click-to-advance is
+ * that opt-in (objectstack#28061, `./recordPathStageChange`): only then, and
+ * only for a reader who may edit `statusField` on this record, does each stage
+ * other than the current one carry a real `<button>` that asks to move the
+ * record there. Everyone else — and every page that does not opt in — gets the
+ * readout below, unchanged.
  *
  * So the presentation below is a PROGRESS RAIL: a thin decorative indicator
  * per stage with the label as plain text beneath it, which is the same
@@ -66,6 +64,8 @@ import { evalFieldPredicate, type FieldRulePredicate } from '@object-ui/core';
 import { useDetailTranslation } from '../useDetailTranslation';
 import { declaredStageKinds, deriveStages, stageTerminalOfKind } from '../synth/buildDefaultPageSchema';
 import { useRecordAriaProps } from './recordComponentAria';
+import { RecordFieldAccessForRecord } from '../recordFieldAccess';
+import { useStageChange } from './recordPathStageChange';
 
 const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
@@ -234,7 +234,27 @@ export interface RecordPathRendererProps {
   [k: string]: any;
 }
 
-export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
+/**
+ * The block. With `allowStageChange`, the stage press asks the status field's
+ * edit right of THIS stored row, so the path sits inside the same row-scoped
+ * field-access scope `record:details` and `record:highlights` mount; without
+ * it the scope is not asked and renders its children as they are.
+ */
+export const RecordPathRenderer: React.FC<RecordPathRendererProps> = (props) => {
+  const ctx = useRecordContext();
+  return (
+    <RecordFieldAccessForRecord
+      objectName={ctx?.objectName}
+      recordId={ctx?.recordId}
+      dataSource={ctx?.dataSource}
+      enabled={props.schema?.allowStageChange === true}
+    >
+      <RecordPathBody {...props} />
+    </RecordFieldAccessForRecord>
+  );
+};
+
+const RecordPathBody: React.FC<RecordPathRendererProps> = ({
   schema = {} as any,
   className,
   ...props
@@ -275,6 +295,9 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
   // `localizeStageLabels` (objectui#10993).
   const { language } = useObjectTranslation();
   const statusField: string | undefined = schema.statusField;
+  // Click-to-advance (objectstack#28061) — `pressable` is false unless the
+  // author opted in AND this reader may edit `statusField` on this record.
+  const stageChange = useStageChange(schema.allowStageChange === true, statusField);
   /**
    * WHERE the stages come from: the author, else the status field's picklist
    * (objectui#11106).
@@ -563,33 +586,62 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
 
   const renderStage = (o: {
     key: string;
-    stage: { label: string };
+    stage: PathStage;
     state: StageState;
     terminal?: 'won' | 'lost';
     className?: string;
     labelClassName?: string;
     /** The label's full text as a `title`, for a row whose labels can be cut. */
     labelTitle?: string;
-  }) => (
-    <div
-      key={o.key}
-      role="listitem"
-      data-stage-state={o.state}
-      data-stage-terminal={o.terminal}
-      aria-current={o.state === 'current' ? 'step' : undefined}
-      aria-label={stageAriaLabel(o.stage.label, o.state, o.terminal)}
-      className={cn('flex flex-col gap-1.5', o.className)}
-    >
-      <span aria-hidden="true" data-stage-rail="" className={railClass(o.state, o.terminal)} />
-      <span className={cn(labelClass(o.state, o.terminal), o.labelClassName)} title={o.labelTitle}>
-        {o.terminal === 'lost' && <span aria-hidden="true" className="mr-1 opacity-70">✗</span>}
-        {o.terminal !== 'lost' && o.state === 'completed' && (
-          <span aria-hidden="true" className="mr-1 text-emerald-600 dark:text-emerald-400 font-semibold">✓</span>
+  }) => {
+    // A stage is a press only behind the opt-in, and never the stage the
+    // record already stands on: there is nowhere to move to.
+    const press = stageChange.pressable && o.state !== 'current';
+    const face = (
+      <>
+        <span aria-hidden="true" data-stage-rail="" className={railClass(o.state, o.terminal)} />
+        <span
+          className={cn(
+            labelClass(o.state, o.terminal),
+            o.labelClassName,
+            press && 'group-hover:text-foreground group-hover:underline',
+          )}
+          title={o.labelTitle}
+        >
+          {o.terminal === 'lost' && <span aria-hidden="true" className="mr-1 opacity-70">✗</span>}
+          {o.terminal !== 'lost' && o.state === 'completed' && (
+            <span aria-hidden="true" className="mr-1 text-emerald-600 dark:text-emerald-400 font-semibold">✓</span>
+          )}
+          {o.stage.label}
+        </span>
+      </>
+    );
+    return (
+      <div
+        key={o.key}
+        role="listitem"
+        data-stage-state={o.state}
+        data-stage-terminal={o.terminal}
+        aria-current={o.state === 'current' ? 'step' : undefined}
+        aria-label={stageAriaLabel(o.stage.label, o.state, o.terminal)}
+        className={cn('flex flex-col gap-1.5', o.className)}
+      >
+        {press ? (
+          <button
+            type="button"
+            aria-label={t('detail.pathStageChangeAction', { stage: o.stage.label })}
+            disabled={stageChange.busy}
+            onClick={() => stageChange.request(o.stage)}
+            className="group flex min-w-0 w-full flex-col gap-1.5 rounded-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70"
+          >
+            {face}
+          </button>
+        ) : (
+          face
         )}
-        {o.stage.label}
-      </span>
-    </div>
-  );
+      </div>
+    );
+  };
 
   return (
     <div className={cn('w-full', className)} {...designer}>
@@ -684,6 +736,23 @@ export const RecordPathRenderer: React.FC<RecordPathRendererProps> = ({
           });
         })}
       </div>
+
+      {/* A refused move, in place under the rails — the server's own reason
+          (`stageRefusalLines`), shown once for both rows. */}
+      {stageChange.refusal && (
+        <div
+          role="alert"
+          data-stage-change-refusal=""
+          className="mt-2 rounded-md border border-destructive/20 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+        >
+          <ul className="space-y-0.5">
+            {stageChange.refusal.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {stageChange.pressable && stageChange.dialog}
     </div>
   );
 };

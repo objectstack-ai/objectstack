@@ -896,3 +896,80 @@ describe('hydration schema gate — real ObjectQL engine findOne count (#8482)',
     expect(findOneSpy).toHaveBeenCalledWith('gate_calc', expect.objectContaining({ where: { id } }));
   }, 15000);
 });
+
+/**
+ * [#28117] A record-change flow bound to an object of a DISABLED package does
+ * not fire while the package is disabled, and fires again once it is enabled.
+ *
+ * "Disabled" has one meaning (hidden + refused on the data plane + data kept),
+ * and the data plane's refusal stops only the writes that come through it. A
+ * write made IN-PROCESS — an app hook's `ctx.api.object(...)`, another flow's
+ * data node, a service — reaches the engine directly, and the engine fires the
+ * object's lifecycle hooks whatever the package's state. Measured on the base
+ * tree with this rig: the flow below stamped `done` on a record of the
+ * disabled package's object. The trigger now asks the registry whether the
+ * written object's OWNING package is disabled (`isObjectPackageDisabled`, the
+ * question the data plane's refusal asks) before it dispatches; the write
+ * itself is untouched, so the data is kept.
+ */
+describe('[#28117] record-change flows on an object of a disabled package', () => {
+  const PKG = 'com.qa.trigger.module';
+  const OTHER_PKG = 'com.qa.trigger.app';
+
+  /** The registry's package-lifecycle members this block drives — public on the concrete registry, outside the slot's contract. */
+  type PackageLifecycleRegistry = {
+    installPackage(manifest: Record<string, unknown>, source: 'code'): unknown;
+    disablePackage(id: string): unknown;
+    enablePackage(id: string): unknown;
+  };
+
+  async function boot() {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
+    const data = kernel.getService<IDataEngine>('data');
+    const automation = kernel.getService<AutomationEngine>('automation');
+    const lifecycle = objectql.registry as unknown as PackageLifecycleRegistry;
+
+    await attachSqlite(objectql);
+    lifecycle.installPackage({ id: PKG, name: PKG, version: '1.0.0', type: 'module', namespace: 'qdm' }, 'code');
+    lifecycle.installPackage({ id: OTHER_PKG, name: OTHER_PKG, version: '1.0.0', type: 'app', namespace: 'qda' }, 'code');
+    objectql.registry.registerObject(objectDef('qdm_order'), PKG, 'qdm');
+    objectql.registry.registerObject(objectDef('qda_account'), OTHER_PKG, 'qda');
+    await objectql.syncSchemas();
+    await installDefaultOrganization(objectql as never);
+    automation.registerFlow('qdm_order_stamp', stampFlow('qdm_order_stamp', 'qdm_order') as any);
+    automation.registerFlow('qda_account_stamp', stampFlow('qda_account_stamp', 'qda_account') as any);
+
+    /** Insert one record of `object` in-process, as a user, and read back its `stamp` once the flow had time to run. */
+    const stampAfterInsert = async (object: string): Promise<unknown> => {
+      const created: any = await data.insert(object, { status: 'new' }, { context: { userId: 'u_trigger' } });
+      const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
+      await sleep(200);
+      const row: any = await data.findOne(object, { where: { id } });
+      expect(row, 'the record itself is written: only the flow dispatch is withheld').toBeTruthy();
+      return row?.stamp ?? null;
+    };
+    return { kernel, lifecycle, stampAfterInsert };
+  }
+
+  it('fires while the package is enabled (the control)', async () => {
+    const { stampAfterInsert } = await boot();
+    expect(await stampAfterInsert('qdm_order')).toBe('done');
+  }, 15000);
+
+  it('does not fire while the package is disabled, and fires again once it is re-enabled', async () => {
+    const { lifecycle, stampAfterInsert } = await boot();
+    expect(lifecycle.disablePackage(PKG), 'precondition: disabled').toBeTruthy();
+    expect(await stampAfterInsert('qdm_order'), 'a flow on a disabled package\'s object fired').toBeNull();
+    // Another package's object, written in the same disabled window: its flow still fires.
+    expect(await stampAfterInsert('qda_account')).toBe('done');
+
+    expect(lifecycle.enablePackage(PKG), 'precondition: enabled').toBeTruthy();
+    expect(await stampAfterInsert('qdm_order')).toBe('done');
+  }, 15000);
+});

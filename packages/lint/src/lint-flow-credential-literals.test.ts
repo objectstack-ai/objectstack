@@ -518,8 +518,24 @@ describe('[#22161] one-line fixes — flow-credential-literal', () => {
       { type: 'api-key', headerName: 'X-Api-Key', credentialRef: 'PROBE_REF' },
       { type: 'api-key', paramName: 'api_key', credentialRef: 'PROBE_REF' },
       { type: 'basic', username: 'probe', credentialRef: 'PROBE_REF' },
+      // The grant-bearing and signing kinds the explanation names, with the
+      // grants and vendors it lists.
+      { type: 'oauth2', grant: 'authorization_code', clientId: 'probe', credentialRef: 'PROBE_REF' },
+      { type: 'oauth2', grant: 'client_credentials', clientId: 'probe', credentialRef: 'PROBE_REF' },
+      ...['feishu', 'dingtalk', 'wecom'].map((vendor) => (
+        { type: 'app-credential', vendor, appId: 'probe', credentialRef: 'PROBE_REF' })),
+      { type: 'signed', scheme: 'aliyun-acs3-hmac-sha256', keyId: 'probe', credentialRef: 'PROBE_REF' },
     ]) {
       expect(ConnectorInstanceAuthSchema.safeParse(auth).success, JSON.stringify(auth)).toBe(true);
+    }
+    const explanation = explainRule(FLOW_CREDENTIAL_LITERAL)!.paragraphs.join('\n');
+    for (const fact of [
+      "`oauth2` (grant `authorization_code` or `client_credentials`)",
+      "`app-credential` (vendor `feishu`, `dingtalk` or `wecom`)",
+      'held degraded and calls no upstream',
+      '`signed` signs each request',
+    ]) {
+      expect(explanation, `explanation names ${fact}`).toContain(fact);
     }
     // The connector-input line offers every secret-bearing variant by name.
     const input = lintFlowCredentialLiteralsUnrecorded(controlStack()).find((f) =>

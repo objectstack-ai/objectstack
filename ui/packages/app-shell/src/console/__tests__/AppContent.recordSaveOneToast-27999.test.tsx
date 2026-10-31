@@ -180,15 +180,18 @@ const NAMED = { id: 't1', subject: 'Quarterly review' };
 
 let toastSuccess: ReturnType<typeof vi.spyOn>;
 let toastWarning: ReturnType<typeof vi.spyOn>;
+let toastInfo: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   modalSchemas.length = 0;
   execute.mockClear();
   toastSuccess = vi.spyOn(toast, 'success');
   toastWarning = vi.spyOn(toast, 'warning');
+  toastInfo = vi.spyOn(toast, 'info');
 });
 afterEach(() => {
   toastSuccess.mockRestore();
   toastWarning.mockRestore();
+  toastInfo.mockRestore();
   cleanup();
 });
 
@@ -278,5 +281,48 @@ describe('AppContent — an overlay save with warnings shows one record-named to
 
     expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated']]);
     expect(toastWarning.mock.calls).toEqual([['Saved — with warnings', { description: ADVISORY.message }]]);
+  });
+});
+
+// objectstack-ai/objectstack#28252 — the answer's `notice` (the message a hook
+// set, objectstack-ai/objectstack#28000) rides the overlay's claim: the
+// `crud_success` toast and the child-form task's direct toast carry it.
+describe('AppContent — the overlay save toast carries the hook notice (objectstack-ai/objectstack#28252)', () => {
+  const NOTICE = 'Sent to your manager for approval';
+
+  it('update (crud_success): one success toast, the notice under the record-named message', async () => {
+    await saveFrom(MAIN_EDIT, update({ warnings: undefined, notice: NOTICE }), NAMED);
+
+    expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated', { description: NOTICE }]]);
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+
+  it('create (crud_success) with a warning too: one warning toast, the notice leading the lines', async () => {
+    await saveFrom(
+      MAIN_CREATE,
+      { operation: 'create', resource: 'showcase_task', id: 't1', droppedFields: [], warnings: [ADVISORY], notice: NOTICE },
+      NAMED,
+    );
+
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+    expect(toastWarning.mock.calls).toEqual([
+      ['Task "Quarterly review" created', { description: `${NOTICE}\n${ADVISORY.message}` }],
+    ]);
+  });
+
+  it('child-form task: the direct toast carries the notice', async () => {
+    await saveFrom(CHILD_EDIT, update({ warnings: undefined, notice: NOTICE }), NAMED);
+
+    expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated', { description: NOTICE }]]);
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a notice on a write the overlay did not make keeps the channel info toast', async () => {
+    await saveFrom(MAIN_EDIT, update({ id: 't9', warnings: undefined, notice: NOTICE }), NAMED);
+
+    expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated']]);
+    expect(toastInfo.mock.calls).toEqual([[NOTICE]]);
   });
 });
