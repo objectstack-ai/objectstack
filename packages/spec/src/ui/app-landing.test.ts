@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
-import { AppLandingEntrySchema, AppSchema, appLandingItemsResolve } from './app.zod';
+import { AppLandingEntrySchema, AppSchema, checkAppLandingItems } from './app.zod';
 import * as uiBarrel from './index';
 
 const NAV = [
@@ -119,17 +119,17 @@ describe('app.landing — refused at parse, at the entry\'s own path', () => {
   });
 });
 
-describe('appLandingItemsResolve — the exported refinement', () => {
+describe('checkAppLandingItems — the exported refinement', () => {
   it('is reachable from the ui barrel by identity', () => {
-    expect((uiBarrel as Record<string, unknown>).appLandingItemsResolve).toBe(appLandingItemsResolve);
+    expect((uiBarrel as Record<string, unknown>).checkAppLandingItems).toBe(checkAppLandingItems);
     expect((uiBarrel as Record<string, unknown>).AppLandingEntrySchema).toBe(AppLandingEntrySchema);
   });
 
   it('judges the authored bare-string `visible` the same as the parsed envelope', () => {
     const issues: string[] = [];
     const ctx = { addIssue: (i: { path?: unknown[] }) => issues.push((i.path ?? []).join('.')) } as unknown as z.RefinementCtx;
-    appLandingItemsResolve({ navigation: NAV, landing: [{ item: 'nav_leads', visible: 'data.x' }] }, ctx);
-    appLandingItemsResolve({ navigation: NAV, landing: [{ item: 'nav_leads', visible: { dialect: 'cel', source: 'data.x' } }] }, ctx);
+    checkAppLandingItems({ navigation: NAV, landing: [{ item: 'nav_leads', visible: 'data.x' }] }, ctx);
+    checkAppLandingItems({ navigation: NAV, landing: [{ item: 'nav_leads', visible: { dialect: 'cel', source: 'data.x' } }] }, ctx);
     expect(issues).toEqual(['landing.0.visible', 'landing.0.visible']);
   });
 });

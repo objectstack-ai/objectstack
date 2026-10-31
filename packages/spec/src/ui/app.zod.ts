@@ -1591,7 +1591,7 @@ export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
  * integrity, which a renderer resolved by falling back to the first item when
  * the id dangled — one fact with two sources, the wrong one failing quietly.
  * `item` is an id into the same tree, and the difference is the refusal:
- * {@link appLandingItemsResolve} runs on every app parse, so an `item` that
+ * {@link checkAppLandingItems} runs on every app parse, so an `item` that
  * names no entry of this app's own `navigation` or `areas[].navigation`, or
  * names an entry that opens nothing (a `group`, a `separator`, an `action`),
  * is refused at its own path before the app is stored. The landing is a
@@ -1687,7 +1687,7 @@ function collectNavEntriesById(items: unknown, into: Map<string, string>): void 
  * attaches this function rather than restating the rule. It accepts the
  * authored bare-string `visible` as well as the parsed envelope.
  */
-export function appLandingItemsResolve(app: unknown, ctx: z.RefinementCtx): void {
+export function checkAppLandingItems(app: unknown, ctx: z.RefinementCtx): void {
   if (!app || typeof app !== 'object') return;
   const { landing, navigation, areas } = app as { landing?: unknown; navigation?: unknown; areas?: unknown };
   if (!Array.isArray(landing) || landing.length === 0) return;
@@ -1811,7 +1811,7 @@ export function appLandingItemsResolve(app: unknown, ctx: z.RefinementCtx): void
  *
  * Landing per AUDIENCE came back as `app.landing` (#28022, ruling record
  * 6545223246, letter A), and it answers both objections above. It cannot
- * dangle: {@link appLandingItemsResolve} refuses, at parse, an `item` that
+ * dangle: {@link checkAppLandingItems} refuses, at parse, an `item` that
  * names no entry of the app's own navigation, so the id is checked rather
  * than trusted. And it is not a second "where everyone lands": every entry
  * carries a required audience predicate, so "everyone" is still the first
@@ -2034,7 +2034,7 @@ export const AppSchema = lazySchema(() => strictObject(
    * reader's own navigation gates hide is passed over). When none matches, or
    * the key is absent, the app opens where it always has: its first
    * navigation item by `order`. Every `item` must name an entry of this app,
-   * refused at parse otherwise ({@link appLandingItemsResolve}).
+   * refused at parse otherwise ({@link checkAppLandingItems}).
    *
    * PLANNED: declared spec-first; the console's landing redirect that reads it
    * is its own card. Until it lands, an app opens on its first navigation item
@@ -2108,7 +2108,7 @@ export const AppSchema = lazySchema(() => strictObject(
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
-}).superRefine(appLandingItemsResolve));
+}).superRefine(checkAppLandingItems));
 
 /**
  * App Factory Helper

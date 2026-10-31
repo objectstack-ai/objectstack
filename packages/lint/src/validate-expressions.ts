@@ -3550,7 +3550,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // unknown function, a malformed `has()`) with no object and no bare-field
   // judgement — a `record`-scoped call would prescribe `record.<x>` on a slot
   // that binds no record. The parse already refused a dangling `item` and a
-  // `data` read (`appLandingItemsResolve`). Apps are not an object's body, so
+  // `data` read (`checkAppLandingItems`). Apps are not an object's body, so
   // an object write reads an empty list here.
   for (const appDef of objectWrite ? [] : recordsOf(stack.apps)) {
     const appName = typeof appDef.name === 'string' ? appDef.name : '?';
