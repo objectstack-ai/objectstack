@@ -746,13 +746,20 @@ const NO_ENLARGED_CHIPS: readonly EnlargedChipDef[] = [];
  *    ask, and a chip that listed settled records as overdue would say what the
  *    cells do not.
  */
-function enlargedChipsOf(objectSchema: any): readonly EnlargedChipDef[] {
+interface EnlargedChipField {
+  name?: unknown;
+  type?: unknown;
+  dueLike?: unknown;
+  settledWhen?: unknown;
+}
+
+function enlargedChipsOf(objectSchema: { fields?: unknown } | null | undefined): readonly EnlargedChipDef[] {
   const chips: EnlargedChipDef[] = [{ id: 'all' }];
   const raw = objectSchema?.fields;
-  const fields: Array<[string, any]> = Array.isArray(raw)
-    ? raw.map((f: any) => [f?.name, f] as [string, any])
+  const fields: Array<[unknown, EnlargedChipField | undefined]> = Array.isArray(raw)
+    ? (raw as Array<EnlargedChipField | undefined>).map((f) => [f?.name, f])
     : raw && typeof raw === 'object'
-      ? Object.entries(raw)
+      ? Object.entries(raw as Record<string, EnlargedChipField | undefined>)
       : [];
   if (fields.some(([name]) => name === 'owner_id')) {
     chips.push({ id: 'mine', filter: { owner_id: '{current_user_id}' } });
@@ -761,7 +768,7 @@ function enlargedChipsOf(objectSchema: any): readonly EnlargedChipDef[] {
     ([name, f]) => typeof name === 'string' && f?.dueLike === true && f?.settledWhen == null
       && (f?.type === 'date' || f?.type === 'datetime'),
   );
-  if (deadline) chips.push({ id: 'overdue', filter: { [deadline[0]]: { $lt: '{today}' } } });
+  if (deadline) chips.push({ id: 'overdue', filter: { [deadline[0] as string]: { $lt: '{today}' } } });
   return chips;
 }
 

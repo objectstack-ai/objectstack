@@ -67,7 +67,7 @@ function renderList({
           pageSize={25}
           columns={[{ field: 'subject', label: 'Subject' }, { field: 'due_date', label: 'Due' }]}
           onNew={onNew}
-          dataSource={dataSource as any}
+          dataSource={dataSource as never}
         />
       </RelatedListEnlargedContext.Provider>
     </FilterScopeProvider>,
@@ -146,7 +146,7 @@ describe('the enlarged related list draws the board toolbar (objectstack#27524)'
     await waitFor(() => expect(lastFilter(dataSource.find)).toContain('owner_id'));
     fireEvent.click(document.querySelector('[data-related-enlarged-export]')!);
     await waitFor(() => expect(dataSource.exportDownload).toHaveBeenCalledTimes(1));
-    const [resource, request] = dataSource.exportDownload.mock.calls[0] as unknown as [string, any];
+    const [resource, request] = dataSource.exportDownload.mock.calls[0] as unknown as [string, { format: string; filter: unknown; fields: string[] }];
     expect(resource).toBe('task');
     expect(request.format).toBe('csv');
     expect(JSON.stringify(request.filter)).toContain('L-1');

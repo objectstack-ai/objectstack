@@ -243,7 +243,7 @@ describe('the enlarged state is the active tab (objectstack#27524, Target 9)', (
       { id: 'a1', type: 'activity', actor: 'Ada', body: 'called', createdAt: '2026-10-29T09:00:00Z' },
     ];
     const { container } = render(
-      <DiscussionContextProvider items={items as any} loading={false}>
+      <DiscussionContextProvider items={items as never} loading={false}>
         <RecordPageColumns
           tier="wide"
           columns={columnsOf()}
@@ -289,7 +289,7 @@ describe('the enlarged state is the active tab (objectstack#27524, Target 9)', (
   it('the right column switched off names the 动态 count too', async () => {
     const items = [{ id: 'c1', type: 'comment', actor: 'Ada', body: 'hi', createdAt: '2026-10-30T10:00:00Z' }];
     const { container } = render(
-      <DiscussionContextProvider items={items as any} loading={false}>
+      <DiscussionContextProvider items={items as never} loading={false}>
         <RecordPageColumns tier="wide" columns={columnsOf()} rightColumn={false} onEnlargeRelated={vi.fn()} />
       </DiscussionContextProvider>,
     );
