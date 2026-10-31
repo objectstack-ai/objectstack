@@ -1163,6 +1163,7 @@ export function isViewFilterAnyGroup(value: unknown): value is { [VIEW_FILTER_AN
  * console (`ui/packages/plugin-list`'s filter-to-AST conversion), which reads
  * flat rules only; until it reads this element, a view that stores one does not
  * filter by it. The describe below says so, so no author is told it works.
+ * The console half is #28370; the marker leaves when it lands.
  *
  * @example
  * ```ts
