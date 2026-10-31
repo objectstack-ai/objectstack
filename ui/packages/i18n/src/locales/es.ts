@@ -20,6 +20,7 @@ const es = {
       manage_org_users: "Gestionar usuarios de la organización",
       manage_metadata: "Gestionar metadatos",
       manage_mailboxes: "Gestionar los buzones",
+      manage_connector_connections: "Gestionar las conexiones de conectores",
       manage_platform_settings: "Gestionar la configuración de la plataforma",
       setup_access: "Acceso a la configuración",
       setup_write: "Escritura de la configuración",

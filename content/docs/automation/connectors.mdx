@@ -483,7 +483,10 @@ a rotating refresh token is never spent twice.
   `credentialRef` names re-derives the token at any time.
 - **`authorization_code`** needs an administrator to **connect** it, once per
   organization. Until then the instance is **degraded** "not connected" (never
-  a failed boot). The connect is three calls, each needing `manage_metadata`:
+  a failed boot). The connect is three calls, each needing the
+  organization-scoped `manage_connector_connections` capability (platform
+  administrators hold it by default; grant it to anyone else, an organization
+  administrator included, through a permission set):
 
   ```http
   POST /api/v1/automation/connectors/:name/connection     → { authorizationUrl, expiresAt }

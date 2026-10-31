@@ -163,6 +163,11 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
     // inbound-mail read gates, the unassociated pool included (ruling
     // 6116489638, Q4 → A). Organization administrators hold it too.
     'manage_mailboxes',
+    // [ADR-0143 D5] The connector connection capability: its holder connects,
+    // reconnects and revokes its organization's OAuth2 connector connections.
+    // Platform administrators hold it by default; every other position, the
+    // organization administrator included, only by explicit grant.
+    'manage_connector_connections',
   ],
 };
 
