@@ -102,7 +102,7 @@ describe('what the flow refuses at the transport', () => {
 
     it('no answer, a 429 or a 5xx is operational, and quotes nothing it was sent', async () => {
         const down = (async () => { throw new Error('connect ECONNREFUSED dummy-detail'); }) as unknown as typeof fetch;
-        const err = await discoverMcpAuthorization(request(down)).catch((e: unknown) => e as Error);
+        const err = (await discoverMcpAuthorization(request(down)).catch((e: unknown) => e)) as Error;
         expect(isConnectorUpstreamUnavailable(err)).toBe(true);
         expect(err.message).not.toContain('dummy-detail');
         for (const status of [429, 503]) {
@@ -125,7 +125,7 @@ describe('what the flow refuses at the transport', () => {
             }),
             'https://auth.example.com/register': () => json({ error: 'invalid_redirect_uri', error_description: 'dummy-echo' }, 400),
         });
-        const err = await discoverMcpAuthorization(request(impl)).catch((e: unknown) => e as Error);
+        const err = (await discoverMcpAuthorization(request(impl)).catch((e: unknown) => e)) as Error;
         expect(err).toBeInstanceOf(McpAuthorizationRefusedError);
         expect(err.message).toContain('(invalid_redirect_uri)');
         expect(err.message).not.toContain('dummy-echo');
