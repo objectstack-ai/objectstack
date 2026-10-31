@@ -1,10 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { SYS_FILE_STORAGE_OWNED_COLUMNS } from './objects/system-file.object.js';
+import { SYS_FILE_REFERENCE_COLUMNS, SYS_FILE_STORAGE_OWNED_COLUMNS } from './objects/system-file.object.js';
 
 /**
  * The create-side half of "the storage service owns `sys_file`'s lifecycle
- * columns" ({@link SYS_FILE_STORAGE_OWNED_COLUMNS}).
+ * columns": the storage-owned ones ({@link SYS_FILE_STORAGE_OWNED_COLUMNS})
+ * and the file-reference ones ({@link SYS_FILE_REFERENCE_COLUMNS}).
  *
  * The update side needs no code here: the columns are `readonly`, and the
  * engine's static readonly strip takes a non-system caller's value off an
@@ -23,6 +24,11 @@ import { SYS_FILE_STORAGE_OWNED_COLUMNS } from './objects/system-file.object.js'
  * columns is the storage service itself, under the system context, which this
  * hook does not judge: the upload doors (through `StorageMetadataStore`), the
  * field-file copy and backfill, and the attachment tombstone.
+ *
+ * The file-reference columns are owned the same way, by the file-reference
+ * lifecycle, which alone records which record and field hold a file,
+ * through its claim, release and copy, all under the system context. A
+ * non-system create starts with none of them, as a fresh upload does.
  *
  * Judged as the update strip judges: every write whose context is not
  * `isSystem`, a context-less one included.
@@ -44,13 +50,16 @@ const PACKAGE_ID = 'com.objectstack.service.storage';
 /** The state a non-system create starts in: an upload the service has not committed. */
 const NON_SYSTEM_CREATE_STATUS = 'pending';
 
+/** Every column a non-system create may not set: the storage-owned ones, then the file-reference ones. */
+const LIFECYCLE_OWNED_COLUMNS: readonly string[] = [...SYS_FILE_STORAGE_OWNED_COLUMNS, ...SYS_FILE_REFERENCE_COLUMNS];
+
 /**
- * Drop the storage-owned columns a non-system create supplied, and start the
- * row `pending`. Returns the names it dropped. Exported for the guard's pin.
+ * Drop the lifecycle-owned columns a non-system create supplied, and start the
+ * row `pending`. Returns the names it dropped.
  */
-export function dropStorageOwnedColumns(data: Record<string, unknown>): string[] {
+function dropLifecycleOwnedColumns(data: Record<string, unknown>): string[] {
   const dropped: string[] = [];
-  for (const column of SYS_FILE_STORAGE_OWNED_COLUMNS) {
+  for (const column of LIFECYCLE_OWNED_COLUMNS) {
     if (!Object.prototype.hasOwnProperty.call(data, column)) continue;
     delete data[column];
     dropped.push(column);
@@ -70,11 +79,12 @@ export function installSysFileStorageOwnedColumnsGuard(
       if (ctx?.session?.isSystem) return;
       const data = ctx?.input?.data;
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
-      const dropped = dropStorageOwnedColumns(data as Record<string, unknown>);
+      const dropped = dropLifecycleOwnedColumns(data as Record<string, unknown>);
       if (dropped.length === 0) return;
       logger.warn(
         `[storage] sys_file: dropped ${dropped.join(', ')} from a create that did not come from the storage service. ` +
-          'These columns record what the storage backend holds, and only the storage service writes them; ' +
+          'These columns record what the storage backend holds and which record owns the file, ' +
+          'and only the storage service writes them; ' +
           `the row was created ${NON_SYSTEM_CREATE_STATUS}. Upload files through the storage upload doors instead.`,
         { object: 'sys_file', operation: 'insert', fields: dropped, userId: ctx?.session?.userId ?? 'unknown' },
       );
