@@ -53,7 +53,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Objeto de destino (p. ej. sys_user, project_task)."
       },
       record_id: {
-        label: "Registro",
+        label: "ID de registro",
         help: "ID del registro afectado."
       },
       old_value: {
@@ -158,7 +158,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Nombre corto del objeto de destino (p. ej. account, sys_user)."
       },
       record_id: {
-        label: "Registro"
+        label: "ID de registro"
       },
       record_label: {
         label: "Nombre visible del registro",

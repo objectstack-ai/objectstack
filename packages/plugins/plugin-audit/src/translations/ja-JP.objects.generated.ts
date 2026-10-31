@@ -53,7 +53,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "対象オブジェクト（例: sys_user、project_task）"
       },
       record_id: {
-        label: "レコード",
+        label: "レコード ID",
         help: "影響を受けたレコードの ID"
       },
       old_value: {
@@ -158,7 +158,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "対象オブジェクトの短い名前（例: account、sys_user）"
       },
       record_id: {
-        label: "レコード"
+        label: "レコード ID"
       },
       record_label: {
         label: "レコード表示名",

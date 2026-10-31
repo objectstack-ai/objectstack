@@ -53,7 +53,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Target object (e.g. sys_user, project_task)"
       },
       record_id: {
-        label: "Record",
+        label: "Record ID",
         help: "ID of the affected record"
       },
       old_value: {
@@ -158,7 +158,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Target object short name (e.g. account, sys_user)"
       },
       record_id: {
-        label: "Record"
+        label: "Record ID"
       },
       record_label: {
         label: "Record Label",
