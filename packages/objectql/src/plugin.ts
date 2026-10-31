@@ -1340,6 +1340,30 @@ export class ObjectQLPlugin implements Plugin {
                 error: e.message,
             });
         }
+
+        // [ADR-0144 D4, Open item 4] The home currency the write-time home
+        // projection converts into: the organization's `localization.currency`
+        // setting. The settings service is resolved when a write asks, not
+        // here, so plugin order cannot leave the projection without it. No
+        // settings service, or no `localization` manifest registered, is an
+        // unset home currency — refused, never defaulted; a read that FAILS is
+        // the write's failure, not an unset setting.
+        this.ql.setHomeCurrencyResolver(async (organizationId) => {
+            let settings: { get?: (ns: string, key: string, c?: Record<string, unknown>) => Promise<{ value?: unknown } | undefined> } | undefined;
+            try {
+                settings = ctx.getService('settings') as typeof settings;
+            } catch {
+                return undefined;
+            }
+            if (!settings || typeof settings.get !== 'function') return undefined;
+            try {
+                const resolved = await settings.get('localization', 'currency', organizationId !== undefined ? { tenantId: organizationId } : {});
+                return typeof resolved?.value === 'string' ? resolved.value : undefined;
+            } catch (e: any) {
+                if (e?.code === 'SETTINGS_UNKNOWN_NAMESPACE' || e?.code === 'SETTINGS_UNKNOWN_KEY') return undefined;
+                throw e;
+            }
+        });
     }
 
     // Initialize drivers (calls driver.connect() which sets up persistence)

@@ -451,3 +451,45 @@ export async function projectHomeAmounts(
   }
   return out;
 }
+
+/**
+ * The one patch a PREDICATE update can store for the projected fields of the
+ * entries it touches, judged over every matched row's projection. `updateMany`
+ * writes ONE patch to all of them, so a projected field is set only when it
+ * comes out the same on every matched row (the payload moved every row to one
+ * currency, amount and date, say). A patch that would project different
+ * values on different rows cannot be one statement, and is refused before
+ * anything is written: update those rows by id, where each is projected from
+ * its own stored row. A caller's value for a projected field never stands
+ * either way — the stored-expression rule for a predicate update, applied to
+ * the home projection.
+ */
+export function settleBulkHomeAmounts(
+  touched: readonly HomeAmountPlanEntry[],
+  patch: Record<string, unknown>,
+  projected: ReadonlyArray<Record<string, unknown>>,
+  object: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...patch };
+  const refused: Array<{ field: string; code: 'invalid_value'; message: string }> = [];
+  for (const entry of touched) {
+    for (const name of [entry.homeField, entry.rateField]) {
+      delete out[name];
+      if (projected.length === 0) continue;
+      const first = projected[0]![name];
+      if (projected.every((values) => Object.is(values[name], first))) {
+        if (first !== undefined) out[name] = first;
+        continue;
+      }
+      refused.push({
+        field: name,
+        code: 'invalid_value',
+        message: `'${name}' on '${object}' is the engine's conversion of '${entry.amountField}' into the home currency, `
+          + 'and this update moves its inputs on rows where it then converts to different values, which one update '
+          + 'of all the matched rows cannot store; update those rows by id, so each is converted from its own row',
+      });
+    }
+  }
+  if (refused.length > 0) throw new ValidationError(refused);
+  return out;
+}
