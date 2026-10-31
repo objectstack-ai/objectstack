@@ -17,3 +17,4 @@ A console working inside one app used to read the app, then one `GET /meta/objec
 - **Server-Timing**: the bundle's metadata reads are timed as a `meta` span beside `db` and `total`, under the existing gate (`OS_SERVER_TIMING=true`, or `X-OS-Debug-Timing: 1` from an admin).
 - The query-parameter set is closed and empty.
 - `@objectstack/client` gains `meta.getAppBundle(appId, { ifNoneMatch })`, conditional in `meta.getCached`'s spelling: it answers `{ notModified: false, data, etag }` on a `200` and `{ notModified: true, etag }` on a `304`, and a `304` is not thrown as a failed request.
+- `meta.getCached` now answers a matching `If-None-Match` / `If-Modified-Since` with `{ notModified: true }` through the same opt-in. Before, the transport threw on the `304` before the method's own `304` branch could run.
