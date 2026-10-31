@@ -71,6 +71,7 @@ import {
     createAuthorizationState,
     createOAuth2GrantHandle,
     createPkcePair,
+    insecureOAuth2EndpointFields,
     kvPendingAuthorizationStore,
     memoryPendingAuthorizationStore,
     notConnectedReason,
@@ -458,7 +459,10 @@ function appCredentialNotServedReason(name: string, auth: Extract<ConnectorInsta
  * request (`registerConnectorProvider(…, { credentialHandle: true })`), and
  * the endpoints and client the handle sends a token request with — on
  * `provider: 'mcp'` over http they may be omitted for the MCP authorization
- * flow to discover and register, which is not run here yet.
+ * flow to discover and register, which is not run here yet. An endpoint over
+ * plain `http:` off loopback, or any other scheme, is refused by field
+ * (`./oauth2-grant/endpoint-transport.ts`): the client secret and the refresh
+ * token would cross the network in the clear.
  */
 function oauth2NotServableReason(name: string, provider: string, auth: OAuth2InstanceAuth, providerApplies: boolean): string | undefined {
     if (!providerApplies) {
@@ -471,10 +475,17 @@ function oauth2NotServableReason(name: string, provider: string, auth: OAuth2Ins
         auth.clientId === undefined ? 'clientId' : undefined,
         auth.grant === 'authorization_code' && auth.authorizationUrl === undefined ? 'authorizationUrl' : undefined,
     ].filter((k): k is string => k !== undefined);
-    if (missing.length === 0) return undefined;
-    return `connector instance '${name}' declares auth type 'oauth2' without ${missing.map((k) => `\`${k}\``).join(', ')}: `
-        + 'discovering the endpoints and registering a client (the MCP authorization flow) is not run by this server yet '
-        + '(ADR-0143 D2.1), so the instance is not served. Declare them to dispatch it now.';
+    if (missing.length > 0) {
+        return `connector instance '${name}' declares auth type 'oauth2' without ${missing.map((k) => `\`${k}\``).join(', ')}: `
+            + 'discovering the endpoints and registering a client (the MCP authorization flow) is not run by this server yet '
+            + '(ADR-0143 D2.1), so the instance is not served. Declare them to dispatch it now.';
+    }
+    const insecure = insecureOAuth2EndpointFields(auth as Partial<Record<'tokenUrl' | 'authorizationUrl', unknown>>);
+    if (insecure.length === 0) return undefined;
+    return `connector instance '${name}' declares auth type 'oauth2' with ${insecure.map((k) => `\`${k}\``).join(', ')} `
+        + 'not over https: the client secret, the refresh token and the authorization redirect would cross the network in '
+        + 'the clear (ADR-0143 D4), so the instance is not served. Declare an https:// endpoint; plain http:// is accepted '
+        + 'only to a loopback host.';
 }
 
 /**
@@ -3100,7 +3111,7 @@ export class AutomationServicePlugin implements Plugin {
     /** ADR-0143 D3 — `IAutomationService.getConnectorConnection`. */
     private async getConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
         const { name, organizationId } = await this.connectionDoorSubject(ctx, request);
-        return this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().read(organizationId, name));
+        return this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
     }
 
     /**

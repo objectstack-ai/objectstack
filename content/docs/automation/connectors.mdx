@@ -494,13 +494,18 @@ a rotating refresh token is never spent twice.
   instance's only connection, and is refused when there are several. When the
   vendor refuses the grant (`invalid_grant`), the connection is marked
   **reconnect required** and the instance degraded until an administrator
-  connects it again.
+  connects it again. A revoke deletes the stored connection only: the server
+  does not yet revoke the refresh token at the vendor (RFC 7009), so it stays
+  valid there until it expires or is revoked in the vendor's console.
 
 What is not served yet is held **degraded** with a reason that names it, and
 never called without its credential: `app-credential` (its vendor exchanges
 are not run yet), an `oauth2` instance on a provider that does not yet ask the
 credential handle (the built-in `rest`, `openapi` and `mcp` providers do not
-yet), and an `mcp` instance that left its endpoints to discovery. A datasource
+yet), an `mcp` instance that left its endpoints to discovery, and an `oauth2`
+instance whose `tokenUrl` or `authorizationUrl` is not `https://` (plain
+`http://` is accepted only to a loopback host, so the client secret and the
+refresh token never cross a network in the clear). A datasource
 that borrows from a grant-bearing instance (`external.connector`) is refused
 with `422`. Until then, declare a static kind (`bearer`, `api-key` or `basic`)
 to dispatch now; don't emulate a grant by putting a short-lived access token

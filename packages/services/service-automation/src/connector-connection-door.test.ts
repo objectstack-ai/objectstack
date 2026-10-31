@@ -230,7 +230,7 @@ async function dataEngine(): Promise<ObjectQL> {
     return ql;
 }
 
-async function boot(declared: unknown[] = [crm()], opts: { redirectUri?: string | null; cluster?: unknown } = {}) {
+async function boot(declared: unknown[] = [crm()], opts: { redirectUri?: string | null; cluster?: unknown; noData?: boolean } = {}) {
     const ql = await dataEngine();
     const provider = grantedProvider();
     const kernel = new LiteKernel({ logger: { level: 'debug', format: 'json' } } as never);
@@ -247,7 +247,7 @@ async function boot(declared: unknown[] = [crm()], opts: { redirectUri?: string 
         dependencies: ['com.objectstack.service-automation'],
         async init(ctx: any) {
             ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
-            ctx.registerService('data', ql);
+            if (!opts.noData) ctx.registerService('data', ql);
             if (opts.cluster) ctx.registerService('cluster', opts.cluster);
             ctx.getService('automation').registerConnectorProvider('granted', provider.factory, { credentialHandle: true });
         },
@@ -380,6 +380,40 @@ describe('ADR-0143 D4/D5 — connect an instance nobody authorized yet', () => {
             .rejects.toMatchObject({ status: 400, message: expect.stringContaining('needs an active organization') });
         await expect(engine.beginConnectorConnection({ connector: 'crm', context: { tenantId: 'org_a' } as never }))
             .rejects.toMatchObject({ status: 400, message: expect.stringContaining('needs a signed-in user') });
+    });
+
+    it('⛔ the door refuses an instance whose tokenUrl or authorizationUrl is not https off loopback, naming the field', async () => {
+        const plain = crm({ name: 'plain', auth: { ...crm().auth, authorizationUrl: 'http://idp.example.com/authorize' } });
+        const { engine } = await boot([crm(), plain]);
+        for (const call of [
+            () => engine.getConnectorConnection({ connector: 'plain', context: ADMIN_A as never }),
+            () => engine.beginConnectorConnection({ connector: 'plain', context: ADMIN_A as never }),
+        ]) {
+            const err = (await call().catch((e: Error) => e)) as Error & { status?: number };
+            expect(err.status).toBe(400);
+            expect(err.message).toContain('`authorizationUrl` not over https');
+            expect(err.message).not.toContain('idp.example.com');
+        }
+        // The loopback token endpoint of `crm()` itself is accepted.
+        await expect(engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .resolves.toMatchObject({ status: 'not_connected' });
+    });
+
+    it('⛔ a store this deployment cannot read is a 503 at the door, never "not connected"', async () => {
+        const none = await boot([crm()], { noData: true });
+        await expect(none.engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }))
+            .rejects.toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE', message: expect.stringContaining('no data engine') });
+
+        const { engine, ql } = await boot();
+        const find = ql.find.bind(ql);
+        vi.spyOn(ql, 'find').mockImplementation(async (object: string, ...rest: unknown[]) => {
+            if (object === CONNECTOR_CONNECTION_OBJECT) throw new Error('dummy-store-down-26702');
+            return (find as any)(object, ...rest);
+        });
+        const err = (await engine.getConnectorConnection({ connector: 'crm', context: ADMIN_A as never }).catch((e: Error) => e)) as Error & { status?: number };
+        expect(err.status).toBe(503);
+        expect(err.message).toContain("connection of connector instance 'crm' cannot be read");
+        expect(err.message).not.toContain('dummy-store-down-26702');
     });
 
     it('the redirect URI is fixed per deployment: with none configured, begin is a 503 and is never taken from the request', async () => {

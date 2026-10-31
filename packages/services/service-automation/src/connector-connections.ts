@@ -107,6 +107,22 @@ export class ConnectorConnectionStore {
         return engine;
     }
 
+    /**
+     * As {@link read}, for the connection door: a store this deployment cannot
+     * read — no data engine, or one whose read fails — is a 503
+     * `ConnectorCredentialUnavailableError`, never "not connected". The
+     * engine's own message is not carried (it may name the row it was handed).
+     */
+    async readOrRefuse(organizationId: string, connectorName: string): Promise<ConnectorConnectionRecord | undefined> {
+        const what = `The connection of connector instance '${connectorName}' cannot be read`;
+        this.engineOrThrow(what);
+        try {
+            return await this.read(organizationId, connectorName);
+        } catch {
+            throw new ConnectorCredentialUnavailableError(`${what}: the connection store did not answer the read.`);
+        }
+    }
+
     /** The row for one instance in one organization, or `undefined` when it is not connected there. */
     async read(organizationId: string, connectorName: string): Promise<ConnectorConnectionRecord | undefined> {
         const engine = this.resolveEngine();

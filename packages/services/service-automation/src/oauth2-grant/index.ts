@@ -10,3 +10,4 @@
 export * from './token-endpoint.js';
 export * from './grant-handle.js';
 export * from './authorization.js';
+export * from './endpoint-transport.js';

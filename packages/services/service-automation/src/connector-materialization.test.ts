@@ -1106,6 +1106,35 @@ describe('ADR-0143 D4 — a grant-bearing instance is served through its credent
         await kernel.shutdown();
     });
 
+    it.each([
+        ['tokenUrl', { tokenUrl: 'http://idp.example.com/token' }],
+        ['authorizationUrl', { authorizationUrl: 'http://idp.example.com/authorize' }],
+        ['tokenUrl', { tokenUrl: 'ftp://idp.example.com/token' }],
+    ] as const)('⛔ holds an `oauth2` instance degraded when its `%s` is not https off loopback, naming the field', async (field, over) => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: { ...AUTHORIZATION_CODE, ...over } as ConnectorInstanceAuth })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expectHeld(automationOf(kernel), calls, `\`${field}\` not over https`, 'not served');
+        // The reason names the field, never the URL it was given.
+        expect(automationOf(kernel).getConnectorDegradedReason('vendor')).not.toContain('idp.example.com');
+        await kernel.shutdown();
+    });
+
+    it('serves an `oauth2` instance whose token endpoint is plain http on a loopback host', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: { ...CLIENT_CREDENTIALS, tokenUrl: 'http://127.0.0.1:8080/token' } as ConnectorInstanceAuth })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expect(calls).toHaveLength(1);
+        expect(automationOf(kernel).getConnectorDescriptors().find((d) => d.name === 'vendor')?.state).toBe('ready');
+        await kernel.shutdown();
+    });
+
     it('serves a `client_credentials` instance on an opted-in provider: a credential handle, and no static auth', async () => {
         const { factory, calls } = makeFakeProvider();
         const kernel = await boot([providerConnector('vendor', { auth: CLIENT_CREDENTIALS })], {
