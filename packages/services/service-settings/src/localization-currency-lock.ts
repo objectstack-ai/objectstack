@@ -151,13 +151,13 @@ export const CURRENCY_LOCK_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Curr
   'zh-CN': {
     objects: (n, labels) => `${n} 个对象（${labels}）`,
     rates: (n) => `${n} 条汇率`,
-    and: '和',
+    and: '和 ',
     listSeparator: '、',
     refusal: (current, usage) =>
-      `默认币种已锁定为 ${current}：它已被${usage}使用。修改它会给所有已换算成该币种的金额换上错误的币种。` +
+      `默认币种已锁定为 ${current}：它已被 ${usage}使用。修改它会给所有已换算成该币种的金额换上错误的币种。` +
       '只有在不再有任何汇率记录、也没有任何对象声明本位币金额之后，才能修改。',
     lockedLabel: (current) => `默认币种已锁定：${current}`,
-    lockedText: (usage) => `已被${usage}使用。换算后的金额都以该币种存储，因此不能再修改。`,
+    lockedText: (usage) => `已被 ${usage}使用。换算后的金额都以该币种存储，因此不能再修改。`,
     unsetLabel: '尚未设置默认币种',
     unsetText: (usage) =>
       `汇率和本位币金额都需要默认币种，但目前尚未设置。使用情况：${usage}。请在下方选择；保存后将无法修改。`,
@@ -165,7 +165,7 @@ export const CURRENCY_LOCK_COPY: Record<'en' | 'zh-CN' | 'ja-JP' | 'es-ES', Curr
   'ja-JP': {
     objects: (n, labels) => `${n} 件のオブジェクト（${labels}）`,
     rates: (n) => `${n} 件の為替レート`,
-    and: 'と',
+    and: 'と ',
     listSeparator: '、',
     refusal: (current, usage) =>
       `既定の通貨は ${current} でロックされています。${usage}で使用されているためです。` +
