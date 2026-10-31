@@ -1042,7 +1042,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // (their gates keep them off the shared cache above),
                         // so before this they were served with no validator.
                         res.header('Vary', 'Accept-Language');
-                        sendMetaRepresentation(req, res, answer.envelope, answer);
+                        sendMetaRepresentation(req, res, answer.envelope, answer, metadata.enableCache !== false);
                     }
                 } catch (error: any) {
                     // [#18402] THE one absence answer, whichever arm

@@ -40,13 +40,25 @@ interface RepresentationResponse {
  * Send `body` under its caching answer: `Cache-Control`, the `ETag` when one
  * was issued, and a bodiless `304` when the request's `If-None-Match` already
  * names it.
+ *
+ * `enableCache` is the deployment's `metadata.enableCache`, declared as
+ * "Enable HTTP cache headers (ETag, Last-Modified)" (`rest-server.zod.ts`).
+ * Switched off, no validator and no revalidation posture is sent and nothing
+ * is answered `304`; the ADR-0106 D6 tier-2 `private, no-store` still is,
+ * because that one forbids storing an unmasked body rather than enabling a
+ * cache.
  */
 export function sendMetaRepresentation(
     req: { headers?: Record<string, unknown> },
     res: RepresentationResponse,
     body: unknown,
     caching: { cacheControl: string; etag?: string },
+    enableCache: boolean,
 ): void {
+    if (!enableCache && caching.etag !== undefined) {
+        res.json(body);
+        return;
+    }
     res.header('Cache-Control', caching.cacheControl);
     if (caching.etag !== undefined) {
         res.header('ETag', caching.etag);

@@ -44,7 +44,7 @@ function makeRes() {
 }
 
 /** A server over a mutable corpus, for a caller holding `perms`. */
-function setup(perms: string[], corpus: { apps: any[]; dashboards: any[]; types: string[] }) {
+function setup(perms: string[], corpus: { apps: any[]; dashboards: any[]; types: string[] }, metadata?: { enableCache: boolean }) {
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
         getMetaTypes: vi.fn(async () => ({ types: [...corpus.types] })),
@@ -61,7 +61,7 @@ function setup(perms: string[], corpus: { apps: any[]; dashboards: any[]; types:
         }),
         findData: vi.fn().mockResolvedValue([]),
     };
-    const rest: any = new RestServer(createMockServer() as any, protocol, { api: { requireAuth: false } } as any);
+    const rest: any = new RestServer(createMockServer() as any, protocol, { api: { requireAuth: false }, ...(metadata ? { metadata } : {}) } as any);
     rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: perms });
     rest.registerRoutes();
     return { rest, protocol };
@@ -183,6 +183,20 @@ describe('[#27627] the uncached item exit — app and dashboard, which the share
         const member = await read(setup([], corpus).rest, ITEM, { type: 'app', name: 'build_in_flight' }, builder.headers.ETag);
         expect(member.statusCode).toBe(404);
         expect(member.headers.ETag).toBeUndefined();
+    });
+});
+
+describe('[#27627] metadata.enableCache: false — "Enable HTTP cache headers (ETag, Last-Modified)" — still switches them off', () => {
+    it('the list, the type list and the uncached item exit send no ETag and no Cache-Control, and never answer 304', async () => {
+        const corpus = fresh();
+        const { rest } = setup([], corpus, { enableCache: false });
+        const tagged = await read(setup([], corpus).rest, LIST, { type: 'app' });
+        for (const [path, params] of [[LIST, { type: 'app' }], [TYPES, {}], [ITEM, { type: 'app', name: 'crm' }]] as const) {
+            const res = await read(rest, path, params, tagged.headers.ETag);
+            expect(res.statusCode, path).toBe(200);
+            expect(res.headers.ETag, path).toBeUndefined();
+            expect(res.headers['Cache-Control'], path).toBeUndefined();
+        }
     });
 });
 

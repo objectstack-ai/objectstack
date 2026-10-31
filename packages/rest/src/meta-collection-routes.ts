@@ -256,7 +256,7 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                 // [#27627] The type list varies by locale and by what this
                 // kernel registers, both inside the served bytes the
                 // validator hashes.
-                sendMetaRepresentation(req, res, translated, metaRepresentationCaching(translated));
+                sendMetaRepresentation(req, res, translated, metaRepresentationCaching(translated), metadata.enableCache !== false);
             } catch (error: any) {
                 handleRouteError(res, error);
             }
@@ -718,7 +718,7 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // validator of the served list, and a `304` when the
                     // caller already holds it.
                     res.header('Vary', 'Accept-Language');
-                    sendMetaRepresentation(req, res, answer.data, answer);
+                    sendMetaRepresentation(req, res, answer.data, answer, metadata.enableCache !== false);
                 } catch (error: any) {
                     handleRouteError(res, error);
                 }
