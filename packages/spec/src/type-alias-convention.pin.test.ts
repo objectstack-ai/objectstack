@@ -616,6 +616,7 @@ export type Iso_api_protocol__MarkNotificationsReadRequestSchema = Assert<Eq< z.
 export type Iso_api_protocol__MarkNotificationsReadResponseSchema = Assert<Eq< z.input< typeof M28.MarkNotificationsReadResponseSchema >, z.infer< typeof M28.MarkNotificationsReadResponseSchema > >>;
 export type Iso_api_protocol__MetadataAuthoringClientSchema = Assert<Eq< z.input< typeof M28.MetadataAuthoringClientSchema >, z.infer< typeof M28.MetadataAuthoringClientSchema > >>;
 export type Iso_api_protocol__MetadataAuthoringSurfaceSchema = Assert<Eq< z.input< typeof M28.MetadataAuthoringSurfaceSchema >, z.infer< typeof M28.MetadataAuthoringSurfaceSchema > >>;
+export type Iso_api_protocol__PublicFormSubmitResponseSchema = Assert<Eq< z.input< typeof M28.PublicFormSubmitResponseSchema >, z.infer< typeof M28.PublicFormSubmitResponseSchema > >>;
 export type Iso_api_protocol__PublishMetaItemRequestSchema = Assert<Eq< z.input< typeof M28.PublishMetaItemRequestSchema >, z.infer< typeof M28.PublishMetaItemRequestSchema > >>;
 export type Iso_api_protocol__PublishMetaItemResponseSchema = Assert<Eq< z.input< typeof M28.PublishMetaItemResponseSchema >, z.infer< typeof M28.PublishMetaItemResponseSchema > >>;
 export type Iso_api_protocol__PublishPackageDraftsResponseSchema = Assert<Eq< z.input< typeof M28.PublishPackageDraftsResponseSchema >, z.infer< typeof M28.PublishPackageDraftsResponseSchema > >>;
