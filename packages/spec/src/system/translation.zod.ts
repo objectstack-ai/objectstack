@@ -266,6 +266,36 @@ const actionTranslationSchema = (surface: string) => strictObject({
  * }
  * ```
  */
+/**
+ * A form's thank-you panel translation — one shape, used at two addresses: a
+ * form view's `_views.<view>.submitBehavior` and a page `object-form`
+ * component's `pages.<page>.components.<id>.submitBehavior` (the block
+ * `ObjectFormPropsSchema.submitBehavior` takes from the form view by
+ * reference). Built by a factory for {@link actionTranslationSchema}'s
+ * reason: the two cannot drift, and `surface` says which of the two a
+ * rejected key was written on.
+ *
+ * It carries the thank-you member's two strings only: the three other kinds
+ * (`redirect`, `continue`, `next-record`) author no copy.
+ */
+const submitBehaviorTranslationSchema = (surface: string) => strictObject({
+  surface,
+  history: TRANSLATION_HISTORY,
+  // Mirrors the thank-you member's own alias table in `ui/view.zod.ts`.
+  aliases: { heading: 'title', text: 'message', body: 'message', description: 'message' },
+  guidance: {
+    url:
+      "`url` is not display copy — a `redirect` submit behavior's path is the same in every "
+      + 'locale. Only a `thank-you` panel authors copy: translate its `title` and `message`.',
+    kind:
+      '`kind` is not display copy — it selects the behavior and is the same in every locale. '
+      + 'Translate the thank-you panel\'s `title` and `message` only.',
+  },
+}, {
+  title: z.string().optional().describe('Translated thank-you panel heading (overlays `submitBehavior.title`)'),
+  message: z.string().optional().describe('Translated thank-you panel message (overlays `submitBehavior.message`)'),
+});
+
 export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this object translation',
   history: TRANSLATION_HISTORY,
@@ -369,23 +399,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
      * `title` / `message`: a form with another kind, or none, gains no
      * panel copy, and the console's own default wording stays in charge.
      */
-    submitBehavior: strictObject({
-      surface: 'this form submit behavior translation',
-      history: TRANSLATION_HISTORY,
-      // Mirrors the thank-you member's own alias table in `ui/view.zod.ts`.
-      aliases: { heading: 'title', text: 'message', body: 'message', description: 'message' },
-      guidance: {
-        url:
-          "`url` is not display copy — a `redirect` submit behavior's path is the same in every "
-          + 'locale. Only a `thank-you` panel authors copy: translate its `title` and `message`.',
-        kind:
-          '`kind` is not display copy — it selects the behavior and is the same in every locale. '
-          + 'Translate the thank-you panel\'s `title` and `message` only.',
-      },
-    }, {
-      title: z.string().optional().describe('Translated thank-you panel heading (overlays `submitBehavior.title`)'),
-      message: z.string().optional().describe('Translated thank-you panel message (overlays `submitBehavior.message`)'),
-    }).optional().describe("Translated thank-you panel copy — overlays a form view's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`; only copy the form authors is translated"),
+    submitBehavior: submitBehaviorTranslationSchema('this form submit behavior translation').optional().describe("Translated thank-you panel copy — overlays a form view's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`; only copy the form authors is translated"),
     emptyState: strictObject({
       surface: 'this view empty-state translation',
       history: TRANSLATION_HISTORY,
@@ -1283,6 +1297,9 @@ const appTranslationDataShape = () => ({
    *   pages.<name>.components.<tabsId>.items.<value>.label
    *                             → that `page:tabs` item's `label`, keyed by the
    *                               item's `value` (see `items` below)
+   *   pages.<name>.components.<formId>.submitBehavior.title / .message
+   *                             → that `object-form`'s thank-you panel (see
+   *                               `submitBehavior` below)
    *
    * When `title` is omitted, the header keeps the title its author wrote.
    * `label` stands in for it only where the header authors no title, or where
@@ -1404,7 +1421,7 @@ const appTranslationDataShape = () => ({
       // A page component's headline is `title`; the PAGE's is `label`. Same
       // document one level apart with opposite spellings — the same trap
       // `dashboards.widgets` names, so it gets the same alias table.
-      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText' },
+      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText', thankYou: 'submitBehavior' },
       guidance: {
         submitLabel:
           '`submitLabel` was removed in @objectstack/spec 17 (ADR-0049) — its only '
@@ -1459,6 +1476,29 @@ const appTranslationDataShape = () => ({
       }, {
         label: z.string().optional().describe("Translated tab label — overlays the item's own `label` (`PageTabsProps.items[].label`)"),
       })).optional().describe('`page:tabs` item labels keyed by the item `value` (`PageTabsProps.items[].value`); an item without a `value` has no key'),
+      /**
+       * An `object-form` component's thank-you panel — overlays the `title`
+       * and `message` of `properties.submitBehavior` when its `kind` is
+       * `'thank-you'` (`ObjectFormPropsSchema.submitBehavior`, the form
+       * view's own member by reference), read by `translatePage`, offered by
+       * `os i18n extract`, judged by `objectstack validate`.
+       *
+       * **Under the page, not under the bound object.** The panel is copy the
+       * PAGE authors: two pages binding the same object can confirm a submit
+       * in different words, and a key under `objects.<object>` (the
+       * `_sections` precedent) would make them share one translation. The
+       * component's own `id` already addresses its `title` / `description`
+       * here, so its panel sits beside them; a form view's panel keeps its
+       * own address under `_views`, because there the copy is the view's.
+       *
+       * Nested the way the authored copy is nested, so the panel's heading
+       * never shares the component's own `title` key. The same rules as the
+       * form view's panel apply, through the one function both share: only a
+       * `kind: 'thank-you'` panel is touched, only authored copy is
+       * translated, and a missing key keeps the authored string. An
+       * `object-form` without an `id` has no key; give it one.
+       */
+      submitBehavior: submitBehaviorTranslationSchema('this page form submit behavior translation').optional().describe("Translated thank-you panel copy — overlays an `object-form` component's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`; only copy the form authors is translated"),
     })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
 

@@ -1292,11 +1292,19 @@ function translateFormTitle(
 }
 
 /**
- * A served form view's translated thank-you panel (`FormViewSchema
- * .submitBehavior`, at `config.submitBehavior`), read from
- * `objects.<object>._views.<viewKey>.submitBehavior.{title,message}` — the
- * same `_views` node {@link translateFormTitle} reads the form's heading
- * from, one level down, the way the authored copy sits one level down.
+ * A form's translated thank-you panel (`FormViewSchema.submitBehavior`) — the
+ * ONE comparison both of its carriers run, each supplying its own address as
+ * `lookup`:
+ *
+ *  - a served form view, at `config.submitBehavior`, read from
+ *    `objects.<object>._views.<viewKey>.submitBehavior.{title,message}` — the
+ *    same `_views` node {@link translateFormTitle} reads the form's heading
+ *    from, one level down, the way the authored copy sits one level down
+ *    ({@link translateView});
+ *  - a page `object-form` component, at `properties.submitBehavior` (the form
+ *    view's member by reference), read from
+ *    `pages.<page>.components.<id>.submitBehavior.{title,message}`
+ *    ({@link translatePage}).
  *
  * Returns `behavior` itself (the same reference) when nothing applies, so the
  * caller can tell "unchanged" by identity:
@@ -1314,20 +1322,17 @@ function translateFormTitle(
  */
 function translateFormSubmitBehavior(
   behavior: unknown,
-  bundle: TranslationBundle,
-  objectName: string,
-  viewKey: string,
-  opts: ResolveOptions | undefined,
+  lookup: (attr: SubmitBehaviorCopyKey) => string | undefined,
   packagedConfig: Record<string, unknown> | undefined,
 ): unknown {
   const served = asRecord(behavior);
   if (!served || served.kind !== 'thank-you') return behavior;
   const packaged = packagedConfig === undefined ? undefined : asRecord(packagedConfig.submitBehavior) ?? {};
-  const text = (attr: 'title' | 'message'): string | undefined => {
+  const text = (attr: SubmitBehaviorCopyKey): string | undefined => {
     const value = served[attr];
     if (typeof value !== 'string' || value.length === 0) return undefined;
     if (valueOverridesPackagedBase(packaged, attr, value)) return undefined;
-    return lookupSubmitBehaviorText(bundle, objectName, viewKey, attr, opts);
+    return lookup(attr);
   };
   const title = text('title');
   const message = text('message');
@@ -1339,6 +1344,9 @@ function translateFormSubmitBehavior(
   };
 }
 
+/** The two strings a thank-you panel authors, and so the two its translation carries. */
+type SubmitBehaviorCopyKey = 'title' | 'message';
+
 /**
  * One string off a view's `_views.<viewKey>.submitBehavior` node, across the
  * locale chain — `undefined` when no locale carries it.
@@ -1347,7 +1355,7 @@ function lookupSubmitBehaviorText(
   bundle: TranslationBundle,
   objectName: string,
   viewKey: string,
-  attr: 'title' | 'message',
+  attr: SubmitBehaviorCopyKey,
   opts: ResolveOptions | undefined,
 ): string | undefined {
   for (const code of localeChain(opts)) {
@@ -1500,12 +1508,10 @@ export function translateView<T extends ViewLike>(
       opts,
       packagedConfig,
     );
+    const viewKey = viewTranslationKey(view, objectName);
     const submitBehavior = translateFormSubmitBehavior(
       config.submitBehavior,
-      bundle,
-      objectName,
-      viewTranslationKey(view, objectName),
-      opts,
+      (attr) => lookupSubmitBehaviorText(bundle, objectName, viewKey, attr, opts),
       packagedConfig,
     );
     if (
@@ -2819,6 +2825,37 @@ function lookupPageComponentCopy(
 export const PAGE_TABS_COMPONENT_TYPE = 'page:tabs';
 
 /**
+ * The one component type whose thank-you panel
+ * `pages.<name>.components.<id>.submitBehavior.{title,message}` addresses:
+ * `object-form`, whose `properties.submitBehavior` is the form view's own
+ * member by reference (`ObjectFormPropsSchema.submitBehavior`).
+ *
+ * Exported for {@link PAGE_TABS_COMPONENT_TYPE}'s reason: `translatePage`,
+ * the CLI extractor and `objectstack validate` must agree on which component
+ * carries the key.
+ */
+export const PAGE_FORM_COMPONENT_TYPE = 'object-form';
+
+/**
+ * One string off a page component's `components.<id>.submitBehavior` node,
+ * across the locale chain — `undefined` when no locale carries it. Resolved
+ * key by key, as {@link lookupPageComponentCopy} is.
+ */
+function lookupPageFormSubmitBehaviorText(
+  bundle: TranslationBundle,
+  name: string,
+  id: string,
+  attr: SubmitBehaviorCopyKey,
+  opts: ResolveOptions | undefined,
+): string | undefined {
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.pages?.[name]?.components?.[id]?.submitBehavior?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * The key a `page:tabs` item is addressed by under
  * `pages.<name>.components.<tabsId>.items` — its authored `value`
  * (`PageTabsProps.items[].value`, the stable `?tab=` token) — or `undefined`
@@ -3315,6 +3352,16 @@ export function walkAddressedPageComponents(
  * key (an index token is never one), and an item the bundle does not key —
  * an inline locale map included — is left as authored.
  *
+ * An `object-form` component's thank-you panel is translated too: its
+ * `properties.submitBehavior` `title` / `message` overlay from
+ * `pages.<name>.components.<formId>.submitBehavior`, addressed by the form
+ * component's own id beside its `title` / `description`. The panel is the
+ * page's copy, so it is keyed under the page rather than under the bound
+ * object, and {@link translateFormSubmitBehavior} applies it by the form
+ * view's panel's rules — one comparison for both carriers. Before this key a
+ * page that embeds a thank-you form confirmed the submit in the authoring
+ * language on a translated page.
+ *
  * A list page's filter-preset tab bar
  * (`interfaceConfig.userFilters.tabs[].label`) is translated too, against
  * `objects.<object>._tabs.<tab_name>.label` — see
@@ -3401,6 +3448,24 @@ export function translatePage<T extends PageLike>(
     // a panel's own keys and still descends the authored panel children.
     if (addressed && component.type === PAGE_TABS_COMPONENT_TYPE) {
       next = translatePageTabItems(next, bundle, name, id as string, opts);
+    }
+
+    // An `object-form`'s thank-you panel, under the form component's own id
+    // (`pages.<name>.components.<id>.submitBehavior`), on the same
+    // `addressed` arbitration. The rules are the form view's panel's, through
+    // the one function both carriers share; `translatePage` is handed no
+    // packaged base for any page string, so the catalog applies as it does
+    // to this component's `title` and `description`.
+    if (addressed && component.type === PAGE_FORM_COMPONENT_TYPE) {
+      const behavior = next.properties?.submitBehavior;
+      const submitBehavior = translateFormSubmitBehavior(
+        behavior,
+        (attr) => lookupPageFormSubmitBehaviorText(bundle, name, id as string, attr, opts),
+        undefined,
+      );
+      if (submitBehavior !== behavior) {
+        next = { ...next, properties: { ...next.properties, submitBehavior } };
+      }
     }
 
     // The page-name header route addresses THE page's header, so it stops at

@@ -994,6 +994,9 @@ const actionObject = () => strictObject({
     // spelling of the same button on a view's `bulkActionDefs` dialog. Neither
     // is reachable by distance from `submitText`.
     submitLabel: 'submitText', confirmLabel: 'submitText',
+    // [#27946] The card's own second spelling (`active`) and the `*When`
+    // predicate family's spelling of the pressed-state predicate.
+    active: 'pressed', activeWhen: 'pressed', pressedWhen: 'pressed',
     style: 'variant', color: 'variant', appearance: 'variant',
     placement: 'locations', location: 'locations', position: 'locations',
     verb: 'method', httpMethod: 'method',
@@ -1631,6 +1634,34 @@ const actionObject = () => strictObject({
    * only; the contract is on {@link actionDisabledReason}.
    */
   disabledReason: actionDisabledReason().optional().describe('Display-only reason a greyed action shows (its hover title and accessible description, or a menu item\'s second line) while `disabled` evaluates TRUE — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an object-less action). Not a gate: the server refuses a call on its own rules (hooks, `requiredPermissions`), and nothing reads this as a condition. Omit = the default reason, "Not available for this record". A blank reason is refused.'),
+  /**
+   * [#27946] Whether the action is drawn as ALREADY PRESSED for this reader —
+   * the toggle face of a button the reader acts on and can act on again
+   * ("you voted Helpful"). A CEL predicate over the same scope as `visible`
+   * and `disabled` (`record`, the reader), evaluated by the action surface
+   * against the row it fetched; TRUE draws the button pressed
+   * (`aria-pressed="true"`), FALSE or absent draws it as a plain button.
+   *
+   * Display only, like {@link actionDisabledReason}: it never gates, greys or
+   * routes the action — a pressed action stays runnable, and the action's own
+   * body decides what a second press does (records again, withdraws, or
+   * answers "already").
+   *
+   * No boolean arm, unlike `visible` / `disabled`: a literal `true` would draw
+   * the button pressed for every reader on every record, which is a static
+   * style and not a reader's state, so it is refused at parse with the
+   * evaluated-slot sentence.
+   *
+   * Reading the reader's OWN state. A per-reader fact is rarely a column of
+   * the row — a vote is a child row per user. The row reaches the predicate
+   * through the object's `attachedOnRead` block: the serving side computes
+   * it per caller (a service, or an app's `afterFind` hook shaping the rows
+   * it returns) and the predicate reads `record.<block>.<leaf>`, guarded with
+   * `has()` because a row fetched by another route carries no block. Action
+   * predicates are the sites where the build validator resolves a declared
+   * block (`SERVED_ROW_SITES` in `@objectstack/lint`).
+   */
+  pressed: EvaluatedExpressionInputSchema.optional().describe('Pressed-state predicate (CEL string or `{dialect, source}` envelope) over the same scope as `visible`: the action surface draws the button as already pressed for this reader (a toggle face, `aria-pressed`) while it evaluates TRUE. Display only — it never gates, greys or routes the action. A per-reader fact (e.g. the reader\'s own vote) is read from a block the object declares under `attachedOnRead`, as `has(record.viewer) && record.viewer.vote == \'helpful\'`. A boolean literal is refused: a constant is a style, not a reader\'s state. Omit = never drawn pressed.'),
 
   /**
    * [ADR-0066 D4] System capabilities required to INVOKE this action — a

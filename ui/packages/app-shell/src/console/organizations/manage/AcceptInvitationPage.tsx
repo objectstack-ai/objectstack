@@ -48,6 +48,9 @@ export function AcceptInvitationPage() {
   const [error, setError] = useState<string | null>(null);
   const [isAccepting, setIsAccepting] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
+  // Set once the membership exists and the session is switched to it: the page
+  // then says the user joined, and Continue enters the organization.
+  const [joined, setJoined] = useState(false);
 
   // Redirect to login if not authenticated.
   //
@@ -98,38 +101,7 @@ export function AcceptInvitationPage() {
     try {
       await acceptInvitation(invitationId);
       await switchOrganization(invitation.organizationId).catch(() => null);
-      toast.success(t('organization.accept.accepted', { defaultValue: 'Invitation accepted' }));
-      // The console ROOT, as a full-page navigation — NOT a router `navigate()`
-      // and NOT `useHomePath()` (objectui#7373).
-      //
-      // ⭐ WHY THE HOOK IS WRONG *HERE*, while it is right at this card's nine
-      // other sites: the app list this component can read belongs to the
-      // organization the user is LEAVING. `switchOrganization` one line up only
-      // updates auth state; `MetadataProvider` drops its whole cache when the
-      // active org changes (objectui#4486) and refetches, and this line runs
-      // before any of that can land. A declared-landing answer read here would
-      // therefore name the PREVIOUS org's app — an app the new organization may
-      // not even carry — which is worse than the launcher this replaced.
-      //
-      // Landing on the ROOT resolves the declaration AFTER the switch instead
-      // of before it: the full page load re-seats every data scope on the new
-      // org, then `RootLandingRedirect` reads the new org's list and applies
-      // `resolveLandingPath` — the declared landing, a single-app workspace's
-      // one app, or the launcher. So this page honours `app.isDefault` for the
-      // organization the user just joined, which is what objectui#7373 asked
-      // for, by the only route that can read it.
-      //
-      // This is the shape both other org-switch paths already take, for this
-      // same reason, and their comments say so: `layout/WorkspaceSwitcher.tsx`
-      // (`handleSwitch`) and `console/organizations/OrganizationsPage.tsx`
-      // (`handleSelect`). Accepting an invitation is the third site of one
-      // transition; it was the only one not taking it.
-      //
-      // `resolveRootUrl()` and not a bare `'/'`: a full-page navigation leaves
-      // React Router, so nothing applies the host's `basename`, and a console
-      // served under `<base href="/_console/">` would drop the user at the
-      // origin root, outside the SPA.
-      window.location.href = resolveRootUrl();
+      setJoined(true);
     } catch (err) {
       // objectui#4474 — the card's site 5: a wrong recipient produced better-auth's
       // English sentence under the translated title. Mapped by `code` now.
@@ -141,6 +113,43 @@ export function AcceptInvitationPage() {
       );
       setIsAccepting(false);
     }
+  };
+
+  // Continue from the "you joined" state. The confirmation is the page, not a
+  // toast: the full-page navigation below would drop a toast before anyone
+  // read it.
+  const handleContinue = () => {
+    // The console ROOT, as a full-page navigation — NOT a router `navigate()`
+    // and NOT `useHomePath()` (objectui#7373).
+    //
+    // ⭐ WHY THE HOOK IS WRONG *HERE*, while it is right at this card's nine
+    // other sites: the app list this component can read belongs to the
+    // organization the user is LEAVING. `switchOrganization` in `handleAccept`
+    // only updates auth state; `MetadataProvider` drops its whole cache when the
+    // active org changes (objectui#4486) and refetches, and nothing here waits
+    // for that to land. A declared-landing answer read here would
+    // therefore name the PREVIOUS org's app — an app the new organization may
+    // not even carry — which is worse than the launcher this replaced.
+    //
+    // Landing on the ROOT resolves the declaration AFTER the switch instead
+    // of before it: the full page load re-seats every data scope on the new
+    // org, then `RootLandingRedirect` reads the new org's list and applies
+    // `resolveLandingPath` — the declared landing, a single-app workspace's
+    // one app, or the launcher. So this page honours `app.isDefault` for the
+    // organization the user just joined, which is what objectui#7373 asked
+    // for, by the only route that can read it.
+    //
+    // This is the shape both other org-switch paths already take, for this
+    // same reason, and their comments say so: `layout/WorkspaceSwitcher.tsx`
+    // (`handleSwitch`) and `console/organizations/OrganizationsPage.tsx`
+    // (`handleSelect`). Accepting an invitation is the third site of one
+    // transition; it was the only one not taking it.
+    //
+    // `resolveRootUrl()` and not a bare `'/'`: a full-page navigation leaves
+    // React Router, so nothing applies the host's `basename`, and a console
+    // served under `<base href="/_console/">` would drop the user at the
+    // origin root, outside the SPA.
+    window.location.href = resolveRootUrl();
   };
 
   const handleDecline = async () => {
@@ -192,6 +201,28 @@ export function AcceptInvitationPage() {
             <p className="text-sm text-muted-foreground">{error}</p>
             <Button variant="outline" onClick={() => navigate('/organizations')}>
               {t('organization.accept.goToOrgs', { defaultValue: 'Go to organizations' })}
+            </Button>
+          </div>
+        ) : invitation && joined ? (
+          <div className="flex flex-col items-center gap-6 text-center" data-testid="accept-invitation-joined">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+              <CheckCircle className="h-7 w-7 text-primary" />
+            </div>
+            <div role="status">
+              <h1 className="text-xl font-bold">
+                {t('organization.accept.accepted', { defaultValue: 'Invitation accepted' })}
+              </h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {t('organization.accept.joinedDescription', {
+                  defaultValue: 'Welcome to {{orgName}}. You joined as {{role}}.',
+                  orgName: invitation.organizationName ?? invitation.organizationId,
+                  role: resolveOrgRoleLabel(invitation.role, t),
+                })}
+              </p>
+            </div>
+            {/* Focused when the state appears, so Enter continues. */}
+            <Button className="w-full" onClick={handleContinue} autoFocus>
+              {t('organization.accept.continue', { defaultValue: 'Continue' })}
             </Button>
           </div>
         ) : invitation ? (

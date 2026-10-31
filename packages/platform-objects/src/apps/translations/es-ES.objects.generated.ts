@@ -146,6 +146,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -585,6 +586,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -676,6 +678,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -688,13 +691,24 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       add_member: {
         label: "Añadir miembro",
-        successMessage: "Miembro añadido"
+        successMessage: "Miembro añadido",
+        params: {
+          role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él."
+          }
+        }
       },
       update_member_role: {
         label: "Cambiar rol",
+        description: "Elija el nuevo rol en la organización para ${record.user_id?.name ?? 'este miembro'}.",
         successMessage: "Rol del miembro actualizado",
         outcomeMessages: {
           permission_set_granted: "Rol del miembro actualizado. El nuevo rol también concedió el conjunto de permisos ${result.grantedPermissionSet.label}."
+        },
+        params: {
+          role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él."
+          }
         }
       },
       remove_member: {
@@ -816,6 +830,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         },
         params: {
           role: {
+            helpText: "Propietario: control total de la organización, incluida su eliminación.\nAdministrador: gestiona los miembros, las invitaciones, los equipos y la configuración de la organización.\nAdministrador delegado: invita a personas y solo las ubica donde un administrador se lo ha delegado.\nMiembro: trabaja en las aplicaciones de la organización con el acceso que le dan sus conjuntos de permisos.\nExterno: alguien ajeno a la organización, como un proveedor o un cliente, que solo ve lo que se comparte con él.",
             options: {
               owner: "Propietario",
               admin: "Administrador",
@@ -833,6 +848,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Reenviar invitación",
+        description: "¿Reenviar la invitación a ${record.email}? Su plazo de vencimiento vuelve a empezar.",
         successMessage: "Invitación reenviada",
         outcomeMessages: {
           sent: "Invitación reenviada a ${result.email}",

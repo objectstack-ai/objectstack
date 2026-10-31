@@ -116,6 +116,7 @@ export const zhCN: TranslationData = {
         nav_webhooks: { label: 'Webhooks' },
         nav_http_deliveries: { label: 'HTTP 投递' },
         nav_datasources: { label: '数据源' },
+        nav_connector_credentials: { label: '连接器凭据' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
       },

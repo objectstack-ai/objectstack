@@ -42,7 +42,22 @@ import pt from './pt.js';
 import ru from './ru.js';
 import ar from './ar.js';
 
-export const builtInLocales = { en, zh, ja, ko, de, fr, es, pt, ru, ar } as const;
+// Annotated rather than inferred: the inferred type spells all ten packs'
+// literal types out inline in the emitted declaration, which outgrew what tsc
+// will serialize (TS7056). Each `typeof <pack>` is the same type, emitted as a
+// reference.
+export const builtInLocales: {
+  readonly en: typeof en;
+  readonly zh: typeof zh;
+  readonly ja: typeof ja;
+  readonly ko: typeof ko;
+  readonly de: typeof de;
+  readonly fr: typeof fr;
+  readonly es: typeof es;
+  readonly pt: typeof pt;
+  readonly ru: typeof ru;
+  readonly ar: typeof ar;
+} = { en, zh, ja, ko, de, fr, es, pt, ru, ar } as const;
 
 // Direction and the lazy registry live in payload-free modules so the runtime
 // can reach them without reaching the ten packs above. Re-exported here so the

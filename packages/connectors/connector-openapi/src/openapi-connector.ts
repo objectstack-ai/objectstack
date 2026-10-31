@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Connector, RetryConfig } from '@objectstack/spec/integration';
-import { connectorFetchOptions } from '@objectstack/spec/integration';
+import type { Connector, ConnectorRequestSigner, RetryConfig } from '@objectstack/spec/integration';
+import { connectorFetchOptions, readConnectorResponse } from '@objectstack/spec/integration';
 import { resilientFetch } from '@objectstack/spec/shared';
 
 /**
@@ -22,6 +22,12 @@ import { resilientFetch } from '@objectstack/spec/shared';
  * Open-source scope: **static** auth only (`none` / `api-key` / `basic` /
  * `bearer`), with credentials supplied by the caller. Managed OAuth2, credential
  * vaulting, and per-tenant lifecycle are the enterprise tier (ADR-0015 / 0022).
+ *
+ * A request-signing instance (ADR-0143 D2.3) passes a `requestSigner` instead
+ * of a credential: every attempt is signed by it — retries included — and its
+ * response verification, when the scheme has one, runs before a body is
+ * returned (`connectorFetchOptions` / `readConnectorResponse`, shared with
+ * `@objectstack/connector-rest`).
  */
 
 /** Static auth understood by the generated connector (the open-source subset). */
@@ -120,6 +126,12 @@ export interface OpenApiConnectorConfig {
     baseUrl?: string;
     /** Static auth with credentials. Defaults to `{ type: 'none' }`. */
     auth?: RestAuth;
+    /**
+     * Per-request signer of a `signed` instance (ADR-0143 D2.3): signs every
+     * attempt and verifies every response its scheme signs. Exclusive with a
+     * static `auth` other than `none` — a request is authenticated one way.
+     */
+    requestSigner?: ConnectorRequestSigner;
     /** Headers merged into every request (request-level headers win). */
     defaultHeaders?: Record<string, string>;
     /** Only include operations for which this predicate returns true (allowlist). */
@@ -169,6 +181,7 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
     const fetchOptions = connectorFetchOptions(
         { retryConfig: config.retryConfig, requestTimeoutMs: config.requestTimeoutMs },
         { fetchImpl: config.fetchImpl },
+        config.requestSigner,
     );
     const name = config.name ?? slug(document.info?.title ?? 'openapi_connector');
     const label = config.label ?? document.info?.title ?? titleize(name);
@@ -176,6 +189,12 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
     const baseUrl = config.baseUrl ?? document.servers?.[0]?.url;
     if (!baseUrl) {
         throw new Error('createOpenApiConnector: no base URL — provide config.baseUrl or document.servers[0].url');
+    }
+    if (config.requestSigner && auth.type !== 'none') {
+        throw new Error(
+            `createOpenApiConnector: connector '${name}' is given both a static '${auth.type}' credential and a request ` +
+                'signer; a request is authenticated one way — pass one of them.',
+        );
     }
 
     // One shared transport (mirrors connector-rest) reused by every action handler.
@@ -197,9 +216,9 @@ export function createOpenApiConnector(config: OpenApiConnectorConfig): OpenApiC
             body: hasBody ? JSON.stringify(input.body) : undefined,
         }, fetchOptions);
 
-        const contentType = response.headers.get('content-type') ?? '';
-        const parsed = contentType.includes('application/json') ? await response.json() : await response.text();
-        return { status: response.status, ok: response.ok, body: parsed };
+        // A signed instance's response is verified first, when its scheme
+        // signs responses.
+        return readConnectorResponse(response, config.requestSigner);
     }
 
     const actions: ConnectorAction[] = [];

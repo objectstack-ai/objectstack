@@ -376,6 +376,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'submitText',
     why: "planned, not yet rendered — the param dialog's submit button label is validated at parse (an I18nLabel, never blank, only beside a non-empty `params`) and translated by `translateAction`, but the console's param dialog still draws its default \"Confirm\" until it reads the key. A form control offered today would let an author set a button label nothing shows",
   },
+  // #27946 — an action's pressed-state predicate lands spec-first the same
+  // way: `planned` in the liveness ledger, drawn by no action surface until
+  // the console card that draws `aria-pressed` on the header buttons.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'pressed',
+    why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
+  },
   // #27973 — the same declared-not-enforced shape: `percentDisplay` is the spec
   // half of a percent field's read-only face, `planned` in `liveness/field.json`
   // until the console's percent face reads it.
@@ -385,6 +395,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'percentDisplay',
     why: "planned, not yet rendered — a percent field's read-only face (`bar` or `plain`) parses, but the console's percent face draws the progress bar for every value until it reads the key, after the spec publishes. A form control offered today would let an author pick `plain` and still see the bar; the field form gains the row with the renderer half, as `useGrouping` did once it was enforced",
+  },
+  // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
+  // in the liveness ledger, read by no form or grid until the ui card's lookup
+  // widget writes the declared targets on pick.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'lookupAutofill',
+    why: "planned, not yet read — a lookup's pick autofill pairs (`[{ target, source, overwrite? }]`) are validated at parse (a single-value relationship; each target a writable field of the same object, named once) and their sources at `os validate` / `os build`, but no form or grid fills a field from them until the ui card's lookup widget writes the declared targets on pick. A form control offered today would let an author declare a fill nothing performs",
   },
   {
     kind: 'omit',

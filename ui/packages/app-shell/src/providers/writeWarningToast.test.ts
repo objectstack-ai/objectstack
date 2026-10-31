@@ -36,7 +36,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DroppedFieldsEventSchema } from '@objectstack/spec/data';
-import { claimAnswerWarnings, emitWriteWarning, type WriteWarningSink } from './writeWarningToast';
+import { emitWriteWarning, type WriteWarningSink } from './writeWarningToast';
+import { claimAnswerWarnings } from '@object-ui/react';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { createI18n, loadBuiltInLocale, type TranslateFn } from '@object-ui/i18n';
 import type { DroppedFieldsEvent, WriteWarningEvent } from '@object-ui/data-objectstack';

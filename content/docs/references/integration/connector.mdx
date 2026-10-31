@@ -165,8 +165,8 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
-import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
+import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorInstanceSignedAliyunAcs3AuthSchema, ConnectorInstanceSignedAuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorSigningSchemeSchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
+import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorInstanceSignedAliyunAcs3Auth, ConnectorInstanceSignedAuth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorSigningScheme, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
 
 // Validate data
 const result = ConnectorSchema.parse(data);
@@ -188,7 +188,7 @@ const result = ConnectorSchema.parse(data);
 | **authentication** | `{ type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional (default: `{"type":"none"}`) | Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets: use `auth.credentialRef` on a provider-bound instance. |
 | **provider** | `string` | optional | Generic-executor key that materializes this declarative entry at boot (e.g. openapi/mcp/rest). Omit for a catalog-only descriptor. Unknown provider ⇒ hard boot error (ADR-0097). |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string } \| … +2 more` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved when the instance materializes), never inline secrets. Requires `provider` (ADR-0097). |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string } \| … +3 more` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved when the instance materializes), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
 | **triggers** | `never` | optional | [REMOVED] `connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a connector trigger never started anything: `AutomationEngine.registerConnector` registers a connector's actions only, no polling loop read `intervalSeconds` (or the `interval` spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete the key; the `ConnectorTrigger` shape leaves with it. To start work from an external system, write a flow that calls the connector's action in a `connector_action` node: for an external event, an `api` flow that the event's sender calls; for a scheduled pull, a `schedule` flow. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **syncConfig** | `never` | optional | [REMOVED] `connector.syncConfig` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no engine ever ran a connector-attached sync: nothing read `strategy`, `direction`, `realtimeSync`, `timestampField`, `conflictResolution`, `batchSize`, `deleteMode` or `filters`, so the `latest_wins` and `soft_delete` defaults resolved and deleted nothing. Delete the key; the `DataSyncConfig` shape leaves with it. A sync is defined on its TARGET: a `mapping` (`targetObject`, `fieldMapping`, `mode`, `upsertKey`) whose `connectorSource` names the `rest` or `openapi` connector it pulls from, the read action and an optional timestamp `watermark`, with a `job` for the cadence. Its pull runs when a `job` drives it — a `job` whose `pull: { mapping }` names that mapping; the binding alone moves no rows. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -292,6 +292,15 @@ const result = ConnectorSchema.parse(data);
 | **vendor** | `Enum<'feishu' \| 'dingtalk' \| 'wecom'>` | ✅ | Vendor whose app-credential token exchange to run: `feishu`, `dingtalk` or `wecom`. |
 | **appId** | `string` | ✅ | The vendor's app identifier (not a secret): Feishu `app_id`, DingTalk `appKey`, WeCom `corpid`. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the app secret (WeCom: the application `corpsecret`). Never an inline secret. |
+
+### Nested Shape: `Connector.auth[option 7]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'aliyun-acs3-hmac-sha256'` | ✅ | Alibaba Cloud OpenAPI V3 signature (ACS3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The AccessKey ID (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the AccessKey secret, the HMAC key every request is signed with. Never an inline secret. |
 
 ### Nested Shape: `Connector.actions[number]`
 
@@ -470,6 +479,12 @@ Type: `{ type: 'oauth2'; tokenUrl?: string; scopes?: string[]; resource?: string
 
 ---
 
+#### Option 7
+
+Type: `{ type: 'signed'; scheme: 'aliyun-acs3-hmac-sha256'; keyId: string; credentialRef: string }`
+
+---
+
 
 ---
 
@@ -590,6 +605,44 @@ This schema accepts one of the following structures:
 
 ---
 
+## ConnectorInstanceSignedAliyunAcs3Auth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'aliyun-acs3-hmac-sha256'` | ✅ | Alibaba Cloud OpenAPI V3 signature (ACS3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The AccessKey ID (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the AccessKey secret, the HMAC key every request is signed with. Never an inline secret. |
+
+
+---
+
+## ConnectorInstanceSignedAuth
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+**Type:** `signed`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'aliyun-acs3-hmac-sha256'` | ✅ | Alibaba Cloud OpenAPI V3 signature (ACS3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The AccessKey ID (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the AccessKey secret, the HMAC key every request is signed with. Never an inline secret. |
+
+---
+
+
+---
+
 ## ConnectorOAuth2Grant
 
 OAuth2 grant (RFC 6749): `authorization_code` (an administrator connects once; PKCE S256 always) or `client_credentials` (no user step).
@@ -612,6 +665,17 @@ Retry strategy
 * `linear_backoff`
 * `fixed_delay`
 * `no_retry`
+
+
+---
+
+## ConnectorSigningScheme
+
+Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature).
+
+### Allowed Values
+
+* `aliyun-acs3-hmac-sha256`
 
 
 ---
@@ -646,7 +710,7 @@ Connector type
 | **authentication** | `{ type: 'api-key'; key: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; password: string } \| { type: 'bearer'; token: string } \| { type: 'none' }` | optional (default: `{"type":"none"}`) | Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets: use `auth.credentialRef` on a provider-bound instance. |
 | **provider** | `string` | optional | Generic-executor key that materializes this declarative entry at boot (e.g. openapi/mcp/rest). Omit for a catalog-only descriptor. Unknown provider ⇒ hard boot error (ADR-0097). |
 | **providerConfig** | `Record<string, any>` | optional | Provider-specific config validated by the provider factory at boot (e.g. `{ spec, baseUrl }` for openapi, where spec is an inline document, a package-relative file path like './billing-openapi.json', or an http(s) URL). Requires `provider`. |
-| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string } \| … +2 more` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved when the instance materializes), never inline secrets. Requires `provider` (ADR-0097). |
+| **auth** | `{ type: 'none' } \| { type: 'bearer'; credentialRef: string } \| { type: 'api-key'; credentialRef: string; headerName?: string; paramName?: string } \| { type: 'basic'; username: string; credentialRef: string } \| … +3 more` | optional | Declarative instance auth — references credentials via `credentialRef` (resolved when the instance materializes), never inline secrets. Requires `provider` (ADR-0097). |
 | **actions** | `{ key: string; label: string; description?: string; inputSchema?: Record<string, any>; … }[]` | optional |  |
 | **triggers** | `never` | optional | [REMOVED] `connector.triggers` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — a connector trigger never started anything: `AutomationEngine.registerConnector` registers a connector's actions only, no polling loop read `intervalSeconds` (or the `interval` spelling it was renamed from), and no receiver was driven by a `webhook` trigger. Delete the key; the `ConnectorTrigger` shape leaves with it. To start work from an external system, write a flow that calls the connector's action in a `connector_action` node: for an external event, an `api` flow that the event's sender calls; for a scheduled pull, a `schedule` flow. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **syncConfig** | `never` | optional | [REMOVED] `connector.syncConfig` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — no engine ever ran a connector-attached sync: nothing read `strategy`, `direction`, `realtimeSync`, `timestampField`, `conflictResolution`, `batchSize`, `deleteMode` or `filters`, so the `latest_wins` and `soft_delete` defaults resolved and deleted nothing. Delete the key; the `DataSyncConfig` shape leaves with it. A sync is defined on its TARGET: a `mapping` (`targetObject`, `fieldMapping`, `mode`, `upsertKey`) whose `connectorSource` names the `rest` or `openapi` connector it pulls from, the read action and an optional timestamp `watermark`, with a `job` for the cadence. Its pull runs when a `job` drives it — a `job` whose `pull: { mapping }` names that mapping; the binding alone moves no rows. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -750,6 +814,15 @@ Connector type
 | **vendor** | `Enum<'feishu' \| 'dingtalk' \| 'wecom'>` | ✅ | Vendor whose app-credential token exchange to run: `feishu`, `dingtalk` or `wecom`. |
 | **appId** | `string` | ✅ | The vendor's app identifier (not a secret): Feishu `app_id`, DingTalk `appKey`, WeCom `corpid`. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the app secret (WeCom: the application `corpsecret`). Never an inline secret. |
+
+### Nested Shape: `DeclarativeConnectorEntry.auth[option 7]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'aliyun-acs3-hmac-sha256'` | ✅ | Alibaba Cloud OpenAPI V3 signature (ACS3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The AccessKey ID (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the AccessKey secret, the HMAC key every request is signed with. Never an inline secret. |
 
 ### Nested Shape: `DeclarativeConnectorEntry.actions[number]`
 

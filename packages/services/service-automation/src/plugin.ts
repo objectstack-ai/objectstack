@@ -10,6 +10,7 @@ import type {
     ResolvedConnectorAuth,
     ConnectorProviderContext,
     ConnectorMaterializationHandler,
+    ConnectorRequestSigner,
 } from '@objectstack/spec/integration';
 import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -58,6 +59,8 @@ import {
 } from './connector-credentials.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
+import { createConnectorRequestSigner } from './request-signing/index.js';
+import { CONNECTOR_CREDENTIALS_UI_BUNDLE } from './connector-credentials-ui.js';
 import {
     FlowCredentialChannel,
     storedFlowStates,
@@ -416,16 +419,32 @@ function grantBearingNotServedReason(name: string, auth: GrantBearingInstanceAut
         + 'to dispatch it now.';
 }
 
+/** The per-request signing instance auth kind (ADR-0143 D2.3): bound to a signer, never handed over as a value. */
+type SignedInstanceAuth = Extract<ConnectorInstanceAuth, { type: 'signed' }>;
+
+/**
+ * ADR-0143 D2.3 / ADR-0049 — why a `signed` instance is not served on a
+ * provider whose materialization did not say it applies the request signer:
+ * its handlers would call the upstream unsigned.
+ */
+function requestSignerNotAppliedReason(name: string, provider: string, auth: SignedInstanceAuth): string {
+    return `connector instance '${name}' declares auth type 'signed' (scheme '${auth.scheme}'), but provider '${provider}' `
+        + 'did not say it signs every request with the request signer it was handed, so its calls would go out unsigned '
+        + '(ADR-0143 D2.3). The built-in openapi and rest providers sign; declare the instance through one of them.';
+}
+
 /**
  * Build the static {@link ResolvedConnectorAuth} a provider factory applies
  * from a declarative instance's `auth` and the secret its `credentialRef`
  * resolved to (ADR-0097 §3). `secret` is present whenever `auth` names a
  * reference — an unresolved one never reaches here: the reconcile degrades
  * the instance first (#27237). A grant-bearing kind never reaches here either:
- * the reconcile holds it degraded ({@link grantBearingNotServedReason}).
+ * the reconcile holds it degraded ({@link grantBearingNotServedReason}); nor
+ * does `signed`, whose key is bound to a request signer instead
+ * (`./request-signing/index.ts`).
  */
 function resolveInstanceAuth(
-    auth: Exclude<ConnectorInstanceAuth, GrantBearingInstanceAuth> | undefined,
+    auth: Exclude<ConnectorInstanceAuth, GrantBearingInstanceAuth | SignedInstanceAuth> | undefined,
     secret: string | undefined,
 ): ResolvedConnectorAuth | undefined {
     if (!auth) return undefined;
@@ -948,6 +967,20 @@ export class AutomationServicePlugin implements Plugin {
                 describeThrownForLog(err),
             );
             return false;
+        }
+    }
+
+    /**
+     * [#27238] Register {@link CONNECTOR_CREDENTIALS_UI_BUNDLE} — the Setup
+     * entry for the connector credential door this plugin attaches in
+     * `init()`. A composition with no `manifest` service (a bare kernel, a
+     * test) serves no console, so it gets no entry and nothing is lost.
+     */
+    private registerConnectorCredentialsUi(ctx: PluginContext): void {
+        try {
+            ctx.getService<{ register(m: unknown): void }>('manifest').register(CONNECTOR_CREDENTIALS_UI_BUNDLE);
+        } catch {
+            /* no manifest service: no console to carry the entry */
         }
     }
 
@@ -1764,6 +1797,13 @@ export class AutomationServicePlugin implements Plugin {
             }
         });
 
+        // [#27238] Setup → Integrations → Connector Credentials — the door's
+        // nav entry ships with the door (cloud ADR-0009 shape). After the
+        // inert-mode return above: a one-shot tool serves no console.
+        ctx.hook('kernel:ready', async () => {
+            this.registerConnectorCredentialsUi(ctx);
+        });
+
         // ── Runtime re-bind: a flow saved, published or deleted at runtime ────
         // [#21725] The protocol's mutation signal, which every metadata write
         // raises — the same one ObjectQL re-binds authored hooks and actions
@@ -2315,7 +2355,27 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 credential = resolution;
             }
-            const auth = resolveInstanceAuth(entry.auth, credential?.value);
+            // ADR-0143 D2.3, D4 — a `signed` instance's key is bound to the
+            // signer its scheme names, here, and the provider receives only
+            // the signer: the key never crosses into a provider package. A key
+            // that cannot sign at all is a configuration fault, like an
+            // unparseable retry policy below.
+            let auth: ResolvedConnectorAuth | undefined;
+            let requestSigner: ConnectorRequestSigner | undefined;
+            if (entry.auth?.type === 'signed') {
+                try {
+                    requestSigner = createConnectorRequestSigner(name, entry.auth, credential?.value ?? '');
+                } catch (err) {
+                    fail(
+                        `[Automation] connector instance '${name}' (provider '${provider}'): its signing key cannot sign ` +
+                            `(ADR-0143 D2.3).`,
+                        err,
+                    );
+                    continue;
+                }
+            } else {
+                auth = resolveInstanceAuth(entry.auth, credential?.value);
+            }
 
             // The registry hands back RAW authored values (see
             // `DeclaredConnectorItem`), so the schema's defaults are applied
@@ -2347,6 +2407,7 @@ export class AutomationServicePlugin implements Plugin {
                 type: typeof entry.type === 'string' ? entry.type : 'api',
                 providerConfig: entry.providerConfig ?? {},
                 auth,
+                ...(requestSigner === undefined ? {} : { requestSigner }),
                 // ADR-0049 · #18975 — the declared resilience policy reaches the
                 // factory. The built-in HTTP providers hand it to
                 // `connectorFetchOptions()` → `resilientFetch()`; a custom
@@ -2365,6 +2426,15 @@ export class AutomationServicePlugin implements Plugin {
             let materialization;
             try {
                 materialization = await factory(providerCtx);
+                // ADR-0143 D2.3 / ADR-0049 — a `signed` instance is served only
+                // by a provider that says it signs every request. One that does
+                // not (it predates the member, or its upstream never signs, as
+                // MCP's does not) is a configuration fault, handled below like
+                // any factory's refusal — after its connection is let go.
+                if (requestSigner && entry.auth?.type === 'signed' && materialization.requestSignerApplied !== true) {
+                    try { await materialization.close?.(); } catch { /* best-effort */ }
+                    throw new Error(requestSignerNotAppliedReason(name, provider, entry.auth));
+                }
             } catch (err) {
                 // #3017 — an *operational* fault (upstream unreachable) degrades
                 // the one instance instead of failing the run, in BOTH modes;

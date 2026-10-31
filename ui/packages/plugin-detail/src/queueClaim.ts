@@ -39,7 +39,7 @@
  * the server says it applies, so no answer means no button.
  */
 import * as React from 'react';
-import { SchemaRendererContext, useDataInvalidation } from '@object-ui/react';
+import { SchemaRendererContext, dataChangeMatches, subscribeDataChanges, useDataInvalidation } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { isConcurrentUpdateError } from './ConcurrentUpdateDialog';
 
@@ -76,6 +76,43 @@ export function queueClaimAdmitted(decision: unknown): boolean {
 }
 
 /**
+ * objectstack#27627 — transfer decisions the record page's ONE read
+ * (`DataSource.getRecordPage`) answered, by principal, object and record, so
+ * {@link useQueueClaimOffered} reads them instead of asking. A data change on
+ * the record drops its entry (the bus's own matching rule), so the re-ask that
+ * change triggers goes to the server; the next open of the record seeds anew.
+ */
+const seededClaimDecisions = new Map<string, Promise<unknown>>();
+
+subscribeDataChanges((change) => {
+  for (const key of Array.from(seededClaimDecisions.keys())) {
+    const [, object, recordId] = JSON.parse(key) as [string | null, string, string];
+    if (dataChangeMatches(change, object, recordId)) seededClaimDecisions.delete(key);
+  }
+});
+
+/**
+ * Hand {@link useQueueClaimOffered} the transfer decision the record page's
+ * payload carries for this principal and record: the body
+ * `POST /security/explain` answers, or `undefined` for a refused part (no
+ * admission, as a refused read).
+ */
+export function seedQueueClaimDecision(
+  principal: string | null,
+  objectName: string,
+  recordId: string,
+  decision: Promise<unknown>,
+): void {
+  decision.catch(() => undefined);
+  seededClaimDecisions.set(JSON.stringify([principal, objectName, recordId]), decision);
+}
+
+/** Test seam — forgets every seeded transfer decision. */
+export function __clearSeededClaimDecisions(): void {
+  seededClaimDecisions.clear();
+}
+
+/**
  * Whether to offer Claim on this record: asked of the server only for a record
  * that sits in a queue, with a known acting user, and answered `true` only
  * when the server admits the claim. Re-asked when the record changes on the
@@ -96,8 +133,14 @@ export function useQueueClaimOffered(
     setOffered(false);
     if (!sitting || !objectName || !recordId || !principal) return;
     let cancelled = false;
+    const seeded = seededClaimDecisions.get(JSON.stringify([principal, objectName, recordId]));
     (async () => {
       try {
+        if (seeded) {
+          const decision = await seeded;
+          if (!cancelled) setOffered(queueClaimAdmitted(decision));
+          return;
+        }
         const doFetch = apiFetch ?? fetch;
         const res = await doFetch('/api/v1/security/explain', {
           method: 'POST',

@@ -299,6 +299,13 @@ export const SPEC_ACTION_KEYS = [
   'outcomeMessages',
   'params',
   'patch',
+  // Added to `ActionSchema` by objectstack#27946: the pressed-state predicate a
+  // header button draws as `aria-pressed` for the reader ("you voted Helpful").
+  // Listed for the reason `description` is — this array restates the spec's
+  // declared keys, so an action carrying it is not reported as having an
+  // unknown key. `ActionDef` does NOT declare it and no surface reads it yet:
+  // the console card that draws the pressed face is a follow-up owed.
+  'pressed',
   'recordIdField',
   'recordIdParam',
   'refreshAfter',

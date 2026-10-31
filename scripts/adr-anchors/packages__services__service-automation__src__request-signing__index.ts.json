@@ -1,0 +1,5 @@
+{
+  "file": "packages/services/service-automation/src/request-signing/index.ts",
+  "adrs": ["ADR-0143", "ADR-0049"],
+  "invariant": "ADR-0143 D2.3 / D4: a `signed` connector instance's key is bound to its scheme's signer here, on the server, and a provider receives only the bound signer, never the key. The switch is exhaustive over the spec's closed scheme enum, so a scheme cannot be declared without a signer that runs it (ADR-0049: declared is enforced); a scheme enters only with its signer and the vendor's test vectors."
+}

@@ -247,6 +247,7 @@ import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
   deriveImplicitPackageBook,
+  PAGE_FORM_COMPONENT_TYPE,
   PAGE_TABS_COMPONENT_TYPE,
   hasPlatformObjectPrefix,
   isPlatformProvidedObjectName,
@@ -571,7 +572,7 @@ interface Universe {
   pages: Map<string, Map<string, PageComponentFacts>>;
 }
 
-/** What the `items` check knows about one addressed page component. */
+/** What the `items` and `submitBehavior` checks know about one addressed page component. */
 interface PageComponentFacts {
   type: string | undefined;
   /** The `page:tabs` item `value`s (`pageTabItemKey`); empty for any other type. */
@@ -1398,7 +1399,8 @@ function buildUniverse(stack: AnyRec): Universe {
   for (const page of artifactProvidedRecords(stack, 'pages')) collectPageRecord(page);
 
   // ── Pages: the components `pages.<page>.components.<id>` addresses, for the
-  //    `page:tabs` item key (`components.<id>.items.<value>.label`) ──
+  //    `page:tabs` item key (`components.<id>.items.<value>.label`) and the
+  //    `object-form` panel key (`components.<id>.submitBehavior`) ──
   //
   // Walked with spec's `walkAddressedPageComponents`, NOT lint's
   // `walkPageComponents`: the key is read by `translatePage`, which runs that
@@ -2174,18 +2176,47 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         }
       }
 
-      // ── pages.<name>.components.<id>.items.<value> ────────────────────
+      // ── pages.<name>.components.<id>.items.<value> / .submitBehavior ──
       //
-      // Only the `items` member is judged here: it is the one page key whose
-      // target this check can see whole — a declared tabs component's item
-      // `value`s. A page this stack does not declare is skipped (no rung
+      // Only the `items` and `submitBehavior` members are judged here: they
+      // are the two page keys whose target this check can see whole — a
+      // declared tabs component's item `value`s, and a declared
+      // `object-form`. A page this stack does not declare is skipped (no rung
       // judges `pages.<name>` itself yet), and so is every other member.
       for (const [pageName, rawPage] of Object.entries(asRecord(rawData.pages))) {
         const page = universe.pages.get(pageName);
         if (!page || !isRec(rawPage)) continue;
         const pagePath = `${base}.pages.${pageName}`;
         for (const [componentId, rawComponent] of Object.entries(asRecord(rawPage.components))) {
-          if (!isRec(rawComponent) || rawComponent.items === undefined) continue;
+          if (!isRec(rawComponent)) continue;
+          // An `object-form`'s thank-you panel: `translatePage` reads the key
+          // under a declared `object-form`'s id only, so one under any other
+          // component (or under an id the page does not declare) resolves
+          // nothing.
+          if (rawComponent.submitBehavior !== undefined) {
+            const panelPath = `${pagePath}.components.${componentId}.submitBehavior`;
+            const component = page.get(componentId);
+            const formHint = 'Thank-you panel translations go under the `id` of an `object-form` component.';
+            if (!component) {
+              orphan(
+                `${inLocale} · page "${pageName}" · component "${componentId}"`,
+                panelPath,
+                `Translations carry a thank-you panel for "${componentId}", a component id page "${pageName}" ` +
+                  `does not declare, so nothing resolves it.` +
+                  suggest(componentId, [...page].filter(([, c]) => c.type === PAGE_FORM_COMPONENT_TYPE).map(([id]) => id)),
+                formHint,
+              );
+            } else if (component.type !== PAGE_FORM_COMPONENT_TYPE) {
+              orphan(
+                `${inLocale} · page "${pageName}" · component "${componentId}"`,
+                panelPath,
+                `Translations carry a thank-you panel for "${componentId}", which page "${pageName}" declares as a ` +
+                  `\`${component.type ?? 'component'}\`, not an \`object-form\`, so nothing resolves it.`,
+                formHint,
+              );
+            }
+          }
+          if (rawComponent.items === undefined) continue;
           const itemsPath = `${pagePath}.components.${componentId}.items`;
           const where = `${inLocale} · page "${pageName}" · component "${componentId}"`;
           const tabsHint = 'Tab-item translations go under the `id` of a `page:tabs` component.';

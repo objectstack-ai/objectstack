@@ -314,6 +314,7 @@
     "data/Field:internal",
     "data/Field:label",
     "data/Field:language",
+    "data/Field:lookupAutofill",
     "data/Field:lookupColumns",
     "data/Field:lookupFilters",
     "data/Field:lookupPageSize",

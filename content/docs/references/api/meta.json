@@ -36,6 +36,7 @@
     "misc",
     "package-api-assembled",
     "package-lifecycle",
+    "record-page",
     "sortability"
   ]
 }

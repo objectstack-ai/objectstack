@@ -105,6 +105,89 @@ export interface ConnectorCredentialHandle {
   refresh(request?: ConnectorCredentialRequest): Promise<BorrowedConnectorCredential>;
 }
 
+// ============================================================================
+// Per-request signer (ADR-0143 D2.3, D4)
+//
+// A `signed` instance has no token: every outgoing request is signed with the
+// key its `credentialRef` names, by the vendor's canonical-request algorithm.
+// ADR-0143 D4 answers such an instance per dispatch with "a signer bound to its
+// key", so the key never crosses this seam — the host resolves the reference,
+// binds a signer to it, and hands the provider only the signer. A provider asks
+// it on EVERY attempt it sends, retries included: a signature carries a
+// timestamp and a nonce, and an upstream refuses one replayed.
+//
+// The seam carries the optional response-verification step from the start
+// (ADR-0143 Q4 condition 2): a scheme whose vendor signs its responses
+// implements `verifyResponse`, and a provider runs it over the raw body before
+// it parses or returns anything.
+//
+// ⛔ Nothing here logs, stores or echoes a signature or the key behind it.
+// ============================================================================
+
+/** The request a {@link ConnectorRequestSigner} signs — exactly what is sent. */
+export interface ConnectorSignableRequest {
+  /** The HTTP method, upper case. */
+  readonly method: string;
+  /** The absolute URL, query string included, as it would be sent. */
+  readonly url: string;
+  /** The request's own headers, as they would be sent, before the signer's. */
+  readonly headers: Readonly<Record<string, string>>;
+  /** The body as sent, or `undefined` when the request carries none. */
+  readonly body?: string;
+}
+
+/** What a signer adds to one request. */
+export interface ConnectorRequestSignature {
+  /**
+   * Headers to set on the request, each replacing any header of the same name
+   * (compared case-insensitively): the signature itself and every value the
+   * scheme signs that the signer chose (a timestamp, a nonce, a body digest).
+   */
+  readonly headers: Readonly<Record<string, string>>;
+  /**
+   * The URL to send in place of the request's own, when the scheme signs the
+   * query string in a canonical encoding: the same resource and the same
+   * parameters, spelled the way the signature covers them. Absent ⇒ the
+   * request's own URL is sent.
+   */
+  readonly url?: string;
+}
+
+/** The response a verifying signer checks, its body read raw before any parse. */
+export interface ConnectorSignedResponse {
+  readonly status: number;
+  readonly headers: { get(name: string): string | null };
+  /** The body exactly as received. */
+  readonly body: string;
+}
+
+/**
+ * A request signer bound to one connector instance's key (ADR-0143 D2.3, D4).
+ * A provider factory receives one as {@link ConnectorProviderContext.requestSigner}
+ * and applies it to every upstream request it sends.
+ */
+export interface ConnectorRequestSigner {
+  /** The connector instance this signer signs for. */
+  readonly connector: string;
+  /** The scheme it implements — a member of `ConnectorSigningSchemeSchema`. */
+  readonly scheme: string;
+  /**
+   * Sign one request. Called once per attempt, so a retried request carries a
+   * fresh signature. Throws when the request cannot be signed (a body that is
+   * not text); the request is then not sent.
+   */
+  sign(request: ConnectorSignableRequest): Promise<ConnectorRequestSignature>;
+  /**
+   * Verify the upstream's signature over a response, for a scheme whose vendor
+   * signs its responses; absent for a scheme whose vendor does not. Resolves
+   * when the response is authentic and throws when it is not — the response
+   * is then treated as the dispatch's failure and its body is never returned.
+   * Which responses the vendor signs (every status, or 2xx only) is the
+   * scheme's to decide, so a provider passes every response.
+   */
+  verifyResponse?(response: ConnectorSignedResponse): Promise<void>;
+}
+
 /**
  * A single materialized connector action handler. Receives the input the
  * `connector_action` node mapped from the flow, ignores the dispatch context
@@ -138,6 +221,17 @@ export interface ConnectorMaterialization {
    * `rejected` credential stays so until it is set again.
    */
   credentialVerified?: boolean;
+  /**
+   * `true` when the factory applies {@link ConnectorProviderContext.requestSigner}
+   * to every upstream request its handlers send (and runs its
+   * `verifyResponse`, when present, on every response). The host serves a
+   * `signed` instance only on a materialization that says so: a factory that
+   * ignores the member — one that predates it, or a provider whose upstream
+   * does not sign, such as MCP — would otherwise call the upstream unsigned,
+   * a declared-but-unenforced credential (ADR-0049). Leave it unset when the
+   * context carried no signer.
+   */
+  requestSignerApplied?: boolean;
 }
 
 /**
@@ -186,6 +280,17 @@ export interface ConnectorProviderContext {
    * a clear message rather than calling the upstream unauthenticated.
    */
   readonly credentialHandle?: ConnectorCredentialHandle;
+  /**
+   * The request signer of a `signed` instance (ADR-0143 D2.3, D4), bound to the
+   * key the entry's `credentialRef` resolved to — the key itself never reaches
+   * the factory. The host sets it for that kind, and only for it; {@link auth}
+   * is then `undefined`. A factory signs every attempt it sends with it (a
+   * retry included), runs its `verifyResponse` over every response before
+   * parsing it, and says so by returning
+   * {@link ConnectorMaterialization.requestSignerApplied}; the host refuses to
+   * serve a `signed` instance on a materialization that does not.
+   */
+  readonly requestSigner?: ConnectorRequestSigner;
   /**
    * The entry's declared retry policy, **resolved** — the host parses it so the
    * schema's defaults (`maxAttempts: 3`, `[408, 429, 500, 502, 503, 504]`, …)

@@ -181,8 +181,8 @@ describe('ADR-0143 D2.2 — `app-credential` instance auth', () => {
 });
 
 describe('ConnectorInstanceAuthSchema — closed', () => {
-  it('refuses an unknown kind, and `signed` is not a member until its signers land (ADR-0143 D2.3)', () => {
-    for (const type of ['signed', 'oauth1']) {
+  it('refuses an unknown kind (`signed` is pinned in connector-auth-signed.test.ts)', () => {
+    for (const type of ['oauth1', 'hmac']) {
       const result = ConnectorInstanceAuthSchema.safeParse({ type, credentialRef: 'X' });
       expect(result.success).toBe(false);
       expect(result.error!.issues.map((i) => `${i.code} @ ${i.path.join('.')}`)).toEqual(['invalid_union @ type']);

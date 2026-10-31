@@ -926,6 +926,25 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(ok).toHaveLength(0);
     });
 
+    it('flags a bare-field `pressed` predicate and accepts the record-qualified form (#27946)', () => {
+      // Same record scope and fault as `visible`: a bare `vote` throws at key
+      // resolution, so the button would never be drawn pressed.
+      const bad = validateStackExpressions({
+        objects: [{ name: 'kb_article', fields: { my_vote: { type: 'text' } } }],
+        actions: [{ name: 'mark_helpful', objectName: 'kb_article', type: 'script', target: 'fn', pressed: 'my_vote == "helpful"' }],
+      });
+      const pressedIssues = bad.filter(i => i.where.includes("action 'mark_helpful' pressed"));
+      expect(pressedIssues).toHaveLength(1);
+      expect(pressedIssues[0].severity).toBe('error');
+      expect(pressedIssues[0].message).toMatch(/bare reference `my_vote`/);
+
+      const ok = validateStackExpressions({
+        objects: [{ name: 'kb_article', fields: { my_vote: { type: 'text' } } }],
+        actions: [{ name: 'mark_helpful', objectName: 'kb_article', type: 'script', target: 'fn', pressed: 'record.my_vote == "helpful"' }],
+      });
+      expect(ok).toHaveLength(0);
+    });
+
     it('never reads `disabledReason` as a predicate — it is display copy (#26619)', () => {
       // The same bare-field source that is an error on `disabled` above is a
       // plain sentence on `disabledReason`: nothing is checked, nothing flagged.
@@ -3390,7 +3409,7 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // `object` is absent — the action schema's canonical key is `objectName`.
     // `disabledReason` is absent by contract (#26619): display copy beside
     // `disabled`, never read as a condition.
-    expected: ['disabled', 'name', 'objectName', 'visible'],
+    expected: ['disabled', 'name', 'objectName', 'pressed', 'visible'],
     declaredBy: 'ObjectStackSchema.actions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.actions),
   },

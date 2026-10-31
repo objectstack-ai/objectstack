@@ -99,8 +99,10 @@ import {
   METRIC_TILE_CONTAINER_CLASS,
   METRIC_TILE_TITLE_CLASS,
   METRIC_TILE_MEASURE_LABEL_CLASS,
-  METRIC_TILE_VALUE_CLASS,
+  METRIC_TILE_DATASET_VALUE_LADDER,
   metricTileTooltip,
+  metricTileValueClass,
+  metricTileValueTitle,
 } from './metricTile';
 import { DrillDownDrawer } from './DrillDownDrawer';
 import { specDefaultWidgetType } from './widgetDispatch';
@@ -1389,6 +1391,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     // under the value, in place of the measure label, which then rides only in
     // the title's tooltip (objectstack#27430).
     const caption = heading?.description || measureLabel;
+    const shownValue = formatMeasure(value, f?.format, f?.currency, f?.percentScale, displayLocale);
     return (
       // Positioned only while a re-read is in flight, for the refresh bar: the
       // idle tile's markup is pinned byte-for-byte (`DatasetWidget.colorVariant`,
@@ -1401,7 +1404,10 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
             `./metricTile`). Without one, the tile's markup is unchanged: the
             label is then the only text naming the value. */}
         {heading && <MetricHeadingRow heading={heading} label={measureLabel} />}
-        <span className={cn(heading ? cn('font-semibold', METRIC_TILE_VALUE_CLASS) : 'text-2xl font-semibold tabular-nums', accentClass)}>{formatMeasure(value, f?.format, f?.currency, f?.percentScale, displayLocale)}</span>
+        {/* With a heading the value scales before it would clip: a long
+            money figure takes the dataset tile's ladder, and past its last
+            rung keeps the ellipsis with the full figure as its tooltip. */}
+        <span className={cn(heading ? cn('font-semibold', metricTileValueClass(shownValue, METRIC_TILE_DATASET_VALUE_LADDER)) : 'text-2xl font-semibold tabular-nums', accentClass)} title={heading ? metricTileValueTitle(shownValue) : undefined}>{shownValue}</span>
         {heading && caption && (
           <span className={METRIC_TILE_MEASURE_LABEL_CLASS} data-testid="dataset-metric-label">{caption}</span>
         )}

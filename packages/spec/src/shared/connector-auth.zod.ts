@@ -128,7 +128,9 @@ export type ConnectorAuthConfigParsed = z.infer<typeof ConnectorAuthConfigSchema
  * It stays the four static kinds (ADR-0143 D4): the grant-bearing kinds
  * (`oauth2`, `app-credential`) are not resolved once at materialization but
  * per dispatch, and reach a provider as the `credentialHandle` member of
- * `ConnectorProviderContext`, never as a value of this type.
+ * `ConnectorProviderContext`, never as a value of this type. Nor does
+ * `signed` (D2.3): its key never reaches a provider at all — the provider
+ * receives a signer bound to the key, the `requestSigner` member.
  */
 export type ResolvedConnectorAuth = Extract<
   ConnectorAuthConfig,
@@ -150,8 +152,10 @@ export type ResolvedConnectorAuth = Extract<
 // kinds ADR-0143 D2 adds — `oauth2` (D2.1) and `app-credential` (D2.2) — are
 // open tier (ADR-0143 D1, which reverses the enterprise placement ADR-0097 §3
 // recorded) and resolve per dispatch (D4): their tokens are runtime state in a
-// connection record, never metadata. The third D2 kind, `signed`, enters this
-// union only with its signers and test vectors (D2.3).
+// connection record, never metadata. The third D2 kind, `signed` (D2.3), has
+// no token: the platform signs every request with the key its `credentialRef`
+// names, and its scheme list grows only together with each scheme's signer and
+// test vectors.
 // ============================================================================
 
 /** No authentication — the upstream is public. */
@@ -191,10 +195,10 @@ export const ConnectorInstanceBasicAuthSchema = lazySchema(() => z.object({
 export type ConnectorInstanceBasicAuth = z.input<typeof ConnectorInstanceBasicAuthSchema>;
 
 /**
- * The guidance an inline secret meets on a grant-bearing instance kind: the
- * strict shape refuses the key by name and sends the author to
- * `credentialRef` (ADR-0143 D3 / Acceptance: "an inline secret on any variant
- * is refused at publish with a located error").
+ * The guidance an inline secret meets on an ADR-0143 instance kind (`oauth2`,
+ * `app-credential`, `signed`): the strict shape refuses the key by name and
+ * sends the author to `credentialRef` (ADR-0143 D3 / Acceptance: "an inline
+ * secret on any variant is refused at publish with a located error").
  */
 function inlineSecretGuidance(kind: string, secret: string): string {
   return `Not authorable on \`auth: { type: '${kind}' }\`. The ${secret} is a credential, and a connector `
@@ -377,6 +381,87 @@ export const ConnectorInstanceAppCredentialAuthSchema = lazySchema(() => strictO
 export type ConnectorInstanceAppCredentialAuth = z.input<typeof ConnectorInstanceAppCredentialAuthSchema>;
 
 /**
+ * The request-signing schemes the platform implements (ADR-0143 D2.3, Q4).
+ * Closed, and a member enters only together with its signer and its test
+ * vectors: a scheme listed here without a shipped signer would be a
+ * declared-but-unenforced property (ADR-0049). Each member names one vendor's
+ * canonical-request algorithm, implemented in the automation service's signer
+ * registry, so nothing about the canonicalisation is authored.
+ */
+export const ConnectorSigningSchemeSchema = z.enum(['aliyun-acs3-hmac-sha256'])
+  .describe('Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature).');
+export type ConnectorSigningScheme = z.input<typeof ConnectorSigningSchemeSchema>;
+
+/**
+ * The guidance a `signed` instance meets for a key that would carry key
+ * material or a per-request value: the key is a `credentialRef`, and the
+ * signature, timestamp and nonce are computed by the signer on every request.
+ */
+const SIGNED_GUIDANCE: Readonly<Record<string, string>> = {
+  secret: inlineSecretGuidance('signed', 'signing key'),
+  privateKey: inlineSecretGuidance('signed', 'signing key'),
+  secretKey: inlineSecretGuidance('signed', 'signing key'),
+  accessKeySecret: inlineSecretGuidance('signed', 'signing key'),
+  signature: 'Not authorable on `auth: { type: \'signed\' }`. The signature is computed by the platform for every request '
+    + 'from the request itself and the key `credentialRef` names, so it never appears in a connector definition. Delete the key.',
+};
+
+/**
+ * `signed` with `scheme: 'aliyun-acs3-hmac-sha256'` — Alibaba Cloud's OpenAPI
+ * V3 signature (ADR-0143 Q4). Every request carries an `Authorization:
+ * ACS3-HMAC-SHA256 Credential=…,SignedHeaders=…,Signature=…` header, an
+ * HMAC-SHA256 over the canonical request keyed with the AccessKey secret; the
+ * signer also sets the `x-acs-date`, `x-acs-signature-nonce` and
+ * `x-acs-content-sha256` headers it signs. The request names its API with the
+ * `x-acs-action` and `x-acs-version` headers, which the signer signs as sent.
+ */
+export const ConnectorInstanceSignedAliyunAcs3AuthSchema = lazySchema(() => strictObject({
+  surface: "this `signed` connector auth (`scheme: 'aliyun-acs3-hmac-sha256'`)",
+  history: 'This shape is strict from birth — the `signed` instance kind had no earlier spelling, so an unknown key here was never accepted.',
+  guidance: SIGNED_GUIDANCE,
+  // Alibaba Cloud's own word for the key id.
+  aliases: { accessKeyId: 'keyId' },
+}, {
+  type: z.literal('signed'),
+  scheme: z.literal('aliyun-acs3-hmac-sha256').describe('Alibaba Cloud OpenAPI V3 signature (ACS3-HMAC-SHA256).'),
+  keyId: z.string().min(1).describe('The AccessKey ID (not a secret); sent in the `Credential` of every signature.'),
+  credentialRef: z.string().min(1).describe(
+    'Secrets-layer reference resolved to the AccessKey secret, the HMAC key every request is signed with. Never an inline secret.',
+  ),
+}));
+export type ConnectorInstanceSignedAliyunAcs3Auth = z.input<typeof ConnectorInstanceSignedAliyunAcs3AuthSchema>;
+
+/**
+ * Per-request signing auth for a provider-bound instance (ADR-0143 D2.3): no
+ * token exists — the platform signs every outgoing request with the key
+ * `credentialRef` names, by the vendor's canonical-request algorithm. One
+ * strict shape per scheme, because each scheme carries its own non-secret
+ * parameters; {@link ConnectorSigningSchemeSchema} is the closed list.
+ *
+ * Accepted on `provider: 'openapi'` and `provider: 'rest'`. An unknown scheme
+ * is refused at publish naming the value, and the signing key is only ever a
+ * `credentialRef` (ADR-0097 §3, ADR-0143 D3).
+ */
+export const ConnectorInstanceSignedAuthSchema = lazySchema(() => z.discriminatedUnion('scheme', [
+  ConnectorInstanceSignedAliyunAcs3AuthSchema,
+], {
+  // The refusal names the scheme it got and the ones that ship, rather than
+  // zod's bare "invalid discriminator": a scheme is a vendor algorithm, and
+  // an author who wrote another vendor's name must learn it is not signed here.
+  error: (issue) => {
+    const input = issue.input;
+    if (typeof input !== 'object' || input === null) return undefined;
+    const scheme = (input as { scheme?: unknown }).scheme;
+    const shipped = ConnectorSigningSchemeSchema.options.map((s) => `'${s}'`).join(', ');
+    return scheme === undefined
+      ? `\`auth: { type: 'signed' }\` needs a \`scheme\`: one of ${shipped}.`
+      : `Unknown signing scheme ${JSON.stringify(scheme)}: this platform signs requests with ${shipped} only. `
+        + 'A scheme enters only together with its signer and its test vectors (ADR-0143 D2.3).';
+  },
+}));
+export type ConnectorInstanceSignedAuth = z.input<typeof ConnectorInstanceSignedAuthSchema>;
+
+/**
  * Declarative connector-instance auth: a discriminated union whose secret-bearing
  * variants carry a `credentialRef` instead of an inline secret (ADR-0097 §3,
  * ADR-0143 D3). Consumed by the `auth` field on a provider-bound `connectors:`
@@ -389,6 +474,7 @@ export const ConnectorInstanceAuthSchema = lazySchema(() => z.discriminatedUnion
   ConnectorInstanceBasicAuthSchema,
   ConnectorInstanceOAuth2AuthSchema,
   ConnectorInstanceAppCredentialAuthSchema,
+  ConnectorInstanceSignedAuthSchema,
 ]));
 
 export type ConnectorInstanceAuth = z.input<typeof ConnectorInstanceAuthSchema>;

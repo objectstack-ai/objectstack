@@ -255,12 +255,14 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // live sample below still holds every live key.
         // [#26619] 47 → 48: `disabledReason` (why a greyed action is
         // unavailable) joined the accepted set, and the sample names it.
-        // [#27944] 48 → 49: `submitText` (the param dialog's submit button
+        // [#27946] 48 → 49: `pressed` (the reader's pressed-state predicate)
+        // joined the accepted set, and the sample names it.
+        // [#27944] 49 → 50: `submitText` (the param dialog's submit button
         // label) joined the accepted set, and the sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(49);
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(50);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'submitText']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
@@ -352,8 +354,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // record page's related lists.
     // [#27973] `field` 79 → 80: `percentDisplay`, a percent field's read-only
     // face (the progress bar or the plain percentage).
+    // [#27945] `field` 80 → 81: `lookupAutofill`, the fields a pick in a
+    // lookup fills.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 22, dashboard: 20, dataset: 16, field: 80, flow: 22,
+        agent: 24, app: 22, dashboard: 20, dataset: 16, field: 81, flow: 22,
         hook: 23, object: 49, page: 26, position: 13, report: 23, skill: 16, tool: 14,
     };
 

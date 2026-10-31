@@ -29,6 +29,7 @@ import {
   resolveIcon,
   Skeleton,
   useIsMobile,
+  RelatedCountStore,
 } from '@object-ui/components';
 import { SchemaRenderer, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
@@ -371,7 +372,12 @@ function resolveRelatedLookupLabel(record: any, refSchema: any): string | undefi
  * Normalize the spec `sort` union (`'field'` / `'-field'` string or
  * `[{field, order}]`) into the object-array form fed to `$orderby`.
  */
-function normalizeSortSpec(
+/**
+ * A related list's declared sort as the row read sends it (`$orderby`). The
+ * record page's payload asks a list's first rows in this order
+ * (objectstack#27627), so a compact card can take them.
+ */
+export function normalizeSortSpec(
   sort: RelatedListProps['defaultSort'],
 ): Array<{ field: string; order: 'asc' | 'desc' }> {
   if (!sort) return [];
@@ -1333,6 +1339,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     );
   }, [add, pickerObject, api, objectName]);
 
+  // objectstack#27627 — a compact card's first rows arrive with the record
+  // page's ONE read (`DataSource.getRecordPage`), which the page hands to the
+  // related-count store before any card mounts. The card takes them there
+  // rather than reading them again after its child definition settles: that
+  // read was the page's second stage. Taken only where the payload asked the
+  // card's own question — the first page in the list's declared order, with no
+  // reader sort and no refresh since the mount — and held in this ref, so the
+  // definition settling re-runs the effect without reading. Any other read is
+  // the card's own, as before.
+  const seededRead = React.useRef<{ key: string; read: Promise<{ total: number; rows: unknown[] }> } | null>(null);
+
   React.useEffect(() => {
     // Stale-response guard: page flips re-run this effect while an earlier
     // window may still be in flight — a slow page-2 response must not
@@ -1371,6 +1388,49 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         return;
       }
       setLoading(true);
+      if (
+        compact
+        && windowed
+        && fetchPage === 0
+        && !fetchSortField
+        && refreshNonce === 0
+      ) {
+        const seedKey = JSON.stringify([api, referenceField, String(parentId), filter ?? null]);
+        if (seededRead.current?.key !== seedKey) {
+          const read = RelatedCountStore.takeRows(
+            api,
+            referenceField!,
+            String(parentId),
+            filter as any,
+            COMPACT_RELATED_ROWS,
+            defaultSortSpec.length > 0 ? JSON.stringify(defaultSortSpec) : undefined,
+          );
+          seededRead.current = read ? { key: seedKey, read } : null;
+        }
+        const adopted = seededRead.current;
+        if (adopted) {
+          adopted.read.then(
+            (result) => {
+              if (cancelled) return;
+              setRelatedData(result.rows as any[]);
+              setTotal(result.total);
+              setHasMore(result.total > result.rows.length);
+              setLoading(false);
+            },
+            (err) => {
+              if (cancelled) return;
+              setRelatedData([]);
+              setTotal(null);
+              setHasMore(false);
+              setLoadFailure({ error: err });
+              setLoading(false);
+            },
+          );
+          return () => {
+            cancelled = true;
+          };
+        }
+      }
       // ⭐ objectui#10690: the child definition GATES this query; it does not
       // refine it afterwards. The arity, `$expand` and `$select` below all read
       // it, so a query sent before it settles is one this effect would send
@@ -1565,9 +1625,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // `selectKey` and the arity flag, never named here by identity
     // (commandment #10). `wireExpandKey` / `wireSelectKey` are those two keys
     // as a compact card narrows them (objectstack#27056), and `rowsWanted` the
-    // card's in-view / non-zero gate, a boolean.
+    // card's in-view / non-zero gate, a boolean. `compact` decides whether the
+    // record page's payload may serve the read (objectstack#27627), a boolean.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady]);
+  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
 
   // Windowed mode: a page beyond the (shrunken) collection — e.g. the last
   // row of the last page was just deleted — comes back empty. Step back one
