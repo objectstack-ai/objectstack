@@ -17,6 +17,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { ListViewSchema } from '@objectstack/spec/ui';
+import type { ViewFilterRule } from '@objectstack/spec/ui';
 import { foldFilterGroupToSpecRules, FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold';
 
 /**
@@ -119,7 +120,8 @@ describe('foldFilterGroupToSpecRules — flat AND group → ViewFilterRule[]', (
             })),
         });
         expect(result.ok).toBe(true);
-        expect(result.ok && result.rules.map(r => r.operator)).toEqual([
+        // An AND group folds to flat rules only, so each element is a rule here.
+        expect(result.ok && result.rules.map(r => (r as ViewFilterRule).operator)).toEqual([
             'equals', 'not_equals', 'contains', 'not_contains',
             'is_empty', 'is_not_empty', 'greater_than', 'less_than',
             'greater_than_or_equal', 'less_than_or_equal', 'before', 'after', 'between',
@@ -133,7 +135,7 @@ describe('foldFilterGroupToSpecRules — flat AND group → ViewFilterRule[]', (
             conditions: [{ id: 'a', field: 'f', operator: 'sounds_like', value: 'x' }],
         });
         // NOT silently rewritten to `equals` — the spec enum is the judge.
-        expect(result.ok && result.rules[0].operator).toBe('sounds_like');
+        expect(result.ok && (result.rules[0] as ViewFilterRule).operator).toBe('sounds_like');
     });
 
     it('drops the blank row `Add filter` inserts before a column is picked', () => {
