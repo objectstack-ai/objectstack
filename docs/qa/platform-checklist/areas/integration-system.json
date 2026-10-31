@@ -1958,10 +1958,10 @@
     },
     {
       "id": "integration-system.connector-auth-kind-application",
-      "title": "Declarative connector static auth kinds (none/api-key/basic/bearer) resolve credentialRef at materialization and land on the wire in exactly their header/query shape; an unresolvable credentialRef is boot-fatal with the env-var prescription; oauth2 has NO authorable spelling (EE tier)",
+      "title": "Declarative connector static auth kinds (none/api-key/basic/bearer) resolve credentialRef at materialization and land on the wire in exactly their header/query shape; an unresolvable credentialRef degrades its instance, naming the reference, instead of failing the boot; oauth2 has NO authorable spelling (EE tier)",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -1969,7 +1969,7 @@
         "requires": [
           "the rest provider factory installed (ConnectorRestPlugin in examples/app-showcase/objectstack.config.ts) — the generic static-auth executor this item drives; the openapi provider shares the same transport (openapi-provider.ts) and is not re-proven per kind",
           "an ECHO upstream on the run's own port range that reflects request headers AND query back in its response body (same local-receiver pattern as webhook-lifecycle's fixture) — the showcase's self-ping connectors prove reachability only",
-          "env vars set for each probe's credentialRef before boot (the open tier resolves credentialRef from environment variables — plugin.ts)"
+          "env vars set for each probe's credentialRef before boot (the open tier resolves credentialRef from an environment variable of the same name first, then the sys_connector_credential store, then the host's resolver — connector-credentials.ts)"
         ],
         "knownGaps": [
           "NO shipped connector declares a secret-bearing auth kind — all three showcase instances are auth:{type:'none'} on purpose (examples/app-showcase/src/system/connectors/index.ts#StatusApiConnector, and StatusOpenApiConnector and DevToolsMcpConnector beside it, each declare auth: { type: 'none' }; StatusApiConnector's own comment says a real upstream would use bearer+credentialRef). The per-kind instances are therefore scratch-authored in a writable package against the echo upstream; without the echo upstream the wire-shape clauses are blocked(fixture), with the unit pins cited beside them as evidence of their own layer only (rest-connector.test.ts drives applyAuth through a stubbed fetch), never their pass (RUNNER rule 6)"
@@ -1989,9 +1989,9 @@
         "start the echo upstream; export the probe env vars (e.g. QA_BEARER_TOK, QA_API_KEY, QA_BASIC_PW); author five scratch rest-provider instances against it in a writable package: auth none / {type:'bearer',credentialRef:'QA_BEARER_TOK'} / {type:'basic',username:'qa',credentialRef:'QA_BASIC_PW'} / {type:'api-key',credentialRef:'QA_API_KEY'} / {type:'api-key',credentialRef:'QA_API_KEY',paramName:'api_key'}; boot",
         "dispatch each instance's `request` action (through a runtime flow: POST /api/v1/automation with a start → connector_action node, then POST /api/v1/automation/NAME/trigger, the vehicle QA run #24615 used on a stock-shaped boot; no HTTP route dispatches a connector action directly) at an echo path; capture what the upstream received per instance",
         "read the authored rows back over GET /api/v1/meta and GET /api/v1/automation/connectors; grep both full bodies for every resolved secret value",
-        "unset QA_BEARER_TOK and boot again; capture the boot failure verbatim",
+        "unset QA_BEARER_TOK and boot again; capture the boot log's degrade line verbatim, the bearer instance's entry on GET /api/v1/automation/connectors, and what a dispatch to it (the step-2 vehicle) answers",
         "author one instance with auth {type:'oauth2', ...} and one catalog/instance entry with inline authentication {type:'api-key', key:'x'}; build both; capture the two rejections",
-        "run the pins: packages/connectors/connector-rest/src/rest-connector.test.ts (wire shapes), packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution, env fallback, and the missing ref failing an in-process boot by the ref name alone) and packages/spec/src/integration/connector-provider.test.ts (the #7990 inline-`authentication` refusal at schema level)"
+        "run the pins: packages/connectors/connector-rest/src/rest-connector.test.ts (wire shapes), packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution, env fallback, and the missing ref degrading its instance on an in-process boot, named), packages/services/service-automation/src/connector-credential-door.test.ts (missing → degraded, set → ready, clear → degraded again, in-process) and packages/spec/src/integration/connector-provider.test.ts (the #7990 inline-`authentication` refusal at schema level)"
       ],
       "acceptance": [
         {
@@ -2007,10 +2007,10 @@
           "evidence": "the meta read + the matching echo capture"
         },
         {
-          "clause": "an unresolvable credentialRef is a HARD BOOT ERROR carrying the prescription — the message names the connector, the provider, the ref, and both remedies ('set the <ref> env var, or wire AutomationServicePluginOptions.credentialResolver to a secrets service (ADR-0097 §3)') — an app must not come up with a connector whose credentials never loaded",
-          "oracle": "log",
-          "verify": "the unset-env boot aborts with the plugin.ts#resolveInstanceAuth message; read the served boot's output and match the connector, the provider, the ref and both remedies. connector-materialization.test.ts ('fails boot loudly when credentialRef does not resolve') is lower-layer evidence only: it boots an in-process kernel and asserts /credentialRef 'MISSING' did not resolve/ alone, not the connector, the provider or the two remedies, so it never scores this clause (RUNNER rule 6)",
-          "evidence": "the fatal boot output"
+          "clause": "an unresolvable credentialRef DEGRADES its instance and never fails the boot — the app comes up, the instance is listed on GET /api/v1/automation/connectors with state 'degraded' and a degradedReason naming the reference and its remedies ('credential 'REF' is not set. Set it under Setup → Connector credentials (PUT /api/v1/automation/connectors/credential-refs/REF) or as the environment variable 'REF' …; the instance materializes once it is set, with no restart'), its provider factory is never called without the credential, and a connector_action dispatch to it fails naming that reason",
+          "oracle": "api",
+          "verify": "the unset-env boot completes; read the bearer instance's descriptor and the boot log's warn line (plugin.ts#degradeConnectorForCredential, the reason from connector-credentials.ts#missingCredentialReason) and match the reference and the remedies; dispatch it through the step-2 vehicle and read the failure. connector-materialization.test.ts ('degrades the instance, naming the reference, when credentialRef does not resolve') and connector-credential-door.test.ts ('missing → degraded naming the reference; set → ready; clear → degraded again') assert on an in-process kernel that the reason names the reference and the factory is not called — lower-layer evidence only, never this clause's pass (RUNNER rule 6)",
+          "evidence": "the served boot's degrade line, the degraded descriptor and the dispatch failure"
         },
         {
           "clause": "oauth2 is refused at AUTHORING, not degraded at runtime: auth {type:'oauth2'} fails parse (invalid discriminator — ConnectorInstanceAuthSchema has exactly the four static arms; the EE-tier boundary is documented on ResolvedConnectorAuth), and an inline `authentication` with a non-'none' type is refused with the located #7990 message steering to auth:{type,credentialRef} — there is no door through which an OAuth2 flow or an inline secret enters open-edition metadata",
@@ -2028,19 +2028,19 @@
       "negative": [
         "a resolved secret appearing in any listing/meta/descriptor body is a cleartext-credential FAIL of P0 severity regardless of this item's priority",
         "an oauth2-authored entry building clean — or an inline non-'none' `authentication` publishing — is a FAIL against the #7990/ADR-0097 refusal doors",
-        "a missing credentialRef materializing a connector that fails only at dispatch time (instead of failing boot) is a FAIL against the hard-boot-error contract"
+        "a missing credentialRef failing the boot, materializing a connector that calls its upstream without the credential, or leaving the instance absent from GET /api/v1/automation/connectors instead of a degraded entry naming the reference is a FAIL against the degrade contract (ADR-0097, the amendment notes under §6 and under Runtime reconcile)"
       ],
       "traps": [
         "stale-dist"
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/connectors/connector-rest/src/rest-connector.test.ts (per-kind wire shapes through a stubbed fetch) + packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution incl. env fallback; its missing-ref case asserts only that the ref did not resolve, on an in-process kernel, so it is evidence for acceptance[2], never its pass) + packages/spec/src/integration/connector-provider.test.ts (the #7990 inline-`authentication` refusal of acceptance[3] and negative[1], at schema level). No pin covers the oauth2 discriminator refusal, the LIVE echo-upstream leg, or the served boot's fatal message"
+        "ref": "packages/connectors/connector-rest/src/rest-connector.test.ts (per-kind wire shapes through a stubbed fetch) + packages/services/service-automation/src/connector-materialization.test.ts (credentialRef resolution incl. env fallback; its missing-ref case asserts the degraded reason names the ref and the factory is not called, on an in-process kernel, so it is evidence for acceptance[2], never its pass) + packages/services/service-automation/src/connector-credential-door.test.ts (missing → degraded → set → ready → clear → degraded, in-process; evidence for acceptance[2] too) + packages/spec/src/integration/connector-provider.test.ts (the #7990 inline-`authentication` refusal of acceptance[3] and negative[1], at schema level). No pin covers the oauth2 discriminator refusal, the LIVE echo-upstream leg, or the served boot's degrade line"
       },
       "source": [
         "packages/spec/src/shared/connector-auth.zod.ts#ConnectorAuthConfigSchema (ConnectorAuthConfigSchema — the runtime shape; ResolvedConnectorAuth = the static open tier, OAuth2 named as the enterprise tier), (ConnectorInstanceAuthSchema — the authored shape: credentialRef instead of inline secrets, four arms, no oauth2)",
         "packages/spec/src/integration/connector.zod.ts#authentication (the #7990 inline-`authentication` publish refusal, both message variants)",
-        "packages/services/service-automation/src/plugin.ts#resolveInstanceAuth (resolveInstanceAuth — credentialRef → ResolvedConnectorAuth; empty resolution throws with the env-var prescription; api-key headerName default applied)",
+        "packages/services/service-automation/src/plugin.ts#resolveInstanceAuth (resolveInstanceAuth — the resolved credentialRef value → ResolvedConnectorAuth; api-key headerName default applied) + plugin.ts#degradeConnectorForCredential (a reference no source answers for degrades its instance, naming it, at boot and on a reload) + connector-credentials.ts#missingCredentialReason (the reason text)",
         "packages/connectors/connector-rest/src/rest-connector.ts#applyAuth (applyAuth — the wire shapes per kind) + rest-provider.ts (the factory receives the RESOLVED static subset)",
         "packages/connectors/connector-openapi/src/openapi-provider.ts#auth (the openapi provider shares the same static-auth transport)",
         "examples/app-showcase/src/system/connectors/index.ts#StatusApiConnector (with StatusOpenApiConnector and DevToolsMcpConnector: every shipped instance is auth none; StatusApiConnector's comment is the fixture's own pointer at bearer+credentialRef for real upstreams)"
@@ -2069,6 +2069,12 @@
           "date": "2026-10-26",
           "change": "acceptance[2].verify, acceptance[3].verify, steps[5] and automated.ref re-scoped to what the pins assert — checklist-accuracy findings of QA run #25815 (18.2.0 sweep, release-18.2.0-tier1, 6679644a; wave anchor #25807; card #25844). a2: connector-materialization.test.ts's missing-ref case asserts /credentialRef 'MISSING' did not resolve/ on an in-process kernel boot, not the connector, the provider or the two remedies, so it no longer reads as pinning the clause. a3/n1: connector-provider.test.ts pins the #7990 half at schema level and was not in the ref; no pin refuses oauth2 on ConnectorInstanceAuthSchema (connector.test.ts parses oauth2 under AuthConfigSchema). Re-read on main 9753d163. No clause changed",
           "ref": "#25844"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "acceptance[2] and negative[2] follow the degrade rule of #27237 (ADR-0097, the amendment notes under §6 and under Runtime reconcile): an unresolvable credentialRef degrades its instance, naming the reference, instead of failing the boot, so the clause is now an api one (the degraded descriptor, the boot's warn line, the dispatch failure) and the negative fails a boot that dies on it. The title, fixtures.requires[2] (the env → sys_connector_credential → host resolver chain), steps[3], steps[5], automated.ref and source[2] follow; the cited pin 'fails boot loudly when credentialRef does not resolve' no longer exists, and its successor 'degrades the instance, naming the reference, when credentialRef does not resolve' plus connector-credential-door.test.ts take its place. Read on main 501c864d",
+          "ref": "#27429"
         }
       ]
     },

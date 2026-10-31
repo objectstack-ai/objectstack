@@ -1373,8 +1373,10 @@ export interface IAutomationService {
      * Remove the stored value for one reference; every instance naming it is
      * torn down and registered degraded, naming the reference. Resolves to the
      * reference's listing entry after that reconcile. Rejects `404
-     * RESOURCE_NOT_FOUND` when nothing is stored for it, and `403
-     * PERMISSION_DENIED` under a walled tenancy posture, as a set does.
+     * RESOURCE_NOT_FOUND` when nothing is stored for it, `403
+     * PERMISSION_DENIED` under a walled tenancy posture, as a set does, and
+     * `503 SERVICE_UNAVAILABLE` when the store cannot be read or written, or
+     * the tenancy posture cannot be read — nothing is changed.
      */
     clearConnectorCredential?(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef>;
 
