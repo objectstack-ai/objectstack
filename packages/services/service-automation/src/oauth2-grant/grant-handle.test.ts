@@ -143,7 +143,7 @@ describe('ADR-0143 D4 — client_credentials', () => {
         expect(sent).toEqual(['dummy-at-1', 'dummy-at-2']);
 
         accept.clear();
-        const refused = await callWithBorrowedCredential(handle, upstream as never).catch((e) => e);
+        const refused = (await callWithBorrowedCredential(handle, upstream as never).catch((e: Error) => e)) as Error;
         expect(refused).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
         expect(String(refused.message)).toContain("connector instance 'crm'");
         expect(String(refused.message)).not.toContain('dummy-at');

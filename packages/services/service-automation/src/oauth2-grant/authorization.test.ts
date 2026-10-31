@@ -115,7 +115,7 @@ describe('ADR-0143 D5 — a begun connect is taken once', () => {
         await store.put('st', pending());
         // The other replica read the same entry and deleted it first.
         const realDelete = kv.delete.bind(kv);
-        (kv as any).delete = async (key: string, opts: { ifVersion?: number }) => {
+        (kv as any).delete = async (key: string, opts: Parameters<IKV['delete']>[1]) => {
             await realDelete(key);
             return realDelete(key, opts);
         };
