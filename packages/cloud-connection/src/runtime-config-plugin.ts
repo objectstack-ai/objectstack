@@ -270,7 +270,15 @@
  * exactly as it does for `marketplace`.
  */
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+import {
+    resolveRequestExecutionContext,
+    type IDataEngine,
+    type Plugin,
+    type PluginContext,
+    type RequestAuthService,
+} from '@objectstack/core';
+import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
+import { ifNoneMatchHits, representationEtag, REVALIDATE_PRIVATE_CACHE_CONTROL } from '@objectstack/types';
 import { resolveCloudUrl, isControlPlaneDeclined } from './cloud-url.js';
 import {
     CLIENT_ERROR_REPORTING_DSN_ENV,
@@ -286,6 +294,64 @@ import {
 } from './telemetry-posture.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 import { readConsoleMapStyleUrl } from './console-map-style.js';
+
+/**
+ * [#27627] Answer `body` under the weak validator of exactly what is served
+ * (`representationEtag`, `@objectstack/types`), `private, no-cache`, and a
+ * bodiless `304` when the request's `If-None-Match` already names it. The
+ * payload is decided per HOST (each subdomain resolves its own environment)
+ * and read per request (a Branding save shows on the next load), both inside
+ * the hashed bytes, so a revalidation sees either change at once. `private`,
+ * not `public`: the host-to-environment resolution and the saved branding are
+ * this deployment's, and nothing here asks a shared cache to hold them.
+ */
+function sendRevalidated(c: any, body: unknown): Response {
+    const etag = representationEtag(body);
+    c.header('Cache-Control', REVALIDATE_PRIVATE_CACHE_CONTROL);
+    c.header('ETag', etag);
+    if (ifNoneMatchHits(c.req.header('if-none-match'), etag)) return c.body(null, 304);
+    return c.json(body);
+}
+
+/**
+ * [#27627] Resolve this request's caller and, for an admin or service
+ * principal, open the per-request `Server-Timing` disclosure gate — the same
+ * predicate (`isPerfDisclosurePrincipal`, over the resolved `posture`) every
+ * other door hands its caller to. The composition is the current-user
+ * endpoints' own (`plugin-hono-server` `current-user-endpoints.ts`): a
+ * sessionless request resolves nobody, and no API-key door is opened.
+ *
+ * Best-effort by design, and that is the whole difference from those doors:
+ * the answer never depends on the caller, so a resolution that fails — an
+ * authorization store outage included — only leaves the gate closed. A no-op
+ * when no request opened a gate (perf-tuning off).
+ */
+async function openTimingGateForAdmin(ctx: PluginContext, headers: Headers): Promise<void> {
+    const service = <T>(name: string): T | undefined => {
+        try { return ctx.getService<T>(name); } catch { return undefined; }
+    };
+    try {
+        const context = await resolveRequestExecutionContext({
+            headers,
+            ql: service<IDataEngine>('objectql'),
+            authService: service<RequestAuthService>('auth'),
+            tenancy: undefined,
+            anonymous: 'fail-closed',
+            authGate: 'withhold',
+            credentials: 'session-only',
+            sessionApi: 'required',
+            session: 'request',
+            localization: 'withhold',
+            requestLocale: undefined,
+            accessToken: 'withhold',
+            oauth: undefined,
+            onAdmission: undefined,
+        });
+        if (context && isPerfDisclosurePrincipal(context)) allowPerfDisclosure();
+    } catch {
+        // The gate stays closed; the payload is served unchanged.
+    }
+}
 
 /**
  * The `env-registry` slot's hostname resolvers — see the call site for both
@@ -1046,6 +1112,15 @@ export class RuntimeConfigPlugin implements Plugin {
             };
 
             const handler = async (c: any) => {
+                // [#27627] Open the per-request `Server-Timing` gate for an
+                // admin, as every other door does once it has resolved its
+                // caller. This route serves everyone anonymously and resolves
+                // nobody, so without this an admin's `X-OS-Debug-Timing` was
+                // the one request in the API that never got its timing. The
+                // caller is resolved ONLY when that header is sent: an
+                // ordinary load pays no session read, and the answer below
+                // never depends on who asked.
+                if (c.req.header('x-os-debug-timing')) await openTimingGateForAdmin(ctx, c.req.raw.headers);
                 const rawHost = c.req.header('host') ?? '';
                 const host = rawHost.split(':')[0].toLowerCase().trim();
                 let defaultEnvironmentId: string | undefined;
@@ -1087,7 +1162,7 @@ export class RuntimeConfigPlugin implements Plugin {
                         // 500s. Worst case the SPA shows its env picker.
                     }
                 }
-                return c.json({
+                return sendRevalidated(c, {
                     cloudUrl: this.cloudUrl,
                     // Declared by the host, never derived (#14514). Spread,
                     // not `upgradeUrl: this.upgradeUrl`, for the same reason

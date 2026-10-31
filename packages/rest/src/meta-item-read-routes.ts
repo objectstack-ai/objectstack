@@ -129,6 +129,8 @@ import {
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
 import * as metaReadGate from './meta-item-read-gate.js';
 import { metaMemberSelector, type MetaReadGatePolicy } from './meta-item-read-gate.js';
+import { measureMetaRead } from './meta-read-timing.js';
+import { sendMetaRepresentation } from './meta-representation-validator.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import {
@@ -751,7 +753,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             ...(environmentId ? { environmentId } : {}),
                             // [#9454] The cached door is the `view` arm, and
                         };
-                        const result = await p.getMetaItemCached(cachedRequest);
+                        const result = await measureMetaRead(() => p.getMetaItemCached!(cachedRequest));
                         // [#23316] The automation engine's verdict on a
                         // FLOW, beside the document and never inside it:
                         // this branch is the default door of
@@ -979,7 +981,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // [#22877] The member, read once above.
                             ...memberSelector,
                         };
-                        const envelope = await p.getMetaItem(itemRequest) as Record<string, any>;
+                        const envelope = await measureMetaRead(() => p.getMetaItem(itemRequest)) as Record<string, any>;
 
                         // [#20408] Everything this read does to the envelope
                         // after the store read is ONE chain,
@@ -1033,9 +1035,14 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // [ADR-0106 D6 tier 2] Visibility undetermined → the
                         // body is unmasked, so it must not be stored or
                         // revalidated under a shared validator.
-                        if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
+                        // [#27627] Otherwise the chain's validator of the
+                        // served envelope, `private, no-cache`, and a `304`
+                        // when the caller already holds it. This exit is the
+                        // one `app`, `dashboard`, `doc` and `book` always take
+                        // (their gates keep them off the shared cache above),
+                        // so before this they were served with no validator.
                         res.header('Vary', 'Accept-Language');
-                        res.json(answer.envelope);
+                        sendMetaRepresentation(req, res, answer.envelope, answer);
                     }
                 } catch (error: any) {
                     // [#18402] THE one absence answer, whichever arm

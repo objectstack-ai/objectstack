@@ -91,6 +91,8 @@ import type { GetMetaItemsRequest } from '@objectstack/spec/api';
 import { truncateClientMessage } from '@objectstack/types';
 import { handleRouteError, sendFieldVisibilityFault } from './error-response.js';
 import * as metaReadGate from './meta-item-read-gate.js';
+import { measureMetaRead } from './meta-read-timing.js';
+import { metaRepresentationCaching, sendMetaRepresentation } from './meta-representation-validator.js';
 import { unknownQueryParamRefusalMessage } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
@@ -248,10 +250,13 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const p = await this.resolveProtocol(environmentId, req);
-                const types = await p.getMetaTypes();
+                const types = await measureMetaRead(() => p.getMetaTypes());
                 const translated = await this.translateMetaTypesResponse(req, environmentId, types);
                 res.header('Vary', 'Accept-Language');
-                res.json(translated);
+                // [#27627] The type list varies by locale and by what this
+                // kernel registers, both inside the served bytes the
+                // validator hashes.
+                sendMetaRepresentation(req, res, translated, metaRepresentationCaching(translated));
             } catch (error: any) {
                 handleRouteError(res, error);
             }
@@ -678,7 +683,7 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                         ...(previewDrafts ? { previewDrafts: true } : {}),
                         ...(environmentId ? { environmentId } : {}),
                     };
-                    const items = await p.getMetaItems(listRequest);
+                    const items = await measureMetaRead(() => p.getMetaItems(listRequest));
 
                     // [#20320] Everything this route does to the list after
                     // the read — the #5224 `api` served-set face, THE
@@ -709,9 +714,11 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // [ADR-0106 D6 tier 2] The chain's cache posture — an
                     // undetermined field visibility serves the list
                     // `private, no-store`, exactly as this route always has.
-                    if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
+                    // [#27627] Otherwise `private, no-cache` under the chain's
+                    // validator of the served list, and a `304` when the
+                    // caller already holds it.
                     res.header('Vary', 'Accept-Language');
-                    res.json(answer.data);
+                    sendMetaRepresentation(req, res, answer.data, answer);
                 } catch (error: any) {
                     handleRouteError(res, error);
                 }

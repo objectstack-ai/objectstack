@@ -58,6 +58,7 @@ import type {
     Logger,
 } from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
+import { ifNoneMatchHits, representationEtag, REVALIDATE_PRIVATE_CACHE_CONTROL } from '@objectstack/types';
 
 /** API prefix these endpoints mount under unless the host overrides it. */
 export const DEFAULT_CURRENT_USER_PREFIX = '/api/v1';
@@ -1003,12 +1004,23 @@ export function registerCurrentUserEndpoints(
             tenantId: execCtx.tenantId ?? undefined,
             acceptLanguage: c.req.raw?.headers?.get?.('accept-language') ?? undefined,
         });
-        return c.json({
+        const body = {
             authenticated: true,
             currency: localization.currency ?? null,
             locale: localization.locale,
             timezone: localization.timezone,
-        });
+        };
+        // [#27627] Read by every renderer on every load, and per caller (the
+        // user's own `locale`, their tenant's defaults): `private, no-cache`
+        // under the weak validator of THIS caller's body, `304` when the
+        // caller already holds it. Only the signed-in answer is validated —
+        // the signed-out one above is a fixed body nothing needs to revalidate.
+        const etag = representationEtag(body);
+        c.header('Cache-Control', REVALIDATE_PRIVATE_CACHE_CONTROL);
+        c.header('Vary', 'Accept-Language');
+        c.header('ETag', etag);
+        if (ifNoneMatchHits(c.req.header('if-none-match'), etag)) return c.body(null, 304);
+        return c.json(body);
     }));
 
     // GET /me/apps — list apps the current user is allowed to enter.
