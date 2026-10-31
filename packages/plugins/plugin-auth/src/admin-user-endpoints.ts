@@ -297,17 +297,21 @@ function badRequest(message: string): EndpointResult {
 }
 
 /**
- * [#28289] A refusal about named inputs: `400 VALIDATION_FAILED` with one
- * `fields[]` entry per input, the same envelope the grant refusal passes
- * through and the data doors answer, so the console's field-error reader
- * needs no case for this door.
+ * [#28289] A refusal for inputs left empty: `400 VALIDATION_FAILED` with one
+ * `fields[]` entry per input, code `required` (the closed ADR-0114 catalog) —
+ * the envelope the grant refusal passes through and the data doors answer, so
+ * the console's field-error reader needs no case for this door.
  */
-function fieldRefusal(message: string, fields: string[], code: FieldErrorCode): EndpointResult {
+function requiredFieldsRefusal(message: string, fields: string[]): EndpointResult {
   return {
     status: 400,
     body: {
       success: false,
-      error: { code: 'VALIDATION_FAILED', message, fields: fields.map((field) => ({ field, code, message })) },
+      error: {
+        code: 'VALIDATION_FAILED',
+        message,
+        fields: fields.map((field) => ({ field, code: 'required' satisfies FieldErrorCode, message })),
+      },
     },
   };
 }
@@ -713,13 +717,12 @@ export async function runAdminCreateUser(
   if (!hasEmail && !phoneNumber) {
     // Named in the dialog's words, not the body's keys: an administrator sees
     // an Email field, and a Phone Number field only where phone sign-in is on.
-    // [#28289] Field-level, as the grant refusal below is: `VALIDATION_FAILED`
-    // with one `fields[]` entry per input that would satisfy it, code
-    // `required` (the closed ADR-0114 catalog), so a client marks the input
-    // and words it in its own language instead of showing this sentence.
+    // [#28289] Field-level, as the grant refusal below is: one `fields[]`
+    // entry per input that would satisfy it, so a client marks the input and
+    // words it in its own language instead of showing this sentence.
     const phoneSignIn = deps.phoneNumberEnabled?.() === true;
     const message = phoneSignIn ? 'Email or phone number is required' : 'Email is required';
-    return fieldRefusal(message, phoneSignIn ? ['email', 'phoneNumber'] : ['email'], 'required');
+    return requiredFieldsRefusal(message, phoneSignIn ? ['email', 'phoneNumber'] : ['email']);
   }
   const email = hasEmail ? (rawEmail as string).trim() : generatePlaceholderEmail();
   const name =
