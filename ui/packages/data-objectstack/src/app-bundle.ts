@@ -22,7 +22,10 @@
  *     included (Studio, objects outside the app, an item withheld from the
  *     caller);
  *   - re-entering an app, or reading past the adapter's cache lifetime, asks
- *     again with `If-None-Match`: a `304` keeps what is held;
+ *     again with `If-None-Match`, the validator sent back byte-for-byte: a
+ *     `304` keeps what is held;
+ *   - a bundle served `no-store` answers the reads that waited on it and is
+ *     not kept: later reads go by name until the app is entered again;
  *   - a metadata write the adapter sees, or an invalidation a host asks for,
  *     marks the bundles stale, and the next bundled read asks again first.
  *
@@ -43,8 +46,11 @@ export type AppBundleItems = Map<string, Map<string, AppBundleEntry>>;
 
 /** What one bundle request obtained. */
 export type AppBundleAnswer =
-  /** A `200`: the bundle, and its validator when the server sent one. */
-  | { status: 'fresh'; etag?: string; items: AppBundleItems }
+  /**
+   * A `200`: the bundle, and its validator when the server sent one.
+   * `noStore`: served `no-store`, so it answers the reads waiting on it and is not kept.
+   */
+  | { status: 'fresh'; etag?: string; items: AppBundleItems; noStore?: boolean }
   /** A `304`: what is held is current. */
   | { status: 'unchanged' }
   /** No bundle for this app: refused, unknown, or no such route on this server. */
@@ -59,7 +65,8 @@ interface AppBundleState {
   /** When the server last answered for this bundle (a `200` or a `304`). */
   checkedAt: number;
   stale: boolean;
-  inflight: Promise<void> | null;
+  /** The load on the wire; it settles with the items its answer gives the reads waiting on it. */
+  inflight: Promise<AppBundleItems> | null;
 }
 
 /**
@@ -86,8 +93,7 @@ export class AppBundleStore {
     if (!appId) return Promise.resolve();
     this.active = appId;
     const state = this.bundles.get(appId);
-    if (state?.inflight) return state.inflight;
-    return this.ask(appId);
+    return (state?.inflight ?? this.ask(appId)).then(() => undefined);
   }
 
   /**
@@ -98,12 +104,12 @@ export class AppBundleStore {
   async read(type: string, name: string): Promise<AppBundleEntry | undefined> {
     const appId = this.active;
     if (!appId) return undefined;
-    let state = this.bundles.get(appId);
+    const state = this.bundles.get(appId);
     if (!state) return undefined;
-    if (state.inflight) await state.inflight;
-    else if (state.stale || Date.now() - state.checkedAt >= this.ttlMs) await this.ask(appId);
-    state = this.bundles.get(appId);
-    return state?.items.get(type)?.get(name);
+    let items = state.items;
+    if (state.inflight) items = await state.inflight;
+    else if (state.stale || Date.now() - state.checkedAt >= this.ttlMs) items = await this.ask(appId);
+    return items.get(type)?.get(name);
   }
 
   /** Whether any bundle held this session holds `type` / `name`. */
@@ -138,7 +144,7 @@ export class AppBundleStore {
     }
   }
 
-  private ask(appId: string): Promise<void> {
+  private ask(appId: string): Promise<AppBundleItems> {
     const held = this.bundles.get(appId);
     const state: AppBundleState = held ?? { appId, items: new Map(), checkedAt: 0, stale: true, inflight: null };
     this.bundles.set(appId, state);
@@ -147,10 +153,16 @@ export class AppBundleStore {
       .then((answer) => {
         // A `clear()` while this was out replaced the state: this answer
         // belongs to the world it left, so it is dropped.
-        if (this.bundles.get(appId) !== state) return;
+        const current = this.bundles.get(appId);
+        if (current !== state) return current?.items ?? new Map();
         state.inflight = null;
         state.checkedAt = Date.now();
         state.stale = false;
+        if (answer.status === 'fresh' && answer.noStore) {
+          state.items = new Map();
+          state.etag = undefined;
+          return answer.items;
+        }
         if (answer.status === 'fresh') {
           state.items = answer.items;
           state.etag = answer.etag;
@@ -158,6 +170,7 @@ export class AppBundleStore {
           state.items = new Map();
           state.etag = undefined;
         }
+        return state.items;
       });
     state.inflight = inflight;
     return inflight;

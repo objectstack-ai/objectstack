@@ -4534,7 +4534,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     const res = await this.fetchImpl(url, { method: 'GET', headers, cache: 'no-store' });
     if (res.status === 304) return { status: 'unchanged' };
     if (!res.ok) return { status: 'absent' };
-    return { status: 'fresh', etag: res.headers.get('etag') ?? undefined, items: indexAppBundle(await res.json()) };
+    const items = indexAppBundle(await res.json());
+    // A bundle holding a member whose field visibility the server could not
+    // settle is served `no-store`, with no validator: it answers the reads
+    // that waited on it and is not kept.
+    if (/\bno-store\b/i.test(res.headers.get('cache-control') ?? '')) return { status: 'fresh', items, noStore: true };
+    // The validator goes back byte-for-byte, a weak `W/` prefix included.
+    return { status: 'fresh', etag: res.headers.get('etag') ?? undefined, items };
   }
 
   /**

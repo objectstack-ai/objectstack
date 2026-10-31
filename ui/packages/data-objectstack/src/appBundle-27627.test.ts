@@ -19,11 +19,13 @@
  *    never asked by name (objects, views, pages, dashboards, the app);
  *  - an item the bundle does not hold, and a call with options, keep the
  *    by-name route;
- *  - re-entering sends `If-None-Match`, and a `304` keeps what is held;
+ *  - re-entering sends `If-None-Match` (a weak validator byte-for-byte), and a
+ *    `304` keeps what is held;
  *  - an invalidation naming a bundled item, and any metadata write through the
  *    client, make the next bundled read ask the bundle again first;
  *  - a bundled object carries its envelope's `sortability`, as its by-name read does;
- *  - a cache clear, or a bundle served with no validator, downloads it again;
+ *  - a cache clear downloads it again;
+ *  - a bundle served `no-store` answers the reads that waited on it and is not kept;
  *  - a refused bundle leaves every read to its by-name route.
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -243,17 +245,43 @@ describe('objectstack#27627 — the app metadata bundle', () => {
     expect(readObjectSortability(await ds.getObjectSchema('b27627_contact'))?.fields.name?.sortable).toBe(true);
   });
 
-  it('a bundle served with no validator (`no-store`) is downloaded again, never revalidated', async () => {
+  it('a weak validator goes back byte-for-byte, its `W/` prefix included', async () => {
     const { ds, held } = await heldAdapter();
     const first = ds.loadAppBundle(APP);
     await drain();
-    held[0].respond(200, bundle(), { 'Cache-Control': 'private, no-store' });
+    held[0].respond(200, bundle(), { ETag: 'W/"sha256-Zm9vYmFy"' });
     await first;
     const again = ds.loadAppBundle(APP);
     await drain();
-    expect(held[1].path).toBe(BUNDLE_PATH);
-    expect(held[1].headers['if-none-match']).toBeUndefined();
-    held[1].respond(200, bundle());
+    expect(held[1].headers['if-none-match']).toBe('W/"sha256-Zm9vYmFy"');
+    held[1].respond(304);
+    await again;
+  });
+
+  it('a bundle served `no-store` answers the reads that waited on it, and is not kept', async () => {
+    const { ds, held } = await heldAdapter();
+    const first = ds.loadAppBundle(APP);
+    const waiting = ds.getObjectSchema('b27627_contact');
+    await drain();
+    // A member under an undetermined posture: no validator, not to be cached.
+    held[0].respond(200, bundle(), { 'Cache-Control': 'private, no-store' });
+    await first;
+    expect((await waiting as any).label).toBe('Contact');
+    expect(held).toHaveLength(1);
+
+    // Nothing was kept: the next read of a member goes by name.
+    const later = ds.getClient().meta.getItem('object', 'b27627_task');
+    await drain();
+    expect(held[1].path).toBe('/api/v1/meta/object/b27627_task');
+    held[1].respond(200, { success: true, data: { type: 'object', name: 'b27627_task', item: task } });
+    await later;
+
+    // Re-entering downloads it again, with no validator.
+    const again = ds.loadAppBundle(APP);
+    await drain();
+    expect(held[2].path).toBe(BUNDLE_PATH);
+    expect(held[2].headers['if-none-match']).toBeUndefined();
+    held[2].respond(200, bundle(), { 'Cache-Control': 'private, no-store' });
     await again;
   });
 
