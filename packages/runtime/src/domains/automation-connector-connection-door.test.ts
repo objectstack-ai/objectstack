@@ -55,10 +55,10 @@ function boot(opts: { posture?: 'single' | 'group' | 'isolated'; service?: Recor
     return { dispatcher: new HttpDispatcher(kernel as never), get, begin, complete, revoke };
 }
 
-/** A caller holding exactly `systemPermissions`, in organization `org_a`. */
-const HOLDING = (systemPermissions: string[], userId = 'u_admin'): HttpProtocolContext => ({
+/** A caller holding exactly `systemPermissions`, in organization `tenantId` (default `org_a`). */
+const HOLDING = (systemPermissions: string[], userId = 'u_admin', tenantId = 'org_a'): HttpProtocolContext => ({
     request: {},
-    executionContext: { userId, tenantId: 'org_a', positions: [], permissions: [], systemPermissions },
+    executionContext: { userId, tenantId, positions: [], permissions: [], systemPermissions },
 } as HttpProtocolContext);
 
 /** The connection administrator: the capability, and nothing else. */
@@ -68,11 +68,22 @@ const MEMBER = (): HttpProtocolContext => HOLDING([], 'u_member');
 
 /**
  * The organization administrator's shipped grant (`organization_admin` in
- * plugin-security's default sets), transcribed: it does not carry the
- * connection capability, which an organization administrator holds only by
- * explicit grant.
+ * plugin-security's default sets, which `organization_admin_no_bypass`
+ * inherits), transcribed: since ruling B (record 6545223261) it carries the
+ * connection capability. The source is pinned in plugin-security's
+ * `default-permission-sets.test.ts`; this transcription pins what the door does
+ * with it.
  */
-const ORG_ADMIN_GRANT = ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'];
+const ORG_ADMIN_GRANT = ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes', 'manage_connector_connections'];
+
+/**
+ * The same organization administrator, active in ANOTHER organization where they
+ * are a plain member. Their `organization_admin` grant is organization-scoped,
+ * and core's resolver applies such a grant only in the organization it names
+ * (`grantAppliesInTenant`), so what reaches the door there is the member
+ * baseline: no system permission at all.
+ */
+const ORG_ADMIN_IN_ANOTHER_ORGANIZATION = (): HttpProtocolContext => HOLDING([], 'u_orgadmin', 'org_b');
 
 const ANONYMOUS = (): HttpProtocolContext => ({ request: {}, executionContext: {} } as HttpProtocolContext);
 
@@ -131,18 +142,23 @@ describe('ADR-0143 D5 — connector connection door: who may reach it', () => {
         }
     });
 
-    it.each(EVERY_MEMBER)('%s: an organization administrator on the shipped grant is refused; granted the capability, admitted', async (_verb, call, member) => {
-        const refused = boot();
-        const denied = await call(refused, HOLDING(ORG_ADMIN_GRANT));
-        expect(statusOf(denied.response)).toBe(403);
-        expect(codeOf(denied.response)).toBe('PERMISSION_DENIED');
-        for (const m of [refused.get, refused.begin, refused.complete, refused.revoke]) expect(m).not.toHaveBeenCalled();
-
+    it.each(EVERY_MEMBER)('%s: an organization administrator on the shipped grant is admitted for their own organization, and refused in another', async (_verb, call, member) => {
         const admitted = boot();
-        const allowed = await call(admitted, HOLDING([...ORG_ADMIN_GRANT, 'manage_connector_connections']));
+        const allowed = await call(admitted, HOLDING(ORG_ADMIN_GRANT, 'u_orgadmin'));
         expect(statusOf(allowed.response)).toBe(200);
         expect(member(admitted)).toHaveBeenCalledTimes(1);
-        expect(member(admitted)).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ tenantId: 'org_a' }) }));
+        // The door acts on the caller's own organization: the service is handed
+        // `org_a` and nothing that could name another.
+        expect(member(admitted)).toHaveBeenCalledWith(
+            expect.objectContaining({ context: expect.objectContaining({ userId: 'u_orgadmin', tenantId: 'org_a' }) }),
+        );
+
+        const refused = boot();
+        const denied = await call(refused, ORG_ADMIN_IN_ANOTHER_ORGANIZATION());
+        expect(statusOf(denied.response)).toBe(403);
+        expect(codeOf(denied.response)).toBe('PERMISSION_DENIED');
+        expect(messageOf(denied.response)).toContain('`manage_connector_connections`');
+        for (const m of [refused.get, refused.begin, refused.complete, refused.revoke]) expect(m).not.toHaveBeenCalled();
     });
 
     it('the system context passes without the capability; an absent capability list is refused (fail-closed)', async () => {

@@ -341,7 +341,7 @@ describe('[#23546] /packages/:id/commits — the commit trail demands studio.acc
     for (const [label, caps] of [
         ['zero-capability', []],
         ['setup.access-only (the organization admin\'s capability)', ['setup.access']],
-        ['the organization admin\'s full grant (setup.access, setup.write, manage_org_users, manage_mailboxes)', ['setup.access', 'setup.write', 'manage_org_users', 'manage_mailboxes']],
+        ['the organization admin\'s full grant (setup.access, setup.write, manage_org_users, manage_mailboxes, manage_connector_connections)', ['setup.access', 'setup.write', 'manage_org_users', 'manage_mailboxes', 'manage_connector_connections']],
         ['WRITE-only (manage_metadata), which this door never admitted', ['manage_metadata']],
         ['setup.access + manage_metadata', ['setup.access', 'manage_metadata']],
     ] as const) {

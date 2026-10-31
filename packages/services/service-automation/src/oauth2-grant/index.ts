@@ -13,3 +13,4 @@ export * from './grant-handle.js';
 export * from './authorization.js';
 export * from './endpoint-transport.js';
 export * from './app-credential.js';
+export * from './mcp-authorization.js';
