@@ -484,6 +484,16 @@ describe('a bound action saved at runtime through the metadata door reaches its 
         expect(actionNames(served.item)).toEqual(['own_action']);
     });
 
+    it('the code layer (`getArtifactItem`) carries the code packages\' bound actions only, never the runtime one', async () => {
+        // The authored-action re-sync reads this layer to decide that a code
+        // package ships an action (and leaves its handler to AppPlugin); a
+        // runtime action read there would never get its body bound.
+        const { engine, protocol } = await hostWith([OWNER, BINDER]);
+        await save(protocol, RUNTIME);
+        expect(actionNames(engine.registry.getObject('ba_org'))).toEqual(['own_action', 'rename_org', 'rt_action']);
+        expect(actionNames(engine.registry.getArtifactItem('object', 'ba_org'))).toEqual(['own_action', 'rename_org']);
+    });
+
     it('a runtime action naming an object no package registers is listed nowhere, and the boot audit stays code-only', async () => {
         const { engine, protocol } = await hostWith([OWNER]);
         await save(protocol, { ...RUNTIME, name: 'rt_orphan', objectName: 'ba_missing' });

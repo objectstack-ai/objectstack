@@ -496,6 +496,14 @@ const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const
 type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
 
 /**
+ * [#28356] Which layer an object fold serves: `'served'`, what every read
+ * answers (the bound actions the registry serves, runtime-authored included),
+ * or `'code'`, the code-layer resolution {@link SchemaRegistry.getArtifactItem}
+ * answers (the code packages' bound actions alone).
+ */
+type ServedObjectLayer = 'served' | 'code';
+
+/**
  * Deep merge two ServiceObject definitions.
  *
  * The merge set is CLOSED and enumerable — this is NOT "every prop, later
@@ -3913,8 +3921,12 @@ export class SchemaRegistry {
    * code-layer resolution ({@link resolveOwnerLayer}) folds extenders exactly
    * the same way rather than growing a second, drifting copy.
    */
-  private foldExtenders(contributors: ObjectContributor[], base: ObjectContributor): ServiceObject {
-    return this.foldExtendersOntoDefinition(contributors, base.definition);
+  private foldExtenders(
+    contributors: ObjectContributor[],
+    base: ObjectContributor,
+    layer: ServedObjectLayer = 'served',
+  ): ServiceObject {
+    return this.foldExtendersOntoDefinition(contributors, base.definition, layer);
   }
 
   /**
@@ -3925,6 +3937,7 @@ export class SchemaRegistry {
   private foldExtendersOntoDefinition(
     contributors: ObjectContributor[],
     baseDefinition: ServiceObject,
+    layer: ServedObjectLayer = 'served',
   ): ServiceObject {
     // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
@@ -3955,7 +3968,7 @@ export class SchemaRegistry {
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.finishServedObject(merged);
+    return this.finishServedObject(merged, layer);
   }
 
   /**
@@ -3999,10 +4012,13 @@ export class SchemaRegistry {
    * 1. picklist-bound fields get their list's options resolved onto them;
    * 2. [#24400] the bound top-level actions are attached — the code
    *    packages' and, [#28356], the runtime-authored ones
-   *    ({@link attachBoundActions}).
+   *    ({@link attachBoundActions}). The CODE layer
+   *    ({@link resolveOwnerLayer}, `layer: 'code'`) attaches the code
+   *    packages' alone: a tenant's action is not something a code package
+   *    ships, and `getArtifactItem('object')` answers exactly that question.
    */
-  private finishServedObject<T>(body: T): T {
-    return this.attachBoundActions(this.resolvePicklistFields(body));
+  private finishServedObject<T>(body: T, layer: ServedObjectLayer = 'served'): T {
+    return this.attachBoundActions(this.resolvePicklistFields(body), layer);
   }
 
   /**
@@ -4049,7 +4065,7 @@ export class SchemaRegistry {
    *
    * Returns `body` by reference when nothing attaches.
    */
-  private attachBoundActions<T>(body: T): T {
+  private attachBoundActions<T>(body: T, layer: ServedObjectLayer = 'served'): T {
     if (body === null || typeof body !== 'object') return body;
     const objectName = (body as { name?: unknown }).name;
     if (typeof objectName !== 'string' || objectName === '') return body;
@@ -4059,7 +4075,7 @@ export class SchemaRegistry {
     const base: any[] = Array.isArray(declared) ? declared : [];
     const present = new Set<unknown>(base.map((action) => action?.name));
     const fresh: any[] = [];
-    for (const action of this.boundServedActions()) {
+    for (const action of layer === 'code' ? this.boundCodeActions() : this.boundServedActions()) {
       if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
       present.add(action.name);
       fresh.push(action);
@@ -4984,7 +5000,7 @@ export class SchemaRegistry {
     if (!contributors || contributors.length === 0) return undefined;
     const ownerContrib = contributors.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
-    return this.foldExtenders(contributors, ownerContrib);
+    return this.foldExtenders(contributors, ownerContrib, 'code');
   }
 
   /**
