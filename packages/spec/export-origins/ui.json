@@ -567,6 +567,7 @@
     "resolveI18nLabel": "src/ui/i18n-label-resolver.ts#resolveI18nLabel (function)",
     "selectViewMetadataBranch": "src/ui/view.zod.ts#selectViewMetadataBranch (function)",
     "stripViewConsoleDecorations": "src/ui/view.zod.ts#stripViewConsoleDecorations (function)",
+    "thankYouRecordFieldNames": "src/ui/view.zod.ts#thankYouRecordFieldNames (function)",
     "validateActionParams": "src/ui/action-params.zod.ts#validateActionParams (function)",
     "viewForm": "src/ui/view.form.ts#viewForm (const)"
   }

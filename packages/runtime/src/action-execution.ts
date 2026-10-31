@@ -16,6 +16,7 @@
  */
 
 import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
@@ -2494,7 +2495,10 @@ export function summarizeActionParams(deps: ActionExecutionDeps, action: any, ob
         if (!name) continue;
         const type = jsonTypeOf(deps, p?.type ?? field?.type);
         const label = typeof p?.label === 'string' ? p.label : field?.label;
-        const help = p?.helpText ?? field?.description;
+        // A param's `helpText` is a `template` slot (#27948, ruling A): the
+        // parsed value is `{ dialect: 'template', source }`, so the tool
+        // schema reads its text, never the object.
+        const help = templateSlotSource(p?.helpText) ?? field?.description;
         const description = [label, help].filter(Boolean).join(' — ') || undefined;
         const optionSource = p?.options ?? field?.options;
         const enumVals = Array.isArray(optionSource)

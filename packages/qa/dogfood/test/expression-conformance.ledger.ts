@@ -702,7 +702,30 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'ui/component.zod.ts:ActionIconPropsSchema.successMessage',
       'ui/component.zod.ts:actionContainerMemberShape.successMessage',
     ],
-    note: 'The platform\'s own sentences (`sys_invitation` / `sys_member` / `sys_organization` / `sys_user` `invite_user`, the nine `sys_approval_request` decisions) were converted from `${result.*}` to `{{ result.* }}` on the same change. `outcomeMessages` is NOT this row: it stays a `${result.*}` string. ⛔ NOT MEASURED HERE: the runner was read at the pin, not run, and the `-log` half of `fail-soft-log`.',
+    note: 'The platform\'s own sentences (`sys_invitation` / `sys_member` / `sys_organization` / `sys_user` `invite_user`, the nine `sys_approval_request` decisions) were converted from `${result.*}` to `{{ result.* }}` on the same change. `outcomeMessages` is NOT this row: it is `template-action-outcome-message`. ⛔ NOT MEASURED HERE: the runner was read at the pin, not run, and the `-log` half of `fail-soft-log`.',
+  },
+  // #27948 (ruling A, step 2): the param dialog's copy (`description`, each param's `helpText`)
+  // and each `outcomeMessages` entry joined the family, over the roots of the key each stands beside.
+  {
+    id: 'template-action-dialog-copy',
+    summary: 'action param dialog copy (Action.description, ActionParam.helpText) — `{{ record.* }}` holes',
+    dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'PARSE and BUILD-TIME GATE: the same as `template-action-confirm-text`, over `actionConfirmTemplateRoots(action)` (`record`; a registered action\'s `params` is the input list, which binds nothing); `helpText` takes no inline locale map. EVALUATOR: console (objectui) `ActionRunner` hands the param-collection handler the action and params with each envelope reduced to its text (`dialogCopyOf`) and an `interpolate` (`dialogCopyFiller`) that fills a `{{ }}` sentence through `fillTemplateHoles` → @objectstack/formula `templateEngine.evaluate` over `record` and static `params`, read in the `ui/` tree (`ui/packages/core/src/actions/ActionRunner.ts`); a sentence with no `{{ }}` hole keeps the transitional `${…}` reading, so stored copy written before the migration reads as before',
+    covers: [
+      'ui/action.zod.ts:actionObject.description',
+      'ui/action.zod.ts:ActionParamSchema.helpText',
+    ],
+    note: 'Refused at the doors, not at the parse: a `${…}` sentence parsed while the keys were plain strings, so a stored one keeps loading until its next save. ⛔ NOT MEASURED HERE: the runner was read in the `ui/` tree\'s pins, not run against a server, and the `-log` half of `fail-soft-log`.',
+  },
+  {
+    id: 'template-action-outcome-message',
+    summary: 'action per-outcome success toast (Action.outcomeMessages entries) — `{{ result.* }}` and `{{ record.* }}` holes',
+    dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'PARSE and BUILD-TIME GATE: the same as `template-action-success-message`, per entry, at `outcomeMessages.<outcome>`, over `ACTION_SUCCESS_TEMPLATE_ROOTS` (`result`, then `record`). EVALUATOR: console (objectui) `ActionRunner.composeSuccessMessage` picks the entry the answer\'s `outcome` names (its envelope reduced to its text) and fills a `{{ }}` sentence through `fillTemplateHoles` over `result` and `record`, read in the `ui/` tree; a blank entry falls to `successMessage`, and a sentence with no `{{ }}` hole keeps the transitional `${result.*}` reading',
+    covers: ['ui/action.zod.ts:actionObject.outcomeMessages'],
+    note: 'The platform\'s own entries (the invite actions\' `sent` / `link_only`, the role change\'s `permission_set_granted`) were converted from `${result.*}` to `{{ result.* }}` on the same change. ⛔ NOT MEASURED HERE: the runner was read in the `ui/` tree\'s pins, not run against a server, and the `-log` half of `fail-soft-log`.',
   },
   {
     id: 'template-action-error-message',

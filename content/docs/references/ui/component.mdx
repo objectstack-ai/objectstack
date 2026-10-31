@@ -653,6 +653,14 @@ Sort field and direction pair
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the object's `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`) |
 | **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … } \| { name: string; label?: string; description?: string; type?: string; … })[]` | optional | The section's fields, in order — each a field name, the form view's `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members |
 
+### Nested Shape: `ObjectFormProps.submitBehavior[kind='thank-you']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'thank-you'` | ✅ |  |
+| **title** | `string` | optional | Heading of the confirmation panel. May name a field of the submitted record as `{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` field, e.g. a case number): a hook-derived value never reaches an anonymous visitor. |
+| **message** | `string` | optional | Body of the confirmation panel. May name a field of the submitted record as `{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` field, e.g. a case number): a hook-derived value never reaches an anonymous visitor. |
+
 ### Nested Shape: `ObjectFormProps.submitBehavior[kind='redirect']`
 
 | Property | Type | Required | Description |

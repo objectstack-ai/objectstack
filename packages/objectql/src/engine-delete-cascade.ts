@@ -44,6 +44,14 @@
  *   site that calls it (`organizationOwnedRowCounts`).
  * - The bodies of a few lines that would not pay for their host.
  *
+ * ## [#28001] The one relation scan, shared
+ *
+ * Added after the move: `cascadeRelationsInto`, the collection walk's scan of
+ * which relations cascade into an object, lifted out of
+ * `collectCascadeDeleteSet` unedited so `collectCascadeDeleteObjects` (the
+ * object-level closure `ObjectQL.getCascadeDeleteObjects` serves to the
+ * metadata read) reads relations through it too, never through a copy.
+ *
  * ## Module helpers
  *
  * The bodies read four top-level `engine.ts` helpers that staying bodies
@@ -168,6 +176,77 @@ export function recordReferenceCheckElevation(
   );
 }
 
+/**
+ * [#28001] The relations a delete of a record of `target` cascades through:
+ * every field of every object in `objects` whose resolved behaviour, read by
+ * {@link DeleteCascadeHost.cascadeRelationBehavior}, is `cascade`. In
+ * `objects` order, then field order.
+ *
+ * The ONE answer to "which relations cascade into this object". The delete's
+ * collection walk ({@link collectCascadeDeleteSet}) asks it for each object
+ * it reaches, and the object-level closure the metadata read serves
+ * ({@link collectCascadeDeleteObjects}) asks it too, so the list a delete
+ * confirmation names and the rows the delete removes cannot be chosen by two
+ * rules.
+ */
+export function cascadeRelationsInto(
+  this: Pick<DeleteCascadeHost, 'cascadeRelationBehavior'>,
+  target: string,
+  objects: ReadonlyArray<ServiceObject>,
+): Array<{ childName: string; fieldName: string; fdef: any }> {
+  const relations: Array<{ childName: string; fieldName: string; fdef: any }> = [];
+  for (const child of objects) {
+    const childName = (child as any)?.name as string | undefined;
+    const fields = (child as any)?.fields as Record<string, any> | undefined;
+    if (!childName || !fields) continue;
+    for (const [fieldName, fdef] of Object.entries(fields)) {
+      if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'cascade') {
+        relations.push({ childName, fieldName, fdef });
+      }
+    }
+  }
+  return relations;
+}
+
+/**
+ * [#28001] The body of `ObjectQL#getCascadeDeleteObjects`; the method's
+ * docblock there is its contract.
+ *
+ * The object-level closure of {@link collectCascadeDeleteSet}: breadth-first
+ * from `object` through {@link cascadeRelationsInto}, reading no row. Each
+ * object is named once, at the first depth that reaches it, and expanded
+ * once, so a cycle (a self-cascading tree, two objects cascading into each
+ * other) terminates. `object` itself is named only when a cascading relation
+ * leads back to it.
+ */
+export function collectCascadeDeleteObjects(
+  this: Pick<DeleteCascadeHost, 'cascadeRelationBehavior'>,
+  object: string,
+  objects: ReadonlyArray<ServiceObject>,
+): string[] {
+  const named: string[] = [];
+  const listed = new Set<string>();
+  const expanded = new Set<string>([object]);
+  let frontier = [object];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const target of frontier) {
+      for (const { childName } of cascadeRelationsInto.call(this, target, objects)) {
+        if (!listed.has(childName)) {
+          listed.add(childName);
+          named.push(childName);
+        }
+        if (!expanded.has(childName)) {
+          expanded.add(childName);
+          next.push(childName);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return named;
+}
+
 /** The body of `ObjectQL#collectCascadeDeleteSet`; the method's docblock there is its contract. */
 export async function collectCascadeDeleteSet(
   this: Pick<DeleteCascadeHost, 'cascadeRelationBehavior' | 'fileReferenceCheckElevation' | 'probeReferencingRowsOfSet'>,
@@ -191,17 +270,7 @@ export async function collectCascadeDeleteSet(
   const cascadingInto = (target: string) => {
     let relations = cascading.get(target);
     if (!relations) {
-      relations = [];
-      for (const child of objects) {
-        const childName = (child as any)?.name as string | undefined;
-        const fields = (child as any)?.fields as Record<string, any> | undefined;
-        if (!childName || !fields) continue;
-        for (const [fieldName, fdef] of Object.entries(fields)) {
-          if (this.cascadeRelationBehavior(target, child, fieldName, fdef) === 'cascade') {
-            relations.push({ childName, fieldName, fdef });
-          }
-        }
-      }
+      relations = cascadeRelationsInto.call(this, target, objects);
       cascading.set(target, relations);
     }
     return relations;

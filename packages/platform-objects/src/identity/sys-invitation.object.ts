@@ -145,7 +145,7 @@ export const SysInvitation = ObjectSchema.create({
       // carried over from the row. invite-member renews a pending invitation
       // with its stored role whatever role is sent, and another email would
       // invite a different person, so neither is the user's to edit here.
-      description: 'Resend the invitation to ${record.email}? Its expiry date starts over.',
+      description: 'Resend the invitation to {{ record.email }}? Its expiry date starts over.',
       icon: 'send',
       variant: 'secondary',
       locations: ['list_item'],

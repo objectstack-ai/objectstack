@@ -47,7 +47,7 @@
  * rejects it, the server's `.strict()` parse rejects it, and this resolver
  * names it via {@link RESOLVED_ONLY_PARAM_KEYS} rather than reading it.
  */
-import { EXPANDABLE_FIELD_TYPES, toPredicateRecord } from '@object-ui/core';
+import { EXPANDABLE_FIELD_TYPES, actionCopySource, toPredicateRecord } from '@object-ui/core';
 import type { ActionParamDef, ActionParamOption } from '@object-ui/core';
 // The form's widget fold. Imported from the barrel this module is re-exported
 // by — a cycle in the SOURCE graph only, and a call-time one: nothing at this
@@ -176,7 +176,13 @@ export interface RawActionParam {
    */
   options?: RawActionParamOption[];
   placeholder?: string;
-  helpText?: string;
+  /**
+   * The hint under the input. A `template` slot since objectstack#27948: the
+   * bare string, or the parsed `{ dialect: 'template', source }` envelope a
+   * served param carries; read through `actionCopySource`, so the resolved
+   * param's `helpText` is always the text.
+   */
+  helpText?: unknown;
   defaultValue?: unknown;
   /** When true, seed defaultValue from the row record using the field name. */
   defaultFromRow?: boolean;
@@ -609,7 +615,7 @@ export function resolveActionParam(
       required: param.required ?? false,
       options: authoredOptions,
       placeholder: param.placeholder,
-      helpText: param.helpText,
+      helpText: actionCopySource(param.helpText),
       defaultValue: rowDefault ?? param.defaultValue,
       visible: normaliseVisible(param.visible),
       // This output is built key by key, so an authored key that is not
@@ -669,7 +675,7 @@ export function resolveActionParam(
       required: param.required ?? false,
       options: authoredOptions,
       placeholder: param.placeholder,
-      helpText: param.helpText,
+      helpText: actionCopySource(param.helpText),
       defaultValue: rowDefault ?? param.defaultValue,
       visible: normaliseVisible(param.visible),
       carryOver: param.carryOver,
@@ -834,7 +840,7 @@ export function resolveActionParam(
     // form shares (`fieldHelpText`, objectui#12213): the spec's
     // `inlineHelpText`, then `description`, an empty string reading as absent.
     // A served `help` key is not read.
-    helpText: param.helpText ?? fieldHelpText(field),
+    helpText: actionCopySource(param.helpText) ?? fieldHelpText(field),
     defaultValue: rowDefault ?? param.defaultValue ?? field.defaultValue,
     visible: normaliseVisible(param.visible),
     // A declaration of the PARAM, never inherited from the field.

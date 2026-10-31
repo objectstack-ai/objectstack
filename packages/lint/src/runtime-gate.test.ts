@@ -342,6 +342,9 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
       // #25650 — a form open to anonymous intake declaring a file field;
       // the snapshot's `objects` context carries the field types it reads.
       'validatePublicFormFileFields',
+      // #28005 — a thank-you panel naming a field the engine does not
+      // generate; the same `objects` context carries the types it reads.
+      'validateThankYouRecordFields',
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -543,6 +546,7 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
       'validatePublicFormFileFields', // #25650 — a public form's file fields, clean here
+      'validateThankYouRecordFields', // #28005 — a thank-you panel's named fields, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -639,6 +643,7 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
       'validatePublicFormFileFields', // #25650 — a public form's file fields, clean here
+      'validateThankYouRecordFields', // #28005 — a thank-you panel's named fields, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);

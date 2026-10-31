@@ -24,7 +24,7 @@
 import type { ActionContext, ActionResult, RunnableActionType, UIActionSchema } from '@object-ui/types';
 import type { Action as SpecActionInput } from '@objectstack/spec/ui';
 import { ExpressionEvaluator } from '../evaluator/ExpressionEvaluator.js';
-import { actionCopySource, fillTemplateHoles, fillTransitionalCopy, hasTemplateHoles, type ActionCopyTemplate } from './actionCopyTemplate.js';
+import { actionCopySource, actionCopyText, fillTemplateHoles, fillTransitionalCopy, hasTemplateHoles, type ActionCopyTemplate } from './actionCopyTemplate.js';
 import { hasDeclaredPredicate } from '../evaluator/declaredPredicate.js';
 import { globalUndoManager } from './UndoManager.js';
 import { warnOnDeprecatedObjectParams, warnOnUnknownActionKeys } from './actionKeys.js';
@@ -1711,10 +1711,13 @@ export class ActionRunner {
 
           // The dialog's `description` / `helpText` read the dispatch's record
           // as `record`: a row dispatch binds none in the runner's context
-          // (objectui#12967).
+          // (objectui#12967). Both are `template` slots, so a served value may
+          // be the envelope: the handler is handed their TEXT
+          // (`dialogCopyOf`), as it localizes a string or a locale map.
+          const dialogCopy = dialogCopyOf(action, paramDefs);
           const collected = await this.paramCollectionHandler(
-            paramDefs,
-            action,
+            dialogCopy.params,
+            dialogCopy.action,
             this.dialogCopyFiller(action),
             run,
           );
@@ -1958,9 +1961,10 @@ export class ActionRunner {
       ? (outcomeMessages as Record<string, unknown>)[outcome]
       : undefined;
     const resultRoots = { result: payload, record: this.dispatchRecord(action) };
-    if (typeof outcomeCopy === 'string' && outcomeCopy.trim() !== '') {
+    const outcomeText = actionCopySource(outcomeCopy);
+    if (outcomeText !== undefined && outcomeText.trim() !== '') {
       return fillTransitionalCopy(
-        outcomeCopy,
+        outcomeText,
         (source) => fillTemplateHoles(source, resultRoots, this.displayLocale?.(), this.tenantCurrency?.()),
         (source) => substituteScopeTokens(source, { result: payload }, (value) => value),
       );
@@ -3232,6 +3236,33 @@ export function readOnSuccessNavigation(value: unknown): OnSuccessNavigation | n
   const navigate = (value as { navigate?: unknown }).navigate;
   if (typeof navigate !== 'string' || navigate === '') return null;
   return value as OnSuccessNavigation;
+}
+
+/**
+ * The action and param list a param-collection handler is handed, with the
+ * two `template` slots the dialog draws — the action's `description` and each
+ * param's `helpText` (objectstack#27948, ruling A) — reduced from the
+ * envelope to its text (`actionCopyText`). The handler localizes them (a
+ * bundle entry over the literal, `pickLocalized` over a locale map) before
+ * `interpolate` fills their holes, and both take a string: an envelope handed
+ * on would localize to nothing and reach the dialog as an object. A string or
+ * a locale map is handed on as written, and so is everything else on the
+ * action. Copies only what changes: the runner's own `action` is the one the
+ * collected values are merged onto.
+ */
+function dialogCopyOf(
+  action: ActionDef,
+  params: ActionParamDef[],
+): { action: ActionDef; params: ActionParamDef[] } {
+  const description = actionCopyText(action.description);
+  const dialogAction = description === action.description
+    ? action
+    : { ...action, description: description as ActionDef['description'] };
+  const dialogParams = params.map((param) => {
+    const helpText = actionCopyText(param.helpText as unknown);
+    return helpText === param.helpText ? param : { ...param, helpText: helpText as string | undefined };
+  });
+  return { action: dialogAction, params: dialogParams };
 }
 
 /**
