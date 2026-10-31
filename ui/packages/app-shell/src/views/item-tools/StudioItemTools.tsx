@@ -75,7 +75,7 @@ export interface StudioItemToolsProps {
 type LayersState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'loaded'; layered: MetadataLayered<unknown> }
+  | { status: 'loaded'; layered: MetadataLayered<Record<string, unknown>> }
   | { status: 'error'; message: string };
 
 const TOOL_BUTTON = 'relative h-7 w-7 p-0';
@@ -110,7 +110,7 @@ function StudioItemToolsFor({
     if (layers.status === 'loading' || layers.status === 'loaded') return;
     setLayers({ status: 'loading' });
     try {
-      const layered = await client.layered<unknown>(type, name, packageId ? { packageId } : {});
+      const layered = await client.layered<Record<string, unknown>>(type, name, packageId ? { packageId } : {});
       setLayers({ status: 'loaded', layered });
     } catch (err) {
       setLayers({ status: 'error', message: err instanceof Error ? err.message : String(err) });
