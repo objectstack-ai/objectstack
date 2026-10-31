@@ -129,6 +129,7 @@ import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
+import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
@@ -1611,6 +1612,25 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['view'],
     run: (stack) => validatePublicFormFileFields(stack),
+  },
+  // Ruling B on #28005 — a form's `thank-you` panel may name, as
+  // `{{record.field_name}}`, only a field the engine generates on insert
+  // (`RUNTIME_OWNED_FIELD_TYPES`): any other stored value may come from a hook
+  // the anonymous form grant cannot read, and the public submit answer never
+  // carries it. Gating, so all three commands run it.
+  //
+  // Runtime publish gate: a `view` or `page` write's snapshot carries
+  // `objects` as context, which is every input this rule reads. `object` is
+  // not declared, for the reason the file-field rule above gives.
+  {
+    name: 'validateThankYouRecordFields',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-thank-you-record-fields.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['view', 'page'],
+    run: (stack) => validateThankYouRecordFields(stack),
   },
   // ADR-0078 Phase 3 (Tier-A `action-locations`) — an action that declares no
   // `locations` and that no view places by name renders on no surface at all.
