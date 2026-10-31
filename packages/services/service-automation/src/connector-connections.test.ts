@@ -7,6 +7,7 @@
 // declared 503. The values below are obvious dummies.
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysSecret } from '@objectstack/platform-objects';
@@ -69,9 +70,13 @@ function interleaved(ql: ObjectQL, beforeUpdate: () => Promise<void>): Connector
     return {
         find: (o, q) => ql.find(o, q as never),
         insert: (o, d, opts) => ql.insert(o, d, opts as never),
-        delete: (o, opts) => ql.delete(o, opts as never),
+        delete: (o, opts) => {
+            assertEngineDeleteDispatch(opts as never);
+            return ql.delete(o, opts as never);
+        },
         resolveSecretField: (o, id, f) => (ql as any).resolveSecretField(o, id, f),
         async update(o, d, opts) {
+            assertEngineUpdateDispatch(d as never, opts as never);
             if (armed) {
                 armed = false;
                 await beforeUpdate();
@@ -181,8 +186,14 @@ describe('ADR-0143 D5 — a connection store that cannot be read refuses 503, ne
     const unreadable = (): ConnectorCredentialEngine => ({
         find: async () => { throw new Error('dummy driver failure naming row 42'); },
         insert: async () => { throw new Error('not reached'); },
-        update: async () => { throw new Error('not reached'); },
-        delete: async () => { throw new Error('not reached'); },
+        update: async (_o, d, opts) => {
+            assertEngineUpdateDispatch(d as never, opts as never);
+            throw new Error('not reached');
+        },
+        delete: async (_o, opts) => {
+            assertEngineDeleteDispatch(opts as never);
+            throw new Error('not reached');
+        },
     });
 
     it.each([
