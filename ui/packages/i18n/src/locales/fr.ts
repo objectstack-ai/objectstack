@@ -2334,7 +2334,7 @@ const fr = {
       objectNotFoundDescription: "L'objet « {{objectName}} » n'existe pas dans la configuration actuelle.",
       objectNotFoundHint: "Vérifiez les paramètres de navigation de votre application ou sélectionnez un autre objet dans la barre latérale.",
       objectPackageDisabled: "L'objet « {{objectName}} » appartient à un package désactivé et n'est donc pas servi.",
-      filterOrNotSavable: "Ce filtre relie les conditions par OU, ce qu'une vue enregistrée ne peut pas encore stocker. Il s'applique toujours à cette liste — supprimez le groupement OU pour l'enregistrer dans la vue.",
+      filterOrGroupNotEditable: "Ce filtre comporte un groupe OU à côté d'autres conditions, que l'éditeur de filtres ne peut pas afficher, il est donc en lecture seule ici. La vue l'applique toujours.",
       filterNestedNotSavable: "Ce filtre utilise des groupes de conditions imbriqués, qu'une vue enregistrée ne peut pas stocker. Aplatissez-le en une seule liste de conditions pour l'enregistrer dans la vue.",
       allRecords: "Tous les enregistrements",
       new: "Nouveau",

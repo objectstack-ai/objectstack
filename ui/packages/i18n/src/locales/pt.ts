@@ -2333,7 +2333,7 @@ const pt = {
       objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe na configuração atual.",
       objectNotFoundHint: "Verifique as configurações de navegação do seu aplicativo ou selecione um objeto diferente na barra lateral.",
       objectPackageDisabled: "O objeto \"{{objectName}}\" pertence a um pacote desativado e, por isso, não está sendo servido.",
-      filterOrNotSavable: "Este filtro une as condições com OU, algo que uma visão salva ainda não consegue armazenar. Ele continua aplicado a esta lista — remova o agrupamento OU para salvá-lo na visão.",
+      filterOrGroupNotEditable: "Este filtro tem um grupo OU ao lado de outras condições, que o editor de filtros não consegue exibir, por isso aqui é somente leitura. A visão continua aplicando o filtro.",
       filterNestedNotSavable: "Este filtro usa grupos de condições aninhados, que uma visão salva não consegue armazenar. Transforme-o em uma única lista de condições para salvá-lo na visão.",
       allRecords: "Todos os registros",
       new: "Novo",

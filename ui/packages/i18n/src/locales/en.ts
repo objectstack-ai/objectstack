@@ -2800,7 +2800,7 @@ const en = {
       objectNotFoundDescription: 'The object "{{objectName}}" does not exist in the current configuration.',
       objectNotFoundHint: 'Check your app navigation settings or select a different object from the sidebar.',
       objectPackageDisabled: 'The object "{{objectName}}" belongs to a package that is disabled, so it is not being served.',
-      filterOrNotSavable: 'This filter uses OR between conditions, which a saved view cannot store yet. It still applies to this list — remove the OR grouping to save it to the view.',
+      filterOrGroupNotEditable: 'This filter has an OR group beside other conditions, which the filter editor cannot show, so it is read-only here. The view still applies it.',
       filterNestedNotSavable: 'This filter uses nested condition groups, which a saved view cannot store. Flatten it to a single list of conditions to save it to the view.',
       systemViewReadonly: 'System view defined in code — read-only.',
       // ObjectView.tsx references ONE edit-denied key from four call sites
