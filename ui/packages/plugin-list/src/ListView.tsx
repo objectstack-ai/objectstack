@@ -32,7 +32,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -4227,7 +4227,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // re-derives lanes once it does.
         const kanbanCfg = kanbanBlockOf(schema);
         // ⭐ THE BLOCK'S DECLARED KEYS ONLY (objectui#6152 round 14). The spec's
-        // kanban block is `groupByField` / `columns` / `titleField` /
+        // kanban block is `groupByField` / `columns` / `lanes` / `titleField` /
         // `summarizeField`, each read by name below. This branch used to read
         // the pre-#2231 `groupField` / `cardFields` aliases as well and to spread
         // the REST of the block onto the node after its own keys, so an undeclared
@@ -4238,9 +4238,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         //
         // `columns` is the spec's list of fields shown on each card.
         // ObjectKanban's own `columns` prop is its LANES, so it goes out as
-        // `cardFields` (mirrors plugin-view's adapter).
-        const { columns: kanbanCardColumns, titleField, summarizeField } = kanbanCfg as Record<string, any>;
+        // `cardFields` (mirrors plugin-view's adapter), and the block's `lanes`
+        // goes out as that `columns`.
+        const { columns: kanbanCardColumns, titleField, summarizeField, lanes } = kanbanCfg as Record<string, any>;
         const laneField = kanbanLaneFieldOf(schema, objectDef);
+        // objectstack#28211 — the block's `lanes`, the lanes the board draws
+        // in the author's order, go out as the node's `columns` (its lanes).
+        // A record whose value is not listed lands in `Uncategorized`.
+        const declaredLanes = kanbanDeclaredLanes(
+          lanes,
+          laneField ? objectDef?.fields?.[laneField]?.options : undefined,
+        );
         // objectui#12619 — the card fields: the block's own `columns` when
         // the author named some (the spec's card-field key, every one of
         // them), else the view's first columns past the title, the lane and
@@ -4274,6 +4282,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           type: 'object-kanban',
           ...baseProps,
           groupBy: laneField,
+          ...(declaredLanes ? { columns: declaredLanes } : {}),
           ...(titleField ? { titleField } : {}),
           cardFields,
           ...(groupingConfig ? { grouping: groupingConfig } : {}),

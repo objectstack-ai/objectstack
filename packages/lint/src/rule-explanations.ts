@@ -4706,7 +4706,12 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       'variable in the open tier) and never stored in metadata (ADR-0097 §3), called from a ' +
       '`connector_action` node. The fix line routes by shape, to a variant the connector auth schema ' +
       'really has: a header credential to `bearer` or a header `api-key`, a query-string key to ' +
-      '`api-key` with `paramName`. A credential in `connectorConfig.input` is dropped instead, ' +
+      '`api-key` with `paramName`. The schema\'s other kinds also take their secret only as a ' +
+      '`credentialRef`, but none is a home a literal moves into by shape: `oauth2` (grant ' +
+      '`authorization_code` or `client_credentials`) and `app-credential` (vendor `feishu`, ' +
+      '`dingtalk` or `wecom`) carry a grant whose token the server obtains per dispatch, and until it ' +
+      'runs that grant such an instance is held degraded and calls no upstream; `signed` signs each ' +
+      'request with its key. A credential in `connectorConfig.input` is dropped instead, ' +
       'because the connector authenticates through its own `auth`. No variant carries a secret in a ' +
       'url path, so a url path is not judged and no fix line promises one.',
     // [#22161] What the fix line stopped saying. The variants are held to the

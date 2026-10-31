@@ -2826,6 +2826,7 @@ const ko = {
         submitting: "업데이트 중…",
         mismatch: "새 비밀번호가 일치하지 않습니다.",
         sameAsTemporary: "임시 비밀번호와 다른 새 비밀번호를 설정하세요.",
+        wrongPassword: "입력한 비밀번호가 올바르지 않습니다. 확인 후 다시 시도하세요.",
         failed: "비밀번호를 변경할 수 없습니다.",
       },
       mfa: {
