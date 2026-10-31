@@ -1516,7 +1516,7 @@
       "title": "Enrollment is inert until one correct TOTP verifies on the session lane — and the run records what sys_two_factor.verified actually carries in between",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user mid-enrollment (session lane)", "the same user at the sign-in challenge (cookie lane)"],
@@ -1532,7 +1532,7 @@
         ]
       },
       "steps": [
-        "arm, boot, run the assert-armed guard (features.twoFactor true, /two-factor/enable non-404) — nothing below is scored without it",
+        "arm, boot, run the assert-armed guard (GET /api/v1/auth/config data.features.twoFactor true — the body is {success, data} — and /two-factor/enable non-404) — nothing below is scored without it",
         "sign in, POST /two-factor/enable { password }, decode the secret from the totpURI (the copied helper)",
         "IMMEDIATELY read the sys_two_factor row via the system-context ObjectQL read and record the literal value of `verified` — this is the latent-default probe (see the clause), captured before anything else touches the row",
         "before any verification, drive the password stage: POST /auth/sign-in/email with the password and record the answer. An unverified enrolment does not interpose a challenge — the sign-in answers a session with no twoFactorRedirect and no two-factor cookie — so there is no cookie lane on which the new factor could be presented: better-auth's TOTP_NOT_ENABLED branch (the sign-in path's refusal of an unverified enrolment, the lockout pin's own comment, two-factor-lockout.dogfood.test.ts) is unreachable over HTTP and is cited from that pin, not driven. Record whether twoFactorRedirect appeared",
@@ -1545,7 +1545,7 @@
         {
           "clause": "ASSERT-ARMED GUARD — identical to identity-auth.two-factor-enrollment-reveal clause 0 and binding for the same reason: unarmed boots 404 the family and would green-tick every clause below",
           "oracle": "api",
-          "verify": "features.twoFactor true in /auth/config + non-404 probe; on failure everything below is blocked(environment)",
+          "verify": "data.features.twoFactor true in /auth/config (the body is {success, data}) + non-404 probe; on failure everything below is blocked(environment)",
           "evidence": "the config read + probe status"
         },
         {
@@ -1600,6 +1600,12 @@
           "date": "2026-10-29",
           "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. acceptance[2].verify quoted the retired 'detail withheld pending maintainer' row and now names the new one. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
           "ref": "#27642"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "steps[0] and acceptance[0].verify read the assert-armed guard as features.twoFactor; GET /api/v1/auth/config answers {success: true, data: getPublicConfig()} (packages/plugins/plugin-auth/src/auth-plugin.ts), so the flag sits at data.features.twoFactor. Both now say so, in the words two-factor-enrollment-reveal r5 uses. source[] lines naming the code symbol features.twoFactor are unchanged. No clause changed. Folded in from the S3 report (anchor comment 6539833149, out_of_scope_findings[1]) on the seat's acceptance of #28349, as a same-file, same-fact extension: no run record named this item, so the row cites the wave anchor. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3",
+          "ref": "#27377"
         }
       ]
     },
@@ -1608,7 +1614,7 @@
       "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — and the navigable regenerate surface reveals the new set in a one-shot dialog",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
@@ -1637,7 +1643,7 @@
       ],
       "acceptance": [
         {
-          "clause": "ASSERT-ARMED GUARD + verified-enrollment precondition: features.twoFactor advertised, the two-factor family mounted, and the enrollment VERIFIED (an unverified enrollment never reaches a challenge, so every spend clause below would be unreachable, not passed)",
+          "clause": "ASSERT-ARMED GUARD + verified-enrollment precondition: /api/v1/auth/config advertises data.features.twoFactor true (the body is {success, data}), the two-factor family mounted, and the enrollment VERIFIED (an unverified enrollment never reaches a challenge, so every spend clause below would be unreachable, not passed)",
           "oracle": "api",
           "verify": "the /auth/config read + the sibling item's activation walk completing on this boot",
           "evidence": "the config read + the activation trace reference"
@@ -1711,6 +1717,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25817, identity-auth.two-factor-backup-codes A4; wave anchor #25807; card #25843). A4's at-rest check needs an out-of-band DB read, because REST never returns sys_two_factor.backup_codes (declared internal: true). fixtures.requires[2], steps[7] and acceptance[4].verify now say to read the row from the DB file, not through a system-context read. The same three places quoted the column's old 'JSON-serialized' description; sys-two-factor.object.ts now declares it encrypted at rest, a single opaque ciphertext, and the text quotes that. No clause's assertion changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "acceptance[0].clause read the assert-armed guard as features.twoFactor advertised; GET /api/v1/auth/config answers {success: true, data: getPublicConfig()} (packages/plugins/plugin-auth/src/auth-plugin.ts), so the flag sits at data.features.twoFactor. The clause now says so, in the words two-factor-enrollment-reveal r5 uses; what it requires is unchanged. source[] lines naming the code symbol features.twoFactor are unchanged. Folded in from the S3 report (anchor comment 6539833149, out_of_scope_findings[1]) on the seat's acceptance of #28349, as a same-file, same-fact extension: no run record named this item, so the row cites the wave anchor. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3",
+          "ref": "#27377"
         }
       ]
     },
