@@ -56,6 +56,9 @@ const STACKS: Record<string, AnyRec> = {
   'a list only a body `picklistExtensions` entry extends': composed({ picklists: [unused] }, {
     picklistExtensions: [{ extend: 'parity_unused', options: [{ label: 'Closed', value: 'closed' }] }],
   }),
+  'a list only a top-level `plugins[]` entry\'s object names': composed({
+    picklists: [unused], plugins: [{ name: 'parity_plugin', objects: [noteObj({ u: { type: 'select', label: 'U', picklist: 'parity_unused' } })] }],
+  }),
   'CONTROL: a list a residual object\'s field names': composed({
     picklists: [unused], objects: [noteObj({ u: { type: 'select', label: 'U', picklist: 'parity_unused' } })],
   }),
