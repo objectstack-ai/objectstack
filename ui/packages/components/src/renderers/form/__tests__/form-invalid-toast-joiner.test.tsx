@@ -34,7 +34,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider } from '@object-ui/i18n';
 import { toast } from '../../../ui/sonner';
