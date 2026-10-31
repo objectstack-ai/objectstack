@@ -258,7 +258,9 @@ const policy: DatasourceConnectPolicy = {
 Never inline a password. Put a reference in `external.credentialsRef` and store the
 secret in the secret store (the same `SecretBinder` / `ICryptoProvider` the
 runtime-admin "Add Datasource" wizard uses). The credential is resolved to
-cleartext **at connect, before the driver is built**.
+cleartext **at connect, before the driver is built**. A datasource defined in code
+reads an environment variable instead; see
+[A datasource defined in code](#a-datasource-defined-in-code-the-environment-variable).
 
 The shipped binder encrypts the cleartext into a `sys_secret` row and mints an
 **opaque** handle — `sys_secret:<id>` — as the `credentialsRef`; that is the only
@@ -273,6 +275,77 @@ unresolvable credential is a connect failure like any other, so it fails the boo
 for the datasources listed under [When auto-connect fails](#when-auto-connect-fails)
 and degrades with a warning otherwise. (Credential-less drivers such as SQLite
 simply have no `credentialsRef`.)
+
+### A datasource defined in code: the environment variable
+
+The handle above is minted by the Setup → Datasources form, which cannot edit a
+datasource defined in code (`defineDatasource`, or a `*.datasource.ts` file in a
+package). A code author leaves the credential out of the declaration entirely,
+and the runtime reads it **at connect** from an environment variable whose name
+the platform derives from the datasource name:
+
+| Datasource name | Variable read at connect |
+| :--- | :--- |
+| `warehouse` | `OS_DATASOURCE_WAREHOUSE_PASSWORD` |
+| `crm_replica` | `OS_DATASOURCE_CRM_REPLICA_PASSWORD` |
+
+The name is upper-cased and every character outside `A-Z0-9` becomes `_`. The
+value is handed to the driver as the connection's secret: the password for
+`postgres`, `mysql` and `mongodb`, the `authToken` for `turso`. It is never
+logged, stored or answered.
+
+```typescript
+import { defineDatasource } from '@objectstack/spec/data';
+
+export const Warehouse = defineDatasource({
+  name: 'warehouse',
+  driver: 'postgres',
+  // No password here: it is read from OS_DATASOURCE_WAREHOUSE_PASSWORD at connect.
+  config: { host: 'db.internal', database: 'warehouse', username: 'svc_app' },
+});
+```
+
+```bash
+OS_DATASOURCE_WAREHOUSE_PASSWORD='…' os start
+```
+
+What the slot does and does not do:
+
+- **It is a host switch, `OS_DATASOURCE_ENV_CREDENTIALS`, which takes `on` or
+  `off`.** `os serve`, `os start` and `os dev` turn it on unless you set it
+  yourself. Every other composition (a host that builds its own kernel, a cloud
+  runtime) leaves it off, so the variable is never read there. Any other value
+  is refused at boot.
+- **It only serves datasources the host registers from code.** That means the
+  ones in the booted artifact and in packages installed locally. A datasource
+  created through Setup or the API under the same name never reads the
+  variable. Nor does the `default` datasource, which keeps `OS_DATABASE_URL`.
+- **A declared credential wins.** With `external.credentialsRef` or
+  `external.connector` declared, the variable is not consulted. If that
+  reference fails to resolve, the datasource stays unconnected (fail-closed, as
+  above) and does not fall back to the environment.
+- **An unset variable leaves the connect as it was.** The driver connects
+  without a secret; if the database refuses, the datasource is unconnected and
+  its reason names the variable to set.
+- **Two datasources that derive one variable are refused.** Valid datasource
+  names are lower-case, so this cannot happen between two declarations that
+  pass the schema; the guard covers a host that hands `connect()` other names.
+- **A plugin driver that resolves its credential per request** (the OData
+  driver resolves `credentialsRef` that way) does not read this slot: it feeds
+  only the secret a driver receives when its connection is built.
+
+<Callout type="warn">
+**Who can read the variable.** The derived name is the only key, so any code
+datasource the host registers under that name reads it. Under `os serve` that
+includes every package installed into the environment: **a package can declare
+a datasource of any free name and so read the matching
+`OS_DATASOURCE_<NAME>_PASSWORD`**. Install only packages you trust with the
+credentials in that process's environment. On a host where several tenants'
+artifacts share one process, a process-wide variable would be readable by every
+tenant artifact that declares the name. That is why the switch is off outside the
+CLI host; turn it on there only when one operator owns every artifact the process
+loads.
+</Callout>
 
 ### Borrowing a connector instance's credential
 

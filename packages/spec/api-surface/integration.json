@@ -42,6 +42,8 @@
     "ConnectorInstanceSignedAliyunAcs3AuthSchema (const)",
     "ConnectorInstanceSignedAuth (type)",
     "ConnectorInstanceSignedAuthSchema (const)",
+    "ConnectorInstanceSignedTencentCloudTc3Auth (type)",
+    "ConnectorInstanceSignedTencentCloudTc3AuthSchema (const)",
     "ConnectorMaterialization (interface)",
     "ConnectorMaterializationHandler (type)",
     "ConnectorOAuth2Grant (type)",
