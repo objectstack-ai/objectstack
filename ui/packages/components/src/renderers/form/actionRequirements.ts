@@ -103,14 +103,18 @@ export function usePatchingUpdateActions(
   objectName: string | undefined,
   enabled: boolean,
 ): PatchingUpdateAction[] {
-  const [actions, setActions] = React.useState<PatchingUpdateAction[]>(NONE)
+  // The answer is kept beside the source it was read from, so a change of
+  // data source or object shows none until its own read lands, and nothing is
+  // set synchronously inside the effect.
+  const [answer, setAnswer] = React.useState<{
+    dataSource: DataSource | null | undefined
+    objectName: string | undefined
+    actions: PatchingUpdateAction[]
+  }>({ dataSource: undefined, objectName: undefined, actions: NONE })
   const canAsk = enabled && !!objectName && typeof dataSource?.getObjectSchema === "function"
 
   React.useEffect(() => {
-    if (!canAsk || !dataSource || !objectName) {
-      setActions(NONE)
-      return
-    }
+    if (!canAsk || !dataSource || !objectName) return
     let cancelled = false
     Promise.resolve()
       .then(() => dataSource.getObjectSchema(objectName))
@@ -119,12 +123,12 @@ export function usePatchingUpdateActions(
         () => NONE,
       )
       .then((found) => {
-        if (!cancelled) setActions(found.length > 0 ? found : NONE)
+        if (!cancelled) setAnswer({ dataSource, objectName, actions: found.length > 0 ? found : NONE })
       })
     return () => {
       cancelled = true
     }
   }, [canAsk, dataSource, objectName])
 
-  return actions
+  return canAsk && answer.dataSource === dataSource && answer.objectName === objectName ? answer.actions : NONE
 }
