@@ -2,7 +2,7 @@
 '@objectstack/rest': patch
 '@objectstack/plugin-hono-server': patch
 '@objectstack/cloud-connection': patch
-'@objectstack/types': patch
+'@objectstack/types': minor
 ---
 
 feat(rest,plugin-hono-server,cloud-connection): metadata lists, the uncached item reads, `runtime/config` and `auth/me/localization` answer an `ETag` and `304`; every timed response carries `db`, `meta` and `total`
