@@ -79,8 +79,10 @@ import { InlineLocaleMapSchema } from './i18n.zod';
  * `description`, `helpText` and `outcomeMessages` took the same road one step
  * later (#27948): the runner filled `${…}` in them until they were typed, and
  * still fills it in a sentence with no `{{ }}` hole, so copy stored before the
- * migration (`os migrate meta`) keeps reading. The doors refuse a `${…}`
- * token there as in the other keys, so new copy is written with `{{ }}`.
+ * rewrite keeps reading until its next save. The rewrite is by hand: the
+ * semantic migration entry `action-dialog-outcome-copy-template-holes` names it
+ * and registers no conversion. The doors refuse a `${…}` token there as in the
+ * other keys, so new copy is written with `{{ }}`.
  */
 
 /** The root a `confirmText` / `successMessage` hole names for the record the action runs against. */

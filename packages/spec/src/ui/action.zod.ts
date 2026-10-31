@@ -1504,8 +1504,11 @@ const actionObject = () => strictObject({
    * `successMessage` (#27948, ruling A): its `{{ }}` holes read `result` —
    * for `type: 'api'` the `target` call's response body, for
    * `type: 'script'` the handler's return value — and `record`. One dialect:
-   * a `${…}` token is refused at the doors, and `os migrate meta` rewrites
-   * stored copy to `{{ }}`.
+   * a `${…}` token is refused at the doors. Stored copy is rewritten to
+   * `{{ }}` by hand: the semantic migration entry
+   * `action-dialog-outcome-copy-template-holes` (`os migrate meta` lists it)
+   * names the edit and registers no conversion, since a `${…}` token can hold
+   * an expression with no mechanical `{{ }}` spelling.
    *
    * **Where it is refused** (`refuseInertOutcomeMessages`, and the
    * declarative-update table): on a type with no server response to report
