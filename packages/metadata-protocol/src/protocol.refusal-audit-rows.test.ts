@@ -172,6 +172,7 @@ describe('[#28355] one denied row per enforced code, at the door that refused', 
         expect(err.code).toBe('NOT_CREATABLE');
         expect(err.status).toBe(403);
         expect(denied(audit)).toEqual([expect.objectContaining({
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             type: 'field', name: DOTTED, operation: 'save', code: 'not_creatable',
             actor: 'usr_author', source: 'protocol.saveMetaItem', note: err.message,
         })]);
@@ -185,6 +186,7 @@ describe('[#28355] one denied row per enforced code, at the door that refused', 
         expect(err.code).toBe('NOT_OVERRIDABLE');
         expect(err.status).toBe(403);
         expect(denied(audit)).toEqual([expect.objectContaining({
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             type: 'field', name: DOTTED, operation: 'save', code: 'not_overridable',
             // No caller actor: the writer's own `system`, as for every other row.
             actor: 'system',
@@ -201,6 +203,7 @@ describe('[#28355] one denied row per enforced code, at the door that refused', 
         expect(err.code).toBe('DESTRUCTIVE_CHANGE');
         expect(err.status).toBe(409);
         expect(denied(audit)).toEqual([expect.objectContaining({
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             type: 'object', name: PARENT, operation: 'save', code: 'destructive_change',
         })]);
     });
@@ -217,6 +220,7 @@ describe('[#28355] one denied row per enforced code, at the door that refused', 
         // The spec refusal of the field type, not some other gate's.
         expect(JSON.stringify(err.issues)).toContain('fields.a.type');
         expect(denied(audit)).toEqual([expect.objectContaining({
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             type: 'object', name: PARENT, operation: 'save', code: 'invalid_metadata',
         })]);
     });
@@ -242,6 +246,7 @@ describe('[#28355] every single-item door stamps its own operation', () => {
         const err = await refusalOf(() => protocol.publishMetaItem({ type: 'object', name: PARENT, ...ORG }));
         expect(err.code).toBe('NOT_OVERRIDABLE');
         expect(denied(audit)).toEqual([expect.objectContaining({
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             operation: 'publish', code: 'not_overridable', source: 'protocol.publishMetaItem',
         })]);
     });
@@ -251,6 +256,7 @@ describe('[#28355] every single-item door stamps its own operation', () => {
         const err = await refusalOf(() => protocol.rollbackMetaItem({ type: 'object', name: PARENT, toVersion: 1, ...ORG }));
         expect(err.code).toBe('NOT_OVERRIDABLE');
         expect(denied(audit)).toEqual([expect.objectContaining({
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             operation: 'rollback', code: 'not_overridable', source: 'protocol.rollbackMetaItem',
         })]);
     });
@@ -260,6 +266,7 @@ describe('[#28355] every single-item door stamps its own operation', () => {
         const err = await refusalOf(() => protocol.deleteMetaItem({ type: 'object', name: PARENT, ...ORG }));
         expect(err.code).toBe('NOT_OVERRIDABLE');
         expect(denied(audit)).toEqual([expect.objectContaining({
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             operation: 'delete', code: 'not_overridable', source: 'protocol.deleteMetaItem',
         })]);
     });
@@ -295,6 +302,7 @@ describe('[#28355] what still leaves no row', () => {
         const outer = withRefusalAudit(record, { ...door, operation: 'publish' }, () =>
             withRefusalAudit(record, door, async () => { throw refusal; }));
         await expect(outer).rejects.toBe(refusal);
+        // adr0112-ok: D6b — persisted audit column, its own vocabulary
         expect(rows).toEqual([expect.objectContaining({ operation: 'delete', code: 'not_overridable' })]);
     });
 });
