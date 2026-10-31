@@ -159,6 +159,28 @@ describe('form renderer — fields an update action would require (objectstack#2
     expect(noteOnIssuedOn()).toBeNull();
   });
 
+  it('makes no read when no field declares a `requiredWhen`', async () => {
+    const getObjectSchema = vi.fn(async () => ({ name: 'showcase_invoice', actions: [SUBMIT_SIGNOFF] }));
+    const Form = ComponentRegistry.get('form')!;
+    render(
+      <SchemaRendererContext.Provider value={{ dataSource: { getObjectSchema } } as any}>
+        <Form
+          schema={{
+            type: 'form',
+            objectName: 'showcase_invoice',
+            defaultValues: DRAFT,
+            previousValues: DRAFT,
+            fields: FIELDS.map(({ requiredWhen: _rule, ...rest }: any) => rest),
+          }}
+        />
+      </SchemaRendererContext.Provider>,
+    );
+    // Let any effect settle before reading the absence.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getObjectSchema).not.toHaveBeenCalled();
+    expect(noteOnIssuedOn()).toBeNull();
+  });
+
   it('skips an action whose `visible` does not hold over the record', async () => {
     const { getObjectSchema } = renderInvoiceForm({
       actions: [{ ...SUBMIT_SIGNOFF, visible: { dialect: 'cel', source: "record.status == 'approved'" } }],

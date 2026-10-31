@@ -2367,7 +2367,19 @@ ComponentRegistry.register('form',
     // (a rule that cannot be evaluated hides the button's note, never invents
     // one), and quietly: the action's own button reports its fault. The note
     // is a heads-up only — nothing here blocks a save.
-    const patchingActions = usePatchingUpdateActions(contextDataSource, schema.objectName, !isCreateForm);
+    //
+    // Asked only when some field declares a `requiredWhen`: with none, no field
+    // can come out required under any patch, so the form makes no read beyond
+    // the ones its host already made.
+    const declaresRequiredWhen = React.useMemo(
+      () => fields.some((f) => (f as { requiredWhen?: unknown } | null | undefined)?.requiredWhen != null),
+      [fields],
+    );
+    const patchingActions = usePatchingUpdateActions(
+      contextDataSource,
+      schema.objectName,
+      !isCreateForm && declaresRequiredWhen,
+    );
     const mayInvokeAction = useCapabilityGate();
     const actionOutcomes = React.useMemo(() => {
       if (isCreateForm || patchingActions.length === 0) return [] as Array<{ label: string; record: Record<string, unknown> }>;
