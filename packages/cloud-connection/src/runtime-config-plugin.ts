@@ -307,10 +307,9 @@ import { readConsoleMapStyleUrl } from './console-map-style.js';
  */
 function sendRevalidated(c: any, body: unknown): Response {
     const etag = representationEtag(body);
-    c.header('Cache-Control', REVALIDATE_PRIVATE_CACHE_CONTROL);
-    c.header('ETag', etag);
-    if (ifNoneMatchHits(c.req.header('if-none-match'), etag)) return c.body(null, 304);
-    return c.json(body);
+    const headers = { 'Cache-Control': REVALIDATE_PRIVATE_CACHE_CONTROL, ETag: etag };
+    if (ifNoneMatchHits(c.req.header('if-none-match'), etag)) return c.body(null, 304, headers);
+    return c.json(body, 200, headers);
 }
 
 /**
