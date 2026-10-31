@@ -154,5 +154,5 @@ Each `operationId` is a named action in the flow palette and to agents;
   (`feishu` / `dingtalk` / `wecom`), but no server runs the grant yet: the
   instance is held degraded, calling no upstream. Do not park a short-lived
   token behind a `bearer` ref. Blocked on the outbound-OAuth card.
-- **WeChat Pay** (RSA-signed APIv3): no `signed` scheme signs it yet; Alipay is
-  `alipay-v3` (requests signed, responses verified against `vendorPublicKeyRef`).
+- **WeChat Pay**: no `signed` scheme yet (Alipay's is `alipay-v3`, which also
+  verifies responses).
