@@ -5,7 +5,8 @@
 
 fix(cloud-connection): an install-local install judges who holds a datasource name with one judge that reads the engine too and fails closed, and a restart's rehydrate no longer takes over a name another holder owns
 
-Clause-②: no
+Clause-②: yes (widening)
+The widening: `@objectstack/runtime` now exports `datasourceNameHolder` and the type `DatasourceNameHolding`, and `POST /api/v1/marketplace/install-local` gains a `503 SERVICE_UNAVAILABLE` answer.
 Metadata-protocol: none
 
 Three edges `POST /api/v1/marketplace/install-local`'s datasource-name check left open, each measured on `main`:
