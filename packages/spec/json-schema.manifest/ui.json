@@ -163,6 +163,8 @@
     "ui/UserFilters",
     "ui/View",
     "ui/ViewData",
+    "ui/ViewFilterElement",
+    "ui/ViewFilterOrGroup",
     "ui/ViewFilterRule",
     "ui/ViewItem",
     "ui/ViewItemName",

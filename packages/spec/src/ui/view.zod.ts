@@ -498,6 +498,45 @@ const VIEW_CONSOLE_ROW_ID_GUIDANCE =
   + 'per row for React) — it is not part of the authoring contract, and the write path '
   + 'removes it before validating. Delete it from authored metadata.';
 
+/**
+ * [#28020] The one key of an any-of group element of a view filter list
+ * ({@link ViewFilterOrGroupSchema}). Its value is an array of builder rows, so
+ * the wire door strips row decorations inside it too.
+ */
+const VIEW_FILTER_OR_GROUP_KEY = 'or' as const;
+
+/** [#28020] What a rule INSIDE an any-of group is told when it carries `or` itself. */
+const VIEW_FILTER_NESTED_GROUP_GUIDANCE =
+  'an any-of group cannot hold another group — its members are flat rules `{ field, operator, value }`. '
+  + 'Move the inner group\'s rules into this group (any of them may match), or write the inner group as its '
+  + 'own element of the filter list, where it ANDs with the others.';
+
+/**
+ * [#28020] The spellings an author reaching for "OR" writes on a rule — the
+ * console builder's `{ logic, conditions }`, the Query-DSL `$or`, and the
+ * natural near-misses `any` / `anyOf` — each answered with the one any-of
+ * shape this list has. `or` itself is not here: it is the group's real key
+ * ({@link VIEW_FILTER_OR_GROUP_KEY}), so an element carrying it is a group, and
+ * a rule only meets it inside a group, as a nested group.
+ */
+const VIEW_FILTER_OR_SPELLING: string =
+  'a view filter writes "any of" as `{ or: [rule, ...] }`, its own element of the filter list, whose '
+  + 'flat rules `{ field, operator, value }` match when ANY of them does; the list still ANDs its elements. '
+  + 'There is no `$or`, `any`, `anyOf`, `logic` or `conditions` key on a filter rule.';
+const VIEW_FILTER_OR_SPELLING_GUIDANCE: Readonly<Record<string, string>> = {
+  $or: VIEW_FILTER_OR_SPELLING,
+  any: VIEW_FILTER_OR_SPELLING,
+  anyOf: VIEW_FILTER_OR_SPELLING,
+  logic: VIEW_FILTER_OR_SPELLING,
+  conditions: VIEW_FILTER_OR_SPELLING,
+};
+
+/** [#28020] What an any-of group is told when it carries a rule's own key. */
+const VIEW_FILTER_GROUP_STRAY_RULE_KEY_GUIDANCE =
+  'an any-of group holds only `or`, the array of its rules — a rule key beside it belongs to a rule. Put '
+  + 'the rule inside `or` (any of the group\'s rules may match), or write it as its own element of the '
+  + 'filter list, where it ANDs with the group.';
+
 function stripRowDecorations(value: unknown, isRow: boolean, depth: number): unknown {
   if (depth > VIEW_DECORATION_MAX_DEPTH || !value || typeof value !== 'object') return value;
 
@@ -524,7 +563,12 @@ function stripRowDecorations(value: unknown, isRow: boolean, depth: number): unk
   }
 
   for (const [k, v] of Object.entries(next ?? dict)) {
-    const out = stripRowDecorations(v, VIEW_DECORATED_ROW_CARRIERS.includes(k), depth + 1);
+    // [#28020] The rules of an any-of group are builder rows of the same
+    // filter, one level down: `or` carries rows only on a row (a group
+    // element of `filter[]`), so a key spelled `or` anywhere else in a view
+    // body is left alone.
+    const carriesRows = VIEW_DECORATED_ROW_CARRIERS.includes(k) || (isRow && k === VIEW_FILTER_OR_GROUP_KEY);
+    const out = stripRowDecorations(v, carriesRows, depth + 1);
     if (out !== v) {
       next ??= { ...dict };
       next[k] = out;
@@ -1005,6 +1049,12 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
   guidance: {
     id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
+    // [#28020] A rule is reached two ways: as a plain element of a filter list,
+    // and as a member of an any-of group. An element carrying `or` is routed
+    // to the group before it gets here, so this key only ever arrives on a
+    // rule INSIDE a group — a nested group, which the one-level shape refuses.
+    [VIEW_FILTER_OR_GROUP_KEY]: VIEW_FILTER_NESTED_GROUP_GUIDANCE,
+    ...VIEW_FILTER_OR_SPELLING_GUIDANCE,
   },
 }, {
   /** Field name to filter on */
@@ -1049,6 +1099,210 @@ export const ViewFilterRuleSchema = lazySchema(() => strictObject({
 export type ViewFilterRule = z.input<typeof ViewFilterRuleSchema>;
 /** Post-parse shape of {@link ViewFilterRule} — defaults applied, transforms run (ADR-0122). */
 export type ViewFilterRuleParsed = z.infer<typeof ViewFilterRuleSchema>;
+
+/**
+ * [#28020] True when `value` is an any-of group element of a view filter list
+ * ({@link ViewFilterOrGroupSchema}): a plain object carrying its own
+ * `or` key.
+ *
+ * It answers WHICH element kind a value is, not whether it is a valid one: the
+ * schema routes every element this predicate claims to the group shape, which
+ * then judges it (a non-array `or`, an empty one, a stray key). Exported for
+ * the readers that walk a stored filter list and must step INTO a group rather
+ * than misread it as a rule or a field-keyed condition — the lint filter walks
+ * and the view reference diagnostics. ⛔ Never restate the test at a reader:
+ * this predicate is the one place the element kinds are told apart.
+ */
+export function isViewFilterOrGroup(value: unknown): value is { [VIEW_FILTER_OR_GROUP_KEY]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, VIEW_FILTER_OR_GROUP_KEY);
+}
+
+/**
+ * [#28020] View Filter OR Group Schema — one element of a view filter list
+ * that holds flat rules of which ANY may match.
+ *
+ * ## The stored shape, and why it is this one
+ *
+ * A view filter list (`ListView.filter` and every other carrier of
+ * {@link ViewFilterElementSchema}) is an AND list. Until this element, that was
+ * all it could say: an "open, or completed in the last 7 days" view had no
+ * spelling, although the console's filter builder already offers an OR toggle
+ * (it refuses to save one, `viewFilterFold.ts`'s `or_logic`). This element is
+ * the one way to say "any of": it sits in the list beside the plain rules, the
+ * list still ANDs its elements, and the group matches a record when at least
+ * one of its rules does.
+ *
+ * - **A member of the rule list, not a second filter vocabulary.**
+ *   `FilterConditionSchema`'s `$or` is the Query-DSL dialect, and the seven
+ *   `filter` doors of the objectui#6206 family converged away from it onto the
+ *   rule array (`filter-rule-array.ts`); admitting it here would put two
+ *   shapes in storage and make every reader accept both (PD#12). The group's
+ *   members ARE {@link ViewFilterRuleSchema}, so the operator vocabulary, the
+ *   alias fold, the value-shape coupling and the `icontains` comparand check
+ *   apply inside a group exactly as at the top level — by construction, not by
+ *   a second copy.
+ * - **One level.** A group holds flat rules only; a group inside a group is
+ *   refused by name. The console builder edits one logic over flat rows and has
+ *   no control that creates a sub-group (`FilterBuilderRowGroup`), so nothing
+ *   it can produce needs more.
+ * - **`or`, not the builder's `{ logic, conditions }`.** The builder's group
+ *   is its whole editing state, and its `logic: 'and'` arm would be a second
+ *   spelling of the AND the list already is, leaving `logic` a key with one
+ *   legal value. One key named for its meaning is the smaller contract. The
+ *   key is `or` by the maintainer's ruling on #28020: it matches the and/or
+ *   wording of Notion, monday.com and Dataverse filters, and a nested level
+ *   added later would pair with `and`. The builder's spellings, `$or`, `any`
+ *   and `anyOf` are answered with this shape when written on a rule
+ *   ({@link VIEW_FILTER_OR_SPELLING_GUIDANCE}).
+ * - **Not empty.** An any-of over zero rules matches no record — a view that is
+ *   permanently empty — so `{ or: [] }` is refused rather than stored.
+ *
+ * Every filter stored before this element still parses, byte for byte: a plain
+ * rule never carries `or`, so it is routed to {@link ViewFilterRuleSchema}
+ * exactly as before.
+ *
+ * ## [PLANNED — not yet rendered]
+ *
+ * No reader applies the group yet. The query a list view runs is built by the
+ * console (`ui/packages/core/src/utils/filter-converter.ts#toFilterNode`), which
+ * lowers flat rules only and passes a group through untouched, so the server
+ * refuses the query as a malformed filter (400 `INVALID_FILTER`) and the list
+ * shows that error and no rows. It fails closed: a stored group never widens
+ * what a view, a related list or a picker shows. The describe below says so,
+ * so no author is told it works.
+ * The console half is #28370; the marker leaves when it lands.
+ *
+ * @example
+ * ```ts
+ * // status is "open", OR completed within the last 7 days — and owned by me
+ * filter: [
+ *   { or: [
+ *     { field: 'status', operator: 'equals', value: 'open' },
+ *     { field: 'completed_at', operator: 'after', value: '{7_days_ago}' },
+ *   ] },
+ *   { field: 'owner', operator: 'equals', value: '{current_user_id}' },
+ * ]
+ * ```
+ */
+export const ViewFilterOrGroupSchema = lazySchema(() => strictObject({
+  surface: 'this any-of filter group',
+  history: VIEW_HISTORY,
+  guidance: {
+    // The console's group carries a React key too; the wire door removes it
+    // from a group element as from a rule (`stripViewConsoleDecorations`).
+    id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
+    field: VIEW_FILTER_GROUP_STRAY_RULE_KEY_GUIDANCE,
+    operator: VIEW_FILTER_GROUP_STRAY_RULE_KEY_GUIDANCE,
+    value: VIEW_FILTER_GROUP_STRAY_RULE_KEY_GUIDANCE,
+  },
+}, {
+  /**
+   * The rules of which ANY may match — at least one, each a flat
+   * {@link ViewFilterRuleSchema}.
+   */
+  or: z.array(ViewFilterRuleSchema)
+    .min(1, {
+      error: () =>
+        'An any-of group needs at least one rule: `{ or: [] }` is a disjunction of zero rules, which '
+        + 'matches no record, so the view would be permanently empty. Write the rules of which any may '
+        + 'match, or delete the group.',
+    })
+    .describe(
+      'The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, '
+      + 'each judged exactly as a rule at the top level of the filter. A group cannot hold a group.',
+    ),
+}).describe(
+  '[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its '
+  + 'rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, '
+  + 'so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", '
+  + 'operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the '
+  + 'last 7 days. One level only: its members are flat rules. No console reads it yet: until the list '
+  + 'query build reads the group, a view that stores one is refused when it loads (the list reports a '
+  + 'malformed filter and shows no rows).',
+));
+
+export type ViewFilterOrGroup = z.input<typeof ViewFilterOrGroupSchema>;
+/** Post-parse shape of {@link ViewFilterOrGroup} — defaults applied, transforms run (ADR-0122). */
+export type ViewFilterOrGroupParsed = z.infer<typeof ViewFilterOrGroupSchema>;
+
+/**
+ * [#28020] Report ONE element kind's verdict, never both.
+ *
+ * {@link ViewFilterElementSchema} is a union, and a union that fails reports
+ * every branch: `invalid_union`, with the per-branch truth nested in `errors[]`
+ * at paths relative to the element. On this union that would bury the rule's
+ * own refusals — a value-shape issue at `filter.0.value`, an unknown key named
+ * with its guidance — one level down, beside a group branch's complaint about
+ * a missing `or` that the author never meant to write. (zod returns a branch's
+ * issues unwrapped only when exactly one branch failed non-fatally, which an
+ * unknown key or a bad operator never is.)
+ *
+ * The element kind is not a guess: {@link isViewFilterOrGroup} decides it, so
+ * the claimed branch's issues replace the union's own issue, flat, and every
+ * path and message an author read before the group existed is the one they
+ * read now. The same shape {@link focusClaimedBranch} takes on
+ * `ViewMetadataSchema`, applied where the branch decision is a single key.
+ *
+ * It changes no verdict: it only runs when the union already failed, adds no
+ * issue of its own, and removes none from the claimed branch.
+ */
+function reportClaimedFilterElementBranch(): z.core.$ZodCheck<unknown> {
+  const check = new z.core.$ZodCheck({ check: 'custom', when: () => true }) as z.core.$ZodCheck<unknown>;
+  check._zod.check = (payload) => {
+    for (let index = 0; index < payload.issues.length; index += 1) {
+      const issue = payload.issues[index] as {
+        code?: string;
+        path?: readonly PropertyKey[];
+        errors?: readonly z.core.$ZodIssue[][];
+      };
+      if (issue?.code !== 'invalid_union' || !Array.isArray(issue.errors)) continue;
+      // Only THIS union's own issue: raised at the element itself, one error
+      // list per branch. A nested union's issue carries a path.
+      if ((issue.path?.length ?? 0) !== 0 || issue.errors.length !== 2) continue;
+      const claimed = issue.errors[isViewFilterOrGroup(payload.value) ? 1 : 0] ?? [];
+      payload.issues.splice(index, 1, ...(claimed as unknown as typeof payload.issues));
+      return;
+    }
+  };
+  return check;
+}
+
+/**
+ * [#28020] One element of a view filter list: a flat
+ * {@link ViewFilterRuleSchema}, or an any-of {@link ViewFilterOrGroupSchema}.
+ *
+ * This is what every filter-list carrier holds — `ListView.filter`, a view
+ * tab's filter, `Page.filterBy`, an element data source's filter, the
+ * related-list and picker filters and the component filter doors — so the
+ * group reaches all of them at once and none can drift. The list ANDs its
+ * elements; a group ORs its rules.
+ *
+ * Which branch judges an element is decided by {@link isViewFilterOrGroup}
+ * (an own `or` key), and only that branch's issues are reported — see
+ * {@link reportClaimedFilterElementBranch}. A stored filter of plain rules is
+ * therefore judged, and refused, exactly as before.
+ *
+ * @example
+ * ```ts
+ * filter: [
+ *   { or: [
+ *     { field: 'status', operator: 'equals', value: 'open' },
+ *     { field: 'completed_at', operator: 'after', value: '{7_days_ago}' },
+ *   ] },
+ *   { field: 'archived_at', operator: 'is_empty' },
+ * ]
+ * ```
+ */
+export const ViewFilterElementSchema = lazySchema(() =>
+  z.union([ViewFilterRuleSchema, ViewFilterOrGroupSchema])
+    .check(reportClaimedFilterElementBranch())
+    .describe('One view filter element: a flat rule, or an any-of group of flat rules'),
+);
+
+export type ViewFilterElement = z.input<typeof ViewFilterElementSchema>;
+/** Post-parse shape of {@link ViewFilterElement} — defaults applied, transforms run (ADR-0122). */
+export type ViewFilterElementParsed = z.infer<typeof ViewFilterElementSchema>;
 
 /**
  * Column Summary Function Schema
@@ -1698,7 +1952,7 @@ export const ViewTabSchema = lazySchema(() => strictObject({
   label: I18nLabelSchema.optional().describe('Display label').meta({ title: 'Label' }),
   icon: z.string().optional().describe('Tab icon name').meta({ title: 'Icon' }),
   view: z.string().optional().describe('Referenced list view name from listViews').meta({ title: 'List View' }),
-  filter: z.array(ViewFilterRuleSchema).optional().describe('Tab-specific filter criteria').meta({ title: 'Filter' }),
+  filter: z.array(ViewFilterElementSchema).optional().describe('Tab-specific filter criteria').meta({ title: 'Filter' }),
   order: z.number().int().min(0).optional().describe('Tab display order').meta({ title: 'Display Order' }),
   pinned: z.boolean().default(false).describe('Pin tab (cannot be removed by users)').meta({ title: 'Pinned' }),
   isDefault: z.boolean().default(false).describe('Set as the default active tab').meta({ title: 'Default Tab' }),
@@ -3067,7 +3321,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     + 'no projection, so neither of them applies: which columns show is then left to the '
     + 'renderer (objectui\'s `ListView` grid derives the object\'s default columns).',
   ),
-  filter: z.array(ViewFilterRuleSchema).optional().describe('Filter criteria (JSON Rules)'),
+  filter: z.array(ViewFilterElementSchema).optional().describe('Filter criteria (JSON Rules)'),
   /**
    * Sort order — the structured `{ field, order }[]` array, and only that.
    *

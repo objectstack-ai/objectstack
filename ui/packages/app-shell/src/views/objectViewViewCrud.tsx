@@ -255,7 +255,10 @@ export function useObjectViewViewCrud({
     // Mobile view switcher — registers our view list with the AppHeader so
     // the topbar can render a `<viewName> ▾` dropdown instead of the static
     // page label. Desktop ignores this (the page title switches there,
-    // objectstack#27594).
+    // objectstack#27594). The trigger names the object first, 「OBJECT / VIEW」
+    // (objectstack#27950): the bar truncates the end, so the view label gives
+    // way before the object's. A view with no label is the plural already
+    // (`unlabelledViewText`, objectui#12774) and reads alone.
     const mobileViewSwitcherItems = useMemo<MobileViewSwitcherItem[]>(() => {
         return (views || []).map((view: any) => {
             const Icon = VIEW_TYPE_ICONS[view.type as keyof typeof VIEW_TYPE_ICONS];
@@ -266,9 +269,13 @@ export function useObjectViewViewCrud({
             };
         });
     }, [views, objectDef.name, viewLabel, unlabelledViewText, servedViews, language]);
+    const activeMobileLabel = mobileViewSwitcherItems.find((item) => item.id === activeViewId)?.label;
     useMobileViewSwitcherRegistration({
         views: mobileViewSwitcherItems,
         activeViewId: activeViewId ?? '',
+        triggerLabel: activeMobileLabel && activeMobileLabel !== unlabelledViewText
+            ? `${unlabelledViewText} / ${activeMobileLabel}`
+            : undefined,
         onChange: handleViewChange,
         enabled: mobileViewSwitcherItems.length > 0 && !!activeViewId,
     });

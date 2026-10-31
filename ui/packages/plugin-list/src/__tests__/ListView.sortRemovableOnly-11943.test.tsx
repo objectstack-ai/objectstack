@@ -221,14 +221,20 @@ describe('a field the Sort picker keeps only for the current sort is removable o
     ]);
     fireEvent.click(screen.getByRole('button', { name: /add sort/i }));
     await waitFor(() => expect(sortRowTriggers()).toHaveLength(2));
-    // With nothing flagged, "Add sort" seeds the first entry, as it always has.
-    expect(sortRowTriggers()[1]).toHaveTextContent('Title');
+    // With nothing flagged, "Add sort" seeds the first entry no row holds:
+    // `Title` is the first row's, so the new row starts on `Priority`
+    // (objectstack#27520, one row per field).
+    expect(sortRowTriggers()[1]).toHaveTextContent('Priority');
   });
 
   it('control: with full read and no served projection, the unreadable and refused fields are ordinary options', async () => {
     mount({ first: 'secret_note', sort: ['secret_note', 'remote_status'], perms: FULL_READ, projection: false });
+    // Each read from the row that sorts by it: in the OTHER row a field is
+    // unavailable because a row already holds it (objectstack#27520), which
+    // is not the removable-only flag this control is about.
     const options = await openSort();
     expect(options.find((o) => o.label === 'Secret Note')).toEqual({ label: 'Secret Note', disabled: false });
-    expect(options.find((o) => o.label === 'Remote Status')).toEqual({ label: 'Remote Status', disabled: false });
+    const secondRow = await optionsOf(sortRowTriggers()[1]);
+    expect(secondRow.find((o) => o.label === 'Remote Status')).toEqual({ label: 'Remote Status', disabled: false });
   });
 });
