@@ -7,6 +7,7 @@ import {
   GetRecordFieldAccessResponse,
   RecordPageRequest,
   RecordPageResponse,
+  AppMetadataBundleResponse,
   UpdateManyRequest,
   DeleteManyRequest,
   BatchOptions,
@@ -2260,6 +2261,22 @@ export class ObjectStackClient {
         const route = this.getRoute('metadata');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/references`);
         return this.unwrapResponse<FindReferencesToMetaResponse>(res);
+    },
+
+    /**
+     * [#27627] The app metadata bundle: the app and the objects, views, pages
+     * and dashboards its navigation reaches, each as its own
+     * `GET /meta/{type}/{name}` answers it to this caller, in one request
+     * (`GET /meta/app/{appId}/bundle`). An item the caller may not read is
+     * absent; an app the caller may not read rejects with the app read's own
+     * answer. The response carries a per-caller `ETag` under
+     * `Cache-Control: private, no-cache`, so the platform's HTTP cache
+     * revalidates it with `If-None-Match`.
+     */
+    getAppBundle: async (appId: string): Promise<AppMetadataBundleResponse> => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/app/${encodeURIComponent(appId)}/bundle`);
+        return this.unwrapResponse<AppMetadataBundleResponse>(res);
     },
 
     /**
