@@ -2,8 +2,8 @@
   "number": 28159,
   "kind": "issue",
   "title": "objectql: a composed stack's residual top-level picklist that no object names is neither registered nor refused",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T14:44:20Z",
-  "updated_at": "2026-10-30T18:38:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T20:45:28Z",
+  "closed_at": "2026-10-30T20:44:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28159",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① found by the contract review of PR #28153 (#28093, record 6525505738, should-fix #3) outside that PR's surface. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What the code does (read)\n\nPR #28153 registers a composed stack's residual top-level items (declared only on the stack's top level, beside package bodies) of every registry type in the engine registry, except `object` (own path) and `picklist`. Picklists stay metadata-only on purpose. The residual objects rule already judges an object whose field names a residual-only picklist as \"listed and not served\", and registering residual picklists would move that line.\n\nSo a residual picklist that no object references is the one listed type that is neither registered nor refused at boot. Its absence is loud only through an object that names it. #28093's triage says \"no type is dropped silently\". No security stake: `picklist` is `allowEnvironmentOverlay: false, allowRuntimeCreate: false`, so a save over one is refused either way.\n\n## Wanted (route is triage's)\n\nEither register a residual picklist the way the body seam does, moving the residual objects rule's line with it, or refuse an unreferenced residual picklist loudly at boot with a prescription.\n\n## Dedupe\n\nRead open titles for `picklist` + `residual`, `top-level picklist`: none. **New.**"

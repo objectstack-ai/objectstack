@@ -13,19 +13,20 @@
   "labels": [
     "area:data",
     "domain:server",
-    "finding",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T19:02:06Z",
-  "updated_at": "2026-10-30T20:00:04Z",
+  "updated_at": "2026-10-31T02:02:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28248",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① found by the contract review of PR #28231 (#28159, record 6531047218, should-fix #3), outside that PR's file surface. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What the code does (read)\n\nPR #28231 makes the boot refuse a composed stack (one with `packages[]`) whose top level declares a picklist that no package body declares, when no object field the engine registers names it. The refusal is `INVALID_METADATA` (422) from the `manifest` service in `@objectstack/objectql`. A residual picklist that a field does name keeps its existing line: a residual object's field makes that object listed and not served, and a body's field fails the boot's picklist audit. Two published surfaces do not say any of this.\n\n1. **The author-time door does not foretell the refusal.** `packages/cli/src/utils/picklist-references.ts` (`os validate` / `os compile`) reads a composed stack's picklists from its bodies alone. Its header says the walk covers \"each body's own `objects` / `objectExtensions` / `picklistExtensions` … and ⛔ NOT the top level, which the load path does not register from\". So a top-level picklist in a composed stack that no body declares and no registered field names passes `os validate` and is refused at boot. An author learns of it only at boot.\n2. **The residual-rule prose has no picklist exception.** `packages/spec/src/stack.zod.ts`, at the permission-set owner gate's docblock, says \"A top-level set that no body declares is the stack's residual, registered under `manifest.id`\". The residual-rule header in `packages/metadata/src/plugin.ts` (\"The residual rule — ONE rule, for both boot doors\") also says the residual is registered under `manifest.id`. Neither says that a residual picklist is kept as metadata only: listed and not served when a field names it, and refused when none does. The engine's own docblock (`RESIDUAL_TYPES_WITH_OWN_PATH` in `packages/objectql/src/plugin.ts`) now carries that line, so the published spec and the runtime disagree in prose.\n\nSeam: `spec:ObjectStackDefinitionSchema.picklists (composed stack top level)` → `runtime:packages/objectql/src/plugin.ts unreferencedResidualPicklistRefusal` | `consumer: packages/cli/src/utils/picklist-references.ts (os validate)`\n\nreach: `os validate` on a composed stack whose top level carries a picklist that no body declares and no registered field names. It reports nothing, and the same stack is refused at boot with `INVALID_METADATA`.\n\n## Wanted\n\n- `os validate` reports a composed stack's residual picklist that no body declares and no registered field names. \"Registered\" means a field of a body's objects or `objectExtensions`, or of a top-level object no body declares. It should use the same judgement and prescription the boot gives: declare it inside the `packages[]` entry of the package whose objects use it, name it from a field of an object meant to use it, or remove it.\n- The residual-rule prose in `packages/spec/src/stack.zod.ts` and `packages/metadata/src/plugin.ts` carries the picklist line the runtime enforces: a residual picklist is metadata only, listed and not served when a field names it, and refused at boot when none does.\n\n## Dedupe\n\nThe REST search endpoint is not reachable from this seat, so I read all 252 open issue titles for `picklist`, `residual`, `top-level`, `os validate`, `author-time` and `stack.zod`. The only picklist or residual hit is #28159, the card PR #28231 fixes. **New.**\n\nDedupe words: `top-level picklist`, `residual picklist`, `picklist-references`, `os validate composed stack`, `residual rule prose`.\n\nBlocked-by: #28231\n"

@@ -1,0 +1,31 @@
+{
+  "number": 28266,
+  "kind": "issue",
+  "title": "spec: action param helpText is a plain string, so it cannot be localized (invite_user role help shows only in English)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "enhancement",
+    "priority:p3",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T21:48:53Z",
+  "updated_at": "2026-10-30T21:56:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28266",
+  "body": "Filing gate ②: fallout measured by the cloud#3383 pin round (pin 99a6a781, branch claude/project-thread-yynugk @ b983a3b, landing with cloud#3385). Filed by `repo:cloud` seat 2. ⛔ Not a claim.\n\n## 维护者速读\n\n框架给「邀请成员」的角色参数加了一段说明文字（objectstack#28224），但 spec 里参数的 helpText 只是一个普通字符串，不能按语言翻译。所以中文用户在 cloud 的欢迎页上看不到这段说明，在别处看到的也只有英文。这张卡让参数说明可以本地化。\n\n## Facts\n\n- objectstack#28224 added an English `helpText` to the `invite_user` role param.\n- The spec types action param `helpText` as `string`, so there is no i18n key or per-locale form. cloud's welcome copy therefore leaves it out.\n\n## Work\n\n1. Make action param `helpText` localizable the way other user-facing action strings are (an i18n key, or the existing translatable-string shape), without breaking a plain string.\n2. Translate the `invite_user` role help in the locale packs.\n3. Contract review (spec), tests, and a changeset with the Clause-② line.\n\n## Done when\n\nA zh session sees the role help in Chinese."
+}

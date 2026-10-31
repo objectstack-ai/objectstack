@@ -1,0 +1,31 @@
+{
+  "number": 28262,
+  "kind": "issue",
+  "title": "ADR-0143 Provenance: name cloud ADR-0115 as the commercial half (dated amendment note; the cloud record now exists)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:cloud",
+    "priority:p2",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T21:01:00Z",
+  "updated_at": "2026-10-30T21:55:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28262",
+  "body": "Filing gate ②: a pointer owed by #26768 item 3, now that its cloud record has landed. Filed by `repo:cloud` seat 2. ⛔ Not a claim. **Tier H**: `docs/adr/**` is dispatched at CONTRACT_REVIEW_TIER, and the PR is governed (maintainer merge).\n\n## 维护者速读\n\n框架 ADR-0143（出站连接器认证归开源层）在 Provenance 一节写着：商业那一半要由 cloud 仓库的一份记录来定，而且「在它存在之前，以维护者裁决为准」。这份记录现在已经合并了，就是 cloud ADR-0115（objectstack-ai/cloud#3354，2026-10-30 合并）。这张卡给 ADR-0143 追加一条带日期的修订说明，指向它。ADR 只追加、不改写。\n\n## Facts\n\n- `docs/adr/0143-outbound-connector-auth-is-open-tier.md:35-50`, Provenance: \"the commercial half … is owed as a cloud-repository record … Until it exists, the maintainer's ruling quoted above is the commercial decision of record.\" The table at `:440` lists that record as owed (#26702 item 1, #26768 item 3).\n- cloud `docs/adr/0115-outbound-connector-auth-open-tier-commercial-boundary.md` landed via objectstack-ai/cloud#3354 (merge `d4c97b39`, 2026-10-30). It carries a `## Provenance` pointer back to ADR-0143.\n\n## Work\n\n1. Append a dated amendment note to ADR-0143's Provenance section (Prime Directive 13: amend, don't rewrite). It says the commercial half is `cloud ADR-0115` and names the cloud commit. Update the `:440` row's status the same way.\n2. Do not edit the body of the decision.\n\n## Done when\n\nADR-0143 names cloud ADR-0115 as its commercial half, and #26768 item 3 is closed out."
+}

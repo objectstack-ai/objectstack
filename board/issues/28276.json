@@ -1,0 +1,29 @@
+{
+  "number": 28276,
+  "kind": "issue",
+  "title": "connector apps, E4 batch 1 (static key): GitHub over its remote MCP server and Stripe read over its OpenAPI document, as open-edition metadata packages validated by this repository's CI",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "enhancement",
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T02:05:40Z",
+  "updated_at": "2026-10-31T02:05:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28276",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ④ coordination child of #27293 (E4), filed by the epic PM on the ruling of #27302. Ruling-ref: 6486157794 (letter A, phased; maintainer 「同意」 2026-10-29). Child of #27293. ⛔ Not a claim.\n\n## What the ruling binds\n\nVerbatim from 6486157794: \"an app whose every key runs on the open tier is **open edition** and lives in this repository (a metadata package validated by this repository's CI against the runtime at HEAD) … start with only the apps #27293's Done-when needs — DocuSign for the OAuth path plus two or three static-key apps — and grow toward 20–30 on customer pull, batch by batch (static-key; OAuth after #26702; signature after #26710).\"\n\nThis card is the static-key batch. The two apps are the epic PM's pick within that ruling, the ones recommended to the maintainer on 2026-10-29: each exercises a different provider archetype the E3 recipes teach.\n\n| App | Provider | Credential the administrator supplies | Why first |\n|:--|:--|:--|:--|\n| GitHub | `mcp`, remote HTTP transport, `include` allowlist | a personal access token in a header, through the credential store (#27237) | proves the remote-MCP archetype; nothing it needs is undelivered |\n| Stripe (read only) | `openapi`, the document normalized by #27373's script, `providerConfig.include` (#26709 item 1) | a restricted secret key, read scopes | proves the OpenAPI archetype; `stripe/openapi` is MIT; write operations are form-encoded, which the provider does not send, so read only |\n\n## Work (per app)\n\n- A metadata package: the declarative `connectors:` entry, `credentialRef` (no secret in metadata), one or two flows or `ai: { exposed: true }` actions showing it used, the listing file (`objectstack.manifest.json`) and a README whose credentials section names each credential, where to obtain it and its scopes (the handbook, `content/docs/deployment/marketplace-handbook.mdx`).\n- Stripe: the packaged spec is the output of `pnpm --filter @objectstack/connector-openapi normalize-openapi` with an `--include-pattern`; the README records the upstream, commit and sha256 the script printed (#27293's Done-when \"provenance (upstream, commit, sha256)\").\n- Validated by this repository's CI at HEAD: `os validate` and a boot test that materializes the instance against a fixture (no live vendor call in CI); one live sandbox call run once locally and reported.\n- Home: a new workspace directory for official connector apps (for example `packages/connector-apps/<vendor>/`, with its glob added to `pnpm-workspace.yaml`), npm-private. ⛔ The exact home is the triage seat's call at first touch; the card names the candidate so the lane can price it.\n\n## Reader\n\nThe triage seat confirms the home and lane (the ruling's workload names `domain:devx`); the epic PM of #27293 dispatches. The ingestion pipeline and listing generation are cloud-repository work and are not in this card.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (all states, read 2026-10-31T02:05Z), titles grepped for `connector app|shelf|docusign|stripe|github mcp|E4`: 0 hits; control `connector` on the same set: 47 hits."
+}

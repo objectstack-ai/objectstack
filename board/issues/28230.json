@@ -2,8 +2,8 @@
   "number": 28230,
   "kind": "issue",
   "title": "plugin-approvals: past the 1000-row suspended-run page, a revise-window recall on a batch item cannot find its batch run and leaves it parked",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,23 @@
     "area:workflow",
     "bug",
     "domain:server",
-    "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T18:07:30Z",
-  "updated_at": "2026-10-30T20:03:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T22:33:12Z",
+  "closed_at": "2026-10-30T22:30:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28230",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d13k5TVyAhqhiKKgN3\n\nFiling gate: out-of-scope finding of the #28183 dev (os-dev report 6529875250), source PR #28228, filed at seat 4's request. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: any batch approval flow (a `map` over approval items, e.g. `showcase_release_signoff` → `one_task_signoff`) on a deployment whose durable suspended-run store (`ObjectStoreSuspendedRunStore`) holds more than 1000 `paused` rows, when a submitter recalls a batch item from its revise window.\nReader who acts: `domain:server` (`packages/services/service-automation` for the engine member, `packages/plugins/plugin-approvals` for the caller).\n\n## What the code does (read, not measured)\n\nPR #28228 makes the revise-window recall wake the batch: after `cancelRun` on the item's run, `ApprovalService.resumeBatchOfRecalledItem` (`packages/plugins/plugin-approvals/src/approval-service.ts`) finds the batch run as the entry of `listSuspendedRunsDurable()` whose `correlation` is `map:<itemRunId>`, then resumes it. `listSuspendedRunsDurable` is the deployment-wide listing (`readSuspendedRuns('degrade')` in `service-automation/src/run-history.ts`), which a DB-backed store serves from `ObjectStoreSuspendedRunStore.list()`: one page, `limit: 1000`, in driver order. Past 1000 parked runs the batch run may not be on that page. The lookup then finds nothing, and the recall answers exactly as it did before PR #28228: the batch stays parked on the cancelled item, and nothing tells the caller (`resumeError` stays empty, nothing is logged).\n\n## Wanted (route is triage's)\n\nA precise lookup instead of a page scan. The item run's own suspension context already carries its batch: `map-node.ts` launches each item with `$parentRunId` (and `$parentMapNode`). The fix this finding proposes: an engine member in `engine.ts` / `run-resume.ts` that answers the batch run for an item run id from the item's `$parentRunId` (read before or by `cancelRun`, since `cancelRun` forgets the item's suspension row), declared on `ApprovalResumeSurface` and called by the recall in place of the `listSuspendedRunsDurable` scan. Measure first: a store with more than 1000 `paused` rows where the batch run is past the page.\n\n## Dedupe\n\nRead the open titles for `listSuspendedRunsDurable`, `1000`, suspended-run page, recall + batch, `$parentRunId`: none. **New.**\n\nLinks back: #28183, PR #28228, PR #28176, #27971\n\nBlocked-by: #28228\n"

@@ -1,0 +1,37 @@
+{
+  "number": 28263,
+  "kind": "pull_request",
+  "title": "fix(runtime): an API-key caller of an api action whose target is an identity route is refused by name, before the forward",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-30T21:06:18Z",
+  "updated_at": "2026-10-30T21:46:07Z",
+  "closed_at": "2026-10-30T21:46:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-30T21:46:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28263",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DCfTM9VrSoNVfHfD6abTWmM)_\n\ndomain:server#3 · os-elon-musk · session_016WV4d1MkJvadehWmrLUUT1\n\nFixes #28217\n\nClause-②: no (a call that was already refused now says why and is refused before its target is called; no credential is newly accepted anywhere, and no error code, status name, answer member or package export is added)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：用 API key 调用的 `type: 'api'` 动作，如果目标是身份路由(`/api/v1/auth/…`,比如 Ban User),两个动作门(REST `/actions` 和 MCP `run_action`)在转发前就按名拒绝:401 `UNAUTHENTICATED`,说明这个端点只接受已登录会话，不接受 API key。目标不会被调用。\n- 为什么改：身份路由只认自己的会话，从不认 API key,所以以前这个调用到了目标那里就成了匿名，拿回一句 \"Sign in first\",而调用方其实已经认证过了。\n- 没变的：身份路由接受哪些凭据不变;会话(token 或 cookie)照旧转发;API key 调其他目标(数据门、声明的端点)照旧转发并成功。\n- 先看:`packages/runtime/src/action-execution.ts` 的 `forwardApiAction` 开头和 `apiActionIdentityRouteKeyRefusal`。\n- 需要你做的：无;Tier S,席位验收后落地。\n\n## What changes\n\n`forwardApiAction` (`packages/runtime/src/action-execution.ts`), the one forward both action doors call, now refuses one combination before it calls the target: a caller the door admitted by API key, running an action whose `target` is an identity route (under `/api/v1/auth/`). The answer is `401` with the standard `UNAUTHENTICATED` code and a sentence that names the action and its identity endpoint, says the endpoint accepts a signed-in session only and not an API key, and says the action was not run. Both doors relay it the way they relay a target's own refusal: the REST door answers it, and MCP `run_action` throws it with the same status and code.\n\n- The identity-route reading is one private predicate, `isIdentityRouteTarget`, which the existing `organizationId` stamp in `buildApiActionRequest` now reads too, so the two rules cannot disagree about which targets are identity routes.\n- The sentence lives in `apiActionIdentityRouteKeyRefusal`, a module export like the file's other refusal sentences (`@objectstack/runtime` exports only its root entry, which does not re-export this module).\n- Docs: `content/docs/ai/actions-as-tools.mdx`, the `api` row of the dispatch table, says an API-key caller of an identity-route target is refused `401` before the forward.\n\nUnchanged: which credentials an identity route accepts. A signed-in session (session token or cookie) is forwarded to it exactly as before. An API-key caller is still forwarded to every target that is not an identity route, and served. This does not touch #28178 (the OAuth-agent lane), which is waiting on its own decision.\n\n## Why\n\nAn api action's forward carries the caller's own credentials so the target authorizes the same principal the door admitted. An identity route reads its caller from its own signed-in session only, so a key-admitted caller arrived there as nobody, and the target answered its anonymous `401` (\"Sign in first\") to a caller that had authenticated. It failed closed (triage 6530162284: a broken function, not a hole). Triage ruled that refusing by name before the forward, and pinning it, needs no decision, and that any change to which credentials an identity route accepts does.\n\n## Verification\n\nPremise re-checked on `main` `86cf7cef` before the change; it held as the card states.\n\n- `packages/runtime/src/domains/api-action-forward.test.ts` (+5): REST door, key-admitted caller of an identity-route action: the named `401`, the target never called; the same action for a session-admitted caller: forwarded as before; a key-admitted caller of a data-door target: forwarded with the key carried across. MCP `run_action`: the key-admitted identity-route call throws the same refusal and forwards nothing; a key-admitted non-identity target is forwarded. 42/42.\n- `packages/qa/dogfood/test/api-action-door-forward.dogfood.test.ts` (+2, booted showcase): an admin's API key running `ban_user` gets the named refusal, not \"Sign in first\", and nobody is banned; the same admin's API key running an api action whose target is the data door is served and the row changes. 10/10.\n- Ablations: refusal removed ⇒ the two identity-route key pins red in the unit file, and the dogfood key pin red (it answered \"Sign in first\"); refusal keyed on the target alone ⇒ 13 red, the session lane among them; keyed on the credential alone ⇒ the two non-identity key pins red. With the fix, all green.\n- `pnpm --filter @objectstack/runtime typecheck` green; the runtime suite green (487 files, 7912 passed); the dogfood package compiles with no error in the touched file.\n- Every family `dispatch-gates --commands` derives (91) ran and exited 0, reconciled with `--ran` (0 NOT-MEASURED, after a whole-tree build); `pnpm lint` exits 0.\n\nSkills-docs: `grep -rniE \"forward|api.?key\" skills content/docs` read for api-action forwarding and API-key callers: `content/docs/ai/actions-as-tools.mdx` describes the forward and gains the sentence above; no skill describes the forward or API-key callers of actions.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the lane's maintainer summary).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d1MkJvadehWmrLUUT1\n"
+}

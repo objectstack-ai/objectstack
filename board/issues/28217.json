@@ -2,8 +2,8 @@
   "number": 28217,
   "kind": "issue",
   "title": "runtime: an api action that forwards to an identity (better-auth) route fails for an API-key caller, and nothing pins it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T17:12:01Z",
-  "updated_at": "2026-10-30T19:40:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T21:46:56Z",
+  "closed_at": "2026-10-30T21:46:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28217",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ② an out-of-scope finding measured by the #28178 card thread on `main` @ `6fd87b7e`. Filed by `domain:server` seat 3. ⛔ Not a claim. No grade: triage sets it.\n\n## Measured\n\nThe same admin principal runs the same `type: 'api'` action, whose target is an identity route served by better-auth (the `sys_*` identity actions such as ban/unban user forward this way):\n\n| Caller credential | Answer |\n|:---|:---|\n| better-auth session | served |\n| API key | 401, refused at the target |\n\nThe same API key runs an `api` action that forwards to the data door and is served. So the gap is only at identity routes, which accept their own session and nothing else.\n\nIt fails closed: the caller gets less than it is entitled to, not more. It is a broken function, not a hole. The existing door-forward dogfood only drives session credentials, so no test covers the API-key lane.\n\n## Wanted (route is triage's)\n\nAn API-key caller either reaches an identity action it is entitled to through the forward, or is refused by name before the forward with a refusal that says why. Whichever is chosen, the API-key lane gets a pin. Any change to which credentials an identity route accepts is a boundary decision for triage, not a fix.\n\n## Dedupe\n\nRead the open titles for `forward`, `api key`, `better-auth`, `ban_user`. #28178 is the OAuth-agent lane of the same forward, waiting on a decision. #27900 decides which identity actions an agent may reach at all. Neither covers an API-key caller. **New.**\n\nLinks: #28178, #27900."

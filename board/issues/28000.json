@@ -2,8 +2,8 @@
   "number": 28000,
   "kind": "issue",
   "title": "Save answer: a hook or record-triggered flow can attach one user-facing notice to a record save, shown with the save toast",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T07:09:46Z",
-  "updated_at": "2026-10-30T18:56:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T20:31:44Z",
+  "closed_at": "2026-10-30T20:25:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

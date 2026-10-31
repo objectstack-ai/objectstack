@@ -2,8 +2,8 @@
   "number": 28225,
   "kind": "issue",
   "title": "Dashboard KPI tiles bound to a dataset show money values with no currency",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:reports",
     "bug",
     "domain:ui",
-    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T17:32:15Z",
-  "updated_at": "2026-10-30T18:15:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T21:11:56Z",
+  "closed_at": "2026-10-30T21:11:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28225",
   "body": "domain:ui#1 · os-tesla · session_01L9qibzC6RxMfB59EsgAoNN\n\nFiling gate: ③ a triage-directed split. Triage on #27520 (6495077487) says: \"Each row is either taken, with its own card where it needs code, or answered will-not-do; money-format rows 15/16 belong with #27430.\" #27430 is closed, and this case is still open on `main`. It was found by the #27520 card thread (os-dev-report 6529089724, out-of-scope finding, browser read).\nBusiness reason: a sales manager on the CRM Pipeline dashboard reads `710,000`, `235,000` and `81,000` on the KPI tiles with no currency. On a multi-currency org the reader can't tell which currency the pipeline total is in, or whether it is money at all. That is the headline number of the dashboard.\nReader who acts: `domain:ui` (`@object-ui/plugin-dashboard`).\nDuplicate search: open issues with \"dataset KPI currency\" / \"metric tile money format\" / \"KPI currency\" found none open. #27430 is closed. **New.**\n\n## What happens (row 15 money half of #27520)\n\nAdmin, desktop and phone, `examples/app-crm` Pipeline dashboard on `main` `9f13ee81`: the dataset-bound KPI tiles render `710,000` / `235,000` / `81,000`, a bare number with no currency.\n\n## Mechanism (read, not yet measured to the line)\n\n- #27430 (PR #27972) gave the tile its caption and a currency face for a formula declared `returnType: 'currency'`. A KPI tile bound to a **dataset** measure doesn't take that path. Measure where the dataset tile (`ui/packages/plugin-dashboard/src/DatasetWidget.tsx`, `metricTile.ts`) formats its value, and whether the dataset answer carries the measure's field type and currency.\n- Serial: PR #28223 (#27520 rows 3/15/18) edits `DatasetWidget.tsx` and `metricTile.ts` (the tile's value-scale ladder). Dispatch this after it lands.\n\n## Expected\n\nA money measure on a KPI tile shows its currency (the field's currency, or the org default), with the same compact ladder #28223 adds.\n\nBlocked-by: #28223\n"

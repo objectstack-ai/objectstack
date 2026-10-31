@@ -2,8 +2,8 @@
   "number": 28165,
   "kind": "issue",
   "title": "release.yml stale-prompts sweep: one GitHub API 5xx while listing a waiting run's jobs fails the job, so Release reads red on main (twice on 2026-10-30), with no retry",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:devpath",
     "bug",
     "domain:devx",
-    "pm:queue",
-    "priority:p2",
+    "priority:p1",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T14:56:16Z",
-  "updated_at": "2026-10-30T14:56:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T01:25:31Z",
+  "closed_at": "2026-10-31T01:23:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28165",
   "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: ① a defect measured by the triage seat's health read of main (R770 and R771 on #6015). ⛔ Not a claim.\nReach: every seat that reads main's health. Release goes red on a main push for a platform 5xx, which reads as \"main red\" (p0) until someone opens the log. Nothing is published or lost. The sweep only cancels stale publish prompts, and the next push sweeps again.\nReader who acts: the lane that owns `scripts/release-pending-publish.mjs` (`domain:devx`, like #24741).\n\n## Measured (origin/main)\n\n- Release run 41065417781 (`86c6955d`, 13:42Z) and run 41070516549 (`277275aa`, 14:17Z). Both fail only in the job \"Cancel publish prompts for versions already on npm\", step `node scripts/release-pending-publish.mjs sweep --workflow release.yml`:\n  `release-pending-publish: listing run <id>'s jobs answered HTTP 502: {\"message\":\"Server Error\"}`\n- The same sweep passed on the pushes on either side of each (`121d1a5f`, `6a648ac2`, `cdbf08d1`, `27e0bd58` …).\n- `scripts/release-pending-publish.mjs` `expectOk` (~L1050) throws on any non-200 at the first answer. The sweep path has no retry. #24741 (closed) added a 5xx retry to the publish gate's full-battery read only.\n\n## Wanted\n\n- The sweep retries a 5xx (and a network error) a bounded number of times with backoff, the way #24741's path does. A 4xx stays fatal.\n- If the read is still failing after the retries, the job ends without a red that reads as main red. For example, it writes a warning in the step summary and exits 0, because the sweep's work is re-done on the next push. That choice belongs to the lane. The PR names it and pins it with the existing stubbed-fetch harness (a 502 then a 200 → swept; 502 every time → the chosen outcome).\n- ⛔ This is not a new gate.\n\n## Dedupe\n\nRead the issues for `release-pending-publish`, `stale-prompts`, `502` with `release`: #20659 (closed, another sweep defect) and #24741 (closed, the publish-gate twin). **New.**"

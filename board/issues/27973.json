@@ -2,8 +2,8 @@
   "number": 27973,
   "kind": "issue",
   "title": "Percent field: a display key that shows a plain percentage instead of the progress bar, in list cells and on the record page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T05:46:59Z",
-  "updated_at": "2026-10-30T17:26:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-30T20:31:16Z",
+  "closed_at": "2026-10-30T20:25:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,
