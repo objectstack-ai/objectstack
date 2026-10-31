@@ -5,7 +5,7 @@
 
 feat(console): entering an app loads its metadata bundle once, and a record open reads no metadata
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Entering an app now loads that app's metadata bundle (`GET /api/v1/meta/app/{appId}/bundle`) in one request, through the new `ObjectStackAdapter.loadAppBundle(appId)`. The bundle holds the app, the objects its navigation reaches together with the objects that reference them, and their views, pages and dashboards. Re-entering the app sends `If-None-Match` with the held `ETag` exactly as served, and a `304` keeps the bundle the console already holds. The request goes through the client's conditional `meta.getAppBundle(appId, { ifNoneMatch })`. A bundle served `no-store` with no `ETag` answers the reads that waited on it and is not kept.
