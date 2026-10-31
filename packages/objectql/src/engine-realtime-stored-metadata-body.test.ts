@@ -109,16 +109,18 @@ describe('[#21120] realtime data.record.* events redact a stored metadata body',
     expect(published).toHaveLength(1);
     const payload = published[0].payload as Record<string, any>;
     expect(JSON.stringify(payload)).not.toContain(CRED);
-    // The event still describes the row — type survives, the body is still present but projected.
+    // The event still describes the row — type survives. [#27884] A datasource
+    // body is withheld whole (the connection configuration with it): the
+    // type's documents are served only to holders of its read capability, and
+    // an event's subscribers are unknown at publish.
     expect(payload.after.type).toBe('datasource');
-    expect(payload.after.metadata).toBeDefined();
-    expect(JSON.parse(payload.after.metadata).config.authToken).toBeUndefined();
-    expect(JSON.parse(payload.after.metadata).config.url).toBe('libsql://db.turso.io');
+    expect(payload.after).not.toHaveProperty('metadata');
+    expect(JSON.stringify(payload)).not.toContain('libsql://db.turso.io');
   });
 
-  it('a credential-free sys_metadata body rides the event unchanged', async () => {
-    const clean = JSON.stringify({ name: 'v', driver: 'postgres', config: { host: 'h', database: 'd' } });
-    await engine.insert('sys_metadata', { id: 'm2', type: 'datasource', name: 'v', metadata: clean });
+  it('a credential-free sys_metadata body of an ungated type rides the event unchanged', async () => {
+    const clean = JSON.stringify({ name: 'v', label: 'V', type: 'grid' });
+    await engine.insert('sys_metadata', { id: 'm2', type: 'view', name: 'v', metadata: clean });
     const payload = published[0].payload as Record<string, any>;
     expect(payload.after.metadata).toBe(clean);
   });

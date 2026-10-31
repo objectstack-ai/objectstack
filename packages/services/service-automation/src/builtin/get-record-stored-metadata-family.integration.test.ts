@@ -17,8 +17,8 @@
  *    row, not a withheld one);
  *  - the served hash equal to the one the door serves for the same row.
  *
- * Two exits are pinned, under BOTH run identities (`runAs: 'system'`, which
- * reads elevated, and `runAs: 'user'`, which reads as the triggering user):
+ * Two exits are pinned, under the system run identity (`runAs: 'system'`,
+ * which reads elevated):
  *  - the run's declared OUTPUT (the node's `outputVariable`, declared
  *    `isOutput` on the flow), which a flow caller is handed back;
  *  - an ordinary RECORD the same flow writes from what the node read (a
@@ -28,6 +28,11 @@
  * list (`find`, `limit > 1`). And the key is pinned twice: with no crypto
  * provider (the process-scoped ephemeral key) and with one registered on the
  * engine (the provider's keyed digest), the node's hash equals the door's.
+ *
+ * [#27884] A datasource definition's stored row is served only to holders of
+ * the capability the `/meta` type gate names for it (`manage_platform_settings`).
+ * The triggering user here holds none, so under `runAs: 'user'` both branches
+ * pin the other side of that rule: the node is served no row at all.
  *
  * Composition: the real stack the other `*.integration.test.ts` files in this
  * package boot: `ObjectKernel`, `ObjectQLPlugin` (which registers the
@@ -127,7 +132,23 @@ function familyReadFlow(name: string, object: string, runAs: RunAs, branch: Bran
   };
 }
 
-/** The trigger a user-identity run needs: a real acting user. */
+/**
+ * start → get_record(family) → end: the read alone, for a run whose node is
+ * served no row (nothing downstream can copy what was not served).
+ */
+function familyReadOnlyFlow(name: string, object: string, runAs: RunAs, branch: Branch) {
+  const def = familyReadFlow(name, object, runAs, branch);
+  return {
+    ...def,
+    nodes: def.nodes.filter((n) => n.id !== 'copy'),
+    edges: [
+      { id: 'e1', source: 'start', target: 'read' },
+      { id: 'e2', source: 'read', target: 'end' },
+    ],
+  };
+}
+
+/** The trigger a user-identity run needs: a real acting user, below datasource administration. */
 const TRIGGER = { userId: 'usr_flow_reader', tenantId: 'org_1', positions: [] as string[], permissions: [] as string[] };
 
 describe('flow get_record serves the stored-metadata family the way the data door does (#21519)', () => {
@@ -206,7 +227,7 @@ describe('flow get_record serves the stored-metadata family the way the data doo
     }
   });
 
-  for (const runAs of ['system', 'user'] as const) {
+  for (const runAs of ['system'] as const) {
     for (const branch of ['one', 'list'] as const) {
       it(`runAs:'${runAs}', ${branch === 'one' ? 'findOne' : 'find'} branch: the output and the written record carry the projected body and the door's keyed hash`, async () => {
         const control = await doorRow('sys_metadata');
@@ -227,6 +248,24 @@ describe('flow get_record serves the stored-metadata family the way the data doo
         expect(copy.hash).toBe(control.checksum);
       });
     }
+  }
+
+  // [#27884] The user-identity run of a caller below datasource administration.
+  for (const branch of ['one', 'list'] as const) {
+    it(`runAs:'user' below datasource administration, ${branch === 'one' ? 'findOne' : 'find'} branch: the node is served no datasource row`, async () => {
+      for (const object of ['sys_metadata', 'sys_metadata_history']) {
+        const def = familyReadOnlyFlow(`fam_user_${branch}_${object}`, object, 'user', branch);
+        automation.registerFlow(def.name, def as any);
+        const res: any = await automation.execute(def.name, { ...TRIGGER });
+        expect(res.success, `run failed: ${JSON.stringify(res.error ?? res)}`).toBe(true);
+        const rec = res.output?.rec;
+        if (branch === 'one') expect(rec ?? null, `${object}: findOne served a row`).toBeNull();
+        else expect(rec ?? [], `${object}: find served a row`).toEqual([]);
+        const text = JSON.stringify(res);
+        expect(text.includes(SENTINEL), `${object}: the stored credential reached the run`).toBe(false);
+        expect(text.includes(DS_URL), `${object}: the row's configuration reached the run`).toBe(false);
+      }
+    });
   }
 
   it('the history table is served the same way, its parent hash included', async () => {
@@ -259,7 +298,7 @@ describe('flow get_record serves the stored-metadata family the way the data doo
     ql.setCryptoProvider({ keyedDigest } as any);
     const control = await doorRow('sys_metadata');
     expect(control.checksum, 'control: the door serves the provider digest').toBe(await keyedDigest(STORED_HASH));
-    const { output, copy } = await runFlow(familyReadFlow('fam_provider', 'sys_metadata', 'user', 'one'));
+    const { output, copy } = await runFlow(familyReadFlow('fam_provider', 'sys_metadata', 'system', 'one'));
     expectServedLikeTheDoor(output, control, 'the run output');
     expect(output.checksum).toBe(control.checksum);
     expect(copy.hash).toBe(control.checksum);

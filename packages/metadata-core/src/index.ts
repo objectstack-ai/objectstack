@@ -101,6 +101,11 @@ export * from './item-key-discriminators.js';
 // axis. Sunk here because the doors live in `@objectstack/runtime` and
 // `@objectstack/rest`, which share no other common home.
 export * from './meta-write-capability.js';
+// [#27884] The read-side twin: which readers a stored metadata document of a
+// capability-gated type (datasource, external_catalog) is served to, asked by the
+// `/meta` type gate (`@objectstack/rest`) and the engine's stored-row read gate
+// (`@objectstack/objectql`) alike.
+export * from './stored-metadata-type-read-admission.js';
 
 // [commit 1408fe385 / #10101] The shared platform-row organization resolver — sunk here
 // from `@objectstack/plugin-audit` per the maintainer ruling recorded on
