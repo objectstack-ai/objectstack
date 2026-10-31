@@ -1523,8 +1523,8 @@ os migrate record-currency-codes --object opportunity --field amount --code USD 
 
 **The code is yours, never derived.** `--object`, `--field` and `--code` are all
 required. One run writes the one code you give into every row of the field whose
-amount is set and whose code is blank. It never reads a code from a `defaultCurrency`
-the field had before, from the organization's `localization.currency`, or from
+amount is set and whose code is blank. It never reads a code from the `defaultCurrency`
+the field had under `fixed`, from the organization's `localization.currency`, or from
 anything else. A row that holds a code is never touched, whatever the code, and a row
 with no amount owes none. If the stored amounts are in more than one currency, split
 them with your own writes first: nothing here can tell those rows apart.
