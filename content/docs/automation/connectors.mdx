@@ -616,7 +616,9 @@ Some upstreams take no token at all: every request carries a signature over its
 own method, path, query, headers and body, computed with a key the caller never
 sends. The `signed` kind declares that (ADR-0143 D2.3). The metadata names the
 **scheme** and the public **key id**; the signing key itself is a
-`credentialRef`, resolved through the same chain as every other kind.
+`credentialRef`, resolved through the same chain as every other kind. A scheme
+whose vendor signs its responses also names the vendor's public key, as a
+second reference.
 
 ```ts
 // Alibaba Cloud OpenAPI, V3 signature (ACS3-HMAC-SHA256):
@@ -634,7 +636,21 @@ auth: {
   keyId: 'YourSecretId',                  // the SecretId: public, stays in metadata
   credentialRef: 'TENCENT_SECRET_KEY',
 }
+
+// Alipay OpenAPI v3 (ALIPAY-SHA256withRSA), responses verified:
+auth: {
+  type: 'signed',
+  scheme: 'alipay-v3',
+  keyId: '2021000000000000',              // the app id: public, stays in metadata
+  credentialRef: 'ALIPAY_APP_PRIVATE_KEY', // the application private key (RSA)
+  vendorPublicKeyRef: 'ALIPAY_PUBLIC_KEY', // the Alipay public key responses are verified with
+}
 ```
+
+Both of an `alipay-v3` instance's references are listed against it by the
+credential door, and setting or replacing either one re-materializes it. The
+keys are accepted as Alipay's console issues them (the bare base64 body) or as
+PEM.
 
 What the platform does with it:
 
@@ -647,7 +663,8 @@ What the platform does with it:
   (`external.connector` is refused with `422`): a driver cannot sign per
   request.
 - **Schemes that sign their responses are verified** before a result is
-  returned; a response that does not verify fails the dispatch.
+  returned; a response that does not verify fails the dispatch, and its body
+  never reaches the flow.
 - **`aliyun-acs3-hmac-sha256`** signs `host`, `content-type` and every
   `x-acs-*` header, and sets `x-acs-date`, `x-acs-signature-nonce`,
   `x-acs-content-sha256` and `Authorization`. The API's own action and version
@@ -658,9 +675,16 @@ What the platform does with it:
   the first label of the endpoint host (`cvm.tencentcloudapi.com`, or a
   regional `cvm.ap-guangzhou.tencentcloudapi.com`, is `cvm`), so point
   `baseUrl` at the product's own endpoint. `X-TC-Action`, `X-TC-Version` and
-  `X-TC-Region` are yours to send and are not signed. A request without a body
-  is sent with `Content-Type: application/x-www-form-urlencoded`, the type it
-  is signed with.
+  `X-TC-Region` are yours to send and are not signed. A request without a
+  content type is sent with `Content-Type: application/x-www-form-urlencoded`,
+  the type it is signed with.
+- **`alipay-v3`** signs the method, the path and query as sent and the body,
+  with a fresh nonce and millisecond timestamp, and sets `Authorization:
+  ALIPAY-SHA256withRSA app_id=…,nonce=…,timestamp=…,sign=…`. Every response
+  below status 400 must carry a valid `alipay-signature` (an empty body too),
+  checked against the key `vendorPublicKeyRef` names; an error response is
+  verified when it is signed, and an unsigned one fails as the error it is.
+  Public-key mode only: Alipay's certificate mode is not supported.
 
 What the publish door refuses:
 
@@ -669,9 +693,11 @@ What the publish door refuses:
   signer and its test vectors, so a scheme the server cannot run is never
   accepted.
 - **An inline key**: `secret`, `privateKey`, `secretKey` or `accessKeySecret`
-  is refused by name, pointing at `credentialRef`. The vendors' words for the
-  key id (`accessKeyId`, `secretId`) are answered with `keyId`. An authored `signature` is
-  refused too: it is computed for every request.
+  is refused by name, pointing at `credentialRef` (on `alipay-v3`,
+  `appPrivateKey` too, and `alipayPublicKey` points at `vendorPublicKeyRef`).
+  The vendors' words for the key id (`accessKeyId`, `secretId`, `appId`) are
+  answered with `keyId`. An authored `signature` is refused too: it is computed
+  for every request.
 - **`provider: 'mcp'`**, at `auth.type`: an MCP server is not signed per
   request. Declare `provider: 'rest'` or `provider: 'openapi'`.
 
@@ -735,7 +761,9 @@ retry):
 | An `authorization_code` instance nobody connected, or whose grant the vendor refused | **Not fatal**: the instance registers **degraded**, "not connected" or "reconnect required" — connect it (`POST …/connectors/:name/connection`), and it materializes without a restart |
 | The token endpoint is unreachable or answers `5xx` / `429` | **Not fatal**: the dispatch fails `CONNECTOR_UPSTREAM_UNAVAILABLE` and is retried on the existing backoff; the connection stays connected |
 | `auth` is `signed` on a provider that does not say it applies the request signer | **Hard boot error** naming the instance, the scheme and the provider: its calls would go out unsigned — declare it through `rest` or `openapi` |
-| `credentialRef` resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
+| `credentialRef` (or a `signed` instance's `vendorPublicKeyRef`) resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
+| A `signed` reference resolves to something that is not a key of the scheme's kind (an `alipay-v3` key that is not RSA) | **Hard boot error** naming the instance and which reference cannot sign or verify, never the value |
+| A response to an `alipay-v3` call is unsigned (below status 400) or its signature does not verify | The dispatch **fails** naming the instance and the status; the response's body is never returned |
 | The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |

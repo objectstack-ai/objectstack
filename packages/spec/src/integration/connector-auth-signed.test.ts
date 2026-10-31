@@ -38,6 +38,14 @@ const tencent = {
   credentialRef: 'TENCENT_SECRET_KEY',
 };
 
+const alipay = {
+  type: 'signed',
+  scheme: 'alipay-v3',
+  keyId: '2021000000000000',
+  credentialRef: 'ALIPAY_APP_PRIVATE_KEY',
+  vendorPublicKeyRef: 'ALIPAY_PUBLIC_KEY',
+};
+
 /** The issues of a refused parse, as `code @ path` — what each refusal pins. */
 function refused(input: unknown) {
   const result = DeclarativeConnectorEntrySchema.safeParse(input);
@@ -61,6 +69,13 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
     expect(DeclarativeConnectorEntrySchema.parse(entry(tencent, openapi)).auth).toEqual(tencent);
   });
 
+  it('CONTROL: accepts alipay-v3 with an app id, the private key and the Alipay public key as references, on rest and openapi', () => {
+    const gateway = { providerConfig: { baseUrl: 'https://openapi.alipay.com' } };
+    expect(DeclarativeConnectorEntrySchema.parse(entry(alipay, gateway)).auth).toEqual(alipay);
+    const openapi = { provider: 'openapi', providerConfig: { spec: './alipay-v3-openapi.json' } };
+    expect(DeclarativeConnectorEntrySchema.parse(entry(alipay, openapi)).auth).toEqual(alipay);
+  });
+
   it('refuses an unknown scheme at `auth.scheme`, naming the scheme it got and the ones that ship', () => {
     for (const scheme of ['aws-sigv4', 'wechatpay-rsa2048', 'hmac-sha256-generic', 'alipay-rsa2']) {
       const issues = refused(entry({ ...aliyun, scheme }));
@@ -68,6 +83,7 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
       expect(issues[0]!.message).toContain(`"${scheme}"`);
       expect(issues[0]!.message).toContain("'aliyun-acs3-hmac-sha256'");
       expect(issues[0]!.message).toContain("'tencentcloud-tc3-hmac-sha256'");
+      expect(issues[0]!.message).toContain("'alipay-v3'");
     }
   });
 
@@ -79,7 +95,7 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
   });
 
   it('refuses each inline-secret spelling by name, pointing at credentialRef, on every scheme', () => {
-    for (const shape of [aliyun, tencent]) {
+    for (const shape of [aliyun, tencent, alipay]) {
       for (const key of ['secret', 'privateKey', 'secretKey', 'accessKeySecret']) {
         const issues = refused(entry({ ...shape, [key]: 'inline' }));
         expect(issues.map((i) => [i.code, i.path.join('.'), (i as { keys?: string[] }).keys])).toEqual([
@@ -88,6 +104,19 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
         expect(issues[0]!.message).toContain('credentialRef');
       }
     }
+  });
+
+  it("refuses Alipay's own spellings of its two keys: the private key by name, the public key towards its reference", () => {
+    const privateKey = refused(entry({ ...alipay, appPrivateKey: 'inline' }));
+    expect(privateKey.map((i) => [i.code, i.path.join('.'), (i as { keys?: string[] }).keys])).toEqual([
+      ['unrecognized_keys', 'auth', ['appPrivateKey']],
+    ]);
+    expect(privateKey[0]!.message).toContain('credentialRef');
+    const publicKey = refused(entry({ ...alipay, alipayPublicKey: 'inline' }));
+    expect(publicKey.map((i) => [i.code, i.path.join('.'), (i as { keys?: string[] }).keys])).toEqual([
+      ['unrecognized_keys', 'auth', ['alipayPublicKey']],
+    ]);
+    expect(publicKey[0]!.message).toContain('vendorPublicKeyRef');
   });
 
   it('refuses an authored signature: the signer computes one per request', () => {
@@ -112,6 +141,20 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
     expect(unknown.message).toContain('keyId');
   });
 
+  it("answers Alipay's own word for the key id with `keyId`", () => {
+    const { keyId, ...rest } = alipay;
+    const issues = refused(entry({ ...rest, appId: keyId }));
+    const unknown = issues.find((i) => i.code === 'unrecognized_keys')!;
+    expect(unknown.message).toContain('keyId');
+  });
+
+  it('alipay-v3 requires the Alipay public key reference: its responses are always verified', () => {
+    const { vendorPublicKeyRef: _v, ...noPublicKey } = alipay;
+    expect(located(entry(noPublicKey))).toEqual(['invalid_type @ auth.vendorPublicKeyRef']);
+    // CONTROL: the schemes whose vendors do not sign responses take no such key.
+    expect(located(entry({ ...aliyun, vendorPublicKeyRef: 'ALIPAY_PUBLIC_KEY' }))).toEqual(['unrecognized_keys @ auth']);
+  });
+
   it('requires the key id and the secret reference', () => {
     const { keyId: _k, ...noKeyId } = aliyun;
     expect(located(entry(noKeyId))).toEqual(['invalid_type @ auth.keyId']);
@@ -134,5 +177,6 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
   it('is a member of the closed instance-auth union', () => {
     expect(ConnectorInstanceAuthSchema.safeParse(aliyun).success).toBe(true);
     expect(ConnectorInstanceAuthSchema.safeParse(tencent).success).toBe(true);
+    expect(ConnectorInstanceAuthSchema.safeParse(alipay).success).toBe(true);
   });
 });

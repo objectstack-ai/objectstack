@@ -179,6 +179,34 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
      (Q4). A "generic HMAC" member is admitted only with a
      canonical form pinned in the spec; without one, it is a dialect.
 
+> **Amended (2026-10-31, #26710) — Alipay's vectors, and which responses it verifies.** The maintainer
+> ruled on 2026-10-31, verbatim: 「其他同意」 (accepting option B of the director decision on S3's test
+> vectors) and 「算」 (the local end-to-end test counts as the acceptance below).
+>
+> - **A third branch of the vector rule.** A vendor may publish neither a complete worked example nor
+>   a byte-exact vector in an official SDK test suite. The vectors are then produced by running two of
+>   the vendor's official SDKs over one placeholder key that belongs to no account, and they are
+>   admitted only when the two agree byte for byte. The test names both SDKs and their versions, and the
+>   generator and the placeholder key are kept in the repository, so anyone can re-run the check. RSA
+>   PKCS#1 v1.5 signatures are deterministic, so agreement is exact, not approximate.
+> - **Alipay takes that branch.** On 2026-10-31 no official v3 SDK test suite carried a byte-exact
+>   vector (Java v3, PHP v3, .NET v3 and the Node SDK were checked). The vendor's signature pages could
+>   not be reached to look for a worked example with a usable key, and the maintainer ruled that this is
+>   not a gate. `alipay-v3`'s vectors come from `com.alipay.sdk:alipay-sdk-java-v3:3.1.89.ALL` and
+>   `alipay-sdk` 4.14.0 (Node); the generator is
+>   `packages/services/service-automation/test-vectors/alipay-v3/`.
+> - **Which responses `alipay-v3` verifies is a deliberate choice, because the two SDKs disagree.**
+>   Java v3 3.1.89 verifies a 2xx response unless its body is empty, and verifies an error response
+>   only when it carries `alipay-signature`. Node 4.14.0 verifies every response below status 400,
+>   including an empty body, and never verifies an error response. The platform takes the stricter rule
+>   in each case: every response below 400 must carry a valid signature, an empty body included, and an
+>   error response is verified when it is signed. An unsigned error response fails as the error it
+>   already is. The rule is one function in the signer (`alipayV3ResponseMustVerify`), so a different
+>   ruling changes one line.
+> - The vendor public key is the instance's `vendorPublicKeyRef`, the "vendor public-key
+>   `credentialRef`" this decision names. It resolves through the same chain as `credentialRef`, and
+>   an instance whose public key does not resolve is degraded, not served unverified.
+
 ### D3 — Secrets are references; tokens are runtime state in a connection record
 
 - Every secret an author names is a `credentialRef`, resolved through `CredentialResolver` (ADR-0097 §3,
@@ -418,6 +446,12 @@ platform public key rather than rotating certificates, but the response-verifica
 - An `openapi` instance over the Alipay v3 document, normalized to JSON first, with
   `auth: { type: 'signed', scheme: 'alipay-v3', … }`, dispatches a sandbox query over https and
   verifies the response signature. Signer unit tests meet D2.3's vector rule.
+  > **Amended (2026-10-31, #26710).** The maintainer ruled 「算」: a local end-to-end test counts as this
+  > line, and no live sandbox call is owed. In that test, an `openapi` instance over the vendor's
+  > `alipay.trade.query` operation dispatches through a flow `connector_action` to a local stand-in for
+  > the gateway. The stand-in checks the request signature and signs its answer, and a tampered or
+  > unsigned answer fails the dispatch. The test is
+  > `packages/connectors/connector-openapi/src/alipay-v3-acceptance.test.ts`.
 - `client_credentials` and the dynamic-registration flow pass a contract test against the embedded
   OAuth authorization server.
 - An unknown `grant`, `vendor` or `scheme`, or an inline secret on any variant, is refused at publish
