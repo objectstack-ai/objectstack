@@ -62,6 +62,7 @@
     },
     "api/AppDefinitionResponse": {
       "sites": [
+        "data",
         "data.navigation.element.lazy",
         "data.navigation.element.lazy.options[0]"
       ]
@@ -75,6 +76,7 @@
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
+        "manifest.apps.element",
         "manifest.assignmentRules.element",
         "manifest.assignmentRules.element.entries.element",
         "manifest.assignmentRules.element.entries.element.assignTo",
@@ -209,6 +211,7 @@
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
+        "data.options[1].manifest.apps.element",
         "data.options[1].manifest.assignmentRules.element",
         "data.options[1].manifest.assignmentRules.element.entries.element",
         "data.options[1].manifest.assignmentRules.element.entries.element.assignTo",
@@ -339,6 +342,7 @@
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
+        "options[1].manifest.apps.element",
         "options[1].manifest.assignmentRules.element",
         "options[1].manifest.assignmentRules.element.entries.element",
         "options[1].manifest.assignmentRules.element.entries.element.assignTo",
@@ -412,6 +416,7 @@
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
+        "data.packages.element.options[1].manifest.apps.element",
         "data.packages.element.options[1].manifest.assignmentRules.element",
         "data.packages.element.options[1].manifest.assignmentRules.element.entries.element",
         "data.packages.element.options[1].manifest.assignmentRules.element.entries.element.assignTo",
@@ -1513,6 +1518,7 @@
     },
     "ui/App": {
       "sites": [
+        "",
         "navigation.element.lazy",
         "navigation.element.lazy.options[0]"
       ]
