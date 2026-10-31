@@ -165,8 +165,8 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorInstanceSignedAliyunAcs3AuthSchema, ConnectorInstanceSignedAuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorSigningSchemeSchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
-import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorInstanceSignedAliyunAcs3Auth, ConnectorInstanceSignedAuth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorSigningScheme, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
+import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorInstanceSignedAliyunAcs3AuthSchema, ConnectorInstanceSignedAuthSchema, ConnectorInstanceSignedTencentCloudTc3AuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorSigningSchemeSchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
+import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorInstanceSignedAliyunAcs3Auth, ConnectorInstanceSignedAuth, ConnectorInstanceSignedTencentCloudTc3Auth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorSigningScheme, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
 
 // Validate data
 const result = ConnectorSchema.parse(data);
@@ -293,7 +293,7 @@ const result = ConnectorSchema.parse(data);
 | **appId** | `string` | ✅ | The vendor's app identifier (not a secret): Feishu `app_id`, DingTalk `appKey`, WeCom `corpid`. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the app secret (WeCom: the application `corpsecret`). Never an inline secret. |
 
-### Nested Shape: `Connector.auth[option 7]`
+### Nested Shape: `Connector.auth[option 7][scheme='aliyun-acs3-hmac-sha256']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -301,6 +301,15 @@ const result = ConnectorSchema.parse(data);
 | **scheme** | `'aliyun-acs3-hmac-sha256'` | ✅ | Alibaba Cloud OpenAPI V3 signature (ACS3-HMAC-SHA256). |
 | **keyId** | `string` | ✅ | The AccessKey ID (not a secret); sent in the `Credential` of every signature. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the AccessKey secret, the HMAC key every request is signed with. Never an inline secret. |
+
+### Nested Shape: `Connector.auth[option 7][scheme='tencentcloud-tc3-hmac-sha256']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'tencentcloud-tc3-hmac-sha256'` | ✅ | Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The SecretId (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the SecretKey every request's signing key is derived from. Never an inline secret. |
 
 ### Nested Shape: `Connector.actions[number]`
 
@@ -481,7 +490,7 @@ Type: `{ type: 'oauth2'; tokenUrl?: string; scopes?: string[]; resource?: string
 
 #### Option 7
 
-Type: `{ type: 'signed'; scheme: 'aliyun-acs3-hmac-sha256'; keyId: string; credentialRef: string }`
+Type: `{ type: 'signed'; scheme: 'aliyun-acs3-hmac-sha256'; keyId: string; credentialRef: string } | { type: 'signed'; scheme: 'tencentcloud-tc3-hmac-sha256'; keyId: string; credentialRef: string }`
 
 ---
 
@@ -640,6 +649,35 @@ This schema accepts one of the following structures:
 
 ---
 
+#### Option 2
+
+**Type:** `signed`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'tencentcloud-tc3-hmac-sha256'` | ✅ | Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The SecretId (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the SecretKey every request's signing key is derived from. Never an inline secret. |
+
+---
+
+
+---
+
+## ConnectorInstanceSignedTencentCloudTc3Auth
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'tencentcloud-tc3-hmac-sha256'` | ✅ | Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The SecretId (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the SecretKey every request's signing key is derived from. Never an inline secret. |
+
 
 ---
 
@@ -671,11 +709,12 @@ Retry strategy
 
 ## ConnectorSigningScheme
 
-Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature).
+Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature) or `tencentcloud-tc3-hmac-sha256` (Tencent Cloud API 3.0 signature v3).
 
 ### Allowed Values
 
 * `aliyun-acs3-hmac-sha256`
+* `tencentcloud-tc3-hmac-sha256`
 
 
 ---
@@ -815,7 +854,7 @@ Connector type
 | **appId** | `string` | ✅ | The vendor's app identifier (not a secret): Feishu `app_id`, DingTalk `appKey`, WeCom `corpid`. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the app secret (WeCom: the application `corpsecret`). Never an inline secret. |
 
-### Nested Shape: `DeclarativeConnectorEntry.auth[option 7]`
+### Nested Shape: `DeclarativeConnectorEntry.auth[option 7][scheme='aliyun-acs3-hmac-sha256']`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -823,6 +862,15 @@ Connector type
 | **scheme** | `'aliyun-acs3-hmac-sha256'` | ✅ | Alibaba Cloud OpenAPI V3 signature (ACS3-HMAC-SHA256). |
 | **keyId** | `string` | ✅ | The AccessKey ID (not a secret); sent in the `Credential` of every signature. |
 | **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the AccessKey secret, the HMAC key every request is signed with. Never an inline secret. |
+
+### Nested Shape: `DeclarativeConnectorEntry.auth[option 7][scheme='tencentcloud-tc3-hmac-sha256']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'signed'` | ✅ |  |
+| **scheme** | `'tencentcloud-tc3-hmac-sha256'` | ✅ | Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256). |
+| **keyId** | `string` | ✅ | The SecretId (not a secret); sent in the `Credential` of every signature. |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference resolved to the SecretKey every request's signing key is derived from. Never an inline secret. |
 
 ### Nested Shape: `DeclarativeConnectorEntry.actions[number]`
 

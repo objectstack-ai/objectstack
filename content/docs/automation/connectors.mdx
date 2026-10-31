@@ -483,12 +483,21 @@ auth: {
   keyId: 'YourAccessKeyId',               // the AccessKey ID: public, stays in metadata
   credentialRef: 'ALIYUN_ACCESS_KEY_SECRET',
 }
+
+// Tencent Cloud API 3.0, signature v3 (TC3-HMAC-SHA256):
+auth: {
+  type: 'signed',
+  scheme: 'tencentcloud-tc3-hmac-sha256',
+  keyId: 'YourSecretId',                  // the SecretId: public, stays in metadata
+  credentialRef: 'TENCENT_SECRET_KEY',
+}
 ```
 
 What the platform does with it:
 
 - **Every request is signed, each attempt fresh.** A retry is signed again with
-  a new nonce and date, so a scheme that refuses a replayed nonce accepts it.
+  a new nonce and date, so a scheme that refuses a replayed nonce or a stale
+  timestamp accepts it.
 - **The key never reaches the provider.** The automation service binds the
   resolved key to the scheme's signer at materialization and hands the
   provider the signer only. A datasource cannot borrow a `signed` instance
@@ -501,6 +510,14 @@ What the platform does with it:
   `x-acs-content-sha256` and `Authorization`. The API's own action and version
   are yours to send, as `x-acs-action` / `x-acs-version` in `defaultHeaders`
   (rest) or in each call's headers.
+- **`tencentcloud-tc3-hmac-sha256`** signs `content-type` and `host`, and sets
+  `X-TC-Timestamp` and `Authorization`. The service in the signature's scope is
+  the first label of the endpoint host (`cvm.tencentcloudapi.com`, or a
+  regional `cvm.ap-guangzhou.tencentcloudapi.com`, is `cvm`), so point
+  `baseUrl` at the product's own endpoint. `X-TC-Action`, `X-TC-Version` and
+  `X-TC-Region` are yours to send and are not signed. A request without a body
+  is sent with `Content-Type: application/x-www-form-urlencoded`, the type it
+  is signed with.
 
 What the publish door refuses:
 
@@ -509,7 +526,8 @@ What the publish door refuses:
   signer and its test vectors, so a scheme the server cannot run is never
   accepted.
 - **An inline key**: `secret`, `privateKey`, `secretKey` or `accessKeySecret`
-  is refused by name, pointing at `credentialRef`. An authored `signature` is
+  is refused by name, pointing at `credentialRef`. The vendors' words for the
+  key id (`accessKeyId`, `secretId`) are answered with `keyId`. An authored `signature` is
   refused too: it is computed for every request.
 - **`provider: 'mcp'`**, at `auth.type`: an MCP server is not signed per
   request. Declare `provider: 'rest'` or `provider: 'openapi'`.

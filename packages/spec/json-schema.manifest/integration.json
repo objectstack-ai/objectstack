@@ -17,6 +17,7 @@
     "integration/ConnectorInstanceOAuth2ClientCredentialsAuth",
     "integration/ConnectorInstanceSignedAliyunAcs3Auth",
     "integration/ConnectorInstanceSignedAuth",
+    "integration/ConnectorInstanceSignedTencentCloudTc3Auth",
     "integration/ConnectorOAuth2Grant",
     "integration/ConnectorRetryStrategy",
     "integration/ConnectorSigningScheme",
