@@ -58,7 +58,7 @@
  * live.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 // The mocked module (see `vi.mock` below), loaded at module top.
 import { matchesFilterCondition } from '@objectstack/formula';
 import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, jsonColumnOperatorRefusalText } from '@objectstack/core';
@@ -137,13 +137,19 @@ afterEach(async () => {
     try { await booted.pop()!.destroy(); } catch { /* noop */ }
   }
 });
+const sharedEngines: ObjectQL[] = [];
+afterAll(async () => {
+  while (sharedEngines.length) {
+    try { await sharedEngines.pop()!.destroy(); } catch { /* noop */ }
+  }
+});
 
 let seq = 0;
 /**
  * One engine and plugin, with ONE policy whose `using` and `check` are the same
  * predicate — or, given `using`, a policy whose `using` is that one instead.
  */
-async function boot(makeDriver: () => Driver, predicate: string, using: string = predicate) {
+async function boot(makeDriver: () => Driver, predicate: string, using: string = predicate, into: ObjectQL[] = booted) {
   const OBJ = `qa_due_stored_${process.pid}_${++seq}`;
   const engine = new ObjectQL();
   engine.registerDriver(makeDriver() as never, true);
@@ -176,7 +182,7 @@ async function boot(makeDriver: () => Driver, predicate: string, using: string =
   // A real `single` install's Default Organization: the system writes below
   // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
   await installDefaultOrganization(engine);
-  booted.push(engine);
+  into.push(engine);
 
   const set = PermissionSetSchema.parse({
     name: 'qa_due_guard',
@@ -210,6 +216,42 @@ async function boot(makeDriver: () => Driver, predicate: string, using: string =
   const shownTo = async (id: string) =>
     ((await engine.find(OBJ, { where: { id }, context: caller } as never)) as unknown[]).length > 0;
   return { OBJ, engine, caller, storedRow, shownTo, logger: ctx.logger };
+}
+
+/**
+ * One stack per (driver, `using`, `check`), shared by every cell that names that
+ * policy. A cell's verdict is a per-row predicate over the row it writes, and every
+ * cell writes and reads only under ids of its own (`ids()`), so what an earlier
+ * cell stored on the stack is never a row a later cell writes, updates or reads:
+ * a predicate update matches `title: 'batch'`, which only that cell's own row
+ * carries. A cell reads the server log from its own mark on (`warnsSince`).
+ */
+const sharedStacks = new Map<string, ReturnType<typeof boot>>();
+function stackFor(driverName: string, makeDriver: () => Driver, predicate: string, using: string = predicate) {
+  const key = `${driverName} :: ${using} :: ${predicate}`;
+  let stack = sharedStacks.get(key);
+  if (!stack) {
+    stack = boot(makeDriver, predicate, using, sharedEngines);
+    sharedStacks.set(key, stack);
+  }
+  return stack;
+}
+let cellSeq = 0;
+/** This cell's own row ids: `w` the caller's write, `r` the system's read row, `u`/`p` an update's row. */
+const ids = () => {
+  const n = ++cellSeq;
+  return { w: `w${n}`, r: `r${n}`, u: `u${n}`, p: `p${n}` };
+};
+
+// The first boot and the first write and read on each driver pay the cold paths
+// (module graph, the driver's first statement): paid here, out of every cell's
+// clock, on a throwaway stack.
+for (const [, makeDriver] of DRIVERS) {
+  const engines: ObjectQL[] = [];
+  const warm = await boot(makeDriver, "record.title == 'x'", "record.title == 'x'", engines);
+  await warm.engine.insert(warm.OBJ, { id: 'warm', title: 'x' }, { context: warm.caller } as never);
+  await warm.shownTo('warm');
+  for (const engine of engines) await engine.destroy();
 }
 
 type Envelope = { code: string; status: number };
@@ -271,50 +313,54 @@ for (const [driverName, makeDriver] of DRIVERS) {
     for (const cell of CELLS) {
       const verdict = cell.admitted ? 'admitted and shown' : 'refused 403 and hidden';
       it(`${cell.predicate}, ${cell.column} written as ${show(cell.value)}: ${verdict}`, async () => {
-        const r = await boot(makeDriver, cell.predicate);
-        const written = await outcome(r.engine.insert(r.OBJ, { id: 'w', [cell.column]: cell.value }, { context: r.caller } as never));
+        const r = await stackFor(driverName, makeDriver, cell.predicate);
+        const id = ids();
+        const written = await outcome(r.engine.insert(r.OBJ, { id: id.w, [cell.column]: cell.value }, { context: r.caller } as never));
         expect(written).toEqual(cell.admitted ? 'admitted' : DENIED);
         // The read under the same predicate, over the same value stored by the system.
-        await r.engine.insert(r.OBJ, { id: 'r', [cell.column]: cell.value }, { context: SYS_CTX } as never);
-        expect((await r.storedRow('r'))?.[cell.column]).toEqual(cell.stored);
-        expect(await r.shownTo('r')).toBe(cell.admitted);
+        await r.engine.insert(r.OBJ, { id: id.r, [cell.column]: cell.value }, { context: SYS_CTX } as never);
+        expect((await r.storedRow(id.r))?.[cell.column]).toEqual(cell.stored);
+        expect(await r.shownTo(id.r)).toBe(cell.admitted);
         // A refused write stored nothing; an admitted one stored the same row.
-        const w = await r.storedRow('w');
+        const w = await r.storedRow(id.w);
         expect(w === undefined ? undefined : w[cell.column]).toEqual(cell.admitted ? cell.stored : undefined);
       });
     }
 
     it("a by-id update judges the stored form too: onto the day as an instant 'admitted', onto the next day 403 and unchanged", async () => {
-      const r = await boot(makeDriver, "record.due_on == '2026-01-05'");
-      await r.engine.insert(r.OBJ, { id: 'u', due_on: '2026-01-05' }, { context: SYS_CTX } as never);
-      expect(await outcome(r.engine.update(r.OBJ, { due_on: '2026-01-05T23:30:00Z' }, { where: { id: 'u' }, context: r.caller } as never)))
+      const r = await stackFor(driverName, makeDriver, "record.due_on == '2026-01-05'");
+      const { u } = ids();
+      await r.engine.insert(r.OBJ, { id: u, due_on: '2026-01-05' }, { context: SYS_CTX } as never);
+      expect(await outcome(r.engine.update(r.OBJ, { due_on: '2026-01-05T23:30:00Z' }, { where: { id: u }, context: r.caller } as never)))
         .toBe('admitted');
-      expect(await outcome(r.engine.update(r.OBJ, { due_on: new Date('2026-01-06T00:30:00Z') }, { where: { id: 'u' }, context: r.caller } as never)))
+      expect(await outcome(r.engine.update(r.OBJ, { due_on: new Date('2026-01-06T00:30:00Z') }, { where: { id: u }, context: r.caller } as never)))
         .toEqual(DENIED);
-      expect((await r.storedRow('u'))?.due_on).toBe('2026-01-05');
+      expect((await r.storedRow(u))?.due_on).toBe('2026-01-05');
     });
 
     it("[#21238] a by-id update judges a lone scalar on a multi-valued column as its stored list: 'x' admitted, 'xy' 403 and unchanged", async () => {
-      const r = await boot(makeDriver, "record.tags.contains('x')");
-      await r.engine.insert(r.OBJ, { id: 'u', tags: ['x', 'z'] }, { context: SYS_CTX } as never);
-      expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { id: 'u' }, context: r.caller } as never)))
+      const r = await stackFor(driverName, makeDriver, "record.tags.contains('x')");
+      const { u } = ids();
+      await r.engine.insert(r.OBJ, { id: u, tags: ['x', 'z'] }, { context: SYS_CTX } as never);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { id: u }, context: r.caller } as never)))
         .toBe('admitted');
-      expect((await r.storedRow('u'))?.tags).toEqual(['x']);
-      expect(await outcome(r.engine.update(r.OBJ, { tags: 'xy' }, { where: { id: 'u' }, context: r.caller } as never)))
+      expect((await r.storedRow(u))?.tags).toEqual(['x']);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'xy' }, { where: { id: u }, context: r.caller } as never)))
         .toEqual(DENIED);
-      expect((await r.storedRow('u'))?.tags).toEqual(['x']);
-      expect(await r.shownTo('u')).toBe(true);
+      expect((await r.storedRow(u))?.tags).toEqual(['x']);
+      expect(await r.shownTo(u)).toBe(true);
     });
 
     it("[#21238] a predicate update judges a lone scalar on a multi-valued column as its stored list: 'x' admitted, 'xy' 403 and unchanged", async () => {
-      const r = await boot(makeDriver, "record.tags.contains('x')");
-      await r.engine.insert(r.OBJ, { id: 'p', title: 'batch', tags: ['x'] }, { context: SYS_CTX } as never);
+      const r = await stackFor(driverName, makeDriver, "record.tags.contains('x')");
+      const { p } = ids();
+      await r.engine.insert(r.OBJ, { id: p, title: 'batch', tags: ['x'] }, { context: SYS_CTX } as never);
       expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { title: 'batch' }, multi: true, context: r.caller } as never)))
         .toBe('admitted');
-      expect((await r.storedRow('p'))?.tags).toEqual(['x']);
+      expect((await r.storedRow(p))?.tags).toEqual(['x']);
       expect(await outcome(r.engine.update(r.OBJ, { tags: 'xy' }, { where: { title: 'batch' }, multi: true, context: r.caller } as never)))
         .toEqual(DENIED);
-      expect((await r.storedRow('p'))?.tags).toEqual(['x']);
+      expect((await r.storedRow(p))?.tags).toEqual(['x']);
     });
   });
 }
@@ -358,25 +404,29 @@ const JSON_COLUMN_CELLS: JsonColumnCell[] = [
   { predicate: "record.title in ['x']", column: 'title', value: 'x', admitted: true, stored: 'x' },
 ];
 
-/** The write gate's server-log lines for this refusal. */
-const refusalLines = (logger: { warn: unknown }): string[] =>
-  (logger.warn as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0])).filter((l) => l.includes('RLS check REFUSED'));
+/** Where the shared stack's server log stands before this cell writes. */
+const warnMark = (logger: { warn: unknown }): number => (logger.warn as ReturnType<typeof vi.fn>).mock.calls.length;
+/** The write gate's server-log lines for this refusal: this cell's, from its mark on. */
+const refusalLines = (logger: { warn: unknown }, mark: number): string[] =>
+  (logger.warn as ReturnType<typeof vi.fn>).mock.calls.slice(mark).map((c) => String(c[0])).filter((l) => l.includes('RLS check REFUSED'));
 
 for (const [driverName, makeDriver] of DRIVERS) {
   describe(`[#21254] ${driverName}: an operator the read refuses on a declared JSON-stored column is refused by the write check, with the read's answer`, () => {
     for (const cell of JSON_COLUMN_CELLS) {
       const verdict = cell.refused ? 'refused 400 INVALID_FILTER, as the read is' : cell.admitted ? 'admitted and shown' : 'refused 403 and hidden';
       it(`${cell.predicate}, ${cell.column} written as ${show(cell.value)}: ${verdict}`, async () => {
-        const r = await boot(makeDriver, cell.predicate);
+        const r = await stackFor(driverName, makeDriver, cell.predicate);
+        const id = ids();
+        const mark = warnMark(r.logger);
         const written = await r.engine
-          .insert(r.OBJ, { id: 'w', [cell.column]: cell.value }, { context: r.caller } as never)
+          .insert(r.OBJ, { id: id.w, [cell.column]: cell.value }, { context: r.caller } as never)
           .then(() => 'admitted' as const, (e: unknown) => e);
-        await r.engine.insert(r.OBJ, { id: 'r', [cell.column]: cell.value }, { context: SYS_CTX } as never);
+        await r.engine.insert(r.OBJ, { id: id.r, [cell.column]: cell.value }, { context: SYS_CTX } as never);
         if (!cell.refused) {
           expect(written === 'admitted' ? written : envelopeOf(written)).toEqual(cell.admitted ? 'admitted' : DENIED);
-          expect((await r.storedRow('r'))?.[cell.column]).toEqual(cell.stored);
-          expect(await r.shownTo('r')).toBe(cell.admitted);
-          expect(refusalLines(r.logger)).toEqual([]);
+          expect((await r.storedRow(id.r))?.[cell.column]).toEqual(cell.stored);
+          expect(await r.shownTo(id.r)).toBe(cell.admitted);
+          expect(refusalLines(r.logger, mark)).toEqual([]);
           return;
         }
         const [field, op, bare] = cell.refused;
@@ -384,15 +434,15 @@ for (const [driverName, makeDriver] of DRIVERS) {
         // The write: the read's code and status, and core's words, which withhold the field and the operator.
         expect(envelopeOf(written)).toEqual(REFUSED);
         expect((written as Error).message).toBe(words.message);
-        expect(await r.storedRow('w')).toBeUndefined();
+        expect(await r.storedRow(id.w)).toBeUndefined();
         // The diagnostic the message points to is in the server log, beside the policy.
-        const lines = refusalLines(r.logger);
+        const lines = refusalLines(r.logger, mark);
         expect(lines).toHaveLength(1);
         expect(lines[0]).toContain("policy 'due_guard'");
         expect(lines[0]).toContain(words.diagnostic);
         // The read the same policy scopes, over the same value stored by the system: the same answer.
         const read = await r.engine
-          .find(r.OBJ, { where: { id: 'r' }, context: r.caller } as never)
+          .find(r.OBJ, { where: { id: id.r }, context: r.caller } as never)
           .then(() => 'answered' as const, (e: unknown) => e);
         expect(envelopeOf(read)).toEqual(REFUSED);
         expect((read as Error).message).toBe(words.message);
@@ -403,13 +453,14 @@ for (const [driverName, makeDriver] of DRIVERS) {
     // predicate an update's pre-image read is refused first, by the driver,
     // and its gate fails closed 403 before any check runs.
     it("record.tags != 'x' as the check: a by-id update and a predicate update are refused 400 too, and change nothing", async () => {
-      const r = await boot(makeDriver, "record.tags != 'x'", "record.title == 'batch'");
-      await r.engine.insert(r.OBJ, { id: 'u', title: 'batch', tags: ['y'] }, { context: SYS_CTX } as never);
-      expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { id: 'u' }, context: r.caller } as never)))
+      const r = await stackFor(driverName, makeDriver, "record.tags != 'x'", "record.title == 'batch'");
+      const { u } = ids();
+      await r.engine.insert(r.OBJ, { id: u, title: 'batch', tags: ['y'] }, { context: SYS_CTX } as never);
+      expect(await outcome(r.engine.update(r.OBJ, { tags: 'x' }, { where: { id: u }, context: r.caller } as never)))
         .toEqual(REFUSED);
       expect(await outcome(r.engine.update(r.OBJ, { tags: ['x'] }, { where: { title: 'batch' }, multi: true, context: r.caller } as never)))
         .toEqual(REFUSED);
-      expect((await r.storedRow('u'))?.tags).toEqual(['y']);
+      expect((await r.storedRow(u))?.tags).toEqual(['y']);
     });
   });
 }

@@ -113,7 +113,7 @@ import { describe, it, expect } from 'vitest';
 import { ObjectGanttSchema } from '../zod/objectql.zod.js';
 import { StrictAnyComponentSchema } from '../zod/index.zod';
 import type { GanttConfig, ObjectGanttSchema as ObjectGanttSchemaTS, SortConfig } from '../objectql.js';
-import type { ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement } from '@objectstack/spec/ui';
 
 const MINIMAL = {
   type: 'object-gantt',
@@ -381,5 +381,6 @@ type Expect<T extends true> = T;
 // `object-gantt` row's `ViewFilterRule` array since objectui#6152 round 10 (was `any[]`).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type _StaticDataIsDeclared = Expect<Equal<ObjectGanttSchemaTS['staticData'], any[] | undefined>>;
-export type _FilterIsDeclared = Expect<Equal<ObjectGanttSchemaTS['filter'], ViewFilterRule[] | undefined>>;
+// objectstack#28020: the row's array element is a flat rule OR an any-of group.
+export type _FilterIsDeclared = Expect<Equal<ObjectGanttSchemaTS['filter'], ViewFilterElement[] | undefined>>;
 export type _SortIsDeclared = Expect<Equal<ObjectGanttSchemaTS['sort'], SortConfig[] | undefined>>;
