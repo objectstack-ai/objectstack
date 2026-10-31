@@ -39,6 +39,11 @@ import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from '.
 // door's and the MCP stdio bridge's, imported rather than re-walked so this door
 // cannot disagree with them about which conditions a filter holds.
 import { relationConditionSites } from '@objectstack/core';
+// [ADR-0090 D10 rule 5] The agent forward credential: minted here, redeemed by
+// the doors that serve forward targets (the dispatcher, the REST face, the
+// identity mount). One module in `@objectstack/rest`, which all three reach.
+import { FORWARD_CREDENTIAL_HEADER, withForwardCredential, type ForwardAgentProvenance } from '@objectstack/rest';
+import { MCP_OAUTH_SCOPE_ACTIONS, MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 // [#25653] The app-automation elevation mark an action body's context carries
 // — see `buildActionExecutionContext`.
 import { markAppAutomationElevation } from '@objectstack/core';
@@ -1182,6 +1187,16 @@ const API_FORWARD_HEADER_ALLOWLIST: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * [ADR-0090 D10 rule 5] The caller's identity headers, of
+ * {@link API_FORWARD_HEADER_ALLOWLIST}: dropped from a forward that carries an
+ * agent forward credential, so the agent's token never reaches the target and
+ * the target reads exactly one credential, the one the server minted.
+ */
+const API_FORWARD_IDENTITY_HEADERS: ReadonlySet<string> = new Set([
+    'authorization', 'cookie', 'x-admin-session-token', 'x-api-key',
+]);
+
+/**
  * Marks a forwarded request so a `target` that is itself an action door
  * cannot loop: the door refuses a request already carrying it.
  */
@@ -1450,16 +1465,32 @@ export type ApiForwardTargetDoor = 'identity' | 'mcp' | 'platform';
  * Read by `run_action` and the REST action door (the refusal, before any
  * forward) and by `list_actions` (the same refusal, carried on the listing as
  * the action's `unavailable` mark), so the listing and the run door cannot
- * disagree. ⛔ This table states what each door accepts today; it changes no
- * door. Letting an OAuth-connected agent reach a door that does not accept its
- * token is a separate decision (a server-built forward credential), never a
- * new cell here.
+ * disagree. ⛔ This table states what each door accepts of the CALLER'S OWN
+ * credential; it changes no door. Where an agent reaches a door that does not
+ * accept its token, the forward carries a credential the server mints instead,
+ * and only at the cells {@link API_FORWARD_AGENT_CREDENTIAL_DOORS} names.
  */
 const API_FORWARD_DOOR_ACCEPTS: Readonly<Record<ApiForwardTargetDoor, ReadonlySet<ApiForwardCredentialKind>>> = {
     identity: new Set<ApiForwardCredentialKind>(['session']),
     mcp: new Set<ApiForwardCredentialKind>(['session', 'api_key', 'oauth']),
     platform: new Set<ApiForwardCredentialKind>(['session', 'api_key']),
 };
+
+/**
+ * [ADR-0090 D10 rule 5] The cells of {@link API_FORWARD_DOOR_ACCEPTS} that flip
+ * from "refuse by name" to "accept with a forward credential": an OAuth-connected
+ * agent at an identity route and at a platform route. The forward then carries
+ * a credential the server mints for that one forward
+ * (`@objectstack/rest` `withForwardCredential`), never the agent's token, and
+ * the target resolves it to the same agent principal. The platform cell is
+ * bounded by the scope-family rule ({@link apiForwardScopeFamilyRefusal}).
+ *
+ * ⛔ Exactly these two. `api_key` × `identity` keeps refusing by name: an API
+ * key is its owner's credential, not an agent principal (ADR-0090 D10, the
+ * 2026-09-16 note), so there is no agent for a forward credential to carry.
+ * `oauth` × `mcp` needs none: that door honours the caller's own token.
+ */
+const API_FORWARD_AGENT_CREDENTIAL_DOORS: ReadonlySet<ApiForwardTargetDoor> = new Set<ApiForwardTargetDoor>(['identity', 'platform']);
 
 /** The door a forward `path` (or an action's declared `target`) is served by. */
 function apiForwardTargetDoor(path: string): ApiForwardTargetDoor {
@@ -1470,14 +1501,50 @@ function apiForwardTargetDoor(path: string): ApiForwardTargetDoor {
     return 'platform';
 }
 
+/**
+ * The metadata door (`/api/v1/meta/…`, plain or environment-scoped). A
+ * state-changing forward to it stays outside the forward credential (ADR-0090
+ * D10 rule 5, the scope-family rule's third clause): an agent authors metadata
+ * through the MCP authoring tools under `metadata:write`, which save drafts a
+ * person publishes, never through an action forward.
+ */
+function isMetadataDoorTarget(path: string): boolean {
+    return /^\/api\/v1(?:\/environments\/[^/]+)?\/meta(?:[/?]|$)/.test(path);
+}
+
+/**
+ * The agent a forward credential would carry for this request: the agent
+ * principal the MCP door resolved from a verified OAuth access token. `undefined`
+ * for every other caller, and for an OAuth caller the door did not resolve to an
+ * agent (a token naming no client), whom the forward has no agent to carry for.
+ */
+export function apiForwardAgentOf(requestContext: HttpProtocolContext | undefined): ForwardAgentProvenance | undefined {
+    const ec: any = requestContext?.executionContext;
+    if (!ec || ec.principalKind !== 'agent' || !Array.isArray(ec.oauthScopes)) return undefined;
+    const userId = typeof ec.onBehalfOf?.userId === 'string' ? ec.onBehalfOf.userId : ec.userId;
+    const clientId = ec.performedBy?.clientId;
+    if (typeof userId !== 'string' || !userId || typeof clientId !== 'string' || !clientId) return undefined;
+    return {
+        userId,
+        clientId,
+        scopes: (ec.oauthScopes as unknown[]).filter((s): s is string => typeof s === 'string'),
+        ...(typeof ec.tenantId === 'string' && ec.tenantId ? { organizationId: ec.tenantId } : {}),
+    };
+}
+
 /** The kind of credential that admitted this request's caller (see {@link ApiForwardCredentialKind}). */
 export function apiForwardCredentialKind(requestContext: HttpProtocolContext | undefined): ApiForwardCredentialKind | undefined {
     if (Array.isArray(requestContext?.executionContext?.oauthScopes)) return 'oauth';
     return requestContext?.admission?.credential;
 }
 
-/** A forward refusal: the status and standard code the target would have answered, and the sentence that says why. */
-export type ApiForwardCredentialRefusal = { status: 401; code: string; message: string };
+/**
+ * A forward refusal: the status and standard code, and the sentence that says
+ * why. `401` when the target's door cannot read the caller's credential (the
+ * status the target would have answered); `403` when the scope-family rule
+ * refuses an agent the consent did not grant the forward's family.
+ */
+export type ApiForwardCredentialRefusal = { status: 401 | 403; code: string; message: string };
 
 /**
  * The refusal for running `action` by forward with this caller's credential —
@@ -1504,10 +1571,73 @@ export function apiForwardCredentialRefusal(
     const door = apiForwardTargetDoor(target);
     if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return null;
     const path = (typeof action?.target === 'string' ? action.target : target).split('?')[0]!;
+    // [ADR-0090 D10 rule 5] The two flipped cells: an agent principal is carried
+    // by a forward credential, bounded by the scope-family rule.
+    if (kind === 'oauth' && API_FORWARD_AGENT_CREDENTIAL_DOORS.has(door)) {
+        const agent = apiForwardAgentOf(requestContext);
+        if (agent) return apiForwardScopeFamilyRefusal(agent.scopes, action, target, path);
+    }
     const message = kind === 'api_key'
         ? apiActionIdentityRouteKeyRefusal(action, path)
         : apiActionOAuthForwardRefusal(action, path, door);
     return { status: 401, code: standardErrorCodeForHttpStatus(401), message };
+}
+
+/**
+ * [ADR-0090 D10 rule 5, the scope-family rule] Whether an agent's consented
+ * scopes cover a forward outside MCP — `null` when they do, else the refusal,
+ * given by name before anything is minted or sent.
+ *
+ * Outside MCP there are no tool families, and a target that gates on system
+ * permissions only would see the agent's `systemPermissions`, which under
+ * `actions:execute` are the delegating user's whole list. So the forward's
+ * method names a data family the agent must ALSO hold:
+ *
+ *  1. every forward credential needs `actions:execute` (the action doors serve
+ *     an agent only under it, so this is the floor, restated where it is read);
+ *  2. a safe method (`GET`, `HEAD`) needs `data:read` or `data:write`, any
+ *     other method `data:write` — a read-consented agent can read through an
+ *     action and can never change state through one, at any target;
+ *  3. a state-changing method on the metadata door is outside the flip and
+ *     keeps refusing by name ({@link isMetadataDoorTarget}).
+ *
+ * `method` is the forward's (`action.method`, default `POST`, as
+ * {@link buildApiActionRequest} reads it), so the listing and the run door
+ * judge the same request.
+ */
+function apiForwardScopeFamilyRefusal(
+    scopes: readonly string[],
+    action: any,
+    target: string,
+    path: string,
+): ApiForwardCredentialRefusal | null {
+    const method = String(action?.method || 'POST').toUpperCase();
+    const safe = method === 'GET' || method === 'HEAD';
+    const name = action?.name ?? 'unknown';
+    if (!safe && isMetadataDoorTarget(target)) {
+        return {
+            status: 403,
+            code: standardErrorCodeForHttpStatus(403),
+            message:
+                `Action '${name}' sends a ${method} request to the metadata endpoint ('${path}'), and an AI agent ` +
+                `does not change metadata through an action. The action was not run. An agent connected with the '` +
+                `${MCP_OAUTH_SCOPE_METADATA_WRITE}' scope builds metadata as drafts through its authoring tools, and a person publishes them.`,
+        };
+    }
+    const needs = !scopes.includes(MCP_OAUTH_SCOPE_ACTIONS)
+        ? [MCP_OAUTH_SCOPE_ACTIONS]
+        : safe
+            ? (scopes.includes(MCP_OAUTH_SCOPE_DATA_READ) || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE) ? [] : [MCP_OAUTH_SCOPE_DATA_READ])
+            : (scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE) ? [] : [MCP_OAUTH_SCOPE_DATA_WRITE]);
+    if (needs.length === 0) return null;
+    return {
+        status: 403,
+        code: standardErrorCodeForHttpStatus(403),
+        message:
+            `Action '${name}' sends a ${method} request to '${path}', which an AI agent may run only with the ` +
+            `'${needs[0]}' scope, and this connection was not granted it. The action was not run. Reconnect the ` +
+            `agent and grant '${needs[0]}', or ask a person signed in to the app to run it.`,
+    };
 }
 
 /**
@@ -1658,6 +1788,16 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * A caller whose credential the target's door cannot read is never
  * forwarded ({@link apiForwardCredentialRefusal}).
  *
+ * [ADR-0090 D10 rule 5] An AI agent principal is the one caller whose own
+ * credential is never carried. At the two cells the table flips
+ * ({@link API_FORWARD_AGENT_CREDENTIAL_DOORS}) the forward drops every caller
+ * identity header and carries a forward credential instead: minted here, after
+ * every gate of the action door has passed, bound to this one method, path and
+ * action run, spent by its first presentation and revoked when the target
+ * answers (`@objectstack/rest` `withForwardCredential`). The target resolves it
+ * to the same agent principal. And no credential-rotation header comes back to
+ * an agent: whatever the target mints stays with the target.
+ *
  * Relayed back: the status, the JSON body, and the credential-rotation
  * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
  * `set-admin-session-token` (the bearer lane) and `Set-Cookie` (the cookie
@@ -1671,14 +1811,14 @@ export async function forwardApiAction(
     inject: (url: string, init: RequestInit) => Promise<Response>,
     requestContext: HttpProtocolContext,
     req: ApiActionRequest,
-    mark: { objectName: string; actionName: string; target?: string },
+    mark: { objectName: string; actionName: string; target?: string; recordId?: string },
 ): Promise<ApiActionForwardAnswer> {
     // A caller whose credential the target's door cannot read (the table,
     // {@link API_FORWARD_DOOR_ACCEPTS}) is refused here, before the target is
     // called, with the status the target would have answered and the sentence
     // that says why. Both doors relay it as they relay a target's refusal.
     const refusal = apiForwardCredentialRefusal(
-        requestContext, { type: 'api', name: mark.actionName, target: mark.target }, req.path,
+        requestContext, { type: 'api', name: mark.actionName, target: mark.target, method: req.method }, req.path,
     );
     if (refusal) {
         return {
@@ -1691,10 +1831,18 @@ export async function forwardApiAction(
         requestContext?.request?.headers && typeof requestContext.request.headers === 'object'
             ? requestContext.request.headers
             : {};
+    // [ADR-0090 D10 rule 5] The agent this forward carries, when the caller is
+    // one and the target's door is a flipped cell; the refusal above has
+    // already answered every other agent forward.
+    const agent = apiForwardCredentialKind(requestContext) === 'oauth'
+        && API_FORWARD_AGENT_CREDENTIAL_DOORS.has(apiForwardTargetDoor(req.path))
+        ? apiForwardAgentOf(requestContext)
+        : undefined;
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(incoming)) {
         const key = k.toLowerCase();
         if (!API_FORWARD_HEADER_ALLOWLIST.has(key) || v == null) continue;
+        if (agent && API_FORWARD_IDENTITY_HEADERS.has(key)) continue;
         headers[key] = Array.isArray(v) ? v.join(', ') : String(v);
     }
     headers.accept = 'application/json';
@@ -1705,7 +1853,21 @@ export async function forwardApiAction(
         init.body = JSON.stringify(req.body);
     }
     const host = typeof incoming.host === 'string' && incoming.host ? incoming.host : 'localhost';
-    const res = await inject(`http://${host}${req.path}`, init);
+    const url = `http://${host}${req.path}`;
+    const res = agent
+        ? await withForwardCredential(
+            {
+                method: req.method,
+                path: req.path,
+                run: { objectName: mark.objectName, actionName: mark.actionName, ...(mark.recordId ? { recordId: mark.recordId } : {}) },
+                agent,
+            },
+            (handle) => {
+                headers[FORWARD_CREDENTIAL_HEADER] = handle;
+                return inject(url, init);
+            },
+        )
+        : await inject(url, init);
 
     const text = await res.text();
     let body: any;
@@ -1734,6 +1896,8 @@ export async function forwardApiAction(
         };
     }
     const relayed: Record<string, string | string[]> = {};
+    // [ADR-0090 D10 rule 5] Nothing a target mints reaches an agent caller.
+    if (agent) return { status: res.status, body, headers: relayed };
     for (const name of API_FORWARD_RELAYED_RESPONSE_HEADERS) {
         const value = res.headers.get(name);
         if (value) relayed[name] = value;
@@ -3729,7 +3893,7 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
         if ('message' in built) {
             throw Object.assign(new Error(built.message), { code: standardErrorCodeForHttpStatus(built.status), status: built.status });
         }
-        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name, target: action.target });
+        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name, target: action.target, ...(recordId ? { recordId: String(recordId) } : {}) });
         if (answer.status < 200 || answer.status >= 300) throw apiActionForwardRefusal(action, answer);
         return {
             ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}),

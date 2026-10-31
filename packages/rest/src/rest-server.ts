@@ -99,6 +99,8 @@ import {
     // them to `meta-item-read-routes.ts` (#23050 slice 13b).
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
+import { presentedForwardCredential, redeemForwardCredential } from './forward-credential.js';
+import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
 // `string | string[]`; the array arm is real (`NodeHttpServer` produces it,
 // measured over a socket on #6878) and this file used it as a string at ~50
@@ -3385,6 +3387,19 @@ export class RestServer {
             // are the composition's; each parameter below is this door's answer
             // from before the composition existed (its docblock tables them).
             let admittedBy: 'api_key' | 'session' | undefined;
+            // [ADR-0090 D10 rule 5, #28367] The ONE agent provenance this face
+            // accepts: a forward credential the action door minted for an AI
+            // agent's in-process `api` forward, redeemed here (once: the
+            // resolution is memoized per request by `resolveExecCtx`). It is
+            // only ever minted from an agent the MCP OAuth door already
+            // admitted, and resolves to the SAME agent principal. ⛔ An OAuth
+            // access token presented from outside stays unaccepted on this
+            // face: nothing below reads one, and a forward credential is
+            // redeemable only inside the forward's own in-process call.
+            const presentedForward = presentedForwardCredential(headers);
+            const forwardAgent = presentedForward
+                ? redeemForwardCredential(presentedForward, String(req?.method ?? ''), String(req?.path ?? req?.url ?? ''))
+                : undefined;
             const base = await resolveRequestExecutionContext({
                 headers,
                 ql,
@@ -3419,7 +3434,18 @@ export class RestServer {
                 // rule: this request answers with its OWN response, so a request
                 // carrying a session cookie reads without renewal (only
                 // `/get-session`, which re-issues the cookie, renews it).
-                session: 'request',
+                // A redeemed forward credential establishes the session for the
+                // agent's delegating user, in the one organization the consent
+                // bound, exactly as the dispatcher's `/mcp` face does for a
+                // verified token; nothing is read from the request for it.
+                session: forwardAgent
+                    ? {
+                        established: {
+                            user: { id: forwardAgent.userId },
+                            session: { userId: forwardAgent.userId, activeOrganizationId: forwardAgent.organizationId },
+                        },
+                    }
+                    : 'request',
                 // The reference localization from this door's settings provider;
                 // a provider that throws or rejects reads as no service.
                 localization: {
@@ -3438,13 +3464,28 @@ export class RestServer {
                 accessToken: 'withhold',
                 // OAuth access tokens are honoured on the `/mcp` door alone
                 // (`acceptOAuthAccessToken`), precisely so coarse tool-family
-                // scopes cannot ride onto REST — so `principalKind: 'agent'`,
-                // `onBehalfOf` and `oauthScopes` are not representable here.
-                oauth: undefined,
+                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The agent
+                // principal (`principalKind: 'agent'`, `onBehalfOf`,
+                // `oauthScopes`) is represented here for one caller only: an
+                // agent a forward credential carried. Its ceiling is derived
+                // from the consented scopes exactly as the MCP door derives it.
+                oauth: forwardAgent
+                    ? {
+                        userId: forwardAgent.userId,
+                        clientId: forwardAgent.clientId,
+                        scopes: forwardAgent.scopes,
+                        ...(forwardAgent.organizationId ? { organizationId: forwardAgent.organizationId } : {}),
+                        scopePermissions: scopesToAgentPermissionSets(forwardAgent.scopes),
+                        delegatesActions: forwardAgent.scopes.includes(MCP_OAUTH_SCOPE_ACTIONS),
+                    }
+                    : undefined,
                 // Which credential admitted the caller, kept on THIS request for
                 // `enforceApiAccess`'s API-key management rule. The ADR-0069 gate
                 // is still enforced off the envelope, at `enforceAuth`.
-                onAdmission: (admission) => { admittedBy = admission.credential; },
+                // [ADR-0090 D10 rule 5] Not for a forward-credential agent: no
+                // credential of its own admitted it here, and the key-management
+                // rule must not read it as a signed-in session.
+                onAdmission: forwardAgent ? undefined : (admission) => { admittedBy = admission.credential; },
             });
             if (!base) return undefined;
 

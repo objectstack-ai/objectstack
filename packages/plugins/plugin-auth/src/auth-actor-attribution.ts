@@ -60,6 +60,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { agentForwardPerformedBy } from './agent-forward-identity-view.js';
 
 /**
  * Resolves the acting user id for the current auth request, or `null` when no
@@ -167,7 +168,16 @@ export async function resolveAttributedUserId(): Promise<string | undefined> {
 export async function authSystemWriteContext(): Promise<{
   isSystem: true;
   attributedUserId?: string;
+  performedBy?: { clientId: string };
 }> {
   const attributedUserId = await resolveAttributedUserId();
-  return attributedUserId ? { isSystem: true, attributedUserId } : { isSystem: true };
+  // [ADR-0090 D10 rule 5, #28367] A forwarded AI agent's identity write is
+  // attributed to both: the user (above) and the agent's client, which the
+  // audit row records as `performed_by`. Attribution only, like the user half.
+  const performedBy = agentForwardPerformedBy();
+  return {
+    isSystem: true,
+    ...(attributedUserId ? { attributedUserId } : {}),
+    ...(performedBy ? { performedBy } : {}),
+  };
 }

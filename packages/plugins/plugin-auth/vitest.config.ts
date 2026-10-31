@@ -48,6 +48,14 @@ export default defineConfig({
         find: /^@objectstack\/formula$/,
         replacement: path.resolve(here, '../../formula/src/index.ts'),
       },
+      // [#28367] `agent-forward-identity-view.test.ts` takes a VALUE import on
+      // `@objectstack/rest` (`withForwardCredential`): the agent forward
+      // credential it mints is the one the identity mount redeems. Same reason
+      // and the same anchoring as the entries above.
+      {
+        find: /^@objectstack\/rest$/,
+        replacement: path.resolve(here, '../../rest/src/index.ts'),
+      },
       // [#22257] `auth-settings-seeded-boot.pin.test.ts` boots the REAL
       // `SettingsServicePlugin` beside `AuthPlugin`: the pre-bind window it
       // pins is that plugin's bind hook and that service's reporter. Same
