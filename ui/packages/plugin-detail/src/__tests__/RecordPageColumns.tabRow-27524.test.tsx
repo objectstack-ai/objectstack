@@ -109,7 +109,7 @@ describe('the record page tab row (objectstack#27524, Target 8)', () => {
     const dataSource = { find, getObjectSchema: vi.fn(async () => ({ fields: {} })) };
     const stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'hide', id: 'call.lead_id' }, Date.now());
     render(
-      <RecordContextProvider recordId="lead-1" dataSource={dataSource as any}>
+      <RecordContextProvider objectName="lead" recordId="lead-1" dataSource={dataSource as any}>
         <RecordPageColumns
           tier="wide"
           columns={columnsOf()}
