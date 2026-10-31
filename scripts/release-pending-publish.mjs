@@ -265,13 +265,14 @@ import { fileURLToPath } from 'node:url';
 // The sweep's reads retry a transient answer through the ONE policy the
 // citation gate measured and the release gate's full-battery read already uses
 // (`BOARD_READ_RETRY` and its reader; see `retryingReads` below). Imported,
-// never copied.
-// ⛔ This import puts `check-issue-citations.mjs` and its own imports in THIS
-// file's load closure, and release.yml runs this file off a bare checkout with
-// no install step. Measured when it was added: every module in that closure
-// imports only `node:*` builtins and runs nothing at load -- the same closure
-// `scripts/ci/scheduled-full-run.mjs` already loads in the `full-battery` job.
-import { boardReadBudget, readBoard, readFailure } from './check-issue-citations.mjs';
+// never copied -- from the LEAF `./board-read.mjs`, which imports nothing, so
+// this file's `./x.mjs` closure grows by exactly that one file. ⛔ Never from
+// `./check-issue-citations.mjs`, which re-exports the same names but drags the
+// citation gate's whole lint/PM closure (`./pm/check-half-states.mjs` and what
+// it imports) into a release script: release.yml runs this file off a bare
+// checkout with no install step, and `release-verify-npm.mjs --self-test`
+// copies this file's `./x.mjs` closure into a fixture repo.
+import { boardReadBudget, readBoard, readFailure } from './board-read.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 export const CLI_MANIFEST = 'packages/cli/package.json';
@@ -1078,7 +1079,7 @@ export class TransientReadFailure extends Error {
 
 /**
  * `http` with every GET retried only when the failure is transient, through the
- * shared policy (`BOARD_READ_RETRY` in `./check-issue-citations.mjs`, whose
+ * shared policy (`BOARD_READ_RETRY` in `./board-read.mjs`, whose
  * docblock is the measurement):
  *
  *   retried   an HTTP 5xx, or a named connection failure (ECONNRESET,
