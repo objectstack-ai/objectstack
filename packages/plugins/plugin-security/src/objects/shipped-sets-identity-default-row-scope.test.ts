@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: a real SecurityPlugin over a real ObjectQL engine and SQL driver, one stack per (posture shape, set list), each persona's secured read of every touched identity object made once on it; slowest CI reading 17.95 s (scheduled full-battery run 41183072927, Test Core suite-ceiling report) x 1.25, rounded up
 
 /**
  * [ruling of record 6250748677 on #24164, letter E′ item 3 — the follow-up it

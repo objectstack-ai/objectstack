@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: a real SecurityPlugin over a real ObjectQL engine and SQL driver, booted per posture and per fixture (a read-only stack each, plus one per case whose write lands or that brings its own sharing service), every admission probe asked on that stack; slowest CI reading 28.95 s (scheduled full-battery run 41183072927, Test Core suite-ceiling report) x 1.25, rounded up
 
 /**
  * [#25063 · ADR-0090 D10] A delegated operation runs only in an organization
