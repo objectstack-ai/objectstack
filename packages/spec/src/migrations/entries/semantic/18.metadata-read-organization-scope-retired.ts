@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // listing, and because `overlayScope` loses its `org` value.
 export const entry: SemanticMigration = {
   id: 'metadata-read-organization-scope-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the organizationId member of the GetMetaItems, GetMetaItem, GetMetaItemLayered, AuditMetaItem, '
     + 'HistoryMetaItem and GetMetaItemCached request schemas and of each ListDraftsResponse draft of '

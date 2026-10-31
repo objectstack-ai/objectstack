@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // author's call. The v18 stored-row listing names each stored object it refuses.
 export const entry: SemanticMigration = {
   id: 'object-duplicate-action-name-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     "object.actions — two or more entries under the same name, e.g. actions: [{ name: 'approve', ... }, "
     + "{ name: 'approve', ... }]",

@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'plugin-security-scan-result-surface-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'the plugin-security scan-result family: the defs '
     + 'KernelSecurityScanResult and KernelSecurityVulnerability '
     + '(kernel/plugin-security-advanced.zod.ts), their two authorable carriers on '

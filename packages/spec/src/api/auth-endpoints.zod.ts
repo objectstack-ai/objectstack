@@ -242,6 +242,9 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   cloudManaged: z.boolean().optional().describe(
     'Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed',
   ),
+  turnstileSiteKey: z.string().optional().describe(
+    'Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge',
+  ),
 }));
 
 /**

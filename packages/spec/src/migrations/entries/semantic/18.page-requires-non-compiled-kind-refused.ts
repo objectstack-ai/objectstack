@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // `checkPageRequiresKind` (ui/page.zod.ts) on the other kinds.
 export const entry: SemanticMigration = {
   id: 'page-requires-non-compiled-kind-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span and a table cell.
   surface:
     'page.requires on a page whose kind is react, full or slotted — a page that omits kind '
     + 'included, since its kind is full',

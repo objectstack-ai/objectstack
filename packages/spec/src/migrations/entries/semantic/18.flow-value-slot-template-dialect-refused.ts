@@ -33,8 +33,6 @@ import type { SemanticMigration } from '../../types.js';
 // placeholders, which stay the query engine's and pass untouched.
 export const entry: SemanticMigration = {
   id: 'flow-value-slot-template-dialect-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'flows[].nodes[].config of an assignment node (the assignments map, the legacy assignments array and the '
     + 'legacy bare config), of create_record and update_record nodes (the fields map), and of the nodes that hand '

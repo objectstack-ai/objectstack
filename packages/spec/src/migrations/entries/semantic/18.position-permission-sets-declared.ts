@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // sets to positions with rows must name them on the definitions instead.
 export const entry: SemanticMigration = {
   id: 'position-permission-sets-declared',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the sys_position_permission_set rows that bound permission sets to a position — written by an '
     + 'app binder at boot, by Setup on a position page, or by confirming an audience-binding suggestion — '

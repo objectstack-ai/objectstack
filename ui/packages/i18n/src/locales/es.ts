@@ -498,6 +498,7 @@ const es = {
       undonePrefix: "Deshecho: ",
       succeeded: "Correctos {{count}} / {{total}}",
       resultFailed: " · Fallidos {{count}}",
+      succeededRecords: "Registros correctos",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
       cancel: "Cancelar",
@@ -2212,6 +2213,8 @@ const es = {
       popupBlockedDescription: "El navegador bloqueó la apertura de la nueva pestaña.",
       popupBlockedAction: "Abrir en una pestaña nueva",
       noRecordId: "Esta acción se ejecuta sobre un solo registro: no hay ningún ID de registro disponible.",
+      fillRequiredThenRetry: "Completa {{fields}} y vuelve a ejecutar «{{action}}».",
+      fillRequiredFirst: "Completa primero {{fields}}.",
     },
     shortcuts: {
       title: "Atajos de teclado",
@@ -2749,9 +2752,11 @@ const es = {
       signInText: "Iniciar sesión",
       socialButton: "Registrarse con {provider}",
       orText: "o continúe con correo electrónico",
+      captchaRetry: "Reintentar",
       errors: {
         userExists: "Ya existe una cuenta con ese correo. Intente iniciar sesión.",
         selfRegistrationClosed: "El registro por cuenta propia no está abierto en este sistema. Solicite una invitación a un administrador.",
+        captchaFailed: "La comprobación de seguridad no se completó. Vuelva a intentarlo.",
         emailDomainNotAllowed: "El dominio de este correo no está autorizado para registrarse aquí. Use el correo de su organización o solicite una invitación a un administrador.",
         invitationSentTo: "Esta invitación se envió a {{email}}. Regístrate con esa dirección para aceptarla.",
         invitationAddressOnly: "Esta invitación solo puede aceptarse con la dirección a la que se envió. Regístrate con esa dirección.",
@@ -3371,6 +3376,7 @@ const es = {
   report: {
     total: "Total",
     totals: "Totales",
+    subtotal: "Subtotal",
     loading: "Cargando…",
     forbiddenMessage: "No tienes permiso para ver los datos de este informe.",
     dateRange: {

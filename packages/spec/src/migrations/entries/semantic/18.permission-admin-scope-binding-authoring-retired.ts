@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // is the judgement this entry hands the upgrader.
 export const entry: SemanticMigration = {
   id: 'permission-admin-scope-binding-authoring-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'permissions[].adminScope.manageBindings / permissions[].adminScope.authorEnvironmentSets — the delegated '
     + 'administrator\'s right to bind sets to positions and to author environment permission sets',

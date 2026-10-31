@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'cache-warmup-scheduled-strategy-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     "CacheWarmup.strategy — the value 'scheduled' left the warmup-strategy enum "
     + '(packages/spec/src/system/cache.zod.ts), and the enum describe stopped promising '

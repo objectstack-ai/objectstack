@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // would change what the gate means.
 export const entry: SemanticMigration = {
   id: 'nav-item-visible-data-needs-data-source',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span.
   surface:
     'A navigation entry whose visible predicate (CEL) reads the top-level data root while the same entry '
     + 'declares no dataSource. Judged at every navigation door: app navigation, app areas navigation, the '

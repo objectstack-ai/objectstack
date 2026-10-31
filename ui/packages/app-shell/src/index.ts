@@ -265,6 +265,7 @@ export { LoginPage as DefaultLoginPage } from './console/auth/LoginPage.js';
 export { signInRefusalMessages } from './console/auth/signInRefusalMessages.js';
 export { RegisterPage as DefaultRegisterPage } from './console/auth/RegisterPage.js';
 export {
+  signUpCaptchaFailedMessage,
   signUpRefusalMessages,
   type SignUpRefusalInvitation,
 } from './console/auth/signUpRefusalMessages.js';

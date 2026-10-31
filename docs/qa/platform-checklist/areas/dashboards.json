@@ -286,7 +286,7 @@
       "title": "Every ChartTypeSchema member renders a real chart with the correct marks and series count",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -308,7 +308,7 @@
         "establish ground truth from the data API: distinct status count, distinct priority count, and month-bucket count for showcase_task_metrics; account count for showcase_project_metrics",
         "open the Chart Gallery dashboard (Showcase app → Analytics → Chart Gallery), let it settle, and screenshot the full board",
         "per gallery widget (16 families: metric ×3 tiles, bar, column, horizontal-bar, line, area, combo, pie, donut, funnel, scatter, radar, treemap, sankey, table, pivot), screenshot the widget, then verify in the DOM that a real SVG (or table element for table/pivot) rendered with the mark type the family names",
-        "count marks against ground truth: bar/column/horizontal-bar bars == distinct statuses (or priorities), pie/donut/funnel segments == distinct statuses/priorities, line/area points == month buckets",
+        "count marks against ground truth: bar/column/horizontal-bar bars == distinct statuses (or priorities), pie/donut/funnel segments == distinct statuses/priorities, line/area points == month buckets. On the stock seed that is 2, or 3 when the boot date puts the 40-day spread across two month boundaries: the seeded tasks' created_at runs from daysAgo(1) to daysAgo(40) (examples/app-showcase/src/data/seed/index.ts). So take the count from step 2's read and never expect a long series. QA run #27441 read 2",
         "for combo, verify BOTH mark types on shared axes: task_count as bars bound to the left axis and avg_progress as a line on the right axis. The widget authors no series[] — the per-series mark type is gone with the structure keys (the D3 entry dashboard-widget-chart-config-structure-refused; examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts), so which mark each measure gets is the renderer's: in a combo the first measure draws as bars and the others as lines, and a combo always draws both value axes (objectui plugin-charts AdvancedChartImpl.tsx)",
         "for table and pivot, verify real grouped tables: Projects by Account rows == distinct accounts with 3 measure columns; Tasks by Status × Priority cross-tab dimensions match distinct status × priority",
         "author the scratch draft dashboard with four widgets of types kpi, gauge, solid-gauge, bullet, each bound to dataset showcase_task_metrics, values ['task_count'], publish it, and load it",
@@ -344,7 +344,7 @@
         {
           "clause": "the four single-value synonyms (kpi, gauge, solid-gauge, bullet) render the SAME value as metric — a number, never a blank or an error",
           "oracle": "screenshot",
-          "verify": "scratch-dashboard tiles each show the task_count value; evidence must note these are value-only renders (no dial) per the spec's own NOTE, and that the four tiles are EXPECTED to look identical to one another and to show the same VALUE as the metric tile — one renderer, five names. The gallery's metric card is not pixel-identical (its title and placement differ, QA run #24573): compare values, not chrome. ⛔ Do not score 'the four tiles are indistinguishable' against the negative below: that negative is about a variant rendering as a DIFFERENT FAMILY (sankey drawn as a bar), which is the opposite failure",
+          "verify": "scratch-dashboard tiles each show the task_count value; evidence must note these are value-only renders (no dial) per the spec's own NOTE, and that the four tiles are EXPECTED to look identical to one another and to show the same VALUE as the metric tile — one renderer, five names. The metric tile's chrome is not the synonyms' even where both sit on one dashboard. The tile has its own title, label line and placement: QA run #24573 saw that on the gallery, and QA run #27441 read '10 Tasks' on every synonym tile. Compare the VALUE only, never chrome. ⛔ Do not score 'the four tiles are indistinguishable' against the negative below: that negative is about a variant rendering as a DIFFERENT FAMILY (sankey drawn as a bar), which is the opposite failure",
           "evidence": "scratch-dashboard screenshot annotated with the honest-synonym caveat"
         },
         {
@@ -448,6 +448,12 @@
           "date": "2026-10-19",
           "change": "steps[5], acceptance[2].clause, acceptance[4].verify and fixtures.knownGaps[0] corrected from QA run #24573 (18.0 sweep, 5b14b7f3; carried by #24612), re-read at objectstack f89d29e382 and the console pin 4016370af3c9. (1) The combo widget no longer authors series[]: chart-gallery.dashboard.ts drops it under the D3 entry dashboard-widget-chart-config-structure-refused, and the renderer picks each measure's mark (objectui AdvancedChartImpl.tsx: first measure bars, the rest lines, both value axes drawn). The run's combo read (2 bars + 1 line on dual axes) is exactly that default. (2) The single-value tiles are compared to the metric tile by value, not by look: the gallery's metric card carries its own title and placement. No clause substance changed. Wave anchor #24579 §3",
           "ref": "#24671"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-31",
+          "change": "Two findings of QA run #27441. acceptance[4].verify now says the metric tile's chrome differs from the synonyms' even on one dashboard, so only the value is compared. The run read '10 Tasks' on all four synonym tiles. The comparison was already by value, so no verdict moves. steps[4] now says the stock seed gives only 2 month buckets, or 3 when the 40-day created_at spread (daysAgo(1)..daysAgo(40), seed/index.ts) crosses two month boundaries. The run counted 2 line/area points. The count is still taken from the step-2 read. No clause's assertion changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726",
+          "ref": "#27441"
         }
       ],
       "enumSource": {
@@ -1267,7 +1273,7 @@
       "title": "Analytics on v18 asks each object's `enable` block and internal flags: a cube or dataset over an apiEnabled:false object is 404, an internal field as dimension / measure / filter is 400 even for admin, an unexposed configured cube is warned at boot and absent from /analytics/meta, and a dataset answer's measure column states its aggregate",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1278,7 +1284,7 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "in the scratch app: an apiEnabled:false object with a cube over it and an internal:true field on an exposed object"
+          "in the scratch app, only for the configured-cube legs (acceptance[1]'s CUBE_NOT_FOUND and acceptance[2]'s registration refusal, boot warn and /analytics/meta absence): an apiEnabled:false object with a configured cube over it. Name every object there with the package namespace prefix (in a showcase copy, showcase_NAME), or compile refuses it as 'missing the package namespace prefix' (packages/spec/src/kernel/namespace-prefix.ts). The query-face specimens are STOCK and need no scratch app (QA run #27438). sys_jwks declares apiEnabled: false (packages/platform-objects/src/identity/sys-jwks.object.ts), so its inferred cube (cube: 'sys_jwks') or an inline dataset over it answers 404 OBJECT_API_DISABLED. sys_session.token and sys_api_key.key are internal: true (sys-session.object.ts, sys-api-key.object.ts), so either one as a dimension or as a filter answers 400 INVALID_FIELD"
         ]
       },
       "steps": [
@@ -1334,6 +1340,12 @@
           "date": "2026-10-19",
           "change": "steps[0], steps[3], acceptance[1].clause and acceptance[3].verify corrected from QA run #24558 (18.0 since:v18 sweep, 5b14b7f3), re-read at objectstack f89d29e382. (1) A configured cube over an apiEnabled:false object is refused at registration (api-exposure-door.ts, the registration face), so querying it answers 404 CUBE_NOT_FOUND, consistent with acceptance[2]; OBJECT_API_DISABLED is reached by a query that names the object itself, through its inferred cube (assertInferableCube admits a registered object) or an inline dataset. The run read CUBE_NOT_FOUND where the clause expected OBJECT_API_DISABLED. (2) sys_user_metrics declares no dimensions (system.datasets.ts), so 'dimension columns carry none' needs a dimensioned dataset; step 4 adds showcase_task_metrics by status. Wave anchor #24579 (round 3 named this item)",
           "ref": "#24671"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[2] put every specimen in a scratch app. QA run #27438 found that stock already carries the query-face specimens, and that scratch objects must carry the package namespace prefix or compile refuses them. sys_jwks is apiEnabled: false and answers 404 OBJECT_API_DISABLED through its inferred cube or an inline dataset. sys_session.token and sys_api_key.key are internal: true and answer 400 INVALID_FIELD. Only the configured-cube legs (acceptance[1]'s CUBE_NOT_FOUND and acceptance[2]) still need the scratch app, and the fixture now names the prefix rule (namespace-prefix.ts). No clause changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6494110310",
+          "ref": "#27438"
         }
       ]
     }

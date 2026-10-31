@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'document-schemas-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the document family, retired whole: the four defs data/DocumentTemplate, data/Document, '
     + 'data/ESignatureConfig and data/DocumentVersion, and every name data/document.zod.ts '

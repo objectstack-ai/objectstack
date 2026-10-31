@@ -7,8 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // prescription in front of an author who wrote the other spelling.
 export const entry: SemanticMigration = {
   id: 'filter-icontains-comparand-refused-at-parse',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'the case-insensitive contains comparand, in BOTH authoring vocabularies — the $ dialect '
     + 'key $icontains inside FilterConditionSchema (query where clauses, read-scope rules, '

@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // `organizationId` key leaves three declared request shapes.
 export const entry: SemanticMigration = {
   id: 'metadata-write-organization-scope-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the organizationId member of the SaveMetaItem, PublishMetaItem and DeleteMetaItem request '
     + 'schemas of @objectstack/spec; and every organization-scoped write the metadata protocol of '

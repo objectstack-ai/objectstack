@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'device-request-response-interval-unit-in-key',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface: 'DeviceRequestResponse.interval (api/auth-endpoints.zod.ts) — the polling cadence '
     + 'in the device-flow response body',
   replacement: 'intervalSeconds — rename the key; the value (seconds, default 2) is unchanged',

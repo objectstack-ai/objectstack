@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'ui-page-action-block-variant-destructive-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface: "variant: 'destructive' on an action block: an action:button, action:icon, action:group or action:menu "
     + 'node, an action:group / action:menu member, or an action:bar node or member',
   replacement: "`variant: 'danger'`, the spelling `ActionSchema.variant` and the action runner use. The rename is "

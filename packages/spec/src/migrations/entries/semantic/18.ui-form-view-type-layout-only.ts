@@ -16,7 +16,6 @@ import type { SemanticMigration } from '../../types.js';
 // that opens its form in a drawer or dialog.
 export const entry: SemanticMigration = {
   id: 'ui-form-view-type-layout-only',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     "view.form.type and view.formViews.<key>.type — the values 'split', 'drawer' and 'modal' left "
     + "FormViewSchema.type ('simple', 'tabbed' and 'wizard' are unchanged, 'simple' stays the default); "

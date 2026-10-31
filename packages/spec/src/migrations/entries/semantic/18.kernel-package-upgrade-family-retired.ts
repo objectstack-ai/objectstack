@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'kernel-package-upgrade-family-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the package upgrade model, retired whole: the ten defs kernel/MetadataChangeType, '
     + 'kernel/MetadataDiffItem, kernel/UpgradeImpactLevel, kernel/UpgradePlan, '

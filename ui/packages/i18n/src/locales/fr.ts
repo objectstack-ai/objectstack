@@ -493,6 +493,7 @@ const fr = {
       undonePrefix: "Annulé — ",
       succeeded: "Réussis {{count}} / {{total}}",
       resultFailed: " · Échecs {{count}}",
+      succeededRecords: "Enregistrements réussis",
       retry: "Réessayer",
       downloadErrorCsv: "Télécharger le CSV d'erreurs",
       cancel: "Annuler",
@@ -2208,6 +2209,8 @@ const fr = {
       popupBlockedDescription: "Le navigateur a bloqué l'ouverture du nouvel onglet.",
       popupBlockedAction: "Ouvrir dans un nouvel onglet",
       noRecordId: "Cette action porte sur un seul enregistrement — aucun identifiant d’enregistrement n’est disponible.",
+      fillRequiredThenRetry: "Renseignez {{fields}}, puis relancez « {{action}} ».",
+      fillRequiredFirst: "Renseignez d’abord {{fields}}.",
     },
     shortcuts: {
       title: "Raccourcis clavier",
@@ -2745,9 +2748,11 @@ const fr = {
       signInText: "Se connecter",
       socialButton: "S'inscrire avec {provider}",
       orText: "ou continuer avec l'e-mail",
+      captchaRetry: "Réessayer",
       errors: {
         userExists: "Un compte avec cet e-mail existe déjà. Essayez de vous connecter.",
         selfRegistrationClosed: "L'inscription libre n'est pas ouverte sur ce système. Demandez une invitation à un administrateur.",
+        captchaFailed: "La vérification de sécurité n'a pas abouti. Veuillez réessayer.",
         emailDomainNotAllowed: "Le domaine de cet e-mail n'est pas autorisé à s'inscrire ici. Utilisez l'e-mail de votre organisation ou demandez une invitation à un administrateur.",
         invitationSentTo: "Cette invitation a été envoyée à {{email}}. Inscrivez-vous avec cette adresse pour l'accepter.",
         invitationAddressOnly: "Cette invitation ne peut être acceptée qu'avec l'adresse à laquelle elle a été envoyée. Inscrivez-vous avec cette adresse.",
@@ -3367,6 +3372,7 @@ const fr = {
   report: {
     total: "Total",
     totals: "Totaux",
+    subtotal: "Sous-total",
     loading: "Chargement…",
     forbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce rapport.",
     dateRange: {

@@ -11,7 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // choose them, which is the judgement this entry exists to carry.
 export const entry: SemanticMigration = {
   id: 'agent-memory-store-retired-and-limits-required',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     'agent.memory — longTerm.store left the shape (the memory store is the platform\'s); '
     + 'longTerm.maxEntries and reflectionInterval are required when longTerm.enabled is true, and '

@@ -179,6 +179,13 @@ export interface SignUpData {
    * passing it here.
    */
   callbackURL?: string;
+  /**
+   * The Cloudflare Turnstile token the sign-up form's widget produced. Sent as
+   * the `x-captcha-response` request header, never in the body; required by
+   * the server exactly when its public config serves
+   * `features.turnstileSiteKey`. Omitted, no header is sent.
+   */
+  captchaToken?: string;
 }
 
 /** Auth client configuration */
@@ -339,6 +346,15 @@ export interface AuthPublicConfig {
      * `disableSignUp` alone decides, as it did before the key existed.
      */
     audiencePosture?: AudiencePosture;
+    /**
+     * The PUBLIC Cloudflare Turnstile site key, served only while the server's
+     * opt-in sign-up challenge is on (the spec lists it in
+     * `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`). Present ⇒ the sign-up door refuses
+     * a request without a token, so a sign-up form renders the widget
+     * (`TurnstileWidget`) and sends its token. Absent ⇒ no challenge, and the
+     * form is what it was before the key existed.
+     */
+    turnstileSiteKey?: string;
   };
 }
 

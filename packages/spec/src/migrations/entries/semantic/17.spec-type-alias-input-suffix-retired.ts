@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'spec-type-alias-input-suffix-retired',
-  // Plain text, no markdown: build-upgrade-guide.ts renders this field inside a
-  // code span AND inside a table cell, so backticks here break both.
   surface:
     'type alias: the 102 XInput names of @objectstack/spec '
     + '(ConnectorInput, AppInput, PageInput, ActionInput, ServiceObjectInput, '
