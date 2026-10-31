@@ -1371,6 +1371,8 @@
     "api/PublishMetaItemResponse:seq",
     "api/PublishMetaItemResponse:success",
     "api/PublishMetaItemResponse:version",
+    "api/PublishPackageDraftsRequest:backfill",
+    "api/PublishPackageDraftsRequest:message",
     "api/PublishPackageDraftsResponse:backfillApplied",
     "api/PublishPackageDraftsResponse:commitId",
     "api/PublishPackageDraftsResponse:failed",
