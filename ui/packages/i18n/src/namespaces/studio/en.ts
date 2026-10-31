@@ -4169,6 +4169,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.more': '+{count} more…',
   'engine.translationPreview.keyCountOne': '{{count} key}',
   'engine.translationPreview.keyCountOther': '{{count} keys}',
+  // Studio item toolbar: the item tools Setup's item page opens, offered in
+  // every pillar's item header (objectstack#28239).
+  'engine.studio.itemTools.group': 'Item tools',
+  'engine.studio.itemTools.sourceReadOnly': 'Read-only: this item cannot be edited here.',
+  'engine.studio.itemTools.layersFailed': 'Could not read this item\'s layers: {message}',
+  'engine.studio.itemTools.layersRetry': 'Try again',
 };
 
 export default STUDIO_EN;

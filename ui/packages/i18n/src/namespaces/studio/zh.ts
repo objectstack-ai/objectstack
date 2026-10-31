@@ -3757,6 +3757,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.translationPreview.more': '另有 {count} 项…',
   'engine.translationPreview.keyCountOne': '{{count} 个键}',
   'engine.translationPreview.keyCountOther': '{{count} 个键}',
+  // Studio 项工具栏：Setup 项页面的项工具,在每个支柱的项头部提供（objectstack#28239）。
+  'engine.studio.itemTools.group': '项工具',
+  'engine.studio.itemTools.sourceReadOnly': '只读：此项无法在这里编辑。',
+  'engine.studio.itemTools.layersFailed': '无法读取此项的分层：{message}',
+  'engine.studio.itemTools.layersRetry': '重试',
 };
 
 export default STUDIO_ZH;
