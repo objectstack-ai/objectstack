@@ -23,7 +23,7 @@ export { evaluateConditionalFormatting, normalizeFilterCondition, normalizeFilte
 // The provider-less fallback table, exported so objectui#4401's mirror gate can
 // compare it against the `en` pack from a package that depends on both.
 export { LIST_DEFAULT_TRANSLATIONS } from './ListView';
-export type { ListViewProps, ListViewHandle } from './ListView';
+export type { ListViewProps, ListViewHandle, ListViewRowGroup } from './ListView';
 export type { ObjectGalleryProps } from './ObjectGallery';
 // The switcher's views are `@object-ui/core`'s `ListViewVisualization`. This
 // barrel no longer re-exports them as `ViewType`, the name `@object-ui/types`

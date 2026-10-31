@@ -255,6 +255,17 @@ function resolveListChartBinding(schema: { chart?: unknown }): ListChartBinding 
  * type each one actually lands on, rather than left to an index signature that
  * types them `any` and erases everything around them.
  */
+/**
+ * One group of the rows a grouped grid or a board shows, as `onRowsChange`
+ * reports it (objectstack#28461): the group's key (a board's lane id), its
+ * heading as the list reads it, and its rows in display order.
+ */
+export interface ListViewRowGroup {
+  key: string;
+  label: string;
+  rows: ReadonlyArray<Record<string, unknown>>;
+}
+
 export interface ListViewProps {
   schema: ListViewSchema;
   className?: string;
@@ -475,13 +486,21 @@ export interface ListViewProps {
    * time that set changes once a load settles — another page, sort, filter or
    * search (objectstack#26679). The console's object page hands it to its
    * record drawer, whose `↑` `↓` at the root step through these rows. Answered
-   * where `onTotalChange` is: a paged grid that draws the rows it fetched; any
-   * other kind (a board, a calendar, a grouped grid) has no single row order
-   * and answers with no rows, so a host never steps through a stale set.
+   * where `onTotalChange` is: a paged grid that draws the rows it fetched.
+   *
+   * A grouped grid and a board answer too (objectstack#28461), with `groups`:
+   * every open group — a board's every open lane — in display order, its
+   * heading and the rows drawn under it; `rows` is those rows end to end. A
+   * collapsed group draws no rows and is not among them. Any other kind (a
+   * calendar, a gantt) has no single row order and answers with no rows and
+   * no groups, so a host never steps through a stale set.
    *
    * A HOST prop, never a schema key: the rows are the list's runtime state.
    */
-  onRowsChange?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+  onRowsChange?: (
+    rows: ReadonlyArray<Record<string, unknown>>,
+    groups?: ReadonlyArray<ListViewRowGroup>,
+  ) => void;
   /**
    * The Display control's Open records section (objectstack#26681): how a row
    * opens its record — the mode the host resolved for this object and view,
@@ -5609,15 +5628,59 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   React.useEffect(() => {
     onRowsChangeRef.current = onRowsChange;
   });
+  // objectstack#28461 — a grouped grid and a board hold their rows group by
+  // group (a server-grouped grid and a lane-paged board fetch them
+  // themselves), so they report what they draw (`onRowGroupsChange`) and this
+  // component relays it. Held with the kind that reported it: a report from a
+  // view no longer on screen is never relayed.
+  const rowGroupsSource: 'grid' | 'kanban' | null =
+    currentView === 'kanban'
+      ? 'kanban'
+      : currentView === 'grid' && !paginate && !groupingNeedsHeaderQuery
+        ? 'grid'
+        : null;
+  const [reportedRowGroups, setReportedRowGroups] = React.useState<{
+    source: 'grid' | 'kanban';
+    key: string;
+    groups: ReadonlyArray<ListViewRowGroup>;
+  } | null>(null);
+  const reportRowGroups = React.useCallback(
+    (source: 'grid' | 'kanban', groups: ReadonlyArray<ListViewRowGroup>) => {
+      const key = JSON.stringify(
+        groups.map((group) => [group.key, group.label, group.rows.map((row: any) => row?.id ?? row?._id ?? null)]),
+      );
+      setReportedRowGroups((prev) => (prev && prev.source === source && prev.key === key ? prev : { source, key, groups }));
+    },
+    [],
+  );
+  const handleGridRowGroups = React.useCallback(
+    (groups: ReadonlyArray<ListViewRowGroup>) => reportRowGroups('grid', groups),
+    [reportRowGroups],
+  );
+  const handleBoardRowGroups = React.useCallback(
+    (groups: ReadonlyArray<ListViewRowGroup>) => reportRowGroups('kanban', groups),
+    [reportRowGroups],
+  );
+  const shownRowGroups =
+    rowGroupsSource && reportedRowGroups?.source === rowGroupsSource ? reportedRowGroups : null;
   const rowSequenceShown = paginate && surfaceDrawsFetchedRows;
   const shownRowsSettled = rowSequenceShown ? !loading && !loadError : true;
-  const shownRowsKey = rowSequenceShown
-    ? JSON.stringify(data.map((row: any) => row?.id ?? row?._id ?? null))
-    : '[]';
+  const shownRowsKey = shownRowGroups
+    ? `${shownRowGroups.source}:${shownRowGroups.key}`
+    : rowSequenceShown
+      ? JSON.stringify(data.map((row: any) => row?.id ?? row?._id ?? null))
+      : '[]';
   const shownRowsRef = React.useRef(data);
   shownRowsRef.current = rowSequenceShown ? data : [];
+  const shownRowGroupsRef = React.useRef(shownRowGroups);
+  shownRowGroupsRef.current = shownRowGroups;
   React.useEffect(() => {
     if (!shownRowsSettled) return;
+    const grouped = shownRowGroupsRef.current;
+    if (grouped) {
+      onRowsChangeRef.current?.(grouped.groups.flatMap((group) => group.rows), grouped.groups);
+      return;
+    }
     onRowsChangeRef.current?.(shownRowsRef.current);
   }, [shownRowsKey, shownRowsSettled]);
 
@@ -6683,6 +6746,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectui#12528 — and the column summaries, drawn in the
               // record-count row below rather than in a row of the grid's own.
               ? { showRowNumbers: rowNumbers, onColumnSummaryChange: setGridSummaries }
+              : {})}
+            {...(onRowsChange && rowGroupsSource === 'grid' && viewComponentSchema.type === 'object-grid'
+              // objectstack#28461 — the grouped grid's open groups and their
+              // rows, on the grid's host channel (a React prop, never a node key).
+              ? { onRowGroupsChange: handleGridRowGroups }
+              : {})}
+            {...(onRowsChange && rowGroupsSource === 'kanban' && viewComponentSchema.type === 'object-kanban'
+              // objectstack#28461 — the board's open lanes and their cards, on
+              // the board's host channel (a React prop, never a node key).
+              ? { onRowGroupsChange: handleBoardRowGroups }
               : {})}
             {...(viewComponentSchema.type === 'object-grid' && rowAdornment
               // objectui#13330 — the host's node beside each row's title, on

@@ -36,6 +36,53 @@ import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 import type { RecordOpenPreference } from '../utils/recordOpenPreference.js';
 
+/**
+ * The rows a list shows, as the object page holds them (objectstack#26679):
+ * their ids in order, and on a grouped grid or a board the groups they sit in
+ * (objectstack#28461), each with its heading. `key` is the content's key.
+ */
+export interface ListShownRows {
+    key: string;
+    ids: readonly string[];
+    groups: ReadonlyArray<{ label: string; ids: readonly string[] }> | null;
+}
+
+const NO_LIST_ROWS: ListShownRows = { key: '', ids: [], groups: null };
+
+const rowIdsOf = (rows: ReadonlyArray<Record<string, unknown>>): string[] =>
+    rows
+        .map((row) => (row?.id ?? row?._id) as string | number | undefined)
+        .filter((id): id is string | number => id != null && id !== '')
+        .map(String);
+
+/** `ListView`'s `onRowsChange` report, as {@link ListShownRows}. */
+export function listShownRowsOf(
+    rows: ReadonlyArray<Record<string, unknown>>,
+    groups?: ReadonlyArray<{ label: string; rows: ReadonlyArray<Record<string, unknown>> }>,
+): ListShownRows {
+    const ids = rowIdsOf(rows);
+    const held = groups ? groups.map((group) => ({ label: group.label, ids: rowIdsOf(group.rows) })) : null;
+    return { key: JSON.stringify([ids, held]), ids, groups: held };
+}
+
+/**
+ * The set a record's `↑` `↓` step through, and the name its counter's tooltip
+ * says: on a grouped list the rows of the record's own group, named by the
+ * group (objectstack#28461, 「Acme Corporation 中第 1 条，共 3 条」); otherwise
+ * every row the list shows, and no name of its own — the host names the list.
+ * `undefined` when the list does not show the record.
+ */
+export function listSiblingSetOf(
+    rows: ListShownRows,
+    recordId: string,
+): { siblings: readonly string[]; scope?: string } | undefined {
+    if (rows.groups) {
+        const group = rows.groups.find((candidate) => candidate.ids.includes(recordId));
+        return group ? { siblings: group.ids, scope: group.label } : undefined;
+    }
+    return rows.ids.includes(recordId) ? { siblings: rows.ids } : undefined;
+}
+
 type OverlaySizeBucket = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
 /**
@@ -130,7 +177,7 @@ export function useObjectViewRecordNavigation({
     // The rows the list shows (`handleListRowsChange` below), read when a
     // handler runs: a page this list opens steps through them
     // (objectstack#27524, Target 7).
-    const listRowIdsRef = useRef<readonly string[]>([]);
+    const listRowsRef = useRef<ListShownRows>(NO_LIST_ROWS);
     // The list's name — its view's tab label: what the page's way back says,
     // and the set the pane's counter names (objectstack#27524, Target 7).
     const listLabel = useMemo(
@@ -165,13 +212,13 @@ export function useObjectViewRecordNavigation({
             // The rows the list shows go along when the record is one of
             // them: the page's top bar counts and steps through them
             // (objectstack#27524, Target 7).
-            const siblings = listRowIdsRef.current;
+            const set = listSiblingSetOf(listRowsRef.current, String(recordId));
             const originState = {
               ...extraState,
               from: {
                 pathname: pathname + (search || ''),
                 label: listLabel,
-                ...(siblings.includes(String(recordId)) ? { siblings } : {}),
+                ...(set ?? {}),
               },
             };
             if (viewId) {
@@ -297,32 +344,32 @@ export function useObjectViewRecordNavigation({
         const { pathname, search, state } = locationRef.current;
         const back = new URLSearchParams(search);
         back.set(RECORD_DRAWER_PARAM, String(recordId));
-        const siblings = listRowIdsRef.current;
+        const set = listSiblingSetOf(listRowsRef.current, String(recordId));
         const returnState = recordDrawerReturnState(
             { pathname, search: `?${back.toString()}`, state },
             [{
                 objectName: objectDef.name,
                 recordId: String(recordId),
-                ...(siblings.includes(String(recordId)) ? { siblings } : {}),
+                ...(set ?? {}),
             }],
         );
         handleNavOverlayNavigate(recordId, undefined, returnState);
     }, [objectDef.name, handleNavOverlayNavigate]);
     /**
      * The rows the list shows, in its order (`ListView`'s `onRowsChange`,
-     * objectstack#26679): the root level's sibling set, which the drawer's
-     * `↑` `↓` step through. Held as the ids' joined key so an equal report
+     * objectstack#26679), and on a grouped grid or a board its groups
+     * (objectstack#28461): the root level's sibling set, which the drawer's
+     * `↑` `↓` step through. Held with its content's key so an equal report
      * changes nothing.
      */
-    const [listRowIds, setListRowIds] = useState<{ key: string; ids: readonly string[] }>({ key: '', ids: [] });
-    listRowIdsRef.current = listRowIds.ids;
-    const handleListRowsChange = useCallback((rows: ReadonlyArray<Record<string, unknown>>) => {
-        const ids = rows
-            .map((row) => (row?.id ?? row?._id) as string | number | undefined)
-            .filter((id): id is string | number => id != null && id !== '')
-            .map(String);
-        const key = JSON.stringify(ids);
-        setListRowIds((prev) => (prev.key === key ? prev : { key, ids }));
+    const [listRows, setListRows] = useState<ListShownRows>(NO_LIST_ROWS);
+    listRowsRef.current = listRows;
+    const handleListRowsChange = useCallback((
+        rows: ReadonlyArray<Record<string, unknown>>,
+        groups?: ReadonlyArray<{ label: string; rows: ReadonlyArray<Record<string, unknown>> }>,
+    ) => {
+        const next = listShownRowsOf(rows, groups);
+        setListRows((prev) => (prev.key === next.key ? prev : next));
     }, []);
     /** `↑` `↓` at the root: the sibling becomes the row `?recordId=` names. */
     const handleRootStep = useCallback((recordId: string) => {
@@ -341,10 +388,10 @@ export function useObjectViewRecordNavigation({
             ? {
                 objectName: objectDef.name,
                 recordId: drawerRecordId,
-                ...(listRowIds.ids.length > 0 ? { siblings: listRowIds.ids } : {}),
+                ...(listSiblingSetOf(listRows, drawerRecordId) ?? {}),
             }
             : null),
-        [drawerRecordId, objectDef.name, listRowIds],
+        [drawerRecordId, objectDef.name, listRows],
     );
     // Sync URL-based recordId to overlay state
     useEffect(() => {

@@ -88,7 +88,7 @@ import { useGridTranslation } from './objectGridTranslations';
 import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInlineRules';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
 import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
-import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary } from './objectGridProps';
+import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary, type ObjectGridRowGroup } from './objectGridProps';
 import { FooterSummaryReport } from './objectGridFooterSummaryReport';
 import { useObjectGridDiagnostics } from './objectGridDiagnostics';
 import { useObjectGridQueryInputs } from './objectGridQueryInputs';
@@ -103,7 +103,7 @@ import { useObjectGridGenerateColumns } from './objectGridGenerateColumns';
 import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns';
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
-export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps } from './objectGridProps';
+export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
 
 /**
  * A view's declared `sort` → the shape the table's header indicators read.
@@ -261,6 +261,18 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * of identity. A RUNTIME prop, never authored metadata.
    */
   onColumnSummaryChange?: (summaries: readonly ObjectGridFooterSummary[] | null) => void;
+  /**
+   * [objectstack#28461] The rows a GROUPED grid shows, group by group: every
+   * open leaf group on the current page of groups, in display order, with its
+   * heading and the rows drawn under it (a server-grouped group's current
+   * page). A collapsed group draws no rows and is left out, and so is an open
+   * group with none yet. An ungrouped grid reports nothing; a grouped one that
+   * stops drawing its groups reports none. Reported on a change of CONTENT —
+   * the keys, headings and row ids — never of identity. `ListView` passes it
+   * so a record pane opened from a row steps within that row's group. A
+   * RUNTIME prop, never authored metadata.
+   */
+  onRowGroupsChange?: (groups: readonly ObjectGridRowGroup[]) => void;
   /**
    * [objectui#8674] Narrow ONE row's generic Edit / Delete entries — the layer
    * that lets a host withhold an operation the record itself cannot accept.
@@ -641,6 +653,32 @@ export type ObjectGridDataTableSchemaHolds = {
 export type ObjectGridDataTableSchema =
   DeclaredDataTableSchema & ObjectGridDataTableSchemaHolds;
 
+/**
+ * [objectstack#28461] Reports the open groups a grouped grid draws, with their
+ * rows, to a host (`onRowGroupsChange`). Renders nothing. Keyed on the groups'
+ * keys, headings and row ids, never on an array's identity (AGENTS.md #10):
+ * every render builds new arrays, and an equal set sends nothing. Unmounting —
+ * the grid stops drawing groups — reports none.
+ */
+function RowGroupsReport({
+  groups,
+  onChange,
+}: {
+  groups: readonly ObjectGridRowGroup[];
+  onChange: (groups: readonly ObjectGridRowGroup[]) => void;
+}) {
+  const key = JSON.stringify(
+    groups.map((group) => [group.key, group.label, group.rows.map((row) => row?.id ?? row?._id ?? null)]),
+  );
+  const latest = React.useRef({ groups, onChange });
+  latest.current = { groups, onChange };
+  useEffect(() => {
+    latest.current.onChange(latest.current.groups);
+  }, [key]);
+  useEffect(() => () => latest.current.onChange([]), []);
+  return null;
+}
+
 export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   schema,
   dataSource,
@@ -678,6 +716,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   objectFields: hostObjectFields,
   showRowNumbers: hostShowRowNumbers,
   onColumnSummaryChange,
+  onRowGroupsChange,
 }) => {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3838,6 +3877,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
   };
 
+  // [objectui#13234] A group's heading: a date-family key reads as its cell
+  // reads; the group's own label (its sort key) everywhere else.
+  const groupHeadingOf = (group: typeof groups[number]): string => {
+    const temporalFace = temporalGroupFaces.get(group.field);
+    return (temporalFace && temporalGroupHeading(temporalFace, group.keyValues[group.field], displayLocale))
+      || group.label;
+  };
+  // The rows an open leaf group draws: a server-grouped group's current page,
+  // or the rows grouped in hand.
+  const leafRowsOf = (group: typeof groups[number]): any[] =>
+    serverGroupedFetch ? (groupRows.pages[group.key]?.rows ?? []) : group.rows;
+
   // objectui#12620 — the groups on this page of groups, flattened into the
   // one table's bands in display order: each group's band, then (open leaf)
   // its rows, then (open parent) its subgroups. A collapsed group keeps its
@@ -3846,11 +3897,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const bands: NonNullable<ObjectGridDataTableSchema['rowGroups']> = [];
     const visit = (group: typeof groups[number]) => {
       const { fieldLabel, labelColorClass, labelColorStyle } = resolveGroupHeader(group.field, group.label);
-      // [objectui#13234] A date-family key reads as its cell reads; the
-      // group's own label (its sort key) everywhere else.
-      const temporalFace = temporalGroupFaces.get(group.field);
-      const heading = (temporalFace && temporalGroupHeading(temporalFace, group.keyValues[group.field], displayLocale))
-        || group.label;
+      const heading = groupHeadingOf(group);
       const openLeaf = !group.collapsed && group.subgroups.length === 0;
       bands.push({
         key: group.key,
@@ -3869,7 +3916,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             onToggle={toggleGroup}
           />
         ),
-        rows: !openLeaf ? [] : serverGroupedFetch ? (groupRows.pages[group.key]?.rows ?? []) : group.rows,
+        rows: !openLeaf ? [] : leafRowsOf(group),
         footer: openLeaf && serverGroupedFetch ? renderServerGroupFooter(group) : undefined,
       });
       if (!group.collapsed) group.subgroups.forEach(visit);
@@ -3886,6 +3933,24 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     (safeGroupedPage - 1) * groupedPageSize,
     safeGroupedPage * groupedPageSize,
   );
+
+  // [objectstack#28461] The open leaf groups the bands below draw rows for, in
+  // the same order, for a host that steps through a group's rows
+  // (`onRowGroupsChange`). A nested group is named by its path of headings.
+  const shownRowGroups: ObjectGridRowGroup[] = [];
+  if (isGrouped && onRowGroupsChange) {
+    const visit = (group: typeof groups[number], trail: readonly string[]) => {
+      if (group.collapsed) return;
+      const path = [...trail, groupHeadingOf(group)];
+      if (group.subgroups.length > 0) {
+        group.subgroups.forEach((sub) => visit(sub, path));
+        return;
+      }
+      const rows = leafRowsOf(group);
+      if (rows.length > 0) shownRowGroups.push({ key: group.key, label: path.join(' › '), rows });
+    };
+    pagedGroups.forEach((group) => visit(group, []));
+  }
 
   const groupedPager = groups.length > 0 && totalGroupPages > 1 ? (
     <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-3 sm:px-4 py-2 border-t">
@@ -4171,6 +4236,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {gridDescription}
       {gridToolbar}
       {renderedGridContent}
+      {isGrouped && onRowGroupsChange && (
+        <RowGroupsReport groups={shownRowGroups} onChange={onRowGroupsChange} />
+      )}
       <BulkActionBar
         selectedRows={selectedRows}
         actions={effectiveBulkActions ?? []}
