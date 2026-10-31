@@ -376,6 +376,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'submitText',
     why: "planned, not yet rendered — the param dialog's submit button label is validated at parse (an I18nLabel, never blank, only beside a non-empty `params`) and translated by `translateAction`, but the console's param dialog still draws its default \"Confirm\" until it reads the key. A form control offered today would let an author set a button label nothing shows",
   },
+  // [ADR-0144 D5] A record-mode amount's home-currency projection lands
+  // spec-first the same way: declared and judged at parse, written by nothing
+  // until the engine's write-time projection lands in the same release (D9).
+  {
+    kind: 'omit',
+    type: 'field',
+    path: 'currencyConfig',
+    key: 'homeAmount',
+    why: "planned, not yet written — the `{ field, rateDate, rateField }` pointers are validated at parse (all three required, each judged against the object's field map), but no engine converts the amount or stores the home amount and the rate until the write-time home-currency projection lands, which ADR-0144 D9 releases with this key. A form control offered today would let an author declare a home amount nothing writes",
+  },
   // #27946 — an action's pressed-state predicate lands spec-first the same
   // way: `planned` in the liveness ledger, drawn by no action surface until
   // the console card that draws `aria-pressed` on the header buttons.

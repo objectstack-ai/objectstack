@@ -118,7 +118,7 @@ describe('connectorFetchOptions — a signed instance is signed per attempt (ADR
         const seen: ConnectorSignableRequest[] = [];
         const signer: ConnectorRequestSigner = {
             connector: 'vendor',
-            scheme: 'test-scheme',
+            scheme: 'aliyun-acs3-hmac-sha256',
             async sign(request) {
                 seen.push(request);
                 return { headers: { Authorization: `Sig n${seen.length}`, 'X-Nonce': `n${seen.length}` } };
@@ -202,7 +202,7 @@ describe('readConnectorResponse', () => {
     });
 
     it('CONTROL: a signer without response verification reads exactly as no signer', async () => {
-        const signer: ConnectorRequestSigner = { connector: 'v', scheme: 's', sign: async () => ({ headers: {} }) };
+        const signer: ConnectorRequestSigner = { connector: 'v', scheme: 'aliyun-acs3-hmac-sha256', sign: async () => ({ headers: {} }) };
         expect(await readConnectorResponse(json('{"a":1}'), signer)).toEqual({ status: 200, ok: true, body: { a: 1 } });
     });
 
@@ -210,7 +210,7 @@ describe('readConnectorResponse', () => {
         const verified: string[] = [];
         const signer: ConnectorRequestSigner = {
             connector: 'v',
-            scheme: 's',
+            scheme: 'aliyun-acs3-hmac-sha256',
             sign: async () => ({ headers: {} }),
             async verifyResponse(response) {
                 verified.push(`${response.status} ${response.headers.get('x-sig')} ${response.body}`);
@@ -224,7 +224,7 @@ describe('readConnectorResponse', () => {
     it('a response that fails verification throws, and its body is never returned', async () => {
         const signer: ConnectorRequestSigner = {
             connector: 'v',
-            scheme: 's',
+            scheme: 'aliyun-acs3-hmac-sha256',
             sign: async () => ({ headers: {} }),
             async verifyResponse() { throw new Error('response signature does not verify'); },
         };

@@ -14,7 +14,7 @@ import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
-import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
+import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
 import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
@@ -763,9 +763,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     runner.registerHandler('crud_success', async (action: any) => {
       closeRecordForm();
       setRefreshKey(k => k + 1);
-      // `warnings`: the save's own advisory warning lines, which this one
-      // toast carries (objectstack-ai/objectstack#27999).
-      toastRecordSave(toast, action.params?.message ?? 'Record saved successfully', action.params?.warnings);
+      // `warnings` / `notice`: the save's own advisory warning lines and its
+      // hook's notice, which this one toast carries
+      // (objectstack-ai/objectstack#27999, objectstack-ai/objectstack#28252).
+      toastRecordSave(toast, action.params?.message ?? 'Record saved successfully', {
+        warnings: action.params?.warnings,
+        notice: action.params?.notice,
+      });
       return { success: true, reload: true };
     });
 
@@ -909,10 +913,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     };
   }, [dataSource, recordFormParam, formObjectName]);
 
-  const handleCrudSuccess = useCallback((saved?: any, warnings?: string[]) => {
+  const handleCrudSuccess = useCallback((saved?: any, feedback?: RecordSaveFeedback) => {
     executeAction({
       type: 'crud_success',
-      params: { message: recordSaveMessage(saved), warnings },
+      params: { message: recordSaveMessage(saved), warnings: feedback?.warnings, notice: feedback?.notice },
     });
   }, [executeAction, recordSaveMessage]);
 
@@ -933,13 +937,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     // the child's open related lists refetch on their own via the
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
-    const warnings = answerWarningClaim.current?.take(saved) ?? [];
+    const feedback = answerWarningClaim.current?.take(saved);
     if (isChildFormTask) {
-      toastRecordSave(toast, recordSaveMessage(saved), warnings);
+      toastRecordSave(toast, recordSaveMessage(saved), feedback);
       closeRecordForm();
       return;
     }
-    handleCrudSuccess(saved, warnings);
+    handleCrudSuccess(saved, feedback);
     if (editingRecord || !currentObjectDef) return;
     const target = resolvePostCreateTarget({
       objectName: currentObjectDef.name,

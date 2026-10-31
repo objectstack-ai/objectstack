@@ -106,6 +106,12 @@ export const SysInvitation = ObjectSchema.create({
         // field, so the gate narrows this dialog and no other picker.
         { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Invite a person by email address to join the current organization with a role (params: email, role). They join when they accept the invitation. Use when the user asks to invite someone who is not a member yet; the role options are only the roles the caller may grant.',
+      },
     },
     {
       name: 'cancel_invitation',
@@ -122,6 +128,14 @@ export const SysInvitation = ObjectSchema.create({
       confirmText: 'Cancel this invitation? The recipient will no longer be able to accept it.',
       successMessage: 'Invitation canceled',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Cancel a pending invitation (the record), so its recipient can no longer accept it. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'resend_invitation',
@@ -152,6 +166,12 @@ export const SysInvitation = ObjectSchema.create({
         { field: 'email', required: true, defaultFromRow: true, carryOver: true },
         { field: 'role', required: true, defaultFromRow: true, carryOver: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Send a pending invitation (the record) again (params: its email and role, copied from the invitation; the stored role is kept). Its expiry date starts over. Use when the invitee lost the invitation or never received it.',
+      },
     },
     {
       // [#27843, ruling E on #27797] The pending invitation's accept link, for
@@ -216,6 +236,12 @@ export const SysInvitation = ObjectSchema.create({
       visible: "has(record.email) && record.email == ctx.user.email && has(record.status) && record.status == 'pending'",
       successMessage: 'Invitation accepted',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address.',
+      },
     },
     {
       name: 'reject_invitation',
@@ -230,6 +256,14 @@ export const SysInvitation = ObjectSchema.create({
       confirmText: 'Decline this invitation? The inviter will be notified and you will need a new invitation to join.',
       successMessage: 'Invitation declined',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Decline an invitation addressed to the current user (the record). The inviter is notified, and joining later needs a new invitation. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 

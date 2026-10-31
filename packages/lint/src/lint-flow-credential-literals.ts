@@ -80,10 +80,12 @@ const SERVED = 'readable by every member who can read flows';
  * prints it only under `--fix`, so a route stated only in the hint misses the
  * author who runs `os lint`.
  *
- * The hint carries the route BY SHAPE, to a variant `ConnectorInstanceAuthSchema`
- * really has (`none` / `bearer` / `api-key` / `basic`): a header credential goes
- * to `bearer` or a header `api-key`, a query-string key to `api-key` with
- * `paramName`. ⛔ No variant carries a secret in a url PATH, so no text here
+ * The hint carries the route BY SHAPE, to a static variant
+ * `ConnectorInstanceAuthSchema` really has (`bearer` / `api-key` / `basic`): a
+ * header credential goes to `bearer` or a header `api-key`, a query-string key
+ * to `api-key` with `paramName`. Its other kinds (`oauth2`, `app-credential`,
+ * `signed`) carry a grant or a signing key, not a value a literal moves into by
+ * shape, so no hint routes to them; the explanation names them. ⛔ No variant carries a secret in a url PATH, so no text here
  * may promise that `credentialRef` can hold one — an author cannot follow it.
  * (This rule does not judge url paths; it judges query parameters only.)
  */

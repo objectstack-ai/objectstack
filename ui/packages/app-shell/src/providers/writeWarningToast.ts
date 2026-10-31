@@ -56,6 +56,7 @@ export type FieldLabelFn = (objectName: string, fieldName: string, fallback: str
  */
 export interface WriteWarningSink {
   warning(title: string, options?: { description?: string }): void;
+  info(title: string): void;
 }
 
 /**
@@ -251,6 +252,14 @@ function lineFor(reason: DroppedFieldsNotice['reason']): StrippedLine {
  * so the claim holds the warnings by the time the surface's success handler
  * runs, whatever the label lookup below costs. The stripped-fields toast is
  * never claimed.
+ *
+ * The answer's `notice` (objectstack-ai/objectstack#28252) — the message a
+ * hook on the write set for the person who made it — is parked with the
+ * warnings on the same claim, so a record save surface shows it on its one
+ * save toast. Unclaimed, it gets the channel's own toast: it leads the
+ * warnings toast's lines when the write also carried warnings, and is an info
+ * toast of its own, the server's text as written, when it did not. Either way
+ * the write's answer feedback is one toast.
  */
 export async function emitWriteWarning(
   ev: WriteWarningEvent,
@@ -261,23 +270,33 @@ export async function emitWriteWarning(
 ): Promise<void> {
   // Before the first `await`: see the claim paragraph above.
   const messages = answerWarningLines(ev);
-  const claimed = messages.length > 0 && !!adapter
-    && parkAnswerWarnings(adapter, ev, () => emitAnswerWarnings(messages, t, sink));
+  const notice = ev.notice || undefined;
+  const claimed = (messages.length > 0 || notice !== undefined) && !!adapter
+    && parkAnswerWarnings(adapter, ev, () => emitAnswerFeedback(messages, notice, t, sink));
   await emitStrippedFields(ev, t, adapter, fieldLabel, sink);
-  if (!claimed) emitAnswerWarnings(messages, t, sink);
+  if (!claimed) emitAnswerFeedback(messages, notice, t, sink);
 }
 
 /**
- * The write answer's advisory `warnings`, one line per distinct message, under
- * one title. Nothing when the event carries none.
+ * The write answer's advisory `warnings`, one line per distinct message under
+ * one title, led by its `notice` when there is one; a notice alone is an info
+ * toast of its own. Nothing when the event carries neither.
  */
-function emitAnswerWarnings(messages: string[], t: TranslateFn, sink: WriteWarningSink): void {
-  if (messages.length === 0) return;
+function emitAnswerFeedback(
+  messages: string[],
+  notice: string | undefined,
+  t: TranslateFn,
+  sink: WriteWarningSink,
+): void {
+  if (messages.length === 0) {
+    if (notice !== undefined) sink.info(notice);
+    return;
+  }
   sink.warning(
     t('detail.writeWarningsTitle', {
       defaultValue: 'Saved — with warnings',
     }),
-    { description: messages.join('\n') },
+    { description: (notice !== undefined ? [notice, ...messages] : messages).join('\n') },
   );
 }
 

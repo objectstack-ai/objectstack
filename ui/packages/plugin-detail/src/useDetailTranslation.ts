@@ -295,6 +295,16 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // any other current/completed stage, so naming it apart would hand a screen
   // reader a distinction the screen does not make.
   'detail.pathStageWonUpcoming': '{{stage}}, goal stage, not reached',
+  // `record:path` with `allowStageChange` (objectstack#28061): the stage
+  // button's accessible name, the confirmation, and the refusals the path
+  // shows in place when the server's answer carries no sentence of its own.
+  'detail.pathStageChangeAction': 'Move to {{stage}}',
+  'detail.pathStageChangeTitle': 'Change stage?',
+  'detail.pathStageChangeDescription': 'Move this record to {{stage}}?',
+  'detail.pathStageChangeConfirm': 'Move',
+  'detail.pathStageChangeConflict': 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
+  'detail.pathStageChangeDenied': "You don't have permission to change this record's stage.",
+  'detail.pathStageChangeFailed': 'The stage could not be changed.',
   // objectui#9050 — RelatedList's malformed-filter state. Byte-identical to
   // the `en` pack (`defaults-maps-mirror-en-pack`), and present HERE as well
   // because a provider-less host mounting `RelatedList` directly is exactly

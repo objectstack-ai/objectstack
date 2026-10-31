@@ -121,7 +121,7 @@ function useContainerSaveFeedback(
     if (dataSource && writes) {
       // Taken first, so nothing the label lookup below awaits can come
       // between the write and its claim.
-      const warnings = answerWarningClaim.current?.take(saved) ?? [];
+      const feedback = answerWarningClaim.current?.take(saved);
       let message = successMessage;
       if (!message) {
         // The adapter caches the definition the form body already read.
@@ -133,7 +133,7 @@ function useContainerSaveFeedback(
           mode,
         });
       }
-      toastRecordSave(toast, message, warnings);
+      toastRecordSave(toast, message, feedback);
     }
     await onSuccess?.(saved);
   }, [writes, dataSource, mode, successMessage, objectName, onSuccess, objectLabel, t]);

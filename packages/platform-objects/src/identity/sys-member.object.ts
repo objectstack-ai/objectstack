@@ -130,6 +130,12 @@ export const SysMember = ObjectSchema.create({
         // field, so the gate narrows this dialog and no other picker.
         { field: 'role', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Invite a person by email address to join the current organization with a role (params: email, role). They join when they accept the invitation. Use when the user asks to invite someone who is not a member yet; the role options are only the roles the caller may grant.',
+      },
     },
     {
       // Admin-only: directly attach an existing user to the active org,
@@ -200,6 +206,12 @@ export const SysMember = ObjectSchema.create({
         { field: 'role', required: true, helpText: MEMBERSHIP_ROLE_PARAM_HELP },
         { name: 'organizationId', field: 'organization_id' },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Add an existing user straight into an organization with a role, without an invitation (params: userId, role, and optionally organizationId, which defaults to the active organization). Platform administrators only.',
+      },
     },
     {
       name: 'update_member_role',
@@ -245,6 +257,14 @@ export const SysMember = ObjectSchema.create({
       confirmText: 'Remove this member from the organization? They will lose access to all org resources.',
       successMessage: 'Member removed',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Remove a member (the record) from the organization: they lose access to all of its resources. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     // Make Owner is `update-member-role` with role=owner, and better-auth's
     // `updateMemberRole` writes the TARGET's role and nothing else: the caller

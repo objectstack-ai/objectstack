@@ -278,7 +278,7 @@ export function generateTemporaryPassword(length = 16): string {
 /**
  * [#24032] The body, or the refusal message for a declared-JSON body that does
  * not parse: it was read as `{}`, which answered "userId is required" (or
- * "Either email or phoneNumber is required") for a body that carried the field
+ * "Email is required") for a body that carried the field
  * (see request-json-body.ts). A well-formed body that is not an object still
  * reads as no fields, as before.
  */
@@ -694,7 +694,11 @@ export async function runAdminCreateUser(
     }
   }
   if (!hasEmail && !phoneNumber) {
-    return badRequest('Either email or phoneNumber is required');
+    // Named in the dialog's words, not the body's keys: an administrator sees
+    // an Email field, and a Phone Number field only where phone sign-in is on.
+    return badRequest(
+      deps.phoneNumberEnabled?.() ? 'Email or phone number is required' : 'Email is required',
+    );
   }
   const email = hasEmail ? (rawEmail as string).trim() : generatePlaceholderEmail();
   const name =

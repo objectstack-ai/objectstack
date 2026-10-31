@@ -364,12 +364,9 @@ pressed: "has(record.viewer) && record.viewer.vote == 'helpful'"
 ```
 
 - It is **display only**. A pressed action stays runnable, and the action's own body decides what a second press does (records the vote again, withdraws it, or answers "already").
+- The record header and the declared actions bar draw it on their buttons: `aria-pressed="true"` and the pressed face while it is true, `aria-pressed="false"` otherwise. A predicate that cannot be evaluated draws the unpressed button. A menu item (an action folded into the header's overflow menu) has no pressed state, so it is not drawn there.
 - A boolean literal is refused: `pressed: true` would draw the button pressed for every reader, which is a style rather than the reader's state.
 - A per-reader fact is usually not a column of the row (a vote is a child record per user). Declare it as a block under the object's `attachedOnRead`, have the serving side attach it to each row it returns for the caller (a service, or an `afterFind` hook that shapes the rows), and read it as `record.<block>.<leaf>`, guarded with `has()`. `os build` and `os validate` check the leaf against the declared block.
-
-<Callout type="info">
-The spec, the build check and this contract are in place; the console's record header and declared actions bar do not draw the pressed face yet ([#28242](https://github.com/objectstack-ai/objectstack/issues/28242)), so today the button looks the same whatever the predicate answers.
-</Callout>
 
 #### Evaluation context
 

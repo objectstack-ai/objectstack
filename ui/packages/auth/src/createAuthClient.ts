@@ -739,7 +739,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // `changePassword`. The runtime method exists but its TS type is
       // sometimes missing depending on plugin order; cast through unknown.
       type ChangePwFn = (opts: { currentPassword: string; newPassword: string; revokeOtherSessions?: boolean }) =>
-        Promise<{ error: { message?: string; status: number } | null }>;
+        Promise<{ error: BetterAuthErrorLike | null }>;
       const fn = (betterAuth as unknown as { changePassword: ChangePwFn }).changePassword;
       if (typeof fn !== 'function') {
         throw new Error('change-password is not available on this auth backend');
@@ -749,9 +749,9 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         newPassword,
         ...(options?.revokeOtherSessions != null ? { revokeOtherSessions: options.revokeOtherSessions } : {}),
       });
-      if (error) {
-        throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
-      }
+      // toAuthError keeps better-auth's `code` (a wrong current password is
+      // INVALID_PASSWORD) so the console can localise it (#27869).
+      if (error) throw toAuthError(error);
     },
 
     // ADR-0069 — enforced-MFA enrollment. Returns the otpauth:// URI (for a QR)
