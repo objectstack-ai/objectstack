@@ -8,9 +8,10 @@
  * wherever that cannot be read. Moved out of `protocol.ts` whole.
  *
  * A MOVE, not a redesign. The function below is the body of the
- * `ObjectStackProtocolImplementation` method of the same name as it stood,
- * re-indented one level and otherwise unedited: the same guards, the same
- * dependency walk, and the same silent `catch` answering `undefined`.
+ * `ObjectStackProtocolImplementation` method of the same name: the same
+ * guards, the same dependency walk (since #28240 the shared
+ * `resolvePackageClosure`, unchanged), and the same silent `catch` answering
+ * `undefined`.
  *
  * ## How the moved body reaches the class
  *
@@ -24,11 +25,12 @@
  * calling the class method: `tenantAuthoredWriteRefusal`, and the authoring
  * gate's host (cut 8, `protocol-authoring-gate.ts`), whose closure calls it.
  *
- * The body reads no module-level declaration of `protocol.ts` and no import,
- * so this module imports only the class type. Nothing re-exports this module,
- * so the published surface does not move.
+ * The body reads no module-level declaration of `protocol.ts`; it imports the
+ * class type and the shared walk (`resolvePackageClosure`, below). Nothing
+ * re-exports this module, so the published surface does not move.
  */
 
+import { resolvePackageClosure } from '@objectstack/lint/runtime';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 
 /**
@@ -42,43 +44,26 @@ export interface WritePackageScopeHost {
     readonly engine: ObjectStackProtocolImplementation['engine'];
 }
 
-/** The body of `ObjectStackProtocolImplementation#resolveWritePackageScope`; the method's docblock there is its contract. */
+/**
+ * The body of `ObjectStackProtocolImplementation#resolveWritePackageScope`; the method's docblock there is its contract.
+ *
+ * [#28240] The dependency walk itself is `resolvePackageClosure` in
+ * `@objectstack/lint`, the same function Studio's object pickers call over
+ * the served package list, so the picker offers exactly what this gate
+ * admits. This body keeps the two host guards: a registry with no
+ * `getPackage`, and the silent `catch` answering `undefined`.
+ */
 export function resolveWritePackageScope(
     this: Pick<WritePackageScopeHost, 'engine'>,
     packageId: string | null | undefined,
 ): { packageId: string; dependencies: string[] } | undefined {
-    if (typeof packageId !== 'string' || packageId === '' || packageId === 'sys_metadata') return undefined;
     try {
         const registry = this.engine.registry as
             | { getPackage?: (id: string) => { manifest?: unknown } | undefined }
             | undefined;
-        if (typeof registry?.getPackage !== 'function') return undefined;
-        // The written package itself must be readable: its manifest is the
-        // ONLY declaration of what it may reference, and narrowing without
-        // it would be narrowing on nothing.
-        if (!registry.getPackage(packageId)) return undefined;
-
-        const dependencies = new Set<string>();
-        const frontier = [packageId];
-        while (frontier.length > 0) {
-            const current = frontier.pop() as string;
-            const manifest = registry.getPackage(current)?.manifest as
-                | { dependencies?: Record<string, unknown> }
-                | undefined;
-            const declared = manifest?.dependencies;
-            if (!declared || typeof declared !== 'object') continue;
-            for (const dep of Object.keys(declared)) {
-                // A dependency the registry cannot resolve is still IN the
-                // closure: the package declared it, so an object stamped
-                // with it is reachable by declaration. Only the transitive
-                // walk stops there — `getPackage` returns undefined and the
-                // loop above simply contributes nothing further.
-                if (dep === packageId || dependencies.has(dep)) continue;
-                dependencies.add(dep);
-                frontier.push(dep);
-            }
-        }
-        return { packageId, dependencies: [...dependencies] };
+        const getPackage = registry?.getPackage;
+        if (typeof getPackage !== 'function') return undefined;
+        return resolvePackageClosure(packageId, (id) => getPackage.call(registry, id));
     } catch {
         // Context gathering must never fail a write (the same contract
         // `listCollection` above holds). An unreadable registry means an
