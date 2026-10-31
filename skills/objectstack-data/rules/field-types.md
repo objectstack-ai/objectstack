@@ -51,7 +51,7 @@ fields: {
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
 | `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency, currencyField, homeAmount) |
-| `percent` | Percentage values (0-100) | `min`, `max`, `precision` |
+| `percent` | Percentage values (0-100) | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
 
 ## Date & Time
 
@@ -181,20 +181,6 @@ stored field to `'record'`? Backfill: `os migrate record-currency-codes`.
 home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 (`date`/`datetime`) rate, and that rate in `rateField` (`number`), both
 `readonly: true`. Cross-currency totals sum `field`.
-
-### Select with Default
-
-```typescript
-{
-  type: 'select',
-  required: true,
-  options: [
-    { label: 'Low', value: 'low' },
-    { label: 'Medium', value: 'medium', default: true },
-    { label: 'High', value: 'high', color: '#e74c3c' },
-  ],
-}
-```
 
 ### Lookup (One-to-Many)
 
