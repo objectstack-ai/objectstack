@@ -2270,6 +2270,8 @@ const ru = {
       popupBlockedDescription: "Браузер заблокировал открытие новой вкладки.",
       popupBlockedAction: "Открыть в новой вкладке",
       noRecordId: "Это действие выполняется для одной записи — идентификатор записи недоступен.",
+      fillRequiredThenRetry: "Заполните {{fields}}, затем снова запустите «{{action}}».",
+      fillRequiredFirst: "Сначала заполните {{fields}}.",
     },
     shortcuts: {
       title: "Горячие клавиши",

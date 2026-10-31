@@ -804,8 +804,8 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   // memoized once) while the config thunks read the latest object scope and
   // refresh callback — the factory's in-flight guard only spans invocations of
   // the same instance.
-  const serverActionEnvRef = useRef({ objApiName, refresh, t, navigate });
-  serverActionEnvRef.current = { objApiName, refresh, t, navigate };
+  const serverActionEnvRef = useRef({ objApiName, refresh, t, navigate, language });
+  serverActionEnvRef.current = { objApiName, refresh, t, navigate, language };
   const serverActionHandler = useMemo(
     () => createConsoleServerActionHandler({
       fetch: authFetch,
@@ -819,7 +819,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // Read through the env ref so the spinner-tab / popup-blocked copy
       // follows a language switch without invalidating the handler instance
       // (objectui#3321).
-      t: (key, englishDefault) => String(serverActionEnvRef.current.t(key, englishDefault)),
+      t: (key, englishDefault, values) =>
+        String(serverActionEnvRef.current.t(key, { defaultValue: englishDefault, ...values })),
+      locale: () => serverActionEnvRef.current.language,
     }),
     [authFetch],
   );

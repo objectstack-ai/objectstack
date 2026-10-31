@@ -2154,6 +2154,8 @@ const ja = {
       popupBlockedDescription: "ブラウザが新しいタブを開くのをブロックしました。",
       popupBlockedAction: "新しいタブで開く",
       noRecordId: "この操作は 1 件のレコードに対して実行されますが、利用できるレコード ID がありません。",
+      fillRequiredThenRetry: "{{fields}} を入力してから、もう一度「{{action}}」を実行してください。",
+      fillRequiredFirst: "先に {{fields}} を入力してください。",
     },
     shortcuts: {
       title: "キーボードショートカット",

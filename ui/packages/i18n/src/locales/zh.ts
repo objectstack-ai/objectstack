@@ -1940,6 +1940,8 @@ const zh = {
       popupBlockedDescription: '浏览器阻止了新标签页的打开。',
       popupBlockedAction: '在新标签页打开',
       noRecordId: '此操作针对单条记录，但没有可用的记录 ID。',
+      fillRequiredThenRetry: '请先填写{{fields}}，然后重新执行“{{action}}”。',
+      fillRequiredFirst: '请先填写{{fields}}。',
     },
     shortcuts: {
       title: '键盘快捷键',

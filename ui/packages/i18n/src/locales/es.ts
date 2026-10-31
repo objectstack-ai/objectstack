@@ -2210,6 +2210,8 @@ const es = {
       popupBlockedDescription: "El navegador bloqueó la apertura de la nueva pestaña.",
       popupBlockedAction: "Abrir en una pestaña nueva",
       noRecordId: "Esta acción se ejecuta sobre un solo registro: no hay ningún ID de registro disponible.",
+      fillRequiredThenRetry: "Completa {{fields}} y vuelve a ejecutar «{{action}}».",
+      fillRequiredFirst: "Completa primero {{fields}}.",
     },
     shortcuts: {
       title: "Atajos de teclado",

@@ -1817,8 +1817,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `action.recordId`; header/more actions carry none and use this page's id.
   // The env ref keeps the handler instance stable across renders (authFetch is
   // memoized once) while the thunks read the live record/object.
-  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyRecordChanged, t, navigate });
-  serverActionEnvRef.current = { objectName, pureRecordId, notifyRecordChanged, t, navigate };
+  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyRecordChanged, t, navigate, language });
+  serverActionEnvRef.current = { objectName, pureRecordId, notifyRecordChanged, t, navigate, language };
   const serverActionHandler = useMemo(
     () => createConsoleServerActionHandler({
       fetch: authFetch,
@@ -1834,7 +1834,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // Read through the env ref so the spinner-tab / popup-blocked copy
       // follows a language switch without invalidating the handler instance
       // (objectui#3321).
-      t: (key, englishDefault) => String(serverActionEnvRef.current.t(key, englishDefault)),
+      t: (key, englishDefault, values) =>
+        String(serverActionEnvRef.current.t(key, { defaultValue: englishDefault, ...values })),
+      locale: () => serverActionEnvRef.current.language,
     }),
     [authFetch],
   );

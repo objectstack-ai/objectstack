@@ -2152,6 +2152,8 @@ const de = {
       popupBlockedDescription: "Der Browser hat das Öffnen des neuen Tabs blockiert.",
       popupBlockedAction: "In neuem Tab öffnen",
       noRecordId: "Diese Aktion gilt für einen einzelnen Datensatz – keine Datensatz-ID verfügbar.",
+      fillRequiredThenRetry: "Füllen Sie {{fields}} aus und führen Sie dann „{{action}}“ erneut aus.",
+      fillRequiredFirst: "Füllen Sie zuerst {{fields}} aus.",
     },
     shortcuts: {
       title: "Tastenkürzel",

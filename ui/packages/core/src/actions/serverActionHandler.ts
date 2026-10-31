@@ -301,7 +301,11 @@ export function createServerActionHandler(config: ServerActionHandlerConfig): Se
       if (!outcome.ok) {
         // Don't toast here — the ActionRunner's post-execution hook surfaces
         // `error` as a toast; a handler-side toast double-fires it.
-        return { success: false, error: outcome.error };
+        return {
+          success: false,
+          error: outcome.error,
+          ...(outcome.fieldErrors ? { fieldErrors: outcome.fieldErrors } : {}),
+        };
       }
       const shouldRefresh = action.refreshAfter !== false;
       if (shouldRefresh) onRefresh?.();

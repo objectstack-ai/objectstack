@@ -2206,6 +2206,8 @@ const fr = {
       popupBlockedDescription: "Le navigateur a bloqué l'ouverture du nouvel onglet.",
       popupBlockedAction: "Ouvrir dans un nouvel onglet",
       noRecordId: "Cette action porte sur un seul enregistrement — aucun identifiant d’enregistrement n’est disponible.",
+      fillRequiredThenRetry: "Renseignez {{fields}}, puis relancez « {{action}} ».",
+      fillRequiredFirst: "Renseignez d’abord {{fields}}.",
     },
     shortcuts: {
       title: "Raccourcis clavier",

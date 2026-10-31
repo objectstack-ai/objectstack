@@ -2152,6 +2152,8 @@ const ko = {
       popupBlockedDescription: "브라우저가 새 탭 열기를 차단했습니다.",
       popupBlockedAction: "새 탭에서 열기",
       noRecordId: "이 작업은 단일 레코드에서 실행되지만 사용할 수 있는 레코드 ID가 없습니다.",
+      fillRequiredThenRetry: "{{fields}}을(를) 입력한 다음 \"{{action}}\"을(를) 다시 실행하세요.",
+      fillRequiredFirst: "먼저 {{fields}}을(를) 입력하세요.",
     },
     shortcuts: {
       title: "키보드 단축키",
