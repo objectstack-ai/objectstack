@@ -390,8 +390,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#27627 — entering an app loads its metadata bundle, and
   // re-entering it revalidates the one held (`loadAppBundle`): from then on the
   // by-name metadata reads of everything the app reaches are answered from it.
+  // Only the app the URL names: a pseudo-route's fallback app is not entered.
   // A host adapter without the bundle keeps every by-name read.
-  const bundleAppName: string | undefined = typeof activeApp?.name === 'string' ? activeApp.name : undefined;
+  const bundleAppName: string | undefined = typeof matchedApp?.name === 'string' ? matchedApp.name : undefined;
   useEffect(() => {
     const load = dataSource?.loadAppBundle;
     if (!bundleAppName || typeof load !== 'function') return;

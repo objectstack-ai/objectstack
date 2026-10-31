@@ -82,16 +82,16 @@ const task = { name: 'b27627_task', label: 'Task', fields: { contact: { type: 'l
 
 /** The bundle's answer: bare, every member the envelope its by-name read answers. */
 function bundle(label = 'Contact') {
-  const env = (type: string, item: { name: string }, extra: Record<string, unknown> = {}) => ({ type, name: item.name, item, ...extra });
+  const env = (type: string, item: { name: string; [key: string]: unknown }, extra: Record<string, unknown> = {}) => ({ type, name: item.name, item, ...extra });
   return {
     app: env('app', { name: APP, label: 'App' }),
     objects: [
       env('object', { ...contact, label }, { sortability: { fields: { name: { sortable: true } } } }),
       env('object', task),
     ],
-    views: [env('view', { name: 'b27627_contact.all', object: 'b27627_contact', label: 'All' } as { name: string })],
-    pages: [env('page', { name: 'b27627_contact_page', label: 'Contact page' } as { name: string })],
-    dashboards: [env('dashboard', { name: 'b27627_home', label: 'Home' } as { name: string })],
+    views: [env('view', { name: 'b27627_contact.all', object: 'b27627_contact', label: 'All' })],
+    pages: [env('page', { name: 'b27627_contact_page', label: 'Contact page' })],
+    dashboards: [env('dashboard', { name: 'b27627_home', label: 'Home' })],
   };
 }
 
