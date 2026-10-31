@@ -22,7 +22,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { RelatedCardChromeContext, RelatedListCompactContext } from '../relatedListCompact';
+import { RelatedCardChromeContext, RelatedListCompactContext, RelatedListEnlargedContext } from '../relatedListCompact';
 
 vi.mock('@object-ui/react', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -32,9 +32,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 function StubNode({ schema }: { schema: any }) {
   const chrome = React.useContext(RelatedCardChromeContext);
   const compact = React.useContext(RelatedListCompactContext);
+  const enlarged = React.useContext(RelatedListEnlargedContext);
   const p = schema?.properties ?? {};
   return (
-    <section data-node={schema?.type} data-related-card-id={chrome?.id} data-compact={compact ? 'yes' : 'no'} data-limit={p.limit}>
+    <section data-node={schema?.type} data-related-card-id={chrome?.id} data-compact={compact ? 'yes' : 'no'} data-enlarged={enlarged ? 'yes' : 'no'} data-limit={p.limit}>
       {chrome?.onEnlarge && <button onClick={chrome.onEnlarge}>{`enlarge ${p.objectName}`}</button>}
       {p.objectName ?? schema?.type}
       {chrome?.onMoveUp && <button onClick={chrome.onMoveUp}>{`up ${p.objectName}`}</button>}
@@ -194,9 +195,12 @@ describe('the enlarged related list — ⤢ and ?related= (objectstack#27055, Ta
     const enlarged = container.querySelector('[data-related-enlarged="note.parent_id"]')!;
     expect(enlarged).toBeTruthy();
     expect(container.querySelector('[data-record-columns]')).toBeNull();
-    // The FULL face, not the compact card — and paged.
+    // The FULL face, not the compact card — and paged. Since objectstack#27524
+    // it is drawn as the tab's face: the toolbar over the table, no card
+    // (`RelatedList.enlargedToolbar-27524`).
     const list = enlarged.querySelector('[data-node="record:related_list"]')!;
     expect(list.getAttribute('data-compact')).toBe('no');
+    expect(list.getAttribute('data-enlarged')).toBe('yes');
     expect(list.getAttribute('data-limit')).toBe('25');
     // The header nodes are still drawn above it.
     expect(container.querySelector('[data-node="page:header"]')).not.toBeNull();

@@ -79,6 +79,14 @@ export const RecordBodyTablesContext = React.createContext<ReadonlySet<string>>(
 export const RelatedEnlargeContext = React.createContext<((id: string) => void) | null>(null);
 
 /**
+ * The related list is drawn as the record page's active tab — its enlarged
+ * face (objectstack#27524, the ride-along ruled at ③'s preview gate): a
+ * toolbar (the filter, 全部 / 我的 / 逾期, 新建, 导出) over the table at the
+ * tab's full height, with no card header and no card foot.
+ */
+export const RelatedListEnlargedContext = React.createContext(false);
+
+/**
  * The count of the compact card being drawn, counted up front by its stack
  * (objectstack#27056, Targets 1 and 2): the card draws its header from it, a
  * count of 0 folds the card to its one line and reads no rows, and a card

@@ -1516,6 +1516,18 @@ const en = {
     maximize: 'Maximize',
     restoreSize: 'Restore size',
     recordOf: '{{current}} of {{total}}',
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: '{{current}} of {{total}} in {{scope}}',
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: 'Filter {{title}}…',
+    relatedChips: 'Show',
+    relatedChipAll: 'All',
+    relatedChipMine: 'Mine',
+    relatedChipOverdue: 'Overdue',
+    relatedExport: 'Export',
+    relatedRows: '{{count}} rows',
+    relatedRows_one: '{{count}} row',
+    relatedRows_other: '{{count}} rows',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
     goBack: 'Go back',
