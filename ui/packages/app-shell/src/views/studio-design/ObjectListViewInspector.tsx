@@ -1487,7 +1487,8 @@ export function ObjectListViewInspector({
                 </PopoverTrigger>
                 <PopoverContent align="start" className="w-[440px] max-w-[90vw] p-3">
                   <SortBuilder
-                    fields={fields.map((f) => ({ value: f.name, label: f.label }))}
+                    // objectstack#27520 — the type lets a date row read "Oldest → Newest".
+                    fields={fields.map((f) => ({ value: f.name, label: f.label, type: f.type }))}
                     value={sort.map((s, i) => ({ id: `${i}`, ...s }))}
                     onChange={(items: SortItem[]) => {
                       // The builder's row `id` is a React key: the spec refuses it on
