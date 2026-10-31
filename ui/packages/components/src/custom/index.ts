@@ -30,6 +30,7 @@ export {
   type RecordListFace,
 } from './record-list-face';
 export * from './panel-toggles';
+export * from './record-top-bar';
 export * from './resizable';
 export * from './section-header';
 export * from './spinner';

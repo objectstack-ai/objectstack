@@ -1634,6 +1634,26 @@ export interface DataTableSchema extends BaseSchema {
    */
   isRowEditable?: (row: any) => boolean;
   /**
+   * Host-drawn row context menu (objectstack#28434): the items a right-click,
+   * the context-menu key or Shift+F10 on a row opens, at the pointer (or below
+   * the focused cell for the keyboard).
+   *
+   * RUNTIME SLOT (the objectui#6124 shape) — a host-supplied function, NOT
+   * authorable metadata: JSON has no function value, so the zod twin refuses
+   * this key by name. `data-table` owns the menu itself — where it opens, Esc,
+   * focus going back to the row, and the cases that keep the browser's own menu
+   * (a link, an input or a cell in edit mode, a text selection in the row, a
+   * touch long-press). The host supplies only the items (`DropdownMenuItem`s),
+   * given the row and whether it is part of the table's selection. `ObjectGrid`
+   * supplies them from the same resolvers its row "⋮" menu and its bulk action
+   * bar read.
+   *
+   * Answering `null` (or `undefined` / `false`) keeps the browser's menu for
+   * that row. Absent, a table with its own row "⋮" menu opens those items, and
+   * every other table keeps the browser's menu, exactly as before.
+   */
+  renderRowContextMenu?: (row: any, context: { selected: boolean }) => React.ReactNode;
+  /**
    * Group bands (objectui#12620): draw the table as ONE table, with one header,
    * whose body is a band row per group followed by that group's rows.
    *
@@ -1873,8 +1893,8 @@ export interface DataTableSchema extends BaseSchema {
    * `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`,
    * `onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`,
    * `onRowDelete`, `onRowEdit`, `onRowSave`, `onSelectionChange`,
-   * `renderCellEditor`, `rowActionDefs`, `rowDeletePredicates`,
-   * `rowEditPredicates` (in
+   * `renderCellEditor`, `renderRowContextMenu`, `rowActionDefs`,
+   * `rowDeletePredicates`, `rowEditPredicates` (in
    * `packages/components/src/renderers/complex/data-table.tsx`).
    *
    * Before objectui#9256 tombstoned them here, `body` and `children` were both
@@ -1904,8 +1924,8 @@ export interface DataTableSchema extends BaseSchema {
    * `emptyAction`, `isRowEditable`, `onAddRecord`, `onBatchSave`, `onCellChange`,
    * `onColumnResize`, `onColumnsReorder`, `onRowActionDef`, `onRowClick`,
    * `onRowDelete`, `onRowEdit`, `onRowSave`, `onSelectionChange`,
-   * `renderCellEditor`, `rowActionDefs`, `rowDeletePredicates`,
-   * `rowEditPredicates` (in
+   * `renderCellEditor`, `renderRowContextMenu`, `rowActionDefs`,
+   * `rowDeletePredicates`, `rowEditPredicates` (in
    * `packages/components/src/renderers/complex/data-table.tsx`).
    *
    * Before objectui#9256 tombstoned them here, `body` and `children` were both

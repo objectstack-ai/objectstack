@@ -192,6 +192,7 @@ const ru = {
     dialogDescriptionFallback: "Заполните поля формы, затем отправьте или отмените.",
     deniedDescription: "У вас нет прав на редактирование этого поля.",
     serverDefaultHint: "Задаётся автоматически при сохранении.",
+    requiredForAction: "Обязательно для выполнения «{{action}}».",
     maxFileSize: "Максимальный размер: {{size}}",
     masterDetail: {
       loadingColumns: "Загрузка столбцов…",
@@ -1230,6 +1231,20 @@ const ru = {
     maximize: "Развернуть",
     restoreSize: "Восстановить размер",
     recordOf: "{{current}} из {{total}}",
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: "{{current}} из {{total}} в «{{scope}}»",
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: "Фильтр: {{title}}…",
+    relatedChips: "Показать",
+    relatedChipAll: "Все",
+    relatedChipMine: "Мои",
+    relatedChipOverdue: "Просроченные",
+    relatedExport: "Экспорт",
+    relatedRows: "{{count}} записей",
+    relatedRows_one: "{{count}} запись",
+    relatedRows_few: "{{count}} записи",
+    relatedRows_many: "{{count}} записей",
+    relatedRows_other: "{{count}} записей",
     recordNotFound: "Запись не найдена",
     recordNotFoundDescription: "Запись, которую вы ищете, не существует, была удалена или у вас нет к ней доступа.",
     goBack: "Назад",

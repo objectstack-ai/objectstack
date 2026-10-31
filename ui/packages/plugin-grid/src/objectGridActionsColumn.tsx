@@ -12,7 +12,7 @@ import { PINNED_RIGHT_SEAM_SHADOW_CLASSES } from '@object-ui/components';
 import { resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
-import { RowActionMenu, planRowActionMenu } from './components/RowActionMenu';
+import { RowActionMenu, planRowActionMenu, type RowActionMenuProps } from './components/RowActionMenu';
 import { rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
 import type { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns';
@@ -98,6 +98,83 @@ export function resolveObjectGridActionsColumn({
   };
   const drawActionsColumn = (hasActions || hasRowActions) && data.some(rowOffersAction);
 
+  /**
+   * The props ONE row's "⋮" cell renders with — and, verbatim, the props its
+   * context menu reads (objectstack#28434), so the two entry points resolve the
+   * same items through the same handlers and the same confirm dialogs.
+   */
+  const rowActionMenuProps = (row: any): RowActionMenuProps => {
+    // [objectui#8674] The CALLER's answer for this one row, resolved
+    // once per row and ANDed into the two verdicts below. A host whose
+    // refusal is per record (a system field the designer may not drop)
+    // has no other place to put it: `operations` and the `onEdit` /
+    // `onDelete` wiring are grid-level and identical for every row, so
+    // the refusal used to live in the callback and fire AFTER the button
+    // had been drawn and clicked. Narrowing only — see `rowOperations`.
+    // Resolved by `rowCrudVerdicts`, the same call the column's draw
+    // verdict above reads (objectui#12708).
+    const rowVerdicts = rowCrudVerdicts(row);
+    return {
+      row,
+      rowActions: customRowActions,
+      rowActionDefs: resolvedRowActionDefs as any[],
+      objectFields: objectSchema?.fields,
+      // NON-AUTHOR SURFACE — `maxInlineRowActions` is deliberately
+      // absent from `GRID_QUERY_INPUTS` (maintainer ruling, 2026-08-18,
+      // objectui#5091), so the cast read behind `maxInlineRowActions` (resolved
+      // above, beside the column's draw verdict) is deliberate, not missed. It is
+      // a host/internal switch for the inline-button budget before the
+      // rest fold into the "⋮" menu — an embedder's layout call, set from
+      // code (`apps/console/src/dev/DevRowActions.tsx:51`), never from a
+      // view document. `ComponentPropsMap['object-grid']` is a
+      // `strictObject` and rejects the key by name, so publishing it would
+      // advertise a key the save gate refuses. The `?? 1` default is the
+      // published behaviour and stays the one an author sees. Pinned by
+      // `__tests__/gridNonAuthorKeys.test.tsx`.
+      maxInlineActions: maxInlineRowActions,
+      // [#4296] The object verdict ANDed with THIS row's record-level one.
+      // It rides the same per-row channel the #2614 predicates ride —
+      // `planRowActionMenu` conjoins `canEdit`/`canDelete` with
+      // `visibleWhen` in one expression, so the item and the "⋮" guard read
+      // one decision (#3562) and a hidden row grows no empty trigger. An
+      // unanswered row keeps the object verdict, i.e. today's rendering.
+      // [objectui#8674] `rowOps` (inside `rowCrudVerdicts`) is the third narrowing in this one
+      // expression, and an INTERSECTION like the two around it: only
+      // `false` removes, so a caller that passes no `rowOperations` —
+      // every caller but the field designer today — reads exactly the
+      // verdict this line carried before the prop existed.
+      canEdit: rowVerdicts.canEdit,
+      canDelete: rowVerdicts.canDelete,
+      editPredicates,
+      deletePredicates,
+      onEdit,
+      onDelete,
+      onAction: (action, r) => {
+        void executeAction({ type: action, params: { record: r } }).then(res => {
+          // A successful row action typically mutated this record; refresh
+          // so the grid reflects the server state (same rationale as bulk).
+          if (res?.success) setRefreshKey(k => k + 1);
+        });
+      },
+      onActionDef: (def, r) => {
+        // Dispatch schema-driven row action through the runner. We forward
+        // the full action def so type/target/recordIdParam/bodyShape/etc.
+        // route correctly, attach the row record under `_rowRecord` for the
+        // apiHandler row-id injection, and surface raw `params` as
+        // `actionParams` so the runner shows the param dialog when present.
+        const { params: rawParams, ...rest } = def;
+        const dispatch: any = { ...rest };
+        if (Array.isArray(rawParams) && rawParams.length > 0) {
+          dispatch.actionParams = rawParams;
+        }
+        dispatch.params = { _rowRecord: r };
+        void executeAction(dispatch).then(res => {
+          if (res?.success) setRefreshKey(k => k + 1);
+        });
+      },
+    };
+  };
+
   const columnsWithActions = drawActionsColumn ? [
     ...persistedColumns,
     {
@@ -113,79 +190,7 @@ export function resolveObjectGridActionsColumn({
       // extent and is hidden). Excluded from the frozen-column decision below so
       // this auto-pin doesn't cancel the default left-freeze of the first column.
       pinned: 'right',
-      cell: (_value: any, row: any) => {
-        // [objectui#8674] The CALLER's answer for this one row, resolved
-        // once per row and ANDed into the two verdicts below. A host whose
-        // refusal is per record (a system field the designer may not drop)
-        // has no other place to put it: `operations` and the `onEdit` /
-        // `onDelete` wiring are grid-level and identical for every row, so
-        // the refusal used to live in the callback and fire AFTER the button
-        // had been drawn and clicked. Narrowing only — see `rowOperations`.
-        // Resolved by `rowCrudVerdicts`, the same call the column's draw
-        // verdict above reads (objectui#12708).
-        const rowVerdicts = rowCrudVerdicts(row);
-        return (
-          <RowActionMenu
-            row={row}
-            rowActions={customRowActions}
-            rowActionDefs={resolvedRowActionDefs as any[]}
-            objectFields={objectSchema?.fields}
-            // NON-AUTHOR SURFACE — `maxInlineRowActions` is deliberately
-            // absent from `GRID_QUERY_INPUTS` (maintainer ruling, 2026-08-18,
-            // objectui#5091), so the cast read behind `maxInlineRowActions` (resolved
-            // above, beside the column's draw verdict) is deliberate, not missed. It is
-            // a host/internal switch for the inline-button budget before the
-            // rest fold into the "⋮" menu — an embedder's layout call, set from
-            // code (`apps/console/src/dev/DevRowActions.tsx:51`), never from a
-            // view document. `ComponentPropsMap['object-grid']` is a
-            // `strictObject` and rejects the key by name, so publishing it would
-            // advertise a key the save gate refuses. The `?? 1` default is the
-            // published behaviour and stays the one an author sees. Pinned by
-            // `__tests__/gridNonAuthorKeys.test.tsx`.
-            maxInlineActions={maxInlineRowActions}
-            // [#4296] The object verdict ANDed with THIS row's record-level one.
-            // It rides the same per-row channel the #2614 predicates ride —
-            // `planRowActionMenu` conjoins `canEdit`/`canDelete` with
-            // `visibleWhen` in one expression, so the item and the "⋮" guard read
-            // one decision (#3562) and a hidden row grows no empty trigger. An
-            // unanswered row keeps the object verdict, i.e. today's rendering.
-            // [objectui#8674] `rowOps` (inside `rowCrudVerdicts`) is the third narrowing in this one
-            // expression, and an INTERSECTION like the two around it: only
-            // `false` removes, so a caller that passes no `rowOperations` —
-            // every caller but the field designer today — reads exactly the
-            // verdict this line carried before the prop existed.
-            canEdit={rowVerdicts.canEdit}
-            canDelete={rowVerdicts.canDelete}
-            editPredicates={editPredicates}
-            deletePredicates={deletePredicates}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onAction={(action, r) => {
-              void executeAction({ type: action, params: { record: r } }).then(res => {
-                // A successful row action typically mutated this record; refresh
-                // so the grid reflects the server state (same rationale as bulk).
-                if (res?.success) setRefreshKey(k => k + 1);
-              });
-            }}
-            onActionDef={(def, r) => {
-              // Dispatch schema-driven row action through the runner. We forward
-              // the full action def so type/target/recordIdParam/bodyShape/etc.
-              // route correctly, attach the row record under `_rowRecord` for the
-              // apiHandler row-id injection, and surface raw `params` as
-              // `actionParams` so the runner shows the param dialog when present.
-              const { params: rawParams, ...rest } = def;
-              const dispatch: any = { ...rest };
-              if (Array.isArray(rawParams) && rawParams.length > 0) {
-                dispatch.actionParams = rawParams;
-              }
-              dispatch.params = { _rowRecord: r };
-              void executeAction(dispatch).then(res => {
-                if (res?.success) setRefreshKey(k => k + 1);
-              });
-            }}
-          />
-        );
-      },
+      cell: (_value: any, row: any) => <RowActionMenu {...rowActionMenuProps(row)} />,
       sortable: false,
     },
   ] : persistedColumns;
@@ -218,6 +223,12 @@ export function resolveObjectGridActionsColumn({
     userLeftPinnedCount > 0 || pinnedRightCols.some((c: any) => c.accessorKey !== '_actions');
 
   return {
+    // objectstack#28434 — the row context menu reads the cell's own props,
+    // whether this table offers row actions at all (a face-level answer), and
+    // the cell's own "does this row offer anything" verdict.
+    rowActionMenuProps,
+    tableOffersRowActions: hasActions || hasRowActions,
+    rowOffersAction: (row: any): boolean => (hasActions || hasRowActions) && rowOffersAction(row),
     columnsWithActions, hasActions, hasPinnedColumns, hasUserPinnedColumns, pinnedLeftCols,
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   };

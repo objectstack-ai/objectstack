@@ -616,6 +616,33 @@ describe('validatePageFieldBindings — binding precedence and traversal', () =>
       'pages[0].interfaceConfig.filterBy[0].field',
     ]);
   });
+
+  // [#28020] An any-of group element names no field itself — its rules do, and
+  // each is checked like a top-level rule. Read through `fieldRefsFrom` alone,
+  // the group yielded nothing and every rule inside it went unchecked.
+  it('checks the rules inside an any-of group of interfaceConfig.filterBy', () => {
+    const findings = validatePageFieldBindings({
+      ...baseStack(),
+      pages: [
+        {
+          name: 'list_page',
+          type: 'list',
+          object: 'crm_lead',
+          interfaceConfig: {
+            source: 'crm_lead',
+            filterBy: [
+              { or: [
+                { field: 'status', operator: 'equals', value: 'open' },
+                { field: 'ghost_in_group', operator: 'equals', value: 'x' },
+              ] },
+              { field: 'amount', operator: 'greater_than', value: 1 },
+            ],
+          },
+        },
+      ],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['pages[0].interfaceConfig.filterBy[0].or[1].field']);
+  });
 });
 
 describe('validatePageFieldBindings — false-positive floor', () => {

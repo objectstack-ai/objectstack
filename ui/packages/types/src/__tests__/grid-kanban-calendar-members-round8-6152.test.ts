@@ -42,6 +42,7 @@ import type {
   ObjectCalendarProps as SpecObjectCalendarProps,
   ObjectGridProps as SpecObjectGridProps,
   ObjectKanbanProps as SpecObjectKanbanProps,
+  ViewFilterElement,
   ViewFilterRule,
 } from '@objectstack/spec/ui';
 import type {
@@ -278,7 +279,8 @@ export type assertionRound8MembersAreTheRows = [
   Expect<Equal<TsObjectGridSchema['filter'], SpecObjectGridProps['filter']>>,
   Expect<Equal<TsObjectKanbanSchema['filter'], SpecObjectKanbanProps['filter']>>,
   Expect<Equal<TsObjectCalendarSchema['filter'], SpecObjectCalendarProps['filter']>>,
-  Expect<Equal<TsObjectGridSchema['filter'], ViewFilterRule[] | undefined>>,
+  // objectstack#28020: the element is a flat rule OR an any-of group (`ViewFilterElement`).
+  Expect<Equal<TsObjectGridSchema['filter'], ViewFilterElement[] | undefined>>,
   Expect<Equal<GridOperations['create'], boolean | undefined>>,
   Expect<Equal<GridOperations['export'], boolean | undefined>>,
   Expect<Equal<GridOperations['read'], undefined>>,

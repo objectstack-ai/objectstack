@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a real SecurityPlugin over a real ObjectQL engine and SQL driver on each of two trees (the identity objects with and without their declarations), every persona's secured read and explain of every declarer compared across the two; slowest CI reading 13.98 s (scheduled full-battery run 41199450735, Test Core suite-ceiling report) x 1.25, rounded up
 
 /**
  * [ADR-0095 D1, 2026-10-18 note; ruling of record 6250748677 on #24164, letter
@@ -473,6 +474,32 @@ async function bootBaseline(declared: boolean) {
   return { engine, plugin: plugin as any, security, served };
 }
 
+/**
+ * One stack per tree, shared by the four cases below: none of them writes after
+ * the fixture is seeded — each one finds, explains or reads the collection — so
+ * a later case asks the same store an earlier one asked.
+ */
+const baselines = new Map<boolean, ReturnType<typeof bootBaseline>>();
+function baseline(declared: boolean) {
+  let stack = baselines.get(declared);
+  if (!stack) {
+    stack = bootBaseline(declared);
+    baselines.set(declared, stack);
+  }
+  return stack;
+}
+
+// The first boot pays the cold paths (the identity objects' module graph, the
+// driver's first statements, the plugin's first explain): paid here, on a
+// throwaway stack, out of the first case's clock.
+{
+  const warm = await bootBaseline(true);
+  await warm.served('sys_user', BASELINE_PERSONAS.member);
+  await warm.security.explain({ object: 'sys_user', operation: 'read' }, { ...BASELINE_PERSONAS.member });
+  baselineEngines.splice(baselineEngines.indexOf(warm.engine), 1);
+  await warm.engine.destroy();
+}
+
 describe('a deployment with the shipped baseline is byte-for-byte unchanged on the real declarations where the sets carry the literal (ruling E′ item 6, ③.11)', () => {
   // Explain is read for `read`; the census below reads the collection itself,
   // the one source every door and every explain composes from, for all four.
@@ -480,8 +507,8 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
   const COLLECTED = ['select', 'insert', 'update', 'delete'] as const;
 
   it('every persona reads every declarer the sets still carry exactly as without the declarations, and is explained the same', { timeout: 30_000 }, async () => {
-    const after = await bootBaseline(true);
-    const before = await bootBaseline(false);
+    const after = await baseline(true);
+    const before = await baseline(false);
     const rowsMoved: string[] = [];
     const explainMoved: string[] = [];
     for (const [persona, context] of Object.entries(BASELINE_PERSONAS)) {
@@ -508,8 +535,8 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
   });
 
   it('on the declarers whose copies the sets dropped, the declaration is the scope: without it the baseline member reads every row', { timeout: 30_000 }, async () => {
-    const after = await bootBaseline(true);
-    const before = await bootBaseline(false);
+    const after = await baseline(true);
+    const before = await baseline(false);
     for (const object of Object.keys(DROPPED_COPIES)) {
       const now = await after.served(object, BASELINE_PERSONAS.member);
       expect(now, object).toEqual(DROPPED_COPIES[object].name.endsWith('_self') ? [`${object}:u_x`] : []);
@@ -518,8 +545,8 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
   });
 
   it('each delegated agent reads its delegator\'s rows on both trees where the sets carry the literal, and under the declaration where they do not: the platform administrator\'s agent reads every row', { timeout: 30_000 }, async () => {
-    const after = await bootBaseline(true);
-    const before = await bootBaseline(false);
+    const after = await baseline(true);
+    const before = await baseline(false);
     const everyUser = [...BASELINE_USERS].sort();
     const expected: Record<string, { sys_user: string[]; sys_session: string[]; sys_scim_user: string[] }> = {
       'mcp agent for the member': { sys_user: ['u_x', 'u_x2'], sys_session: ['sys_session:u_x'], sys_scim_user: ['sys_scim_user:u_x'] },
@@ -549,7 +576,7 @@ describe('a deployment with the shipped baseline is byte-for-byte unchanged on t
   });
 
   it('census: a persona collects a declared default exactly on the dropped copies\' `select` — the baseline carries a policy for every other declarer — and a delegated leg collects none', async () => {
-    const { plugin } = await bootBaseline(true);
+    const { plugin } = await baseline(true);
     const objects = await registeredObjects();
     const census = async (context: Persona): Promise<string[]> => {
       const sets = await plugin.resolvePermissionSetsForContext({ ...context });

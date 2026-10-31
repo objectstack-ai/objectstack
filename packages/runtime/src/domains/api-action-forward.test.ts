@@ -37,6 +37,8 @@ import {
     headlessActionTypeError,
     offOriginApiActivationRefusal,
     apiActionIdentityRouteKeyRefusal,
+    apiActionOAuthForwardRefusal,
+    apiForwardCredentialRefusal,
     API_FORWARD_MARK_HEADER,
 } from '../action-execution.js';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
@@ -809,5 +811,159 @@ describe('[#28217] an API-key caller is refused by name before a forward to an i
         expect(result.ok).toBe(true);
         expect(result.result).toEqual({ recalculated: 1 });
         expect(h.injected[0].url).toBe('http://app.example.test/api/v1/apps/showcase/recalc');
+    });
+});
+
+// [#28178] An agent connected to MCP over OAuth holds an access token that the
+// platform honours on the MCP endpoint ONLY (the dispatcher's
+// `acceptOAuthAccessToken`). An api action's forward carries the caller's own
+// credentials, so that token reached every other target as nobody and the
+// agent got the target's anonymous 401. Ruled B (fable 总监决裁 5, Elon
+// 2026-10-31): refuse by name before the forward, from ONE table of credential
+// kind × target door that `run_action`, the REST door and `list_actions` all
+// read — and `list_actions` MARKS such an action instead of hiding it. The
+// table states what each door accepts; it widens none (a server-built forward
+// credential is #28367, a separate decision).
+describe('[#28178] the credential × target-door table: an OAuth-connected agent is refused by name, and the listing marks it', () => {
+    /** An agent the MCP door admitted by OAuth access token: the envelope carries its scopes. */
+    const OAUTH_CTX = (): HttpProtocolContext => {
+        const ctx: any = CTX({ authorization: 'Bearer oat_agent_token' });
+        delete ctx.request.headers.cookie;
+        ctx.admission = { credential: 'session', authGate: undefined };
+        ctx.executionContext = { ...ctx.executionContext, oauthScopes: ['actions:execute', 'data:read'] };
+        return ctx as HttpProtocolContext;
+    };
+    const KEY_CTX = (): HttpProtocolContext => {
+        const ctx: any = CTX({ 'x-api-key': 'osk_member_key' });
+        delete ctx.request.headers.authorization;
+        delete ctx.request.headers.cookie;
+        ctx.admission = { credential: 'api_key', authGate: undefined };
+        return ctx as HttpProtocolContext;
+    };
+    const SESSION_CTX = (): HttpProtocolContext =>
+        ({ ...CTX(), admission: { credential: 'session', authGate: undefined } } as unknown as HttpProtocolContext);
+    const runViaMcp = async (h: ReturnType<typeof boot>, ctx: HttpProtocolContext, name: string, input: any = {}) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, ctx as any, name, input, {
+            driver: h.ql,
+            ec: (ctx as any).executionContext,
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        });
+    };
+    const listFor = async (h: ReturnType<typeof boot>, ctx: HttpProtocolContext): Promise<any[]> =>
+        (h.dispatcher as any).buildMcpBridge(ctx).listActions();
+
+    it('the table, cell by cell: identity takes a session only, the MCP endpoint all three, every other door a session or a key', () => {
+        const api = (target: string) => ({ name: 'probe', type: 'api', target });
+        const cell = (ctx: HttpProtocolContext, target: string) => apiForwardCredentialRefusal(ctx, api(target)) === null ? 'ok' : 'refused';
+        const doors = {
+            identity: '/api/v1/auth/admin/ban-user',
+            mcp: '/api/v1/mcp',
+            platform: '/api/v1/data/crm_lead/{id}',
+        };
+        const table = Object.fromEntries(
+            (Object.entries({ session: SESSION_CTX, api_key: KEY_CTX, oauth: OAUTH_CTX }) as Array<[string, () => HttpProtocolContext]>)
+                .map(([kind, ctx]) => [kind, Object.fromEntries(Object.entries(doors).map(([door, t]) => [door, cell(ctx(), t)]))]),
+        );
+        expect(table).toEqual({
+            session: { identity: 'ok', mcp: 'ok', platform: 'ok' },
+            api_key: { identity: 'refused', mcp: 'ok', platform: 'ok' },
+            oauth: { identity: 'refused', mcp: 'ok', platform: 'refused' },
+        });
+        // Every refusal is the target's own 401 with the standard code.
+        expect(apiForwardCredentialRefusal(OAUTH_CTX(), api(doors.platform))).toMatchObject({
+            status: 401, code: standardErrorCodeForHttpStatus(401),
+        });
+        // Not an api action, an off-origin target, or a caller the door recorded nothing for: no refusal from the table.
+        expect(apiForwardCredentialRefusal(OAUTH_CTX(), { name: 'x', type: 'script', target: doors.platform })).toBeNull();
+        expect(apiForwardCredentialRefusal(OAUTH_CTX(), api('https://example.invalid/ping'))).toBeNull();
+        expect(apiForwardCredentialRefusal(CTX(), api(doors.identity))).toBeNull();
+    });
+
+    it('MCP `run_action`: an OAuth agent running a data-door-style action gets the named 401, and nothing is forwarded', async () => {
+        const h = boot();
+
+        const thrown = await runViaMcp(h, OAUTH_CTX(), RECALC_LEAD.name, { recordId: 'u_target' }).catch((e) => e);
+
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as any).status).toBe(401);
+        expect((thrown as any).code).toBe(standardErrorCodeForHttpStatus(401));
+        expect(String(thrown.message)).toBe(apiActionOAuthForwardRefusal(RECALC_LEAD, RECALC_LEAD.target, 'platform'));
+        expect(String(thrown.message)).toMatch(/OAuth access token, which is honoured on the MCP endpoint only.*Connect with an API key/);
+        expect(h.request).not.toHaveBeenCalled();
+    });
+
+    it('MCP `run_action`: an OAuth agent running an identity-route action gets the identity sentence, and nothing is forwarded', async () => {
+        const h = boot();
+
+        const thrown = await runViaMcp(h, OAUTH_CTX(), BAN_LEAD.name, { recordId: 'u_target' }).catch((e) => e);
+
+        expect((thrown as any).status).toBe(401);
+        expect(String(thrown.message)).toBe(apiActionOAuthForwardRefusal(BAN_LEAD, BAN_LEAD.target, 'identity'));
+        expect(String(thrown.message)).not.toMatch(/API key to run it/);
+        expect(h.request).not.toHaveBeenCalled();
+    });
+
+    it('REST door: the shared forward refuses the same OAuth caller the same way (it never reaches the target)', async () => {
+        const { dispatcher, request } = boot();
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${RECALC_LEAD.name}`, 'POST', { recordId: 'u_target' }, OAUTH_CTX());
+
+        expect(statusOf(res)).toBe(401);
+        expect(codeOf(res)).toBe(standardErrorCodeForHttpStatus(401));
+        expect(messageOf(res)).toBe(apiActionOAuthForwardRefusal(RECALC_LEAD, RECALC_LEAD.target, 'platform'));
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it('unchanged lanes: a session caller and an API-key caller of the same data-door-style action are forwarded', async () => {
+        for (const ctx of [SESSION_CTX(), KEY_CTX()]) {
+            const h = boot({ answer: { body: { success: true, data: { recalculated: 1 } } } });
+            const result: any = await runViaMcp(h, ctx, RECALC_LEAD.name, { recordId: 'u_target' });
+            expect(result.ok).toBe(true);
+            expect(h.injected).toHaveLength(1);
+        }
+    });
+
+    it('`list_actions` LISTS the OAuth agent\'s api actions and marks each with the refusal `run_action` answers', async () => {
+        const h = boot();
+
+        const listed = await listFor(h, OAUTH_CTX());
+        const byName = Object.fromEntries(listed.map((a) => [a.name, a]));
+
+        expect(byName[RECALC_LEAD.name]?.unavailable).toEqual({
+            code: standardErrorCodeForHttpStatus(401),
+            reason: apiActionOAuthForwardRefusal(RECALC_LEAD, RECALC_LEAD.target, 'platform'),
+        });
+        expect(byName[BAN_LEAD.name]?.unavailable).toEqual({
+            code: standardErrorCodeForHttpStatus(401),
+            reason: apiActionOAuthForwardRefusal(BAN_LEAD, BAN_LEAD.target, 'identity'),
+        });
+        // The mark and the run door read the same table: the throw carries the listed reason.
+        const thrown = await runViaMcp(h, OAUTH_CTX(), RECALC_LEAD.name, { recordId: 'u_target' }).catch((e) => e);
+        expect(String(thrown.message)).toBe(byName[RECALC_LEAD.name].unavailable.reason);
+    });
+
+    it('`list_actions` for a session caller marks nothing; for an API-key caller it marks the identity-route action only', async () => {
+        const h = boot();
+
+        const session = await listFor(h, SESSION_CTX());
+        expect(session.map((a) => a.name)).toEqual(expect.arrayContaining([BAN_LEAD.name, RECALC_LEAD.name]));
+        expect(session.filter((a) => a.unavailable)).toEqual([]);
+
+        const keyed = Object.fromEntries((await listFor(h, KEY_CTX())).map((a) => [a.name, a]));
+        expect(keyed[BAN_LEAD.name]?.unavailable).toEqual({
+            code: standardErrorCodeForHttpStatus(401),
+            reason: apiActionIdentityRouteKeyRefusal(BAN_LEAD, BAN_LEAD.target),
+        });
+        expect(keyed[RECALC_LEAD.name]).toBeDefined();
+        expect(keyed[RECALC_LEAD.name].unavailable).toBeUndefined();
     });
 });

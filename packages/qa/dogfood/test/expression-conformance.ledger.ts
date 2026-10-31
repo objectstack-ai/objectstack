@@ -440,6 +440,16 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     note: 'Display only by contract — it never gates, greys or routes the action — so a fault refuses nothing: the predicate\'s effect (the pressed face) is dropped and the fault is logged, which is `fail-soft-log`, not `fail-closed`. The unpressed face is also the one that never claims the reader acted. Split from `cel-action-visible` / `cel-action-disabled` for the collision rule those two were split on: one row cannot state three fault faces. A menu item (the header overflow, the bar\'s override menu) draws no pressed state at all. Measured here: the ui half is in this checkout and its suites pin the TRUE / FALSE / fault faces on both surfaces.',
   },
   {
+    // The key arrived spec-first (card 28022); the console landing redirect that reads it is its own ui card.
+    id: 'cel-app-landing',
+    summary: "app per-audience landing predicate (AppLandingEntry.visible) — the first entry whose predicate holds names the navigation entry the app opens on",
+    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
+    enforcement:
+      'PARSE ONLY — `EvaluatedExpressionInputSchema` normalizes a bare string to `{dialect:"cel",source}` and refuses an `ast`-only envelope and a blank source, and `checkAppLandingItems` on `AppSchema` refuses a `data` read (a landing entry binds no `data`) and an `item` naming no openable navigation entry of the app. NO EVALUATOR FOUND: no console reads `app.landing` yet; the landing redirect that will ask these predicates is the follow-up ui card',
+    covers: ['ui/app.zod.ts:AppLandingEntrySchema.visible'],
+    note: 'EXPERIMENTAL, declared spec-first by ruling (letter A): the liveness ledger carries `app.landing` as `planned` with an author warning, so an author is told no console reads it yet. Re-classify when the console redirect lands: the predicate decides only where a reader opens, never what they may reach (each navigation entry keeps its own gates), so its fault face is expected to be `fail-soft-log` — a faulting entry is passed over and the app opens on its first navigation item.',
+  },
+  {
     id: 'cel-record-alert-visible',
     summary: '`record:alert` banner visibility (RecordAlertProps.visible) — the one record component whose PROPS carry a real predicate',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',

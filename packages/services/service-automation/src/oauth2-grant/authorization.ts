@@ -54,6 +54,7 @@
  * deployment by the caller and never taken from the request.
  */
 
+import type { McpAuthorizationClient } from './mcp-authorization.js';
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 import type { IKV } from '@objectstack/spec/contracts';
 
@@ -71,6 +72,13 @@ export interface PendingAuthorization {
     readonly redirectUri: string;
     /** Epoch ms after which the callback is refused. */
     readonly expiresAt: number;
+    /**
+     * The client an MCP instance's connect discovered or registered (ADR-0143
+     * D2.1): the code is exchanged at its token endpoint, as it, and the
+     * connection keeps it. Absent when the instance declares its endpoints and
+     * client.
+     */
+    readonly client?: McpAuthorizationClient;
 }
 
 /** Where pending authorizations wait for their callback. `take` is single-use. */

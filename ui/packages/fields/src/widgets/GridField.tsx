@@ -20,6 +20,7 @@ import { formatDate, formatDateTime, resolveFieldRuleState, toDisplayDate } from
 import { useDisplayLocale, useLocalization, formatDisplayNumber } from '@object-ui/i18n';
 import { resolveFieldCurrency, currencyFractionDigits, currencySymbol } from '../currency.js';
 import { LookupField } from './LookupField.js';
+import { declaredLookupAutofillPatch, type LookupAutofillByField, type LookupAutofillPair } from './lookupAutofill.js';
 import { FileCell } from './FileField.js';
 import { toDateInputValue, toDateTimeInputValue, fromDateTimeInputValue, isImpossibleStoredDay } from './nativeDateValue.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
@@ -271,17 +272,31 @@ export function evalArith(expr: string, row: Row): number | null {
  * catalog-typeahead behaviour (pick a product → its unit_price/description fill
  * in). Skips the lookup column itself and computed columns. Pure + exported so
  * it is unit-testable independent of the picker UI.
+ *
+ * `declared` carries the child field's `lookupAutofill` pairs, the row being
+ * edited and the record the cell held from an earlier pick in this grid. Each
+ * pair writes its target under the spec's overwrite rule
+ * (`declaredLookupAutofillPatch`), whatever the column's `autofill` says, and
+ * a declared target is taken out of the same-named copy, so one target never
+ * has two writers on one pick.
  */
-export function lookupAutofillPatch(columns: GridColumn[], col: GridColumn, record: any): Row {
+export function lookupAutofillPatch(
+  columns: GridColumn[],
+  col: GridColumn,
+  record: any,
+  declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
+): Row {
   const patch: Row = { [col.name]: record?.value ?? record?.id ?? record?._id };
+  const declaredTargets = new Set((declared?.pairs ?? []).map((p) => p.target));
   if (col.autofill !== false && record && typeof record === 'object') {
     for (const other of columns) {
       if (other.name === col.name || other.computed || other.type === 'lookup') continue;
+      if (declaredTargets.has(other.name)) continue;
       const v = record[other.name];
       if (v !== undefined && v !== null && v !== '') patch[other.name] = v;
     }
   }
-  return patch;
+  return { ...patch, ...declaredLookupAutofillPatch(declared?.pairs, record, declared?.row, declared?.previous) };
 }
 
 /**
@@ -585,6 +600,11 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  `readonlyWhen` / `requiredWhen` CEL predicate — so a line cell can react to
    *  the header (`parent.status == 'paid'`). Supplied by MasterDetailForm. */
   contextRecord?: Record<string, unknown>;
+  /** The child object's declared `lookupAutofill` pairs, by lookup column
+   *  name (`lookupAutofillByField` over the child's fields). A grid column
+   *  carries no field definition, so the host that knows the child object
+   *  hands them over. Supplied by MasterDetailForm and LineItemsPanel. */
+  lookupAutofill?: LookupAutofillByField;
 };
 
 /**
@@ -675,6 +695,7 @@ function GridFieldBody({
   onRowExpand,
   displayMode,
   onAdd,
+  lookupAutofill,
   ...props
 }: GridFieldProps) {
   // The field-level keys, read as `GridFieldMetadata` declares them and as
@@ -856,12 +877,28 @@ function GridFieldBody({
    * lookup/computed column). The catalog-typeahead behaviour every invoicing
    * tool has: pick a product → its unit_price / description drop into the row.
    * Opt out per column with `autofill: false`.
+   *
+   * The column's declared `lookupAutofill` pairs fill their targets too, under
+   * the spec's overwrite rule. "An earlier pick filled it" is read from the
+   * records picked in this grid, keyed by column and id: the record the cell
+   * held before this pick, if this grid picked it, is the one whose `source`
+   * values count as pick-filled. Keyed by the row's own lookup value rather
+   * than its index, so adding, removing or reordering rows cannot misattribute it.
    */
+  const pickedLookupRecords = useRef(new Map<string, Row>());
   const applyLookupSelection = useCallback(
     (rowIdx: number, col: GridColumn, record: any) => {
-      applyPatch(rowIdx, lookupAutofillPatch(columns, col, record));
+      const row = rows[rowIdx] ?? blankRow();
+      const pickKey = (id: unknown) => `${col.name}\u0000${String(id)}`;
+      const heldId = row[col.name];
+      const previous = heldId == null || heldId === '' ? null : pickedLookupRecords.current.get(pickKey(heldId)) ?? null;
+      const patch = lookupAutofillPatch(columns, col, record, { pairs: lookupAutofill?.[col.name], row, previous });
+      if (record && typeof record === 'object' && patch[col.name] != null) {
+        pickedLookupRecords.current.set(pickKey(patch[col.name]), record);
+      }
+      applyPatch(rowIdx, patch);
     },
-    [columns, applyPatch],
+    [columns, rows, blankRow, lookupAutofill, applyPatch],
   );
 
   /** Set a cell to an already-typed value (lookup ids, etc.) without coercion. */

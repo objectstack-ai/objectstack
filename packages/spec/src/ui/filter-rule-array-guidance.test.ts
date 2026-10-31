@@ -164,7 +164,12 @@ describe('§1 the record form is refused WITH the new spelling', () => {
     );
     expect(issue.code).toBe('invalid_type');
     expect(issue.message).not.toContain("field: '$or'");
-    expect(issue.message).toContain('`$or` is a combinator, not a field, and the rule array has no spelling for it');
+    expect(issue.message).toContain('`$or` is a combinator, not a field, and the rule array spells a combinator only as its own elements');
+    // [#28020] The one combinator the rule array can spell is named, with its
+    // status: the any-of group is declared but no console applies it yet.
+    expect(issue.message).toContain('`$or` over flat rules is one any-of group element');
+    expect(issue.message).toContain('no console applies it yet');
+    expect(issue.message).toContain('`$not` cannot be written at all');
     expect(issue.message).toContain('flattening one changes which rows the filter selects');
     expect(issue.message).toContain('decide which rows this filter should select');
     expect(issue.message).toContain('migration `element-data-source-and-object-block-filter-rule-array`');

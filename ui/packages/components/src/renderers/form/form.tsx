@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue } from '@object-ui/core';
+import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, type FieldRulePredicate } from '@object-ui/core';
 import type { FormSchema, FormField as FormFieldConfig, FormFieldTab, FormFieldPane, FieldCondition, SelectOption } from '@object-ui/types';
 import { useForm, type RefCallBack } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from '../../ui/form';
@@ -42,10 +42,11 @@ import { FullscreenEditor } from '../../custom/fullscreen-editor';
 import { CharacterCount } from '../../custom/character-count';
 import { cn } from '../../lib/utils';
 import React from 'react';
-import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, useCapabilityGate, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
+import { usePatchingUpdateActions } from './actionRequirements';
 
 /**
  * A submit refusal as the banner and the toast draw it: one string as itself,
@@ -508,6 +509,10 @@ const useSafeFormTranslation = createSafeTranslation(
     // objectui#12108 — the hint under an empty field the server fills at insert
     // (see `renderFieldDescription`). Byte-identical to the `en` pack.
     'form.serverDefaultHint': 'Set automatically when saved.',
+    // objectstack#28382 — the note under an empty field a visible update
+    // action's static `patch` would make required (see `actionOutcomes`).
+    // Byte-identical to the `en` pack.
+    'form.requiredForAction': 'Required to run “{{action}}”.',
   },
   'common.selectOption',
 );
@@ -1211,8 +1216,9 @@ const HORIZONTAL_FIELD_ITEM_CLASS =
 function renderFieldDescription(
   description: string | undefined,
   serverDefaultHint: string | undefined,
+  actionRequirementHints: readonly string[] = [],
 ): React.ReactNode {
-  if (!description && !serverDefaultHint) return null;
+  if (!description && !serverDefaultHint && actionRequirementHints.length === 0) return null;
   return (
     <FormDescription>
       {description}
@@ -1221,6 +1227,15 @@ function renderFieldDescription(
           {serverDefaultHint}
         </span>
       )}
+      {/* objectstack#28382 — one line per update action that would require
+          this empty field. Inside the same `<FormDescription>` for the
+          serverDefaultHint's reason: the control's `aria-describedby` names
+          it, so the note is announced with the field. */}
+      {actionRequirementHints.map((hint) => (
+        <span key={hint} className="block" data-required-for-action="true">
+          {hint}
+        </span>
+      ))}
     </FormDescription>
   );
 }
@@ -1246,6 +1261,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     dependsOnLabels,
     emptyHint,
     onInvalidInputChange,
+    onAutofill,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1286,8 +1302,14 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
+    // Only a relationship pick fills sibling fields (`lookupAutofill`); every
+    // other widget would spread an unknown handler onto its DOM.
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) ? { onAutofill } : {}),
   };
 }
+
+/** The registered widgets whose pick writes `lookupAutofill` targets through `onAutofill`. */
+const LOOKUP_AUTOFILL_WIDGET_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
 
 /** The registered widgets that fire `onInvalidInputChange`: the date picker's two faces. */
 const INVALID_INPUT_REPORTING_WIDGET_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
@@ -2328,6 +2350,57 @@ ComponentRegistry.register('form',
     // Read once per object and handed down on the field's own metadata.
     const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
     const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
+
+    // The record as each visible update action would leave it
+    // (objectstack#28382). A declarative update action writes its static
+    // `patch` over the record, and the server runs `requiredWhen` over the
+    // result — so a field the patch makes required is refused on the first
+    // press while this form, judging the record as it stands, drew no mark.
+    // Each entry is `{ ...ruleRecord, ...patch }`, the merge the server makes;
+    // `renderFormField` evaluates the field's own `requiredWhen` over it and
+    // notes the action under an empty field that comes out required.
+    //
+    // EDIT forms only: an insert has no record for an action to run on. An
+    // action is kept when it is not switched off, the caller holds its
+    // `requiredPermissions` (the `action:bar` gate), and its `visible`
+    // predicate holds over the live record. That predicate fails CLOSED here
+    // (a rule that cannot be evaluated hides the button's note, never invents
+    // one), and quietly: the action's own button reports its fault. The note
+    // is a heads-up only — nothing here blocks a save.
+    //
+    // Asked only when some field declares a `requiredWhen`: with none, no field
+    // can come out required under any patch, so the form makes no read beyond
+    // the ones its host already made.
+    const declaresRequiredWhen = React.useMemo(
+      () => fields.some((f) => (f as { requiredWhen?: unknown } | null | undefined)?.requiredWhen != null),
+      [fields],
+    );
+    const patchingActions = usePatchingUpdateActions(
+      contextDataSource,
+      schema.objectName,
+      !isCreateForm && declaresRequiredWhen,
+    );
+    const mayInvokeAction = useCapabilityGate();
+    const actionOutcomes = React.useMemo(() => {
+      if (isCreateForm || patchingActions.length === 0) return [] as Array<{ label: string; record: Record<string, unknown> }>;
+      const out: Array<{ label: string; record: Record<string, unknown> }> = [];
+      for (const action of patchingActions) {
+        if (isActionSwitchedOff(action.source) || !mayInvokeAction(action.requiredPermissions)) continue;
+        const visible = action.visible;
+        if (visible === false) continue;
+        if (
+          visible != null &&
+          visible !== true &&
+          !evalFieldPredicate(visible as FieldRulePredicate, ruleRecord, false, previousRecord, predicateScope, {
+            warn: false,
+          })
+        ) {
+          continue;
+        }
+        out.push({ label: action.label, record: { ...ruleRecord, ...action.patch } });
+      }
+      return out;
+    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope]);
 
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
@@ -3904,6 +3977,18 @@ ComponentRegistry.register('form',
                     invalidInputMessages.set(name, message);
                     void form.trigger(name);
                   },
+                  // A lookup pick's declared `lookupAutofill` targets, written
+                  // as edits of this form's record; the widget decides what the
+                  // overwrite rule lets it fill. A target already showing an
+                  // error is re-validated, so a filled required field clears.
+                  onAutofill: (patch: Record<string, unknown>) => {
+                    for (const [target, filled] of Object.entries(patch)) {
+                      form.setValue(target, filled, {
+                        shouldDirty: true,
+                        shouldValidate: !!form.getFieldState(target).error,
+                      });
+                    }
+                  },
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —
@@ -3971,6 +4056,26 @@ ComponentRegistry.register('form',
                 // which is a missing hint, never a wrong one.
                 serverOwned && !readonly && !fieldDisabled && isMissingForRequired(formField.value)
                   ? t('form.serverDefaultHint')
+                  : undefined,
+                // objectstack#28382 — the update actions this empty field
+                // would block: its own `requiredWhen` over the record each
+                // action leaves (`actionOutcomes`). Not while it is required
+                // already (the asterisk says so), nor on a control the person
+                // cannot fill. Faults answer `false` and stay quiet: the live
+                // evaluation above already reported a broken rule.
+                requiredWhen != null &&
+                  !required &&
+                  !readonly &&
+                  !fieldDisabled &&
+                  actionOutcomes.length > 0 &&
+                  isMissingForRequired(formField.value)
+                  ? actionOutcomes
+                      .filter((outcome) =>
+                        evalFieldPredicate(requiredWhen, outcome.record, false, previousRecord, predicateScope, {
+                          warn: false,
+                        }),
+                      )
+                      .map((outcome) => t('form.requiredForAction', { action: outcome.label }))
                   : undefined,
               )}
               <FormMessage />

@@ -170,6 +170,12 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
     .describe('Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
   groupBy: z.string().regex(SNAKE_CASE).optional()
     .describe('REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows).'),
+  // [#28020] Flat rules only: the any-of group element `ListView.filter` takes
+  // (`ViewFilterElementSchema`) is deliberately NOT admitted here. The design
+  // model writes this key through the strict mirror below, which cannot carry a
+  // union, and the applier that turns it into a built view lives outside this
+  // repository; widening the lenient side alone would accept a shape no producer
+  // emits and no reader here was measured on.
   filters: z.array(ViewFilterRuleSchema).optional()
     .describe('Which records this view shows: the list-view filter rules [{ field, operator, value }] the built view carries, ANDed. REQUIRED whenever the view\'s name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [{ field: "due_date", operator: "less_than", value: "{today}" }, { field: "status", operator: "not_equals", value: "completed" }]; my open → [{ field: "owner", operator: "equals", value: "{current_user_id}" }, { field: "status", operator: "equals", value: "open" }]. WITHOUT it the view shows EVERY record under a name that promises a subset. For a select field compare its option VALUE, never its label. Omit for a view that genuinely spans every record.'),
   sort: z.array(SortItemSchema).optional()

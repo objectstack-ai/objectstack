@@ -13620,8 +13620,10 @@ function dollarKeysReason(keys: readonly string[]): string {
       ? ''
       : ` (its top-level ${quoteKeys(others)} ${others.length === 1 ? 'is' : 'are'} not a field either)`;
     return `carries the combinator${combinators.length === 1 ? '' : 's'} ${quoteKeys(combinators)}`
-      + `${alsoNotFields}: a rule array's rules only AND, so \`$or\` and \`$not\` have no rule `
-      + 'spelling and `$and` only the separate rules it joins, and a combinator is never flattened — '
+      + `${alsoNotFields}: a rule array's elements AND, so \`$and\` is only the separate rules it `
+      + 'joins, `$or` over flat rules only an any-of group element `{ or: [rule, ...] }` (declared, '
+      + 'not yet applied by any console) that this conversion does not write, and `$not` has no rule '
+      + 'spelling; a combinator is never flattened — '
       + 'that would change which rows the filter selects. Decide which rows it should select, and '
       + 'write the rules that select exactly those';
   }

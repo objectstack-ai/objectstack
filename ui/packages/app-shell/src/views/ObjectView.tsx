@@ -745,7 +745,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // an object that declares `page` (or `new_window` / `none`) keeps its
     // declaration. objectstack#27545 — the pane beside the list is the default.
     const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -803,7 +803,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
-    const { viewTabItems, titleSwitcher } = useObjectViewTitleSwitcher({
+    const { viewTabItems, titleSwitcher, titleLabel } = useObjectViewTitleSwitcher({
         views,
         savedViews,
         objectDef,
@@ -967,6 +967,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
              <ObjectViewPageHeader
                  objectDef={objectDef}
                  titleSwitcher={titleSwitcher}
+                 titleLabel={titleLabel}
+                 objectListHref={appName && objectName ? `/apps/${appName}/${objectName}` : undefined}
                  objectPluralLabel={objectPluralLabel}
                  objectDesc={objectDesc}
                  createButton={createButton}
@@ -1166,6 +1168,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             drawerRoot={drawerRoot}
             drawerRestore={drawerRestore}
             handleRootStep={handleRootStep}
+            stepScope={listLabel}
             dataSource={dataSource}
             objects={objects}
             onEdit={onEdit}

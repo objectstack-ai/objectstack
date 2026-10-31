@@ -50,9 +50,13 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES — the one platform-admin list plugin-
   });
 
   it('carries the connector connection capability, declared org-scoped (ADR-0143 D5)', () => {
-    // Platform administrators hold it by default through this grant; the
-    // organization administrator's shipped sets withhold it, pinned on the
-    // seeded sets in plugin-security's `default-permission-sets.test.ts`.
+    // Platform administrators hold it by default through this grant. The two
+    // organization-administrator sets hold it by default too (ruling B, record
+    // 6545223261), and every other shipped set withholds it: the exact holder
+    // list is pinned by the `[ADR-0143 D5] the connector connection capability
+    // ships with the platform administrator and both organization-administrator
+    // sets, and no other` case in plugin-security's
+    // `default-permission-sets.test.ts`.
     expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain('manage_connector_connections');
     expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'manage_connector_connections')?.scope).toBe('org');
   });
