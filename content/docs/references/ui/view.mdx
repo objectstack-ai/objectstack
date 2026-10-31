@@ -59,8 +59,8 @@ nothing. The one item-name grammar itself lives in
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -780,7 +780,7 @@ Map view configuration
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -863,7 +863,7 @@ Map view configuration
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
-### Nested Shape: `ListView.filter[number]`
+### Nested Shape: `ListView.filter[number][option 1]`
 
 View filter rule
 
@@ -872,6 +872,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ListView.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ListView.userFilters`
 
@@ -1161,7 +1169,7 @@ View filter rule
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -1244,7 +1252,7 @@ View filter rule
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
-### Nested Shape: `ObjectListView.filter[number]`
+### Nested Shape: `ObjectListView.filter[number][option 1]`
 
 View filter rule
 
@@ -1253,6 +1261,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectListView.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectListView.selection`
 
@@ -1695,7 +1711,7 @@ Tab configuration for multi-tab view interface
 | **label** | `string \| Record<string, string>` | optional | Display label |
 | **icon** | `string` | optional | Tab icon name |
 | **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
 | **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
@@ -1735,7 +1751,7 @@ Tab configuration for multi-tab view interface
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -1814,7 +1830,7 @@ Tab configuration for multi-tab view interface
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -1938,6 +1954,99 @@ This schema accepts one of the following structures:
 
 ---
 
+## ViewFilterElement
+
+One view filter element: a flat rule, or an any-of group of flat rules
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+View filter rule
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| 'starts_with' \| 'ends_with' \| 'greater_than' \| 'less_than' \| 'greater_than_or_equal' \| … +10 more>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Allowed Values: `ViewFilterElement[option 1].operator`
+
+* `equals`
+* `not_equals`
+* `contains`
+* `not_contains`
+* `icontains`
+* `starts_with`
+* `ends_with`
+* `greater_than`
+* `less_than`
+* `greater_than_or_equal`
+* `less_than_or_equal`
+* `in`
+* `not_in`
+* `is_empty`
+* `is_not_empty`
+* `is_null`
+* `is_not_null`
+* `before`
+* `after`
+* `between`
+
+---
+
+#### Option 2
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
+
+### Nested Shape: `ViewFilterElement[option 2].or[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+---
+
+
+---
+
+## ViewFilterOrGroup
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
+
+### Nested Shape: `ViewFilterOrGroup.or[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+
+---
+
 ## ViewFilterRule
 
 View filter rule
@@ -2016,7 +2125,7 @@ This schema accepts one of the following structures:
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -2188,7 +2297,7 @@ This schema accepts one of the following structures:
 | **type** | `Enum<'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'>` | optional (default: `"grid"`) |  |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | ✅ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND the baseline order; `hiddenFields` subtracts from it and `fieldOrder` orders what survives. `hiddenFields` and `fieldOrder` cannot add a field omitted here. An empty list declares no projection, so neither of them applies: which columns show is then left to the renderer (objectui's `ListView` grid derives the object's default columns). |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria (JSON Rules) |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Filter criteria (JSON Rules) |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional |  |
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -2376,13 +2485,13 @@ Tab configuration for multi-tab view interface
 | **label** | `string \| Record<string, string>` | optional | Display label |
 | **icon** | `string` | optional | Tab icon name |
 | **view** | `string` | optional | Referenced list view name from listViews |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Tab-specific filter criteria |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Tab-specific filter criteria |
 | **order** | `integer` | optional | Tab display order |
 | **pinned** | `boolean` | optional (default: `false`) | Pin tab (cannot be removed by users) |
 | **isDefault** | `boolean` | optional (default: `false`) | Set as the default active tab |
 | **visible** | `boolean` | optional (default: `true`) | Tab visibility |
 
-### Nested Shape: `ViewTab.filter[number]`
+### Nested Shape: `ViewTab.filter[number][option 1]`
 
 View filter rule
 
@@ -2391,6 +2500,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ViewTab.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 
 ---

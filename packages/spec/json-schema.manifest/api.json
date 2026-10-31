@@ -323,6 +323,7 @@
     "api/PublicFormSubmitResponse",
     "api/PublishMetaItemRequest",
     "api/PublishMetaItemResponse",
+    "api/PublishPackageDraftsRequest",
     "api/PublishPackageDraftsResponse",
     "api/QueryAdapterConfig",
     "api/QueryAdapterTarget",

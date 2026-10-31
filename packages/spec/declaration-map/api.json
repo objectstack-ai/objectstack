@@ -591,6 +591,8 @@
     "PublishMetaItemRequestSchema": "api/PublishMetaItemRequest",
     "PublishMetaItemResponse": "api/PublishMetaItemResponse",
     "PublishMetaItemResponseSchema": "api/PublishMetaItemResponse",
+    "PublishPackageDraftsRequest": "api/PublishPackageDraftsRequest",
+    "PublishPackageDraftsRequestSchema": "api/PublishPackageDraftsRequest",
     "PublishPackageDraftsResponse": "api/PublishPackageDraftsResponse",
     "PublishPackageDraftsResponseSchema": "api/PublishPackageDraftsResponse",
     "QueryAdapterConfig": "api/QueryAdapterConfig",
