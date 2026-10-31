@@ -1427,7 +1427,7 @@ const STUDIO_ZH: Record<string, string> = {
   // 事件的操作者(ADR-0146 D1):用户姓名;查不到用户记录时显示记录的 id 并标注未解析。
   'engine.edit.historyBy': '操作者',
   'engine.edit.historyActorUnresolved': '未解析的用户',
-  'engine.edit.historyActorUnresolvedHint': '找不到这个 id 对应的用户记录:该用户可能已被删除,或你无权读取用户目录。',
+  'engine.edit.historyActorUnresolvedHint': '找不到这个 id 对应的用户记录：该用户可能已被删除，或你无权读取用户目录。',
   // Reorder buttons
   'engine.inspector.reorder.up': '上移',
   'engine.inspector.reorder.down': '下移',
