@@ -38,6 +38,8 @@ const DECLARED_SECRET = 'dummy-declared-secret-26702';
 const REDIRECT_URI = 'https://app.example.com/api/v1/automation/connectors/oauth/callback';
 const SYSTEM = { isSystem: true } as const;
 const ADMIN_A = { userId: 'usr_admin', tenantId: 'org_a' };
+const ADMIN_B = { userId: 'usr_admin', tenantId: 'org_b' };
+const ADMIN_C = { userId: 'usr_admin', tenantId: 'org_c' };
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -141,11 +143,21 @@ function notion(auth: Record<string, unknown> = {}, transportUrl?: string) {
     };
 }
 
-/** The `mcp` stand-in: asks the handle on every request, records the token it was handed. */
-function mcpStandIn() {
-    const state = { materialized: [] as ConnectorProviderContext[], sent: [] as string[], refuse: new Set<string>() };
-    const factory: ConnectorProviderFactory = (ctx) => {
+/**
+ * The `mcp` stand-in: asks the handle on every request, records the token it
+ * was handed. With `lists`, it reads the upstream while it materializes, as
+ * the real provider's `tools/list` does: an ask that names no organization.
+ */
+function mcpStandIn(lists = false) {
+    const state = { materialized: [] as ConnectorProviderContext[], sent: [] as string[], listedWith: [] as string[], refuse: new Set<string>() };
+    const factory: ConnectorProviderFactory = async (ctx) => {
         state.materialized.push(ctx);
+        if (lists) {
+            await callWithBorrowedCredential(ctx.credentialHandle!, async (auth) => {
+                state.listedWith.push(auth.type === 'bearer' ? auth.token : '');
+                return { status: 200 };
+            }, {});
+        }
         return {
             def: {
                 name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' },
@@ -189,7 +201,7 @@ function captureOutput(): { text: () => string } {
     return { text: () => chunks.join('\n') };
 }
 
-async function boot(declared: unknown[] = [notion()]) {
+async function boot(declared: unknown[] = [notion()], opts: { lists?: boolean } = {}) {
     const ql = new ObjectQL();
     engines.push(ql);
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
@@ -202,7 +214,7 @@ async function boot(declared: unknown[] = [notion()]) {
     await ql.syncSchemas();
     ql.setCryptoProvider(fakeCrypto());
 
-    const provider = mcpStandIn();
+    const provider = mcpStandIn(opts.lists);
     const kernel = new LiteKernel({ logger: { level: 'debug', format: 'json' } } as never);
     kernels.push(kernel);
     kernel.use(new AutomationServicePlugin({
@@ -226,10 +238,13 @@ async function boot(declared: unknown[] = [notion()]) {
     await flush();
     const engine = kernel.getService('automation') as AutomationEngine;
     const call = () => engine.resolveConnectorAction('notion', 'search')!({}, { automation: { tenantId: 'org_a' } } as never);
-    const connect = async (query: (state: string) => Record<string, string> = (state) => ({ code: GOOD_CODE, state })) => {
-        const begun = await engine.beginConnectorConnection({ connector: 'notion', context: ADMIN_A as never });
+    const connect = async (
+        query: (state: string) => Record<string, string> = (state) => ({ code: GOOD_CODE, state }),
+        as: { userId: string; tenantId: string } = ADMIN_A,
+    ) => {
+        const begun = await engine.beginConnectorConnection({ connector: 'notion', context: as as never });
         const state = new URL(begun.authorizationUrl).searchParams.get('state')!;
-        return { begun, done: () => engine.completeConnectorConnection({ query: query(state), context: ADMIN_A as never }) };
+        return { begun, done: () => engine.completeConnectorConnection({ query: query(state), context: as as never }) };
     };
     return { ql, engine, provider, call, connect };
 }
@@ -313,6 +328,60 @@ describe('ADR-0143 D2.1 — the MCP authorization flow, with dynamic client regi
             }
         }
         expect(out.text()).toContain('the MCP authorization flow found its authorization server and registered a client');
+    });
+});
+
+describe('ADR-0143 D4, ruled B — the connection an mcp instance lists its tools with', () => {
+    /** The organizations that exchanged a code, in order: the n-th exchange is theirs. */
+    const exchangedBy: string[] = [];
+    /**
+     * The organization an access token was issued to. The token endpoint
+     * answers its n-th request with `dummy-at-<n>` and `dummy-rt-<n>`: an
+     * exchange is the organization that connected, a refresh is the one whose
+     * refresh token it spent.
+     */
+    const orgOfToken = (token: string): string | undefined => {
+        const owners: string[] = [];
+        let exchanges = 0;
+        for (const r of requestsTo('/auth/token')) {
+            const form = Object.fromEntries(new URLSearchParams(r.body));
+            owners.push(form.grant_type === 'authorization_code'
+                ? exchangedBy[exchanges++]
+                : owners[Number(form.refresh_token.replace('dummy-rt-', '')) - 1]);
+        }
+        return owners[Number(token.replace('dummy-at-', '')) - 1];
+    };
+    const connectAs = async (connect: Awaited<ReturnType<typeof boot>>['connect'], as: { userId: string; tenantId: string }) => {
+        const { done } = await connect(undefined, as);
+        exchangedBy.push(as.tenantId);
+        await done();
+    };
+
+    it('lists with the connection connected earliest; each dispatch still uses its own organization', async () => {
+        exchangedBy.length = 0;
+        const { engine, provider, connect } = await boot([notion()], { lists: true });
+        await connectAs(connect, ADMIN_A);
+        await connectAs(connect, ADMIN_B);
+        await connectAs(connect, ADMIN_C);
+        // Connecting org_b and org_c changed nothing about the listing: org_a stays the oldest connection.
+        expect(provider.state.materialized).toHaveLength(1);
+        expect(provider.state.listedWith.map(orgOfToken)).toEqual(['org_a']);
+
+        // A dispatch asks in its own run's organization.
+        const dispatch = (tenantId?: string) =>
+            engine.resolveConnectorAction('notion', 'search')!({}, (tenantId ? { automation: { tenantId } } : {}) as never);
+        await dispatch('org_b');
+        expect(orgOfToken(provider.state.sent.at(-1)!)).toBe('org_b');
+        // A run with no organization is still answered as D4 answers it: several connections, refused.
+        await expect(dispatch()).rejects.toMatchObject({ status: 422 });
+
+        // The listing organization revokes: the instance materializes again and lists with the next oldest,
+        // while two organizations stay connected — a request naming none would be refused there.
+        await engine.revokeConnectorConnection({ connector: 'notion', context: ADMIN_A as never });
+        expect(engine.getConnectorDegradedReason('notion')).toBeUndefined();
+        expect(provider.state.materialized).toHaveLength(2);
+        expect(orgOfToken(provider.state.listedWith.at(-1)!)).toBe('org_b');
+        await expect(dispatch()).rejects.toMatchObject({ status: 422 });
     });
 });
 

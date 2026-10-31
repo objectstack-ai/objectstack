@@ -11,6 +11,8 @@ import type {
     ConnectorProviderContext,
     ConnectorMaterializationHandler,
     ConnectorRequestSigner,
+    ConnectorCredentialHandle,
+    ConnectorCredentialRequest,
 } from '@objectstack/spec/integration';
 import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -528,8 +530,61 @@ function oauth2NotServableReason(
  * not be read.
  */
 type ConnectionStateOfInstance =
-    | { readonly kind: 'read'; readonly connected: readonly string[]; readonly reconnectRequired: readonly string[] }
+    | {
+        readonly kind: 'read';
+        readonly connected: readonly string[];
+        readonly reconnectRequired: readonly string[];
+        /** The organization whose connection is the oldest standing one: see {@link discoveryOrganizationOf}. */
+        readonly discovery?: string;
+    }
     | { readonly kind: 'unreadable' };
+
+/**
+ * ADR-0143 D4, ruled B on #26702 — the organization whose connection an
+ * instance's materialization asks for when it asks with none: the one
+ * connected earliest (`connected_at`, ties by organization id). A provider
+ * that reads the upstream while it materializes (the `mcp` provider lists
+ * the server's tools) does so outside any run, so there is no run
+ * organization to select; this keeps a working instance listing however many
+ * organizations connected it. Every dispatch still asks in its own run's
+ * organization, and a run with none is still answered as D4 answers it.
+ */
+function discoveryOrganizationOf(rows: readonly ConnectorConnectionRecord[]): string | undefined {
+    let pick: ConnectorConnectionRecord | undefined;
+    for (const row of rows) {
+        if (row.status !== 'connected') continue;
+        if (!pick) { pick = row; continue; }
+        // A row with no `connected_at` sorts after every row that has one.
+        const a = row.connectedAt ?? '\uffff';
+        const b = pick.connectedAt ?? '\uffff';
+        if (a < b || (a === b && row.organizationId < pick.organizationId)) pick = row;
+    }
+    return pick?.organizationId;
+}
+
+/**
+ * The handle a provider is given while it materializes an instance whose
+ * materialization asks name {@link discoveryOrganizationOf}: until `settle()`
+ * (the factory has answered), an ask that names no organization is made in
+ * `organizationId`'s name; after it, every ask goes to `handle` as made, so
+ * a dispatch that names none is answered as D4 answers a run with none.
+ */
+function askingDuringMaterializationAs(
+    handle: OAuth2GrantHandle,
+    organizationId: string,
+): { readonly handle: ConnectorCredentialHandle; settle(): void } {
+    let materializing = true;
+    const as = (request?: ConnectorCredentialRequest): ConnectorCredentialRequest | undefined =>
+        materializing && request?.organizationId === undefined ? { ...request, organizationId } : request;
+    return {
+        handle: {
+            connector: handle.connector,
+            get: (request) => handle.get(as(request)),
+            refresh: (request) => handle.refresh(as(request)),
+        },
+        settle() { materializing = false; },
+    };
+}
 
 /** The per-request signing instance auth kind (ADR-0143 D2.3): bound to a signer, never handed over as a value. */
 type SignedInstanceAuth = Extract<ConnectorInstanceAuth, { type: 'signed' }>;
@@ -2395,6 +2450,7 @@ export class AutomationServicePlugin implements Plugin {
                     kind: 'read',
                     connected: rows.filter((r) => r.status === 'connected').map((r) => r.organizationId).sort(),
                     reconnectRequired: rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort(),
+                    discovery: discoveryOrganizationOf(rows),
                 };
             } catch (err) {
                 state = { kind: 'unreadable' };
@@ -2407,7 +2463,11 @@ export class AutomationServicePlugin implements Plugin {
             d.signature += state.kind === 'unreadable'
                 ? '|connections:unreadable'
                 : state.connected.length > 0
-                    ? '|connections:connected'
+                    // An `mcp` instance lists its tools as the discovery
+                    // organization (ruled B on #26702): when that changes (its
+                    // connection is revoked, refused or connected again), the
+                    // instance materializes again and lists as the next one.
+                    ? d.entry.provider === 'mcp' ? `|connections:connected:discovery:${state.discovery ?? ''}` : '|connections:connected'
                     // Held: which reason it is held with moves with the refused organizations.
                     : `|connections:none:${state.reconnectRequired.join(',')}`;
         }
@@ -2551,6 +2611,9 @@ export class AutomationServicePlugin implements Plugin {
             let auth: ResolvedConnectorAuth | undefined;
             let requestSigner: ConnectorRequestSigner | undefined;
             let credentialHandle: OAuth2GrantHandle | undefined;
+            // The handle the provider is given while it materializes an `mcp`
+            // `authorization_code` instance: see `askingDuringMaterializationAs`.
+            let materializingHandle: ReturnType<typeof askingDuringMaterializationAs> | undefined;
             if (entry.auth?.type === 'signed') {
                 try {
                     requestSigner = createConnectorRequestSigner(name, entry.auth, credential?.value ?? '');
@@ -2596,6 +2659,10 @@ export class AutomationServicePlugin implements Plugin {
                     }
                 }
                 credentialHandle = this.createGrantHandle(ctx, name, entry, entry.auth, credential?.value);
+                const discovery = entry.auth.grant === 'authorization_code' && provider === 'mcp'
+                    ? (() => { const state = connectionStates.get(name); return state?.kind === 'read' ? state.discovery : undefined; })()
+                    : undefined;
+                if (discovery !== undefined) materializingHandle = askingDuringMaterializationAs(credentialHandle, discovery);
             } else if (entry.auth?.type === 'app-credential') {
                 // ADR-0143 D2.2 — the vendor exchange the closed `vendor` names,
                 // run from the app secret its `credentialRef` resolved to; the
@@ -2644,7 +2711,7 @@ export class AutomationServicePlugin implements Plugin {
                 ...(requestSigner === undefined ? {} : { requestSigner }),
                 // ADR-0143 D4 — the per-dispatch credential of an `oauth2`
                 // instance; `auth` is then `undefined`.
-                ...(credentialHandle === undefined ? {} : { credentialHandle }),
+                ...(credentialHandle === undefined ? {} : { credentialHandle: materializingHandle?.handle ?? credentialHandle }),
                 // ADR-0049 · #18975 — the declared resilience policy reaches the
                 // factory. The built-in HTTP providers hand it to
                 // `connectorFetchOptions()` → `resilientFetch()`; a custom
@@ -2662,7 +2729,11 @@ export class AutomationServicePlugin implements Plugin {
 
             let materialization;
             try {
-                materialization = await factory(providerCtx);
+                try {
+                    materialization = await factory(providerCtx);
+                } finally {
+                    materializingHandle?.settle();
+                }
                 // ADR-0143 D2.3 / ADR-0049 — a `signed` instance is served only
                 // by a provider that says it signs every request. One that does
                 // not (it predates the member, or its upstream never signs, as

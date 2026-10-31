@@ -138,12 +138,10 @@ function normalizeTransport(
  * ADR-0143 D4 — the credential request the instance's tool discovery
  * (`tools/list` at materialization) asks its credential handle with.
  * Discovery runs outside any run, so there is no run organization: it asks
- * with none, and the handle answers it as D4 answers a run with none — from
- * the instance's only connection, or refused when there are several.
- *
- * ⚠ Which connection discovery uses when an instance has several is an open
- * point the maintainer rules on (#26702, S2); this constant is the one place
- * that choice lives.
+ * with none. The host answers an ask that names none, made while the
+ * instance materializes, from the connection connected earliest (ruled B on
+ * #26702), so an instance several organizations connected still lists; every
+ * dispatch asks in its own run's organization.
  */
 export const MCP_DISCOVERY_CREDENTIAL_REQUEST: ConnectorCredentialRequest = Object.freeze({});
 
@@ -362,8 +360,10 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     const clientFactory = deps.clientFactory ?? defaultMcpClientFactory;
     // One client per organization a dispatch runs for (ADR-0143 Q1): an MCP
     // session is opened with one connection's token, so organizations never
-    // share one. A dispatch whose request is the discovery one goes through
-    // the client the tools were listed with.
+    // share one. A dispatch that names no organization goes through the
+    // client the tools were listed with: once the instance has materialized,
+    // that client's asks name none, which the host answers as D4 answers a
+    // run with none (the only connection, or refused when there are several).
     const borrowedClients = new Map<string, Promise<McpClientLike>>();
     const clientFor = handle && transport.kind === 'http'
       ? (actionCtx: unknown): Promise<McpClientLike> | undefined => {
