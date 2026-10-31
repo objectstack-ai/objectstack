@@ -22,6 +22,7 @@ import { deriveLookupColumns } from './deriveLookupColumns.js';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, mergeFilterNodes, resolveAffordance, resolveNameField, toPredicateRecord, withoutDeniedFields } from '@object-ui/core';
 import { getRecentLookupIds, pushRecentLookupId } from './recentLookups.js';
 import { getPersonInitials } from './personDisplay.js';
+import { declaredLookupAutofillPatch, type LookupAutofillPair } from './lookupAutofill.js';
 import { getCellRendererResolver } from './_cell-renderer-bridge.js';
 // The one place a lookup column's display value is decided — shared with the
 // "browse all records" picker (RecordPickerDialog) so a single `lookupColumns`
@@ -1051,6 +1052,39 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const onSelectRecord = props.onSelectRecord;
 
   /**
+   * The field's declared `lookupAutofill` pairs (`@objectstack/spec`), read
+   * where a record form draws this widget: a single-value pick whose host owns
+   * no `onSelectRecord` and supplies `onAutofill`, the writer for the sibling
+   * fields of the record being edited. A host that owns the pick (the line-item
+   * grid) applies the pairs itself.
+   */
+  const autofillPairs: readonly LookupAutofillPair[] | undefined =
+    !multiple && !onSelectRecord && props.onAutofill ? fieldMeta?.lookupAutofill : undefined;
+  const onAutofill = props.onAutofill;
+
+  /**
+   * Fill the declared targets from the picked `row`. The current values are
+   * the host's live record (`dependentValues`). "An earlier pick filled it" is
+   * read from `pickedRecords`, the rows this widget's own picks committed: the
+   * row the field held before this pick, if a pick in this form chose it, is
+   * the one whose `source` values count as pick-filled. A value the field held
+   * from the stored record was never picked here, so its targets stay.
+   */
+  const fillDeclaredTargets = useCallback(
+    (row: Record<string, unknown> | undefined) => {
+      if (!autofillPairs?.length || !onAutofill || !row) return;
+      const heldId = normalizeId(value);
+      const previous =
+        heldId == null || heldId === ''
+          ? null
+          : pickedRecords.find((r) => String(recordValue(r, idField)) === String(heldId)) ?? null;
+      const patch = declaredLookupAutofillPatch(autofillPairs, row, resolvedDependentValues, previous);
+      if (Object.keys(patch).length > 0) onAutofill(patch);
+    },
+    [autofillPairs, onAutofill, normalizeId, value, pickedRecords, idField, resolvedDependentValues],
+  );
+
+  /**
    * Commit a pick. `row` is the record `option` was built from.
    *
    * The row is kept so the pick's label resolves synchronously and durably,
@@ -1086,11 +1120,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       } else {
         if (referenceTo) pushRecentLookupId(referenceTo, option.value);
         if (onSelectRecord) onSelectRecord(option);
-        else onChange(option.value);
+        else {
+          onChange(option.value);
+          fillDeclaredTargets(row);
+        }
         setIsOpen(false);
       }
     },
-    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField],
+    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets],
   );
 
   const handleRemove = (optionValue: any) => {
@@ -1111,9 +1148,41 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       if (referenceTo) {
         records.forEach((r) => pushRecentLookupId(referenceTo, recordValue(r, idField) as string | number | undefined));
       }
+      // A single pick from a Level-2 picker commits its id through `onSelect`
+      // (`onChange`) just before this, so the declared targets fill here, from
+      // the picked row, with `pickedRecords` still holding the earlier picks.
+      if (!multiple && records.length === 1) fillDeclaredTargets(records[0]);
       setPickedRecords(records);
     },
-    [idField, referenceTo],
+    [idField, referenceTo, multiple, fillDeclaredTargets],
+  );
+
+  /**
+   * The browse-all dialog's single pick, for a host that owns the pick
+   * (`onSelectRecord`, the line-item grid): the dialog's bare-id `onSelect`
+   * is held back and the pick reaches the host once, with its record, exactly
+   * as a popover pick does, so the host's autofill runs on either path. A
+   * cleared value and a multi-value pick commit through `onChange` as before.
+   */
+  const handleDialogSelect = useCallback(
+    (next: any) => {
+      if (!multiple && onSelectRecord && next != null && next !== '') return;
+      onChange(next);
+    },
+    [multiple, onSelectRecord, onChange],
+  );
+  const handleDialogSelectRecords = useCallback(
+    (records: Record<string, unknown>[]) => {
+      if (multiple || !onSelectRecord || records.length !== 1) {
+        handlePickerSelectRecords(records);
+        return;
+      }
+      const row = records[0];
+      if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined);
+      setPickedRecords(records);
+      onSelectRecord(recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo));
+    },
+    [multiple, onSelectRecord, handlePickerSelectRecords, referenceTo, idField, declaredDisplayField, effectiveDescriptionField, refObjectSchema, perms],
   );
 
   // ── Recently-used, quick-create, combined option list ────────────────────
@@ -1937,8 +2006,8 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           idField={idField}
           pageSize={lookupPageSize}
           value={pickerValue}
-          onSelect={onChange}
-          onSelectRecords={handlePickerSelectRecords}
+          onSelect={handleDialogSelect}
+          onSelectRecords={handleDialogSelectRecords}
           lookupFilters={lookupFilters}
           baseFilter={dependentFilter}
           cellRenderer={getCellRendererResolver()}
