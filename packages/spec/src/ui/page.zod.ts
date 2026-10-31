@@ -12,7 +12,7 @@ import {
   UserActionsConfigSchema,
   AppearanceConfigSchema,
   UserFiltersSchema,
-  ViewFilterRuleSchema,
+  ViewFilterElementSchema,
   AddRecordConfigSchema,
   ListColumnSchema,
   EmptyStateSchema,
@@ -327,7 +327,7 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
    * form is refused at `filter`; the migration prescription is the
    * `element-data-source-and-object-block-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this element data source',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -872,7 +872,7 @@ export const PageRecordBindingSchema = lazySchema(() => strictObject({
 }, {
   object: z.string().describe('Object the page row is read from'),
   view: z.string().optional().describe('Named view to apply'),
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterElementSchema).optional()
     .describe('Filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the filter of the named view'),
   sort: z.array(SortItemSchema).optional().describe('Sort order — the page row is the FIRST row of the bound set under it'),
 }));
@@ -1055,7 +1055,7 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
     .describe('Columns shown by the page. Blank = all object fields. Defined directly on the page (no view inheritance).'),
   sort: z.array(SortItemSchema).optional()
     .describe('Default sort order for the page, defined directly on the page.'),
-  filterBy: z.array(ViewFilterRuleSchema).optional().describe('Always-on page filter (base filter).'),
+  filterBy: z.array(ViewFilterElementSchema).optional().describe('Always-on page filter (base filter).'),
   levels: z.number().int().min(1).optional().describe('Number of hierarchy levels to display'),
 
   /** @deprecated Back-compat only. Pre-revision pages inherited columns/filter/sort

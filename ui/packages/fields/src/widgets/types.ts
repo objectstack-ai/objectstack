@@ -248,6 +248,17 @@ export type FieldWidgetComponentProps<T = any> = {
    */
   onSelectRecord?: (record: Record<string, any>) => void;
   /**
+   * Write sibling fields of the record being edited: the targets a pick in a
+   * lookup fills under its declared `lookupAutofill` pairs, as one patch of
+   * field name → value.
+   *
+   * **Producer**: the form renderer, which owns the record's values.
+   * **Consumer**: `LookupField`, on a single-value pick whose host owns no
+   * `onSelectRecord` (a host that owns the pick, the line-item grid, applies
+   * the pairs itself). A lookup reached without it fills nothing.
+   */
+  onAutofill?: (patch: Record<string, unknown>) => void;
+  /**
    * Offer a "create new" affordance in a record picker, carrying whatever the
    * user had typed. Also declarable on the field metadata.
    */

@@ -431,11 +431,12 @@ export function useObjectViewTitleSwitcher({
 
     const openViewId = viewAccess.refusal ? '' : activeViewId ?? '';
     const openView = viewTabItems.find((item) => item.id === openViewId);
+    const titleLabel = openView?.label ?? unlabelledViewText;
     const titleSwitcher = views.length >= 1 ? (
         <ObjectViewTitleSwitcher
             views={switcherViews}
             activeViewId={openViewId}
-            activeLabel={openView?.label ?? unlabelledViewText}
+            activeLabel={titleLabel}
             count={viewTotal && viewTotal.viewId === openViewId ? viewTotal.total : undefined}
             description={openView?.type === 'chart' ? openView.description : undefined}
             onViewChange={handleViewChange}
@@ -449,5 +450,5 @@ export function useObjectViewTitleSwitcher({
         />
     ) : null;
 
-    return { viewTabItems, titleSwitcher };
+    return { viewTabItems, titleSwitcher, titleLabel };
 }

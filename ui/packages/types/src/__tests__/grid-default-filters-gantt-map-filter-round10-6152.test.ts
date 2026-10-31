@@ -42,6 +42,7 @@ import type {
   ObjectGanttProps as SpecObjectGanttProps,
   ObjectGridProps as SpecObjectGridProps,
   ObjectMapProps as SpecObjectMapProps,
+  ViewFilterElement,
   ViewFilterRule,
 } from '@objectstack/spec/ui';
 import type {
@@ -259,8 +260,9 @@ export type assertionRound10MembersAreTheRows = [
   Expect<Equal<NonNullable<TsObjectViewSchema['table']>['defaultFilters'], SpecObjectGridProps['defaultFilters']>>,
   Expect<Equal<TsObjectGanttSchema['filter'], SpecObjectGanttProps['filter']>>,
   Expect<Equal<TsObjectMapSchema['filter'], SpecObjectMapProps['filter']>>,
-  Expect<Equal<TsObjectGanttSchema['filter'], ViewFilterRule[] | undefined>>,
-  Expect<Equal<TsObjectMapSchema['filter'], ViewFilterRule[] | undefined>>,
+  // objectstack#28020: the element is a flat rule OR an any-of group (`ViewFilterElement`).
+  Expect<Equal<TsObjectGanttSchema['filter'], ViewFilterElement[] | undefined>>,
+  Expect<Equal<TsObjectMapSchema['filter'], ViewFilterElement[] | undefined>>,
   // Lit control: round 8's grid `filter` is unchanged.
   Expect<Equal<TsObjectGridSchema['filter'], SpecObjectGridProps['filter']>>,
 ];
