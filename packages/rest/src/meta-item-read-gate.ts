@@ -85,6 +85,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import type { ExpandedViewItem } from '@objectstack/spec/ui';
 import { isEndpointMatchAuthority, selectServedEndpoints } from './served-endpoints.js';
 import { logError, logWarn } from './log.js';
+import { metaRepresentationCaching } from './meta-representation-validator.js';
 // [#23072] The recognition sentence and the arity rule's portable halves, for
 // the by-name doors' query decision ({@link metaItemQueryRefusal}).
 import { unknownQueryParamRefusalMessage } from './query-allowlist.js';
@@ -3367,13 +3368,17 @@ export interface MetaListRequest {
  * or the `{ type, items }` envelope), or the object whose mask could not be
  * evaluated, which the transport answers as its D6 tier-3 fault.
  *
- * [#20408] `cacheControl` — the `Cache-Control` the list must be served under,
- * when it owes one: {@link META_UNDETERMINED_CACHE_CONTROL} when any listed
- * object schema was served under an undetermined field visibility (ADR-0106
- * D6 tier 2). Absent otherwise; the transport then sets none.
+ * [#20408] `cacheControl` — the `Cache-Control` the list must be served under:
+ * {@link META_UNDETERMINED_CACHE_CONTROL} when any listed object schema was
+ * served under an undetermined field visibility (ADR-0106 D6 tier 2), and no
+ * `etag`. [#27627] Otherwise `private, no-cache` and `etag`, the weak
+ * validator of `data` itself — the served list, after every step below
+ * (`metaRepresentationCaching` in `./meta-representation-validator.ts` says
+ * why the served bytes, and only they, are hashed). A transport that answers
+ * conditional requests compares `If-None-Match` against `etag`.
  */
 export type MetaListAnswer =
-    | { ok: true; data: unknown; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL }
+    | { ok: true; data: unknown; cacheControl: string; etag?: string }
     | { ok: false; object: string };
 
 /** The items of a list shape this chain serves, or `null` for anything else (left alone, never replaced). */
@@ -3590,7 +3595,9 @@ export function createMetaListAnswer(
 
         // 9. The translation step ({@link translateMetaList}, through the transport's entry).
         const data = await sources.translateList(metaType, visible);
-        return cacheControl ? { ok: true, data, cacheControl } : { ok: true, data };
+        // 10. [#27627] The validator of what is served — over `data`, the
+        //     list after every step above, never an earlier stage of it.
+        return { ok: true, data, ...metaRepresentationCaching(data, cacheControl) };
     };
 }
 
@@ -3643,16 +3650,18 @@ export interface MetaItemRequest {
 /**
  * What the item chain answers:
  *
- *  - `serve` — send `envelope`, under `cacheControl` when it owes one
- *    ({@link META_UNDETERMINED_CACHE_CONTROL}, ADR-0106 D6 tier 2), and under
- *    `Vary: Accept-Language` always (the body is translated per request);
+ *  - `serve` — send `envelope` under `cacheControl` and `Vary:
+ *    Accept-Language` (the body is translated per request):
+ *    {@link META_UNDETERMINED_CACHE_CONTROL} with no `etag` on an ADR-0106 D6
+ *    tier-2 posture, otherwise [#27627] `private, no-cache` and `etag`, the
+ *    weak validator of `envelope` itself, after every step below;
  *  - `refuse` — the gate's {@link MetaItemReadRefusal} (`absent` included:
  *    nothing behind the name is the transport's own absence answer);
  *  - `mask-fault` — the projection left the schema with no field (D6), which
  *    the transport answers as its field-visibility fault for `object`.
  */
 export type MetaItemAnswer =
-    | { kind: 'serve'; envelope: unknown; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL }
+    | { kind: 'serve'; envelope: unknown; cacheControl: string; etag?: string }
     | { kind: 'refuse'; refusal: MetaItemReadRefusal }
     | { kind: 'mask-fault'; object: string };
 
@@ -3726,9 +3735,8 @@ export function createMetaItemAnswer(
         //    over [#22250] the caller's runtime view of what step 4 serves.
         const runtime = await resolveObjectSchemaRuntimeView(visible, maskPosture);
         const served = await sources.translateEnvelope(envelope ?? {}, visible, runtime.document);
-        return masked.cacheControl
-            ? { kind: 'serve', envelope: served, cacheControl: masked.cacheControl }
-            : { kind: 'serve', envelope: served };
+        // 6. [#27627] The validator of what is served — over `served`, never an earlier stage of it.
+        return { kind: 'serve', envelope: served, ...metaRepresentationCaching(served, masked.cacheControl) };
     };
 }
 

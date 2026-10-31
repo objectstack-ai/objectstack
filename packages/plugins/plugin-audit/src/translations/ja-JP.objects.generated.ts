@@ -37,7 +37,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "アカウントロック",
           config_change: "構成変更",
           import: "インポート",
-          platform_admin_standing_change: "プラットフォーム管理者権限の変更"
+          platform_admin_standing_change: "プラットフォーム管理者権限の変更",
+          action_invocation: "アクション実行"
         }
       },
       user_id: {
