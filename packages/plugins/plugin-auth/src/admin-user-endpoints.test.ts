@@ -269,15 +269,43 @@ describe('runAdminCreateUser', () => {
 
   // #27857: the refusal names what the dialog shows. `phoneNumber` is a body
   // key, and the dialog has a Phone Number field only where phone sign-in is
-  // on. The code and status are the endpoint's contract and do not move.
+  // on. #28289: it is the field-level refusal, `VALIDATION_FAILED` with one
+  // `fields[]` entry per input that can satisfy it, code `required`, so a
+  // client can mark the input and word it in its own language.
   for (const phone of [false, true]) {
     const expected = phone ? 'Email or phone number is required' : 'Email is required';
-    it(`phone sign-in ${phone ? 'on' : 'off'}: neither email nor phone answers 400 INVALID_REQUEST "${expected}"`, async () => {
+    const fields = phone
+      ? [
+          { field: 'email', code: 'required', message: expected },
+          { field: 'phoneNumber', code: 'required', message: expected },
+        ]
+      : [{ field: 'email', code: 'required', message: expected }];
+    it(`phone sign-in ${phone ? 'on' : 'off'}: neither email nor phone answers 400 VALIDATION_FAILED "${expected}" at ${fields.map((f) => f.field).join(' + ')}`, async () => {
       const m = makeDeps({ phoneNumberEnabled: () => phone });
       const res = await runAdminCreateUser(m.deps, makeRequest({ name: 'x', generatePassword: true }), ACTOR);
       expect(res.status).toBe(400);
-      expect(res.body.error?.code).toBe('INVALID_REQUEST');
+      expect(res.body.error?.code).toBe('VALIDATION_FAILED');
       expect(res.body.error?.message).toBe(expected);
+      expect(res.body.error?.fields).toEqual(fields);
+      expect(m.createUser).not.toHaveBeenCalled();
+    });
+  }
+
+  // #28289 CONTROLS: the refusals beside it keep their answer exactly.
+  for (const [shape, body, phone, message] of [
+    ['a malformed email', { email: 'not-an-email' }, false, 'A valid email is required'],
+    ['a phone number with phone sign-in off', { phoneNumber: '+8613800000000' }, false,
+      'Phone numbers require the phoneNumber auth plugin (auth.plugins.phoneNumber)'],
+    ['a malformed phone number', { phoneNumber: 'abc' }, true,
+      'phoneNumber must be a valid phone number (E.164 recommended, e.g. +8613800000000)'],
+    ['a permissionSet that is not a name', { email: 'a@b.co', permissionSet: 7 }, false,
+      'permissionSet must be the machine name of a permission set'],
+  ] as const) {
+    it(`CONTROL: ${shape} still answers 400 INVALID_REQUEST with no fields`, async () => {
+      const m = makeDeps({ phoneNumberEnabled: () => phone });
+      const res = await runAdminCreateUser(m.deps, makeRequest({ ...body, generatePassword: true }), ACTOR);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toEqual({ code: 'INVALID_REQUEST', message });
       expect(m.createUser).not.toHaveBeenCalled();
     });
   }

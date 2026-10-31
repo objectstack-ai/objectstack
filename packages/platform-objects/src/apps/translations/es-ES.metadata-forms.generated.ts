@@ -616,6 +616,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Separador de miles",
         helpText: "Agrupación de dígitos (separador de miles) en los valores mostrados. Sin definir: lo decide el renderizador; un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el renderizador agrupe. Desactivado: nunca se agrupa, p. ej., un año o un ID. Activado: siempre se agrupa."
       },
+      percentDisplay: {
+        label: "Visualización del porcentaje",
+        helpText: "Cómo se muestra el valor en modo de solo lectura, en las celdas de lista y en la página del registro. Sin definir: una barra de progreso junto al porcentaje. Barra: siempre la barra de progreso, para un progreso. Simple: solo el porcentaje, para una tasa o una probabilidad."
+      },
       currencyConfig: {
         label: "Configuración de moneda",
         helpText: "En qué moneda está este campo: un campo de moneda, o una fórmula cuyo tipo de retorno es Moneda. Sin definir: modo dynamic. En todos los modos el valor es un número sin más."

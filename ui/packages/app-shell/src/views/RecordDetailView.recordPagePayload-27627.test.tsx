@@ -21,6 +21,12 @@
  * approval / lock / record read, one wave of data requests; the badges draw the
  * payload's totals; and the record a drawer step shows next is asked ahead, so stepping to it
  * asks nothing for the record it opens.
+ *
+ * objectstack#27524: the 动态 panel leads the page's right column in every
+ * tier, so the stream is on screen at open and reads its own sources beside
+ * the page request, in the same wave: the record's comment thread, its
+ * activity and, once per view, the mention list. None of them is a part of the page the payload answers;
+ * they are pinned on their own below, not counted as page requests.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -154,7 +160,17 @@ async function runWaves(held: Held[], state: { wave: number }) {
 
 const isMeta = (h: Held) => h.path.startsWith('/api/v1/meta/');
 const isPage = (h: Held) => h.method === 'POST' && /\/api\/v1\/data\/[^/?]+\/[^/?]+\/page$/.test(h.path);
-const dataRequests = (held: Held[]) => held.filter((h) => !isMeta(h));
+/** The 动态 stream's own reads (objectstack#27524): its sources, not the page's parts. */
+const STREAM_SOURCES = ['sys_comment', 'sys_activity', 'sys_user'];
+const isStreamRead = (h: Held) => h.method === 'GET' && STREAM_SOURCES.some((o) => h.path.startsWith(`/api/v1/data/${o}?`));
+/** A stream read as `<object> <record>`, or `<object>` for the mention list, which names no record. */
+const streamRead = (h: Held) => {
+  const object = /\/api\/v1\/data\/([^/?]+)\?/.exec(h.path)![1];
+  const rec = new RegExp(`${OBJECT}:([^"]+)"|"record_id","=","([^"]+)"`).exec(h.path);
+  return rec ? `${object} ${rec[1] ?? rec[2]}` : object;
+};
+const streamReads = (held: Held[]) => held.filter(isStreamRead).map(streamRead).sort();
+const dataRequests = (held: Held[]) => held.filter((h) => !isMeta(h) && !isStreamRead(h));
 
 beforeEach(() => {
   cleanup();
@@ -222,6 +238,10 @@ describe('objectstack#27627 — one request opens a record page', () => {
 
     // Every badge's total is the payload's.
     for (const c of CHILDREN) expect(RelatedCountStore.get(c, 'contact', 'c1')).toBe(TOTAL[c]);
+
+    // The 动态 panel's own reads go out beside the page request, in its wave.
+    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1', 'sys_user']);
+    expect(held.filter(isStreamRead).every((h) => h.wave === 1)).toBe(true);
   });
 
   it('a warm open of another record sends one page request too', async () => {
@@ -233,7 +253,9 @@ describe('objectstack#27627 — one request opens a record page', () => {
     state.wave = 1;
     open('c2');
     await runWaves(held, state);
-    expect(held.map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c2/page`]);
+    expect(dataRequests(held).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c2/page`]);
+    expect(held.filter(isMeta)).toEqual([]);
+    expect(streamReads(held)).toEqual(['sys_activity c2', 'sys_comment c2', 'sys_user']);
   });
 
   it("asks the record a drawer step shows next ahead, so stepping to it sends nothing", async () => {
@@ -254,6 +276,8 @@ describe('objectstack#27627 — one request opens a record page', () => {
     // The step's own page is the prefetched answer; only the next one is asked.
     expect(held.filter(isPage).map((h) => h.path)).toEqual([`/api/v1/data/${OBJECT}/c3/page`]);
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
+    // What the step does read is its 动态 stream, the payload's to answer no part of.
+    expect(streamReads(held)).toEqual(['sys_activity c2', 'sys_comment c2', 'sys_user']);
   });
   // Merge resolution with objectstack#27056 (#27636): in a drawer, that card
   // warms the next record's related counts; the payload's prefetch carries
@@ -299,6 +323,8 @@ describe('objectstack#27627 — one request opens a record page', () => {
       `/api/v1/data/${OBJECT}/c2/page`,
     ]);
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
+    // The swapped-in record's 动态 stream; the mention list is the view's, read once.
+    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1']);
   });
 
   it('in a drawer, an adapter without the payload keeps the count warm-up: each of the next record\'s counts is asked once', async () => {

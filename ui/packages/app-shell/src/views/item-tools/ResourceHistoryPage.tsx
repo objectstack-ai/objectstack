@@ -32,13 +32,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { t, tFormat, translateConsoleValue, useMetadataLocale } from './i18n.js';
-import { PageShell } from './PageShell.js';
+import { t, tFormat, translateConsoleValue, useMetadataLocale } from '../metadata-admin/i18n.js';
+import { PageShell } from '../metadata-admin/PageShell.js';
 import {
   useMetadataClient,
   useMetadataTypes,
   type RichMetadataTypeEntry,
-} from './useMetadata.js';
+} from '../metadata-admin/useMetadata.js';
 
 export interface MetadataResourceHistoryPageProps {
   type?: string;

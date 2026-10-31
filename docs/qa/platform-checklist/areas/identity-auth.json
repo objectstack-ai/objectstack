@@ -156,7 +156,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -170,7 +170,7 @@
           "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. objectui#4179 (the login-UI card) was CLOSED not_planned on 2026-09-24: the maintainer's 'no UI for now' stands until the login UI is scheduled. So the browser-lane variants have no environment to run in; record them blocked(dependency, objectui#4179 closed not_planned), never pass (QA run #21784 N3, parked on #22017 row 20). The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
           "the two spec files disagree on the device-flow paths (packages/spec/src/api/auth-endpoints.zod.ts: /device/request, /device/token, /device/approve vs packages/spec/src/system/auth-config.zod.ts: /device/code, /device/token, /device, /device/approve, /device/deny) — the LIVE better-auth surface serves POST /device/code, /device/token, /device/approve, /device/deny and GET /device (auth-route-ledger.ts BETTER_AUTH_MOUNTED_SURFACE); trust the live routes and file the doc divergence",
           "the password-reset path names ALSO diverge from the spec: AuthEndpointPaths.forgetPassword = '/forget-password' but the live catch-all serves POST /request-password-reset, POST /reset-password and GET /reset-password/:token (BETTER_AUTH_MOUNTED_SURFACE) — trust the live routes (this is the same divergence identity-auth.self-service-password-reset drives)",
-          "acceptance[0]'s SSO and device-authorization variants have no switch on the stock `os dev` → `os serve` path (QA run #21784, parked on #22017 row 20). The AuthPlugin the CLI injects takes only env-mapped plugins (packages/cli/src/commands/serve.ts: OS_AUTH_ADMIN, OS_AUTH_TWO_FACTOR, OS_AUTH_PASSWORD_REJECT_BREACHED, OS_AUTH_PHONE_NUMBER_ENABLED), and neither plugins.deviceAuthorization nor an oidcProviders map is one of them. Device authorization needs a host that constructs AuthPlugin itself with plugins.deviceAuthorization: true. The SSO plugin DOES have a boot switch, OS_SSO_ENABLED (packages/plugins/plugin-auth/src/auth-manager.ts, isSsoWired), but features.sso is advertised only once a provider is registered, and registering one needs a reachable external IdP. So the environment these variants need is a custom host (device) and a reachable IdP (SSO / OIDC). A reachable IdP need not be external: generic OIDC is drivable against an IdP started on localhost (the identity-auth slice report on #23878 (6216631966)), so the generic-OIDC half is not blocked(environment) — only the device variant (no custom host) and the enterprise @better-auth/sso half (features.sso) stay blocked(environment)"
+          "acceptance[0]'s SSO and device-authorization variants have no switch on the stock `os dev` → `os serve` path (QA run #21784, parked on #22017 row 20). The AuthPlugin the CLI injects takes only env-mapped plugins (packages/cli/src/commands/serve.ts: OS_AUTH_ADMIN, OS_AUTH_TWO_FACTOR, OS_AUTH_PASSWORD_REJECT_BREACHED, OS_AUTH_PHONE_NUMBER_ENABLED), and neither plugins.deviceAuthorization nor an oidcProviders map is one of them. Device authorization needs a host that constructs AuthPlugin itself with plugins.deviceAuthorization: true. The SSO plugin DOES have a boot switch, OS_SSO_ENABLED (packages/plugins/plugin-auth/src/auth-manager.ts, isSsoWired), but features.sso is advertised only once a provider is registered, and registering one needs an IdP whose discovery URL is publicly routable or allowlisted: the register door (POST /api/v1/auth/admin/sso/register, re-dispatched into @better-auth/sso's /sso/register) refuses a loopback or private IdP 400 discovery_private_host unless its origin is in trustedOrigins (@better-auth/sso validateOIDCEndpointUrl; QA run #27438 measured it on a localhost IdP), so the localhost IdP that unblocks generic OIDC below does NOT unblock features.sso. So the environment these variants need is a custom host (device) and a reachable IdP (SSO / OIDC). A reachable IdP need not be external: generic OIDC is drivable against an IdP started on localhost (the identity-auth slice report on #23878 (6216631966)), so the generic-OIDC half is not blocked(environment) — only the device variant (no custom host) and the enterprise @better-auth/sso half (features.sso) stay blocked(environment) — the latter until a run reaches a publicly routable IdP or boots with a trustedOrigins configuration naming its IdP's origin"
         ]
       },
       "steps": [
@@ -285,7 +285,8 @@
         { "revision": 6, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 20). A1's SSO / device variants were blocked (no switch on the dev → serve path) and N3 was blocked(dependency, objectui#4179). Disposition: recorded knownGap. Verified: serve.ts injects AuthPlugin with four env-mapped plugins and no deviceAuthorization or oidcProviders; SSO has the OS_SSO_ENABLED boot switch but needs a registered provider behind a reachable IdP. A knownGap names that environment, and that CI and the QA container lack it. objectui#4179 closed not_planned on 2026-09-24, so the magic-link / passkey knownGap and negative 3 now say so", "ref": "#22017" },
         { "revision": 7, "date": "2026-10-13", "change": "clause 10, acceptance[9] (the delete-user half) and step 9 re-worded (assertion defect, #23104 A9). Revision 4 said delete-user answers 404 to every caller, authed or not. The route is mounted and session-guarded, so the anonymous forge answers 401 UNAUTHORIZED and only a signed-in caller reaches the capability switch's 404. No caller gets 2xx, and the disposition 'disabled' is unchanged. The oracle is packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts, whose '#7735' delete-user block pins anonymous 401, authed 404 and the callback 404, and says the 401-beside-404 pair is how the switch is told apart from an unmounted route. The change-email half is unchanged", "ref": "#23121" },
         { "revision": 8, "date": "2026-10-17", "change": "knownGaps[3], steps[3] and [4], acceptance[3].verify and variants[3] and [7] corrected (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). The no-SMS state needs NODE_ENV=production: in development the SMS log transport delivers, so send-otp succeeds. A generic oidcProviders entry surfaces as a socialProviders[] entry of type 'oidc', while features.sso tracks only the @better-auth/sso plugin, so the SSO step's 'features.sso refined to usable' check could never see a generic provider. Magic-link is off on stock (404), not 'server endpoints live'. Generic OIDC is drivable against a localhost IdP, so only the device and enterprise-SSO halves stay blocked(environment). Not loosened: a phone OTP without SMS that succeeds, hangs or 500s on a production boot still FAILS", "ref": "#24036" },
-        { "revision": 9, "date": "2026-10-26", "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-method-matrix a3, a6, a9 and ref; wave anchor #25807; card #25843). acceptance[3], [6] and [9] each named a pin that exists but was not in automated.ref (phone-otp-no-sms-service-refusal.test.ts, two-factor-lockout.dogfood.test.ts, change-email-delete-user-wiring.test.ts), and the ref held a single OIDC pin (acceptance[7]) under kind 'e2e', over-implying coverage of a 10-clause item. automated.ref now lists all four pins with the clause and layer each scores, and kind reads 'dogfood'; acceptance[3].verify and acceptance[9].verify say their pins drive AuthManager at unit layer, not the production boot's send-otp door or a booted server, so they score partial and the live calls are still driven. No clause's assertion changed", "ref": "#25843" }
+        { "revision": 9, "date": "2026-10-26", "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-method-matrix a3, a6, a9 and ref; wave anchor #25807; card #25843). acceptance[3], [6] and [9] each named a pin that exists but was not in automated.ref (phone-otp-no-sms-service-refusal.test.ts, two-factor-lockout.dogfood.test.ts, change-email-delete-user-wiring.test.ts), and the ref held a single OIDC pin (acceptance[7]) under kind 'e2e', over-implying coverage of a 10-clause item. automated.ref now lists all four pins with the clause and layer each scores, and kind reads 'dogfood'; acceptance[3].verify and acceptance[9].verify say their pins drive AuthManager at unit layer, not the production boot's send-otp door or a booted server, so they score partial and the live calls are still driven. No clause's assertion changed", "ref": "#25843" },
+        { "revision": 10, "date": "2026-10-31", "change": "knownGaps[3] said registering an enterprise SSO provider 'needs a reachable external IdP'. The precise rule, measured by QA run #27438: the register door re-dispatches into @better-auth/sso's /sso/register, whose validateOIDCEndpointUrl refuses a loopback or private discovery URL with 400 discovery_private_host unless its origin is in trustedOrigins. So the localhost IdP that unblocks generic OIDC does not unblock features.sso. The gap now says so, and names the two environments that would lift it. Verdicts are unchanged: device and features.sso stay blocked(environment). Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310", "ref": "#27438" }
       ]
     },
     {
@@ -756,7 +757,7 @@
       "title": "Self-service profile: name + avatar edits persist through real storage, and password change verifies the current password (passwordless users get set-initial)",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["a signed-in email+password user", "a signed-in passwordless (SSO-only) user"],
@@ -829,7 +830,7 @@
       "source": [
         "objectui apps/console/src/pages/system/ProfilePage.tsx (updateUser name/image; useUpload avatar; PasswordCard changePassword vs setInitialPassword gated on hasLocalPassword; email immutable; data-testids profile-avatar-file/-upload-btn/-remove-btn)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (POST /api/v1/auth/update-user=auth.updateUser, POST /api/v1/auth/change-password=auth.changePassword, GET /api/v1/auth/get-session=auth.me — re-pointed #18104: updateUser is a CLIENT METHOD name, carried in this file only inside a dotted string value)",
-        "packages/platform-objects/src/identity/sys-account.object.ts#previous_password_hashes (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password)"
+        "packages/platform-objects/src/identity/sys-account.object.ts#previous_password_hashes (previous_password_hashes ring — ADR-0069 D1 reuse-prevention backs change-password ONLY while the auth setting password_history_count is above 0, and it defaults to 0, which disables the history check: packages/services/service-settings/src/manifests/auth.manifest.ts (password_history_count, default 0) and packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts#assertPasswordNotReused (returns early on a count of 0 unless an admin-forced change is outstanding). So on a stock boot a change back to a previous password is admitted, and a run that wants the PASSWORD_REUSE refusal sets password_history_count first (QA run #27441))"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: self-service name + avatar (real storage write, persists) and password change with current-password verification, plus the passwordless set-initial branch, grounded in ProfilePage.tsx + the auth route ledger (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -838,6 +839,12 @@
           "date": "2026-10-19",
           "change": "fixtures.requires[2], knownGaps[0] and steps[7] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.self-service-profile-password; wave anchor #24579 §3): the knownGap said the set-initial-password branch needs an IdP, but a credential-less user is provisionable on stock showcase through POST /api/v1/auth/admin/import-users with passwordPolicy 'none' (admin-import-users.ts) and a session through POST /api/v1/auth/admin/impersonate-user — the recipe the run scored acceptance[5] pass on. The knownGap is marked CLOSED and the step drives the recipe. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-31",
+          "change": "source[2] says when the reuse ring backs change-password, as QA run #27441 noted: only while password_history_count > 0. The auth settings manifest declares it with default 0 ('0 disables the check', packages/services/service-settings/src/manifests/auth.manifest.ts), and assertPasswordNotReused (plugin-auth auth-manager-password-session-policy.ts) returns early on a count of 0 unless an admin-forced change is outstanding. No clause changed: no clause here asserts a reuse refusal. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6490438726",
+          "ref": "#27441"
         }
       ]
     },
@@ -1396,7 +1403,7 @@
       "title": "TOTP enrollment reveal: /two-factor/enable returns a parseable otpauth:// URI + backup codes, the declared reveal dialog's paths resolve against that exact shape, and the live re-reveal endpoint's behavior is recorded",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user with a known password enrolling their own second factor"],
@@ -1413,7 +1420,7 @@
       },
       "steps": [
         "arm 2FA BEFORE boot (OS_AUTH_TWO_FACTOR=true exported first, or the Setup mfa_required path) — see fixtures; the in-process bootStack harness the lockout pin uses is the workable API-lane rig, since sys_two_factor's REST surface is get-by-id only",
-        "GUARD (assert-armed, first clause): GET /api/v1/auth/config and require features.twoFactor true; probe POST /api/v1/auth/two-factor/enable with an empty body and require a non-404 answer (400/401 is armed; 404 means the catch-all never mounted the two-factor family and NOTHING below may be scored)",
+        "GUARD (assert-armed, first clause): GET /api/v1/auth/config and require data.features.twoFactor true (the body is {success, data}); probe POST /api/v1/auth/two-factor/enable with an empty body and require a non-404 answer (400/401 is armed; 404 means the catch-all never mounted the two-factor family and NOTHING below may be scored)",
         "sign in as the enrolling user and POST /api/v1/auth/two-factor/enable with { password }; capture the full response body",
         "parse the returned totpURI: it must be an otpauth://totp/ URI whose label identifies the issuer + account (the app/user), whose secret query param base32-decodes cleanly (use the copied helper), and whose algorithm/digits/period params — where present — are the sane RFC defaults (SHA1/6/30)",
         "assert backupCodes is a non-empty array of strings and record its size/format",
@@ -1424,9 +1431,9 @@
       ],
       "acceptance": [
         {
-          "clause": "ASSERT-ARMED GUARD — the surface exists before anything is scored: /api/v1/auth/config advertises features.twoFactor true and POST /two-factor/enable answers non-404. Without OS_AUTH_TWO_FACTOR=true (or the mfa_required forcing path) set BEFORE boot, the two-factor family is simply absent from the catch-all, and every clause below would pass green against a 404 surface",
+          "clause": "ASSERT-ARMED GUARD — the surface exists before anything is scored: /api/v1/auth/config advertises data.features.twoFactor true and POST /two-factor/enable answers non-404. Without OS_AUTH_TWO_FACTOR=true (or the mfa_required forcing path) set BEFORE boot, the two-factor family is simply absent from the catch-all, and every clause below would pass green against a 404 surface",
           "oracle": "api",
-          "verify": "GET /api/v1/auth/config features.twoFactor === true, plus a probe POST to /api/v1/auth/two-factor/enable returning 400/401 (not 404). If this clause fails the run stops here: the remaining clauses are blocked(environment), never pass",
+          "verify": "GET /api/v1/auth/config data.features.twoFactor === true, plus a probe POST to /api/v1/auth/two-factor/enable returning 400/401 (not 404). If this clause fails the run stops here: the remaining clauses are blocked(environment), never pass",
           "evidence": "the /auth/config read + the probe status"
         },
         {
@@ -1450,7 +1457,7 @@
         {
           "clause": "OBSERVE-AND-RECORD — the live re-reveal endpoint is recorded, not assumed: POST /api/v1/auth/two-factor/get-totp-uri is a mounted route that hands the totpURI back AFTER enrollment — measured password-gated and returning the SAME secret (the identity-auth slice report on #23878 (6216631966)). The enable dialog's 'shown only once' copy covers the backup codes only, so the re-reveal breaks no promise the console makes; whether a re-revealable TOTP secret is accepted design is a ruling owed, not this clause's verdict. The run records the behaviour (password-gated? same secret? before and after verification?) — this clause is satisfied by an accurate record, not by any particular outcome",
           "oracle": "api",
-          "verify": "drive POST /two-factor/get-totp-uri with and without the correct password, before and after the enrollment is verified; record each status and whether the returned URI carries the same secret. If it re-reveals with NO password gate, that is an authentication finding — RUNNER rule 2's carve-out applies (no card; one run-record row, recipe withheld)",
+          "verify": "drive POST /two-factor/get-totp-uri with and without the correct password, before and after the enrollment is verified. The verification ROTATES the session: on the enrolment lane /two-factor/verify-totp mints a new session and deletes the caller's, so the 'after' probes carry the token verify-totp's response echoes (the live rotated session, packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts) or its Set-Cookie; on the pre-verify bearer every probe answers 401, for the right and the wrong password alike, and measures nothing (QA run #27392); record each status and whether the returned URI carries the same secret. If it re-reveals with NO password gate, that is an authentication finding — RUNNER rule 2's carve-out applies (no card; one run-record row, recipe withheld)",
           "evidence": "the recorded behavior table (secrets redacted)"
         },
         {
@@ -1495,6 +1502,12 @@
           "date": "2026-10-29",
           "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. negative[2] quoted the retired 'detail withheld pending maintainer' row and now names the new one; acceptance[4].verify said 'existence published', which read as the retired card, and now says no card. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
           "ref": "#27642"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "acceptance[4].verify gains the session-rotation note QA run #27392 found missing. On the enrolment lane /two-factor/verify-totp mints a new session and deletes the caller's (better-auth's totp handler; two-factor-rotated-token-echo.ts makes the response echo the live rotated token). So the 'after verification' re-reveal probes must carry that token; on the pre-verify bearer, #27392 got 401 for the right and the wrong password alike. The same item's steps[1] and acceptance[0] (clause, verify) read features.twoFactor, which sits at data.features.twoFactor in /auth/config's {success, data} body, so they say so, as two-factor-disable-lifecycle now does. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488404069",
+          "ref": "#27392"
         }
       ]
     },
@@ -1503,7 +1516,7 @@
       "title": "Enrollment is inert until one correct TOTP verifies on the session lane — and the run records what sys_two_factor.verified actually carries in between",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["a signed-in user mid-enrollment (session lane)", "the same user at the sign-in challenge (cookie lane)"],
@@ -1519,7 +1532,7 @@
         ]
       },
       "steps": [
-        "arm, boot, run the assert-armed guard (features.twoFactor true, /two-factor/enable non-404) — nothing below is scored without it",
+        "arm, boot, run the assert-armed guard (GET /api/v1/auth/config data.features.twoFactor true — the body is {success, data} — and /two-factor/enable non-404) — nothing below is scored without it",
         "sign in, POST /two-factor/enable { password }, decode the secret from the totpURI (the copied helper)",
         "IMMEDIATELY read the sys_two_factor row via the system-context ObjectQL read and record the literal value of `verified` — this is the latent-default probe (see the clause), captured before anything else touches the row",
         "before any verification, drive the password stage: POST /auth/sign-in/email with the password and record the answer. An unverified enrolment does not interpose a challenge — the sign-in answers a session with no twoFactorRedirect and no two-factor cookie — so there is no cookie lane on which the new factor could be presented: better-auth's TOTP_NOT_ENABLED branch (the sign-in path's refusal of an unverified enrolment, the lockout pin's own comment, two-factor-lockout.dogfood.test.ts) is unreachable over HTTP and is cited from that pin, not driven. Record whether twoFactorRedirect appeared",
@@ -1532,7 +1545,7 @@
         {
           "clause": "ASSERT-ARMED GUARD — identical to identity-auth.two-factor-enrollment-reveal clause 0 and binding for the same reason: unarmed boots 404 the family and would green-tick every clause below",
           "oracle": "api",
-          "verify": "features.twoFactor true in /auth/config + non-404 probe; on failure everything below is blocked(environment)",
+          "verify": "data.features.twoFactor true in /auth/config (the body is {success, data}) + non-404 probe; on failure everything below is blocked(environment)",
           "evidence": "the config read + probe status"
         },
         {
@@ -1587,6 +1600,12 @@
           "date": "2026-10-29",
           "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. acceptance[2].verify quoted the retired 'detail withheld pending maintainer' row and now names the new one. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
           "ref": "#27642"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "steps[0] and acceptance[0].verify read the assert-armed guard as features.twoFactor; GET /api/v1/auth/config answers {success: true, data: getPublicConfig()} (packages/plugins/plugin-auth/src/auth-plugin.ts), so the flag sits at data.features.twoFactor. Both now say so, in the words two-factor-enrollment-reveal r5 uses. source[] lines naming the code symbol features.twoFactor are unchanged. No clause changed. Folded in from the S3 report (anchor comment 6539833149, out_of_scope_findings[1]) on the seat's acceptance of #28349, as a same-file, same-fact extension: no run record named this item, so the row cites the wave anchor. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3",
+          "ref": "#27377"
         }
       ]
     },
@@ -1595,7 +1614,7 @@
       "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — and the navigable regenerate surface reveals the new set in a one-shot dialog",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
@@ -1624,7 +1643,7 @@
       ],
       "acceptance": [
         {
-          "clause": "ASSERT-ARMED GUARD + verified-enrollment precondition: features.twoFactor advertised, the two-factor family mounted, and the enrollment VERIFIED (an unverified enrollment never reaches a challenge, so every spend clause below would be unreachable, not passed)",
+          "clause": "ASSERT-ARMED GUARD + verified-enrollment precondition: /api/v1/auth/config advertises data.features.twoFactor true (the body is {success, data}), the two-factor family mounted, and the enrollment VERIFIED (an unverified enrollment never reaches a challenge, so every spend clause below would be unreachable, not passed)",
           "oracle": "api",
           "verify": "the /auth/config read + the sibling item's activation walk completing on this boot",
           "evidence": "the config read + the activation trace reference"
@@ -1698,6 +1717,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25817, identity-auth.two-factor-backup-codes A4; wave anchor #25807; card #25843). A4's at-rest check needs an out-of-band DB read, because REST never returns sys_two_factor.backup_codes (declared internal: true). fixtures.requires[2], steps[7] and acceptance[4].verify now say to read the row from the DB file, not through a system-context read. The same three places quoted the column's old 'JSON-serialized' description; sys-two-factor.object.ts now declares it encrypted at rest, a single opaque ciphertext, and the text quotes that. No clause's assertion changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "acceptance[0].clause read the assert-armed guard as features.twoFactor advertised; GET /api/v1/auth/config answers {success: true, data: getPublicConfig()} (packages/plugins/plugin-auth/src/auth-plugin.ts), so the flag sits at data.features.twoFactor. The clause now says so, in the words two-factor-enrollment-reveal r5 uses; what it requires is unchanged. source[] lines naming the code symbol features.twoFactor are unchanged. Folded in from the S3 report (anchor comment 6539833149, out_of_scope_findings[1]) on the seat's acceptance of #28349, as a same-file, same-fact extension: no run record named this item, so the row cites the wave anchor. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3",
+          "ref": "#27377"
         }
       ]
     },
@@ -1706,7 +1731,7 @@
       "title": "Disable tears the factor down completely — row gone, flag off, next sign-in unchallenged, stale backup codes dead — is password-gated server-side, and under mfa_required re-gates through the grace-clock machinery",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["a user with an ACTIVE (verified) enrollment disabling it", "the same user post-disable at a fresh sign-in", "for the mfa_required clause: the same user under an enforced-MFA boot"],
@@ -1728,15 +1753,15 @@
         "assert teardown: the system-context find on sys_two_factor for this user returns NO row; sys_user.two_factor_enabled reads false",
         "fresh password sign-in: the response is a full session with NO twoFactorRedirect and no two-factor cookie — the challenge is gone, not just the row",
         "fire POST /two-factor/verify-backup-code with a retained unspent code anyway (no challenge cookie exists to carry it) and capture the refusal — stale codes are dead, not dormant",
-        "re-enable + verify to confirm the lifecycle is repeatable (a fresh secret, fresh codes — the old secret's TOTP codes must not verify the new enrollment)",
-        "mfa_required variant (separate boot or Setup patch — the settings door is PUT /api/settings/auth with mfa_required and mfa_grace_period_days, outside /api/v1, where /api/v1/settings/auth answers 404; restore both values afterwards): with enforced MFA on, disable the active enrollment and record what ACTUALLY happens next, against the source's machinery (auth-manager.ts computeAuthGate): the disable itself is NOT refused anywhere in the source; on the next request the gate sees required-but-unenrolled and answers 403 MFA_REQUIRED only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at — a stamp written LAZILY the first time the user is seen unenrolled and, as far as the source shows, never cleared on enrollment. So the post-disable posture depends on that stamp: an old elapsed stamp gates immediately; no stamp opens a fresh grace window. Record the stamp value and the observed branch",
+        "re-enable + verify (verify-totp ROTATES the session on the enrolment lane, so carry the token its response echoes, packages/plugins/plugin-auth/src/two-factor-rotated-token-echo.ts) to confirm the lifecycle is repeatable (a fresh secret, fresh codes — the old secret's TOTP codes must not verify the new enrollment)",
+        "mfa_required variant (separate boot or Setup patch — the settings door is PUT /api/settings/auth with mfa_required and mfa_grace_period_days, outside /api/v1, where /api/v1/settings/auth answers 404; restore both values afterwards): with enforced MFA on, disable the active enrollment (the disable ROTATES the session: better-auth's /two-factor/disable mints a new session, installs it through Set-Cookie, deletes the caller's and answers {status: true}, so the pre-disable bearer answers 401 afterwards; sign in again before the post-disable authed request, QA run #27392) and record what ACTUALLY happens next, against the source's machinery (auth-manager.ts computeAuthGate): the disable itself is NOT refused anywhere in the source; on the next request the gate sees required-but-unenrolled and answers 403 MFA_REQUIRED only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at — a stamp written LAZILY the first time the user is seen unenrolled and, as far as the source shows, never cleared on enrollment. So the post-disable posture depends on that stamp: an old elapsed stamp gates immediately; no stamp opens a fresh grace window. Record the stamp value and the observed branch",
         "while gated (if the gate engaged), confirm the /two-factor/* enrollment endpoints still answer — the re-gate must leave the compliance path open (the mfa_required toggle forces the plugin on for exactly this reason, per its own comment)"
       ],
       "acceptance": [
         {
           "clause": "ASSERT-ARMED GUARD + active-enrollment precondition, same as the sibling items — a disable 'passing' against an absent surface or an inert enrollment proves nothing",
           "oracle": "api",
-          "verify": "features.twoFactor advertised; the pre-disable challenge trace shows twoFactorRedirect: true",
+          "verify": "GET /api/v1/auth/config answers {success, data} and data.features.twoFactor is true (the route wraps getPublicConfig() in data, packages/plugins/plugin-auth/src/auth-plugin.ts); the pre-disable challenge trace shows twoFactorRedirect: true",
           "evidence": "the config read + the BEFORE challenge trace"
         },
         {
@@ -1766,7 +1791,7 @@
         {
           "clause": "OBSERVE-AND-RECORD — the mfa_required re-gate follows the grace-clock machinery, not a hard block on disable: the source refuses the disable nowhere; re-gating is computeAuthGate answering 403 MFA_REQUIRED for a required-but-unenrolled user once the grace window from sys_user.mfa_required_at elapses, and that stamp is written lazily on first sight of non-enrollment and (per the source) never cleared afterward — so whether the gate bites immediately after a disable or opens a fresh grace window depends on the stamp the user already carries. The run records the stamp, the branch observed, and — the 'not stranded' half — that the /two-factor/* enrollment endpoints remain reachable while gated (mfa_required forces plugins.twoFactor on so gated users can comply). An accurate record satisfies the clause; a gated user whose enrollment endpoints 404 is the FAIL",
           "oracle": "api",
-          "verify": "under an mfa_required boot: disable 200 → read sys_user.mfa_required_at → drive an authed request and record 2xx-in-grace vs 403 MFA_REQUIRED, and the gate the session reports at user.authGate → while gated (or with the grace shrunk via mfa_grace_period_days=0), POST /two-factor/enable answers non-404. Source: auth-manager.ts computeAuthGate (lazy stamp, fail-open catch) + auth-plugin.ts (the forcing)",
+          "verify": "under an mfa_required boot: disable 200 → read sys_user.mfa_required_at → sign in again (the disable rotated the session, so the pre-disable bearer answers 401 and measures nothing) and drive an authed request and record 2xx-in-grace vs 403 MFA_REQUIRED, and the gate the session reports at user.authGate → while gated (or with the grace shrunk via mfa_grace_period_days=0), POST /two-factor/enable answers non-404. Source: auth-manager.ts computeAuthGate (lazy stamp, fail-open catch) + auth-plugin.ts (the forcing)",
           "evidence": "the recorded branch + stamp + the enrollment-endpoint reachability probe"
         }
       ],
@@ -1791,6 +1816,12 @@
           "date": "2026-10-27",
           "change": "fixtures.requires[2] names the DB-file read; steps[7] names the settings door; acceptance[5].verify names user.authGate. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): the run read the rows from the DB file, toggled mfa_required at /api/settings/auth after /api/v1/settings/auth answered 404, and found the gate at user.authGate. Re-read at base e4ba846f (service-settings auth.manifest.ts: namespace auth, keys mfa_required and mfa_grace_period_days; settings-service-plugin.ts: routes at /api/settings). No clause's assertion changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-31",
+          "change": "acceptance[0].verify, acceptance[5].verify, steps[6] and steps[7], from QA run #27392. The config read is data.features.twoFactor: the /auth/config route answers {success: true, data: getPublicConfig()} (packages/plugins/plugin-auth/src/auth-plugin.ts). The disable rotates the session: better-auth's two-factor disable handler creates a new session, sets its cookie and deletes the caller's, so #27392's post-disable request on the pre-disable bearer answered 401. steps[7] and acceptance[5] now sign in again before the post-disable authed request. On the enrolment lane verify-totp rotates the session too (two-factor-rotated-token-echo.ts), so steps[6] carries the token it echoes. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488404069",
+          "ref": "#27392"
         }
       ]
     },
@@ -1799,7 +1830,7 @@
       "title": "Zero-user first-run: the /setup owner wizard serves even under OS_DISABLE_SIGNUP, creates the owner + names the personal org through a full-document exit, and every bootstrap bypass closes the moment an owner exists",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor on a zero-user boot (the would-be owner)", "the created owner (post-bootstrap)", "a second anonymous visitor (post-bootstrap forger)"],
@@ -1818,14 +1849,14 @@
       "steps": [
         "boot zero-user with OS_DISABLE_SIGNUP=true exported and --no-seed-admin on a fresh DB (such a boot seeds no demo personas either, so a step needing a second user mints one); wait for the serving line (first-boot compile/seed work reads as downtime — trap)",
         "as anonymous, GET /api/v1/auth/bootstrap-status — public, no credentials — and capture {hasOwner:false} (the route is exempted from the plugin's auth wall alongside /config, auth-plugin.ts; ledgered GET /api/v1/auth/bootstrap-status = auth.bootstrapStatus, auth-route-ledger.ts)",
-        "open /setup in a fresh browser context: the first-run wizard renders (SetupRoute mode 'first-run'; the verdict comes from useSetupEntryMode over the same bootstrap-status probe, gated on being unauthenticated — objectui#2794)",
+        "open /_console/setup in a fresh browser context (the console is served under /_console; /setup is its router's route): the first-run wizard renders (SetupRoute mode 'first-run'; the verdict comes from useSetupEntryMode over the same bootstrap-status probe, gated on being unauthenticated — objectui#2794)",
         "fill owner name/email/password AND an organization name — run at least once with a CJK-or-emoji-only org name (slugify('') guard: the DISPLAY rename must still apply, SetupPage keeps the slug) — and submit",
         "capture the network: the wizard drives POST /api/v1/auth/sign-up/email and it SUCCEEDS despite OS_DISABLE_SIGNUP=true — the before-hook flips disableSignUp off for exactly this request when isBootstrapCreation() (auth-manager.ts; comment), and the audience gate's isBootstrap arm admits it under the default invite_only posture (audience-posture.ts)",
         "capture the exit: a FULL-DOCUMENT navigation (window.location.assign), never a SPA route change — the run saw two document loads, to /_console/ and then landing on /_console/home — the landing console renders the owner's world, not the anonymous-era empty app list (the objectui#4181 hazard, SetupPage.tsx)",
         "verify server state: GET /api/v1/auth/get-session identifies the owner; GET /api/v1/auth/organization/list shows the auto-provisioned org carrying the TYPED display name (the wizard renames the bootstrap org — it must NOT create a second one; single-org mode forbids createOrganization)",
         "bypass closed, door 1: on the same OS_DISABLE_SIGNUP=true boot, now that a human user exists, forge POST /api/v1/auth/sign-up/email from TWO addresses: an UNINVITED anonymous address is refused first by the audience gate, 403 SELF_REGISTRATION_CLOSED (invite_only), so it cannot show the toggle; have the owner invite a second address and forge that one — it passes the audience gate and the re-enforced toggle refuses it, 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. The invited address is the one that proves door 1",
         "bypass closed, door 2: on the stock contrast boot (owner exists, no OS_DISABLE_SIGNUP), the same forge refuses 403 SELF_REGISTRATION_CLOSED — the default audience posture invite_only closes it (audience-posture.ts); record WHICH door refused on each boot",
-        "wizard never re-renders: GET bootstrap-status → {hasOwner:true}; anonymous /setup redirects through the login contract (/login?redirect=%2Fsetup); the signed-in owner's /setup resolves to the platform-administration deep link (the route's SECOND meaning, objectui#2794 — not a RouteNotFound, not the wizard)"
+        "wizard never re-renders: GET bootstrap-status → {hasOwner:true}; anonymous /_console/setup redirects through the login contract (/_console/login?redirect=%2Fsetup: the redirect value is read off the router's location, so it carries no /_console prefix, ui/apps/console/src/components/ProtectedRoute.tsx LoginRedirect); the signed-in owner's /_console/setup resolves to the platform-administration deep link (the route's SECOND meaning, objectui#2794 — not a RouteNotFound, not the wizard)"
       ],
       "acceptance": [
         {
@@ -1891,6 +1922,12 @@
           "date": "2026-10-27",
           "change": "steps[0] says a --no-seed-admin boot has no demo personas; steps[5] records the exit's two document loads. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "steps[2] and steps[9] open /_console/setup, not /setup, as QA run #27441 drove it (its A5 read /_console/setup). The console is mounted under /_console with a router basename (ui/apps/console/src/App.tsx), and /setup is a route inside it. steps[9]'s login contract is spelled with its mount: the URL is /_console/login?redirect=%2Fsetup, because LoginRedirect (ProtectedRoute.tsx) reads the redirect off the router's location, which has no /_console prefix. acceptance[5]'s router-relative '/login?redirect=%2Fsetup' still reads true and is unchanged. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6490438726",
+          "ref": "#27441"
         }
       ]
     },
@@ -2209,7 +2246,7 @@
       "title": "Implicit account linking on external sign-in: no implicit link to an unverified local user; after an unlink, implicit sign-in does not re-link; an explicit, signed-in link still works and lifts the refusal; the platform identity provider's exception holds only on its OAuth path",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2224,7 +2261,7 @@
         "requires": [
           "the local OIDC provider runtime fixture that identity-auth.linked-accounts-social carries in its fixtures.requires (proved by run #21845): a localhost authorization-code + PKCE OpenID provider, registered through the auth manager's applyConfigPatch from a scratch app plugin before the first auth request. ⛔ Never committed, never a product change",
           "that provider's test identity answers with an email EQUAL to U's and email_verified: true. A provider that answers email_verified false is refused by the library's own provider-side check first, and the run then measures that gate, not this one",
-          "a way to verify U's email through the product: the captured-mail verification loop identity-auth.email-verification-loop drives (POST /api/v1/auth/send-verification-email as U, then the link from that mail's sys_email row — admin GET /api/v1/data/sys_email; the dev log transport logs no body or link). ⛔ Never by writing sys_user directly"
+          "a way to verify U's email through the product: the captured-mail verification loop identity-auth.email-verification-loop drives (POST /api/v1/auth/send-verification-email as U, then the link from that mail's sys_identity_email row — admin GET /api/v1/data/sys_identity_email: the verification mail is identity mail (auth.verify_email, sent with identityMail, packages/plugins/plugin-auth/src/auth-manager-auth-instance.ts), persisted in sys_identity_email, while sys_email holds organization mail (QA run #27438 found only the organization invitation mails there); the dev log transport logs no body or link). ⛔ Never by writing sys_user directly"
         ],
         "knownGaps": [
           "the platform identity provider's exception (acceptance[4]) is scored from the unit pin. A live run would need the fixture provider registered under the id objectstack-cloud on the OAuth method, and no run has proved that registration yet",
@@ -2325,6 +2362,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, identity-auth.implicit-account-linking-ownership a0–a3; wave anchor #25807; card #25843). The ref's 'end to end' cases drive the real better-auth handler (AuthManager.handleRequest) but over a hand-rolled in-memory data engine, with sys_account read off that fake rather than by an admin read through a booted server, so they assert each clause's facts at unit layer only. automated.ref and steps[7] now say so and that acceptance[0]–[3] are scored live; steps[7] also carries --maxWorkers=1, RUNNER.md's memory fact. No clause changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[2] read the verify-email link from sys_email. The verification mail is identity mail: auth.verify_email is sent with identityMail (plugin-auth auth-manager-auth-instance.ts) and lands in sys_identity_email (ADR-0131 D7), and QA run #27438 found only the organization invitation mails in sys_email. The recipe now reads sys_identity_email; it still verifies through the product, never by writing sys_user. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310",
+          "ref": "#27438"
         }
       ]
     },
@@ -2333,7 +2376,7 @@
       "title": "A session held by the ADR-0069 credential policy (password expired, forced reset, MFA not enrolled) is refused with the gate's own 403 code on EVERY raw-host route family, and an API key whose owner holds an account-scope posture is refused too",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2344,7 +2387,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a member whose session the policy holds — the cheapest: create the member with POST /api/v1/auth/admin/create-user, which lands mustChangePassword:true, and sign it in BEFORE it changes its password (held with PASSWORD_RESET_REQUIRED); an expiry / MFA-required policy in auth settings holds it with the other two codes. ⚠️ An organization's require_mfa reaches the gate only after the 'any org requires MFA' cache refreshes — a 60 s TTL, refreshed in the background by a request made after it goes stale (packages/plugins/plugin-auth/src/auth-manager.ts refreshOrgMfaCacheIfStale) — so the MFA hold can lag the switch by over a minute (QA run #24538 saw ~70 s): poll the held call until it answers MFA_REQUIRED before scoring, never probe once and score a 200",
+          "a member whose session the policy holds — the cheapest: create the member with POST /api/v1/auth/admin/create-user, which lands mustChangePassword:true, and sign it in BEFORE it changes its password (held with PASSWORD_RESET_REQUIRED); the other two codes each need more than a policy switch. PASSWORD_EXPIRED needs password_expiry_days > 0 AND a sys_user.password_changed_at older than that many days, so a fresh member never qualifies (sign-up stamps the clock now, and a null stamp never expires): age the stamp in the run's own scratch DB. MFA_REQUIRED holds an unenrolled member only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at, which is stamped on first sight of the required-but-unenrolled member, so switching MFA on alone holds nobody for a week: set mfa_grace_period_days to 0 through the settings door (PUT /api/settings/auth) or age that stamp too (packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts#resolveUserAuthGates; QA run #27438). ⚠️ An organization's require_mfa reaches the gate only after the 'any org requires MFA' cache refreshes — a 60 s TTL, refreshed in the background by a request made after it goes stale (packages/plugins/plugin-auth/src/auth-manager.ts refreshOrgMfaCacheIfStale) — so the MFA hold can lag the switch by over a minute (QA run #24538 saw ~70 s): poll the held call until it answers MFA_REQUIRED before scoring, never probe once and score a 200",
           "an API key minted by the member before the hold (POST /api/v1/keys)"
         ]
       },
@@ -2417,6 +2460,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.auth-gate-held-session-raw-host-families a1, a2 and a3; wave anchor #25807; card #25843). The raw-host families are proven at mixed layers (the storage, settings, share-link and cloud-connection pins call handlers with fake IHttpRequest / IHttpResponse); held-session-vendor-admin-doors arms PASSWORD_RESET_REQUIRED by a system write of must_change_password plus noteMustChangePasswordIssued(), not by driving the forced-reset door; and the two API-key posture pins drive RestServer.enforceAuth and HttpDispatcher with fakes, so neither answers an HTTP x-api-key call. acceptance[0] now says what each pin layer proves and that it does not score acceptance[1]–[3]; acceptance[1].verify and acceptance[3].verify say to drive them over HTTP; acceptance[2].verify names the forced-reset door, POST /api/v1/auth/admin/set-user-password, and its default session and key revocation (admin-user-endpoints.ts runAdminSetUserPassword). acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[1] said 'an expiry / MFA-required policy in auth settings holds it with the other two codes'. A policy switch alone holds nobody, as QA run #27438 found and resolveUserAuthGates (plugin-auth auth-manager-password-session-policy.ts) shows. PASSWORD_EXPIRED needs password_expiry_days > 0 and a password_changed_at older than it; sign-up stamps the clock and a null stamp never expires. MFA_REQUIRED waits out mfa_grace_period_days (default 7, settings manifest) from the lazily stamped mfa_required_at. The recipe now names both preconditions and the cheap levers: age the stamp in a scratch DB, or set the grace to 0. The finding line in the anchor comment is truncated after 'require_mfa alone holds nobody for a week'; the rest is read from source. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310",
+          "ref": "#27438"
         }
       ]
     },
@@ -2425,7 +2474,7 @@
       "title": "API-key lifecycle policy: a mint with no expiry gets the default (90 days) echoed back, an expiry past the ceiling is refused 400 API_KEY_EXPIRY_TOO_LONG, and an expired / inactive / revoked key is refused with its own 403 code",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2460,7 +2509,7 @@
         {
           "clause": "an expires_at beyond the ceiling (365 days by default) is refused 400 API_KEY_EXPIRY_TOO_LONG and no key is minted",
           "oracle": "api",
-          "verify": "status + error.code; GET /api/v1/keys before and after the refused mint, and the count is unchanged. Drive the count live: the dogfood case asserts only the 400 and its code, and the no-key half is pinned only over a fake objectql (packages/runtime/src/api-key-lifecycle.pin.test.ts)",
+          "verify": "status + error.code; count the caller's keys before and after the refused mint, and the count is unchanged — through GET /api/v1/data/sys_api_key (its total), never GET /api/v1/keys: /keys serves POST alone, and its GET is a refusal-only mount that answers a signed-in caller 405 (packages/runtime/src/route-ledger.ts, the GET /keys row; QA run #27438 measured 405). Drive the count live: the dogfood case asserts only the 400 and its code, and the no-key half is pinned only over a fake objectql (packages/runtime/src/api-key-lifecycle.pin.test.ts)",
           "evidence": "refusal body + the two key counts"
         },
         {
@@ -2494,6 +2543,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.api-key-expiry-lifecycle a2 and a3; wave anchor #25807; card #25843). The dogfood case asserts 400 API_KEY_EXPIRY_TOO_LONG but never that the key count is unchanged, and it drives no revoked or expired key; 'nothing is stored' and the three 403 codes are pinned only at unit layer over fakes. acceptance[0] now says which layer pins what and that it does not score those halves, and acceptance[2].verify / acceptance[3].verify say to drive them live. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-31",
+          "change": "acceptance[2].verify counted keys with GET /api/v1/keys. That route is a refusal-only mount: packages/runtime/src/route-ledger.ts lists GET /keys as server-only, answering anonymous 401 and signed-in the keys domain's 405, and QA run #27438 measured 405. The count now reads GET /api/v1/data/sys_api_key (its total) before and after the refused mint. The clause is unchanged: no key is minted. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310",
+          "ref": "#27438"
         }
       ]
     },
@@ -2574,7 +2629,7 @@
       "title": "ADR-0131 single posture: the Default Organization exists from boot BEFORE any sign-up — the first sign-up becomes its owner, later sign-ups its members, every session carries it as active org, and seeded org-columned rows carry it instead of NULL",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -2584,7 +2639,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a fresh boot of the showcase at info log level: `pnpm dev -- --fresh -p PORT --seed-admin --log-level info` (the seeded admin is printed). acceptance[1] reads the [default-org] lines, which are info-level, so a boot at `os dev`'s default warn level prints nothing for it to read",
+          "a fresh boot of the showcase at info log level: `pnpm dev -- --fresh -p PORT --seed-admin --log-level info` (the seeded admin is printed). That default `os dev` first compiles objectstack.config.ts into the app's own dist/objectstack.json (packages/cli/src/commands/dev.ts, the `compile` flag, default on), so when several runners boot from one shared checkout, boot with `pnpm -C examples/app-showcase exec objectstack dev --fresh --no-compile -p PORT --log-level info` instead: --no-compile serves the existing artifact as built (it still compiles when the artifact is missing, and warns when the artifact is older than the sources), so one compile boot beforehand keeps it current and no concurrent boot rewrites it (QA run #27481). acceptance[1] reads the [default-org] lines, which are info-level, so a boot at `os dev`'s default warn level prints nothing for it to read",
           "a DB file the runner can read: --fresh puts the SQLite file at FRESH_HOME/data/objectstack.db, where FRESH_HOME is the path the boot prints on its 'Fresh OS_HOME' line. Read it with a SQLite client while the server runs (it is deleted on exit): acceptance[1]'s created_at ordering of the slug-default sys_organization row against the first sys_user row is read there"
         ]
       },
@@ -2655,6 +2710,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25812, identity-auth.default-organization-boot-invariant; wave anchor #25807; card #25843). steps[2] filtered `organization = default`, but sys_member's column is organization_id and it holds the organization's id, so the step now filters organization_id by the slug-default row's id. fixtures.requires booted with --fresh alone, but acceptance[1] needs the info-level [default-org] lines and a DB it can read: the boot now carries --log-level info, and a second requires entry names the --fresh SQLite file. acceptance[0].verify prescribed --maxWorkers=2, against RUNNER.md's memory fact (--maxWorkers=1); it now says 1. No clause changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[0] keeps `pnpm dev -- --fresh … --log-level info` and adds the shared-checkout boot, as QA run #27481 found: a default os dev first compiles objectstack.config.ts into the app's dist/objectstack.json (packages/cli/src/commands/dev.ts, the compile flag, default on), so runners sharing one checkout boot `objectstack dev --fresh --no-compile -p PORT --log-level info`, which serves the existing artifact as built (still compiled when missing; warns when stale) — #27481's own boot line. The info log level the clause needs is kept in both spellings. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6493994883",
+          "ref": "#27481"
         }
       ]
     },
@@ -2663,7 +2724,7 @@
       "title": "Identity import sends the dedicated account-invitation mail whose link opens the console set-password page, and the SSO domain-verification doors answer 404 for an unknown provider when enabled and 400 DOMAIN_VERIFICATION_DISABLED when off",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2673,7 +2734,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "the dev mail transport (boot log mail capture) to read the sent message",
+          "a way to read the sent message: identity mail (the account invitation, the password reset) is persisted in sys_identity_email, not sys_email — read its subject, body and set-password link there as the seeded admin (GET /api/v1/data/sys_identity_email; the object requires manage_platform_settings). The dev LogTransport logs only the recipient, sender and subject, never a body or a link (packages/plugins/plugin-email/src/email-service.ts, LogTransport), so the boot log alone cannot carry the link (QA run #27438)",
           "OS_SSO_DOMAIN_VERIFICATION toggled per leg (two boots)"
         ]
       },
@@ -2731,6 +2792,12 @@
           "date": "2026-10-26",
           "change": "checklist-accuracy findings of the 18.2.0 sweep (QA run #25815, identity-auth.import-invitation-and-sso-domain-answers a1 and a3; wave anchor #25807; card #25843). admin-import-users-invite-link.test.ts asserts the auth.account_invitation template on the import but never that a self-requested reset still uses password_reset; admin-import-users-account-invitation.test.ts (cases ① and ②) asserts both and was not in automated.ref, so it joins the ref and acceptance[0] names both halves. sso-domain-verification-unknown-provider.pin.test.ts mounts the real AuthPlugin on Hono over createMemoryEngine, a hand-rolled engine fake, so acceptance[0] now says it scores the doors at unit layer only and acceptance[3].verify drives them live. acceptance[0].verify's --maxWorkers=2 now reads 1, RUNNER.md's memory fact (the same correction as identity-auth.default-organization-boot-invariant, QA run #25812). No clause's assertion changed",
           "ref": "#25843"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[1] read the mail from 'the dev mail transport (boot log mail capture)'. The dev LogTransport logs to, from and subject and never a body or link (packages/plugins/plugin-email/src/email-service.ts). The account-invitation and password-reset mails are identity mail, sent with identityMail (plugin-auth auth-manager-auth-instance.ts) and persisted in sys_identity_email, not sys_email (ADR-0131 D7; packages/platform-objects/src/audit/sys-identity-email.object.ts). QA run #27438 read them there. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6494110310",
+          "ref": "#27438"
         }
       ]
     }

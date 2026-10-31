@@ -29,6 +29,7 @@
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/observability": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"

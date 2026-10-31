@@ -263,6 +263,19 @@ export const SysAuditLog = ObjectSchema.create({
     // client fingerprint; never the attempted credential. Their shipped
     // surface is the `auth_events` list view above.
     //
+    // [#27908, maintainer ruling 6513869839 on #27681, parameter 3]
+    // `action_invocation` joins the enum WRITER-FIRST. Its writer is
+    // `action-invocation-audit.ts` (`createActionInvocationAuditWriter`, on the
+    // `audit` slot), called by both action doors in `@objectstack/runtime` —
+    // REST `POST /actions/:object/:action` and the `/mcp` bridge's
+    // `run_action` / `resume_run` — on every branch (script, api, flow,
+    // declarative update): one row per invocation that reached its branch,
+    // naming the door in `metadata.surface` (`rest` / `mcp`), so an
+    // administrator tells an agent's call from a click without a second log.
+    // Its shipped surfaces are the unfiltered `recent` and `all_events` views
+    // above, as for `platform_admin_standing_change`. No new column: the
+    // surface rides `metadata` beside `performed_by` / `on_behalf_of`.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -281,6 +294,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Config Change', value: 'config_change' },
           { label: 'Import', value: 'import' },
           { label: 'Platform Admin Standing Change', value: 'platform_admin_standing_change' },
+          { label: 'Action Invocation', value: 'action_invocation' },
         ],
         label: 'Action',
         required: true,

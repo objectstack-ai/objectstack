@@ -270,24 +270,36 @@ export interface ApprovalResumeSurface {
    */
   unresumableSuspensionCause?(runId: string): Promise<string | undefined>;
   /**
-   * [#15389] Where each suspended run is currently parked. Read by
-   * {@link ApprovalService.continueRestoredRun} to prove the pause it was asked
-   * to continue is the one THIS request's recorded outcome was issued at, and
-   * not merely some live pause on the same run — `hasSuspendedRun` answers a
-   * boolean and cannot tell the two apart. Which node that is depends on the signal, not
-   * only on the row: see {@link ApprovalService.expectedPauseNode}.
+   * [#15389] Where each suspended run is currently parked, durable-first.
    *
    * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
-   * (`listSuspendedRunsDurable`); it widens no engine surface. Durable-first,
-   * so it sees a pause parked by another replica or before a restart.
+   * (`listSuspendedRunsDurable`); it widens no engine surface. [#28271]
+   * {@link ApprovalService.continueRestoredRun} no longer reads it: on a
+   * DB-backed store it is one capped page, and it now asks
+   * {@link suspensionOf} for the one run instead.
+   */
+  listSuspendedRunsDurable?(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>>;
+  /**
+   * [#15389, #28271] Where the run `runId` is parked, or `undefined` when it
+   * is not suspended. Read by {@link ApprovalService.continueRestoredRun} to
+   * prove the pause it was asked to continue is the one THIS request's
+   * recorded outcome was issued at, and not merely some live pause on the
+   * same run — `hasSuspendedRun` answers a boolean and cannot tell the two
+   * apart. Which node that is depends on the signal, not only on the row:
+   * see {@link ApprovalService.expectedPauseNode}.
+   *
+   * ⚠️ Declares the method `AutomationEngine` implements publicly
+   * (`suspensionOf`): one keyed read of the store, so it sees a pause parked
+   * by another replica or before a restart however many runs are parked
+   * ahead of it — where {@link listSuspendedRunsDurable}, which this proof
+   * read until #28271, is one capped page of a DB-backed store. Read-only;
+   * rejects when the store cannot be read.
    *
    * Optional, and its absence is FAIL-CLOSED: a caller that cannot prove node
    * identity refuses the continuation rather than proceeding on the weaker
-   * check. The engine degrades a store outage to its in-memory list rather
-   * than throwing, and that degradation is safe HERE for the same reason — a
-   * pause it cannot see is a pause this verb will not act on.
+   * check.
    */
-  listSuspendedRunsDurable?(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>>;
+  suspensionOf?(runId: string): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined>;
   /**
    * [#28230] The run parked at a `map` node on the item run `itemRunId`, or
    * `undefined` when there is none. Read by
@@ -7381,23 +7393,27 @@ export class ApprovalService implements IApprovalService {
     // node refused the one population the journal was built to serve, with a
     // message that named a cause the code had not taken.
     //
-    // FAIL-CLOSED in every direction: no reader, no listing, no matching entry,
-    // an entry at another node, or an expected node this service cannot derive
-    // — all refuse. The engine degrades a store outage to its in-memory list
-    // instead of throwing, so a pause this cannot see is a pause this verb
-    // declines to act on. A false refusal costs the operator a retry; a false
-    // admission advances a flow nobody decided.
+    // FAIL-CLOSED in every direction: no reader, no pause, a pause at another
+    // node, or an expected node this service cannot derive — all refuse. A
+    // store that cannot be read rejects the read, as GUARD 2's does. A false
+    // refusal costs the operator a retry; a false admission advances a flow
+    // nobody decided.
+    //
+    // [#28271] The read is KEYED by the run id. It used to be the run's entry
+    // in `listSuspendedRunsDurable()`, which on a DB-backed store is one page
+    // of 1000 parked runs plus what this process parked itself: a run another
+    // process parked behind more than 1000 others was on no page, so every
+    // retry was refused the same way and the recorded outcome never took effect.
     const expected = await this.expectedPauseNode(raw, signal, requestId, runId);
-    if (typeof this.automation?.listSuspendedRunsDurable !== 'function') {
+    if (typeof this.automation?.suspensionOf !== 'function') {
       throw new Error(
         `INVALID_STATE: this automation engine cannot report WHERE run '${runId}' is parked ` +
-        `(no listSuspendedRunsDurable), so the pause cannot be proved to be the one ${signal.what} on ` +
+        `(no suspensionOf), so the pause cannot be proved to be the one ${signal.what} on ` +
         `request ${requestId} was refused on — refusing, because continuing the wrong pause advances a ` +
         `flow with no decision behind it`,
       );
     }
-    const parkedAt = (await this.automation.listSuspendedRunsDurable())
-      .find(r => String(r.runId) === String(runId))?.nodeId;
+    const parkedAt = (await this.automation.suspensionOf(runId))?.nodeId;
     if (parkedAt !== expected.nodeId) {
       throw new Error(
         `INVALID_STATE: run '${runId}' is parked at ` +

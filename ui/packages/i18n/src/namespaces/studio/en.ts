@@ -1539,6 +1539,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': 'Show system objects ({count})',
   'engine.inspector.objectPicker.hideSystem': 'Hide system objects',
   'engine.inspector.objectPicker.noMatch': 'No object matches. Press Enter to keep what you typed.',
+  // objectstack#28240 — objects outside the edited package's closure.
+  'engine.inspector.objectPicker.groupOutside': 'Outside this package\u2019s dependencies',
+  'engine.inspector.objectPicker.showOutside': 'Show objects outside this package\u2019s dependencies ({count})',
+  'engine.inspector.objectPicker.hideOutside': 'Hide objects outside this package\u2019s dependencies',
+  'engine.inspector.objectPicker.outsideReason': '{package} can use only its own objects, the objects of the packages it declares as dependencies, and system objects. To use one of these, declare a dependency on the package it comes from.',
+  'engine.inspector.objectPicker.outsideFrom': 'From {package}',
+  'engine.inspector.objectPicker.declareDependency': 'Declare a dependency',
   // Add affordances (used by OutlineStrip + custom previews)
   'engine.inspector.add.widget': 'Add widget',
   'engine.inspector.add.block': 'Add block',
@@ -4171,6 +4178,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.more': '+{count} more…',
   'engine.translationPreview.keyCountOne': '{{count} key}',
   'engine.translationPreview.keyCountOther': '{{count} keys}',
+  // Studio item toolbar: the item tools Setup's item page opens, offered in
+  // every pillar's item header (objectstack#28239).
+  'engine.studio.itemTools.group': 'Item tools',
+  'engine.studio.itemTools.sourceReadOnly': 'Read-only: this item cannot be edited here.',
+  'engine.studio.itemTools.layersFailed': 'Could not read this item\'s layers: {message}',
+  'engine.studio.itemTools.layersRetry': 'Try again',
 };
 
 export default STUDIO_EN;

@@ -26,6 +26,8 @@ describe('sys_audit_log.action option labels', () => {
     expect(options.map((o) => o.value)).toEqual([
       'create', 'read', 'update', 'delete', 'login', 'logout', 'login_failed', 'account_locked',
       'config_change', 'import', 'platform_admin_standing_change',
+      // #27908: a new value, added writer-first; no existing value moved.
+      'action_invocation',
     ]);
   });
 

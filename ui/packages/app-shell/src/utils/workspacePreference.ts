@@ -72,7 +72,7 @@ export interface WorkspacePreferenceCodec<T> {
 
 /** A declared preference — see {@link defineWorkspacePreference}. */
 export interface WorkspacePreference<T> {
-  /** The preference's name, dotted (`record.columns.timeline`). */
+  /** The preference's name, dotted (`record.columns.related`). */
   readonly name: string;
   readonly codec: WorkspacePreferenceCodec<T>;
   /**
@@ -127,7 +127,7 @@ export function versionedPreferenceCodec<T>(options: {
 }
 
 /**
- * An on | off preference — a record-page column shown or not. Stored as
+ * An on | off preference — the record page's right column shown or not. Stored as
  * `{"value":"on"|"off","v":1}`.
  */
 export type PreferenceSwitch = 'on' | 'off';
@@ -139,18 +139,12 @@ const switchCodec = versionedPreferenceCodec<PreferenceSwitch>({
 });
 
 /**
- * Whether the record page shows its timeline column, per object
- * (scope `object:OBJECT_NAME`). With no choice the host derives the default
- * from the object (`recordPageColumnDefaults` in `@object-ui/plugin-detail`).
- */
-export const RECORD_TIMELINE_COLUMN_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
-  name: 'record.columns.timeline',
-  codec: switchCodec,
-});
-
-/**
- * Whether the record page shows its related column, per object
- * (scope `object:OBJECT_NAME`). With no choice: shown.
+ * Whether the record page shows its right column — the 动态 panel and the
+ * related panels, the reader's ⊟ (objectstack#27524, Target 4) — per object
+ * (scope `object:OBJECT_NAME`). With no choice: shown. The name keeps its
+ * stored spelling, so a reader's earlier choice for the related column
+ * holds. (The timeline column's switch, `record.columns.timeline`, retired
+ * with the column.)
  */
 export const RECORD_RELATED_COLUMN_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
   name: 'record.columns.related',
