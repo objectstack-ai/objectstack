@@ -259,7 +259,8 @@ product's `list_price`.
   a stored field with an `expression`). Each target is named once per field. The
   object's parse refuses anything else.
 - **`source`** is a field the referenced object declares and the record carries
-  (not `internal`), and its value must be one the target can hold: the same type,
+  (not `internal`), and its value must be one the target can hold: the same type
+  and multiplicity (a list only into a list),
   a string-valued field into a text target, `number` and `currency` into each
   other, a relationship only into a relationship over the same object. `os
   validate` / `os build` judge the source against the referenced object.
@@ -271,9 +272,9 @@ product's `list_price`.
   write that sets the lookup fills nothing.
 - **In a line-item grid**, the column key `autofill` still governs only the grid's
   same-named copy; a declared pair applies under its own overwrite rule and takes
-  its target out of that copy. A master-detail collection whose relationship and
-  every column are authored loads no child fields, so it sees no pairs and keeps
-  only the same-named copy.
+  its target out of that copy. A master-detail collection whose `relationshipField`
+  is set and whose every column carries its `type` loads no child fields, so it
+  sees no pairs and keeps only the same-named copy.
 
 The key's full contract is in the [Field reference](/docs/references/data/field).
 
