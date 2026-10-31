@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 251 |
-| Object name statically decidable | 173 |
+| Write call sites | 256 |
+| Object name statically decidable | 178 |
 | Object name chosen at run time | 78 |
-| Against a tenancy-enabled object | 172 |
+| Against a tenancy-enabled object | 177 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 192 |
+| Threading a tenant context | 197 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 51 |
 | …and decidably tenancy-enabled | 29 |
-| Threading a decidably elevated context | 144 |
+| Threading a decidably elevated context | 146 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 99 |
+| Threading a context of undecidable elevation | 102 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-29 at `07b65dd40`.
+Measured on 2026-10-31 at `949892a3c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 801 |
-| engine-shaped types recognised | 95 |
-| declared objects in the registry | 122 |
-| same-named calls subtracted as non-engine | 185 |
+| tracked non-test sources scanned | 824 |
+| engine-shaped types recognised | 96 |
+| declared objects in the registry | 124 |
+| same-named calls subtracted as non-engine | 207 |
 
 ## Every site
 
@@ -201,6 +201,10 @@ Measured on 2026-10-29 at `07b65dd40`.
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `update` | `objectName` | undecidable | context, elevation undecidable | 1 |
+| `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-automation/src/connector-connections.ts` | `insert` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-automation/src/connector-connections.ts` | `update` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-automation/src/connector-connections.ts` | `update` | `sys_connector_connection` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/connector-credentials.ts` | `delete` | `sys_connector_credential` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-credentials.ts` | `insert` | `sys_connector_credential` | enabled | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/connector-credentials.ts` | `update` | `sys_connector_credential` | enabled | context, elevation undecidable | 1 |

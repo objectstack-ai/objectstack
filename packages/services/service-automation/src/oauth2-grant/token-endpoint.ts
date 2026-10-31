@@ -17,12 +17,17 @@
  *   - no answer, a timeout, `429` or a `5xx` → {@link ConnectorUpstreamUnavailableError}
  *     (`CONNECTOR_UPSTREAM_UNAVAILABLE`), retried on the existing backoff;
  *   - `invalid_grant` (§5.2: the code or refresh token is invalid, expired or
- *     revoked) → {@link OAuth2GrantRefusedError}: the grant is gone, and only a
- *     reconnect brings it back;
+ *     revoked) → {@link OAuth2GrantRefusedError}, which never leaves the
+ *     service: the grant handle and the connect door turn it into their own
+ *     refusal ("reconnect required", "the code was refused");
  *   - `invalid_client` / `unauthorized_client` → {@link OAuth2ClientRefusedError}:
  *     the client id or secret is wrong, which the instance's configuration fixes;
  *   - anything else, or a `2xx` without a bearer `access_token` →
  *     {@link OAuth2TokenResponseError}.
+ *
+ * The last two carry the connector seam's `503 SERVICE_UNAVAILABLE` (the
+ * shape `connectorCredentialRefusal` stamps), a standard code: no code of
+ * this module's own reaches a dispatch.
  *
  * ⛔ The authorization server's own text is never carried: a token endpoint
  * that echoes a secret or token back would carry it into a degraded reason, a
@@ -77,7 +82,6 @@ const REGISTERED_TOKEN_ERRORS = new Set([
 
 /** The authorization server refused the grant itself: revoked, expired, or a code already spent (§5.2 `invalid_grant`). */
 export class OAuth2GrantRefusedError extends Error {
-    readonly code = 'OAUTH2_GRANT_REFUSED';
     constructor(connector: string) {
         super(
             `the authorization server of connector instance '${connector}' refused its grant (invalid_grant): it was revoked, `
@@ -87,9 +91,16 @@ export class OAuth2GrantRefusedError extends Error {
     }
 }
 
-/** The authorization server refused the client (§5.2 `invalid_client` / `unauthorized_client`). */
+/**
+ * The authorization server refused the client (§5.2 `invalid_client` /
+ * `unauthorized_client`). A dispatch it ends reads as the connector seam's
+ * `503 SERVICE_UNAVAILABLE`: the instance's configuration is wrong, which the
+ * caller cannot change.
+ */
 export class OAuth2ClientRefusedError extends Error {
-    readonly code = 'OAUTH2_CLIENT_REFUSED';
+    readonly code = 'SERVICE_UNAVAILABLE';
+    readonly status = 503;
+    readonly statusCode = 503;
     constructor(connector: string, error: string) {
         super(
             `the authorization server of connector instance '${connector}' refused its client (${error}): check the instance's `
@@ -99,9 +110,11 @@ export class OAuth2ClientRefusedError extends Error {
     }
 }
 
-/** Any other refusal, or an answer that is not a usable bearer token. */
+/** Any other refusal, or an answer that is not a usable bearer token. A dispatch reads it as `503 SERVICE_UNAVAILABLE`, like the client's refusal. */
 export class OAuth2TokenResponseError extends Error {
-    readonly code = 'OAUTH2_TOKEN_RESPONSE_INVALID';
+    readonly code = 'SERVICE_UNAVAILABLE';
+    readonly status = 503;
+    readonly statusCode = 503;
     constructor(message: string) {
         super(message);
         this.name = 'OAuth2TokenResponseError';

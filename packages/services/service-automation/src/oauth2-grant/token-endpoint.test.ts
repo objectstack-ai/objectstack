@@ -100,8 +100,10 @@ describe('ADR-0143 D4 — how a token request fails', () => {
         await expect(request(answering(status, body))).rejects.toBeInstanceOf(OAuth2ClientRefusedError);
     });
 
-    it('any other refusal → OAUTH2_TOKEN_RESPONSE_INVALID naming the registered code', async () => {
+    it('any other refusal → a 503 SERVICE_UNAVAILABLE naming the registered code', async () => {
         await expect(request(answering(400, { error: 'invalid_scope' }))).rejects.toThrow(/\(invalid_scope\)/);
+        await expect(request(answering(400, { error: 'invalid_scope' }))).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+        await expect(request(answering(400, { error: 'invalid_client' }))).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
         await expect(request(answering(400, { error: 'invalid_scope' }))).rejects.toBeInstanceOf(OAuth2TokenResponseError);
     });
 
