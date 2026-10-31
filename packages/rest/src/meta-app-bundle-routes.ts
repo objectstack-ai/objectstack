@@ -64,7 +64,7 @@
  */
 
 import { normalizeIfNoneMatch, ObjectSchemaMaskEvaluationError } from '@objectstack/metadata-core';
-import type { GetMetaItemRequest } from '@objectstack/spec/api';
+import type { GetMetaItemRequest, GetMetaItemsRequest } from '@objectstack/spec/api';
 import { deriveViewContainerObject } from '@objectstack/spec/ui';
 import { measureServerTiming } from '@objectstack/observability';
 import { handleRouteError, sendFieldVisibilityFault, thrownAnswerIsBareNotFound } from './error-response.js';
@@ -260,15 +260,28 @@ export function registerMetaAppBundleRoute(this: MetaAppBundleRouteHost, scope: 
                     return answers.filter((a): a is Extract<MetaItemAnswer, { kind: 'serve' }> => a?.kind === 'serve');
                 };
 
-                const list = this.metaListSource(p, environmentId);
-                const listOf = async (type: string) => metaReadGate.metaItemsArray(await list.listMetaItems(type));
+                // The whole-type lists that NAME candidates: the object list
+                // through the read gate's own source (its execution face, which
+                // carries every field), the view and page lists through the
+                // protocol's list read with the same env-scoped request.
+                const objectList = async () => metaReadGate.metaItemsArray(
+                    await this.metaListSource(p, environmentId).listMetaItems('object'),
+                );
+                const listOf = async (type: 'view' | 'page') => metaReadGate.metaItemsArray(
+                    await p.getMetaItems?.({ type, ...(environmentId ? { environmentId } : {}) } as GetMetaItemsRequest),
+                );
 
-                const built = await measureServerTiming('meta', async () => {
+                type Served = Extract<MetaItemAnswer, { kind: 'serve' }>;
+                type Built =
+                    | { kind: 'refused'; app: Extract<MetaItemAnswer, { kind: 'refuse' }> | undefined }
+                    | { kind: 'bundle'; app: Served; objects: Served[]; views: Served[]; pages: Served[]; dashboards: Served[] };
+                const built = await measureServerTiming('meta', async (): Promise<Built> => {
                     const app = await answer('app', appId);
-                    if (!app || app.kind !== 'serve') return { refused: app };
+                    if (app?.kind === 'refuse') return { kind: 'refused', app };
+                    if (!app || app.kind !== 'serve') return { kind: 'refused', app: undefined };
 
                     const reach = appNavigationReach((app.envelope as { item?: unknown } | null)?.item);
-                    const inbound = inboundRelationObjects(await listOf('object'), reach.objects);
+                    const inbound = inboundRelationObjects(await objectList(), reach.objects);
                     const objects = await members('object', [...reach.objects, ...inbound]);
                     const served = new Set(objects.map((o) => String((o.envelope as { name?: unknown }).name)));
 
@@ -287,11 +300,11 @@ export function registerMetaAppBundleRoute(this: MetaAppBundleRouteHost, scope: 
                         members('page', pageNames),
                         members('dashboard', reach.dashboards),
                     ]);
-                    return { app, objects, views, pages, dashboards };
+                    return { kind: 'bundle', app, objects, views, pages, dashboards };
                 }, 'Metadata reads');
 
-                if (!('app' in built)) {
-                    if (built.refused) this.sendMetaReadRefusal(res, built.refused.refusal);
+                if (built.kind === 'refused') {
+                    if (built.app) this.sendMetaReadRefusal(res, built.app.refusal);
                     else sendMetaItemAbsent(res);
                     return;
                 }

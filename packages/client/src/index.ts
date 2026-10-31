@@ -254,6 +254,15 @@ export interface ClientConfig {
 export type DiscoveryResult = GetDiscoveryResponse;
 
 /**
+ * [#27627] `meta.getAppBundle`'s answer: the bundle and its validator, or
+ * `notModified` when the `ifNoneMatch` sent still names what the server would
+ * serve this caller.
+ */
+export type AppBundleCacheResponse =
+  | { notModified: false; data: AppMetadataBundleResponse; etag?: { value: string; weak: boolean } }
+  | { notModified: true; etag?: { value: string; weak: boolean } };
+
+/**
  * @deprecated Use `data.query()` with standard QueryAST parameters instead.
  * This interface uses legacy parameter names (filter/sort/top/skip) that
  * require translation to QueryAST. Prefer QueryAST fields directly:
@@ -2273,10 +2282,21 @@ export class ObjectStackClient {
      * `Cache-Control: private, no-cache`, so the platform's HTTP cache
      * revalidates it with `If-None-Match`.
      */
-    getAppBundle: async (appId: string): Promise<AppMetadataBundleResponse> => {
+    getAppBundle: async (appId: string, cacheOptions?: { ifNoneMatch?: string }): Promise<AppBundleCacheResponse> => {
+        // The conditional spelling is `getCached`'s (`MetadataCacheRequest.ifNoneMatch` in,
+        // `notModified` + `etag: { value, weak }` out), with the 304 admitted by the transport
+        // instead of thrown as a failed request.
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/app/${encodeURIComponent(appId)}/bundle`);
-        return this.unwrapResponse<AppMetadataBundleResponse>(res);
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/app/${encodeURIComponent(appId)}/bundle`,
+            cacheOptions?.ifNoneMatch ? { headers: { 'If-None-Match': cacheOptions.ifNoneMatch } } : {},
+            { admitNotModified: true },
+        );
+        const header = res.headers.get('ETag');
+        const etag = header ? { value: header.replace(/^W\/|"/g, ''), weak: header.startsWith('W/') } : undefined;
+        if (res.status === 304) return { notModified: true, ...(etag ? { etag } : {}) };
+        const data = await this.unwrapResponse<AppMetadataBundleResponse>(res);
+        return { notModified: false, data, ...(etag ? { etag } : {}) };
     },
 
     /**
@@ -7616,7 +7636,11 @@ export class ObjectStackClient {
     this.token = token;
   }
 
-  private async fetch(url: string, options: RequestInit = {}): Promise<Response> {
+  /**
+   * `transport.admitNotModified` — [#27627] a conditional read's `304` is its
+   * answer, not a failure: returned to the caller instead of thrown.
+   */
+  private async fetch(url: string, options: RequestInit = {}, transport: { admitNotModified?: boolean } = {}): Promise<Response> {
     this.logger.debug('HTTP request', { 
       method: options.method || 'GET',
       url,
@@ -7652,7 +7676,7 @@ export class ObjectStackClient {
       ok: res.ok
     });
     
-    if (!res.ok) {
+    if (!res.ok && !(transport.admitNotModified && res.status === 304)) {
         let errorBody: any;
         try {
             errorBody = await res.json();
