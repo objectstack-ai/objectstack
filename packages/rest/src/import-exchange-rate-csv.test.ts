@@ -67,7 +67,11 @@ async function boot() {
   (rest as any).resolveExecCtx = async () => ({ userId: 'finance-admin', organizationId: DEFAULT_ORGANIZATION_ID });
   rest.registerRoutes();
   const routes = rest.getRoutes();
-  const find = (method: string, path: string) => routes.find((r: any) => r.method === method && r.path === path);
+  const find = (method: string, path: string) => {
+    const route = routes.find((r: any) => r.method === method && r.path === path);
+    if (!route) throw new Error(`route not registered: ${method} ${path}`);
+    return route;
+  };
   return {
     engine,
     create: find('POST', '/api/v1/data/:object/import/jobs'),
@@ -106,7 +110,6 @@ describe('sys_exchange_rate — CSV through the generic async import door (multi
   let ctx: Booted;
   beforeEach(async () => {
     ctx = await boot();
-    expect(ctx.create && ctx.progress && ctx.results).toBeTruthy();
   });
 
   it('lands one rate per CSV line, twelve decimals intact, source at its default', async () => {
