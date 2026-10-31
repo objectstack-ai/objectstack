@@ -9,7 +9,7 @@
 // Boot fails loudly for unknown provider / name conflict / factory failure; a
 // credentialRef nothing resolves degrades the instance naming it (#27237).
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -30,6 +30,7 @@ import {
 } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
 import { computeAliyunAcs3Signature } from './request-signing/aliyun-acs3-hmac-sha256.js';
+import { computeAlipayV3Signature, readAlipayPrivateKey } from './request-signing/alipay-v3.js';
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -1179,6 +1180,63 @@ describe('ADR-0143 D2.3 — a `signed` instance is handed a request signer, neve
         expect(engine.getConnectorDescriptors().find((d) => d.name === 'aliyun_ecs')?.state).toBe('degraded');
         expect(engine.getConnectorDegradedReason('aliyun_ecs')).toContain('ALIYUN_SECRET');
         await kernel.shutdown();
+    });
+
+    // `alipay-v3` names the Alipay public key beside the private key; it
+    // resolves through the same chain, and a response is never accepted
+    // unverified for want of it.
+    describe('alipay-v3: the vendor public key is a second reference', () => {
+        const vectors = new URL('../test-vectors/alipay-v3/', import.meta.url);
+        const PRIVATE_KEY = readFileSync(new URL('PLACEHOLDER-test-only-rsa2048-private-key.pkcs8.b64', vectors), 'ascii').trim();
+        const PUBLIC_KEY = readFileSync(new URL('PLACEHOLDER-test-only-rsa2048-public-key.spki.b64', vectors), 'ascii').trim();
+        const alipay: ConnectorInstanceAuth = {
+            type: 'signed',
+            scheme: 'alipay-v3',
+            keyId: '2021000000000000',
+            credentialRef: 'ALIPAY_APP_PRIVATE_KEY',
+            vendorPublicKeyRef: 'ALIPAY_PUBLIC_KEY',
+        };
+        const both = (ref: string) => ({ ALIPAY_APP_PRIVATE_KEY: PRIVATE_KEY, ALIPAY_PUBLIC_KEY: PUBLIC_KEY } as Record<string, string>)[ref];
+
+        it('binds a signer that signs with the private key and verifies with the public key; neither key is in the context', async () => {
+            const { factory, calls } = makeSigningProvider(true);
+            const kernel = await boot([providerConnector('alipay_pay', { auth: alipay })], { providerFactory: factory, credentialResolver: both });
+            const ctx = calls[0]!;
+            expect([ctx.requestSigner?.scheme, typeof ctx.requestSigner?.verifyResponse]).toEqual(['alipay-v3', 'function']);
+            expect(JSON.stringify(ctx)).not.toContain(PRIVATE_KEY.slice(40, 120));
+
+            const request = { method: 'POST', url: 'https://openapi.alipay.com/v3/alipay/trade/query', headers: {}, body: '{}' };
+            const { authorization } = (await ctx.requestSigner!.sign(request)).headers;
+            const [, nonce, timestamp] = /nonce=([^,]+),timestamp=(\d+),/.exec(authorization!)!;
+            expect(authorization).toBe(
+                computeAlipayV3Signature(request, '2021000000000000', readAlipayPrivateKey(PRIVATE_KEY), nonce!, Number(timestamp)).headers.authorization,
+            );
+            // An unsigned 2xx is refused: the public key is in force.
+            await expect(ctx.requestSigner!.verifyResponse!({ status: 200, headers: { get: () => null }, body: '{}' })).rejects.toThrow(/no complete Alipay signature/);
+            await kernel.shutdown();
+        });
+
+        it('degrades the instance naming the public-key reference when only it does not resolve, without calling its factory', async () => {
+            const { factory, calls } = makeSigningProvider(true);
+            const kernel = await boot([providerConnector('alipay_pay', { auth: alipay })], {
+                providerFactory: factory,
+                credentialResolver: (ref) => (ref === 'ALIPAY_APP_PRIVATE_KEY' ? PRIVATE_KEY : undefined),
+            });
+            expect(calls).toHaveLength(0);
+            const engine = automationOf(kernel);
+            expect(engine.getConnectorDegradedReason('alipay_pay')).toContain('ALIPAY_PUBLIC_KEY');
+            await kernel.shutdown();
+        });
+
+        it('fails boot when the public key is not a key: a configuration fault, its value not echoed', async () => {
+            const { factory } = makeSigningProvider(true);
+            const boot26710 = boot([providerConnector('alipay_pay', { auth: alipay })], {
+                providerFactory: factory,
+                credentialResolver: (ref) => (ref === 'ALIPAY_PUBLIC_KEY' ? 'not-a-public-key-26710' : both(ref)),
+            });
+            await expect(boot26710).rejects.toThrow(/a key it names cannot sign or verify/);
+            await expect(boot26710).rejects.not.toThrow(/not-a-public-key-26710/);
+        });
     });
 
     it('CONTROL: a static kind is handed its credential and no signer', async () => {

@@ -139,7 +139,7 @@ describe('createConnectorRequestSigner — the signer registry', () => {
     const auth = { type: 'signed', scheme: 'aliyun-acs3-hmac-sha256', keyId: VENDOR_KEY_ID, credentialRef: 'ALIYUN_SECRET' } as const;
 
     it('binds the scheme the instance names to its key', async () => {
-        const signer = createConnectorRequestSigner('aliyun_ecs', auth, VENDOR_SECRET, {
+        const signer = createConnectorRequestSigner('aliyun_ecs', auth, { key: VENDOR_SECRET }, {
             now: () => new Date('2023-10-26T10:22:32Z'),
             nonce: () => VENDOR_NONCE,
         });
@@ -148,11 +148,11 @@ describe('createConnectorRequestSigner — the signer registry', () => {
     });
 
     it('refuses an empty key before any request, without echoing a key', () => {
-        expect(() => createConnectorRequestSigner('aliyun_ecs', auth, '')).toThrow(/signing key its credentialRef names is empty/);
+        expect(() => createConnectorRequestSigner('aliyun_ecs', auth, { key: '' })).toThrow(/signing key its credentialRef names is empty/);
     });
 
     it('never carries the key in what it hands back', async () => {
-        const signer = createConnectorRequestSigner('aliyun_ecs', auth, VENDOR_SECRET);
+        const signer = createConnectorRequestSigner('aliyun_ecs', auth, { key: VENDOR_SECRET });
         const signature = await signer.sign(vendorRequest);
         expect(JSON.stringify({ signer, signature })).not.toContain(VENDOR_SECRET);
     });
