@@ -225,6 +225,9 @@ export const ENRICHED_FIELD_METADATA_KEYS = [
   // The author's digit-grouping hint, which overrides `scale`'s scale-0
   // heuristic in the number cell (objectui#11026).
   'useGrouping',
+  // A percent field's read-only face (`bar` or `plain`), which the percent
+  // cell reads to drop its progress bar (objectstack#28255).
+  'percentDisplay',
   // Numeric range/step constraints (objectui#2572 item 3).
   'min',
   'max',
