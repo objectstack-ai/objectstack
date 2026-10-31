@@ -276,6 +276,8 @@ export function createOpenApiProviderFactory(deps: OpenApiProviderDeps = {}): Co
       document,
       baseUrl: typeof cfg.baseUrl === 'string' ? cfg.baseUrl : undefined,
       auth,
+      // ADR-0143 D2.3 — a `signed` instance's signer, applied to every attempt.
+      requestSigner: ctx.requestSigner,
       include,
       // ADR-0049 · #18975 — the authored resilience policy, already resolved by
       // the materializer, reaches the transport this bundle closes over.
@@ -303,6 +305,8 @@ export function createOpenApiProviderFactory(deps: OpenApiProviderDeps = {}): Co
         );
       }
     }
-    return bundle;
+    // Says so, so the host serves the `signed` instance (it refuses one whose
+    // provider does not apply the signer).
+    return ctx.requestSigner ? { ...bundle, requestSignerApplied: true } : bundle;
   };
 }

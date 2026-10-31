@@ -81,7 +81,7 @@ export interface ConnectorCredentialSourceDeps {
 type Lendable = LendableConnectorItem & {
     name: string;
     provider: string;
-    auth: Exclude<ConnectorInstanceAuth, { type: 'none' | 'oauth2' | 'app-credential' }>;
+    auth: Exclude<ConnectorInstanceAuth, { type: 'none' | 'oauth2' | 'app-credential' | 'signed' }>;
 };
 
 function findDeclared(items: readonly unknown[] | undefined, name: string): LendableConnectorItem | undefined {
@@ -123,6 +123,14 @@ function lendRefusal(connector: string, item: LendableConnectorItem | undefined)
             + 'refreshed per dispatch (ADR-0143 D4). This server does not run that resolution yet, so the instance '
             + 'cannot lend its credential to a datasource. Declare a static kind (bearer, api-key or basic) on it, or '
             + 'remove external.connector from the datasource.';
+    }
+    // ADR-0143 D2.3 — a `signed` instance has no credential to lend: its key
+    // signs each request by the vendor's canonical form, which a datasource
+    // driver does not run, and the key itself never leaves the host.
+    if (auth.type === 'signed') {
+        return `${subject} declares \`auth: { type: 'signed' }\`, which signs each of its own requests with a key that `
+            + 'never leaves the server, so it has no credential a datasource can borrow. Point external.connector at an '
+            + 'instance with a static kind (bearer, api-key or basic), or remove it from the datasource.';
     }
     if (item.enabled === false) {
         return `${subject} is disabled (enabled: false), which turns the vendor off for this datasource's records as for `

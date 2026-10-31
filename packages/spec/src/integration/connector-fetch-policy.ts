@@ -2,6 +2,7 @@
 
 import type { ResilientFetchOptions } from '../shared/resilient-fetch';
 import { RetryConfigSchema, type RetryConfig } from './connector.zod';
+import type { ConnectorRequestSigner } from './connector-provider';
 
 /**
  * Re-exported so the type this module's return value has is nameable from the
@@ -73,6 +74,20 @@ export type { ResilientFetchOptions } from '../shared/resilient-fetch';
  * "restore" it by aliasing a connect deadline onto `timeoutMs`: two keys that
  * silently mean one thing is the declared-not-enforced shape this mapping
  * exists to remove, and it is the shape the retirement just closed.
+ *
+ * ## A `signed` instance is signed per ATTEMPT, here (ADR-0143 D2.3)
+ *
+ * `resilientFetch` re-sends a request on a retryable status or a network
+ * error. A request signature carries a timestamp and a nonce, and an upstream
+ * refuses one it has seen (Alibaba Cloud's `x-acs-signature-nonce` is
+ * single-use), so a signature computed once and replayed on the retry would
+ * turn every transient blip into an authentication failure. Handing a
+ * {@link ConnectorRequestSigner} to {@link connectorFetchOptions} wraps the
+ * fetch the wrapper calls, so EVERY attempt is signed fresh — and this stays
+ * the one site that does it for both built-in HTTP connectors, rather than one
+ * copy per connector package. {@link readConnectorResponse} is the matching
+ * one site for the response half: a scheme's `verifyResponse` runs over the
+ * raw body before anything is parsed or returned.
  */
 
 /** The slice of a {@link Connector} this mapping reads. */
@@ -97,8 +112,10 @@ export interface ConnectorFetchPolicy {
 export function connectorFetchOptions(
   policy: ConnectorFetchPolicy,
   base: Pick<ResilientFetchOptions, 'fetchImpl' | 'sleep'> = {},
+  signer?: ConnectorRequestSigner,
 ): ResilientFetchOptions {
   const opts: ResilientFetchOptions = { ...base };
+  if (signer) opts.fetchImpl = signingFetch(signer, base.fetchImpl);
   if (policy.requestTimeoutMs !== undefined) opts.timeoutMs = policy.requestTimeoutMs;
   if (policy.retryConfig === undefined) return opts;
 
@@ -117,4 +134,76 @@ export function connectorFetchOptions(
   opts.retryOnNetworkError = retry.retryOnNetworkError;
   opts.retryableStatus = (status: number): boolean => codes.includes(status);
   return opts;
+}
+
+/**
+ * A fetch that signs each call with `signer` before sending it through
+ * `fetchImpl` (the global `fetch` when absent). `resilientFetch` calls it once
+ * per attempt, which is what makes a retry carry a fresh signature.
+ *
+ * Only the URL-plus-init form is signed: a `Request` object carries its own
+ * method, headers and body where this wrapper cannot see them, and a body that
+ * is not text cannot be canonicalised — both are refused rather than sent with
+ * a signature over something else.
+ */
+function signingFetch(signer: ConnectorRequestSigner, fetchImpl: typeof fetch | undefined): typeof fetch {
+  return async (input, init = {}) => {
+    const doFetch = fetchImpl ?? (globalThis.fetch as typeof fetch | undefined);
+    if (!doFetch) {
+      throw new Error('connectorFetchOptions: no fetch implementation (pass fetchImpl or run on a fetch-capable runtime)');
+    }
+    if (typeof input !== 'string' && !(input instanceof URL)) {
+      throw new Error(`connector '${signer.connector}': a signed request is sent as a URL and its init, not as a Request object`);
+    }
+    const body = init.body ?? undefined;
+    if (body !== undefined && typeof body !== 'string') {
+      throw new Error(`connector '${signer.connector}': a signed request's body must be text, so the signature can cover it`);
+    }
+    const url = typeof input === 'string' ? input : input.href;
+    const headers: Record<string, string> = {};
+    new Headers(init.headers).forEach((value, name) => { headers[name] = value; });
+    const signature = await signer.sign({
+      method: (init.method ?? 'GET').toUpperCase(),
+      url,
+      headers: { ...headers },
+      ...(body === undefined ? {} : { body }),
+    });
+    // `Headers` hands names back lower-cased, so lower-casing the signer's
+    // makes a signer header REPLACE a same-named request header, never sit
+    // beside it.
+    for (const [name, value] of Object.entries(signature.headers)) headers[name.toLowerCase()] = value;
+    return doFetch(signature.url ?? url, { ...init, headers });
+  };
+}
+
+/** What a built-in HTTP connector's action answers: the upstream's status, and its body parsed when JSON. */
+export interface ConnectorHttpResult extends Record<string, unknown> {
+  status: number;
+  ok: boolean;
+  body: unknown;
+}
+
+/**
+ * Read a connector response into {@link ConnectorHttpResult} — the body parsed
+ * when the upstream advertises JSON, its text otherwise, so a non-JSON
+ * endpoint does not throw.
+ *
+ * With a `signer` whose scheme verifies responses, the raw body is read first
+ * and handed to `verifyResponse` before anything is parsed: a response that
+ * fails verification throws here, and its body never reaches the flow.
+ * Without one, this is exactly the read both built-in HTTP connectors always
+ * made.
+ */
+export async function readConnectorResponse(
+  response: Response,
+  signer?: ConnectorRequestSigner,
+): Promise<ConnectorHttpResult> {
+  const json = (response.headers.get('content-type') ?? '').includes('application/json');
+  if (!signer?.verifyResponse) {
+    const body: unknown = json ? await response.json() : await response.text();
+    return { status: response.status, ok: response.ok, body };
+  }
+  const raw = await response.text();
+  await signer.verifyResponse({ status: response.status, headers: response.headers, body: raw });
+  return { status: response.status, ok: response.ok, body: json ? JSON.parse(raw) as unknown : raw };
 }

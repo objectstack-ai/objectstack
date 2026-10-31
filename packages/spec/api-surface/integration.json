@@ -19,6 +19,7 @@
     "ConnectorCredentialRequest (interface)",
     "ConnectorDescriptor (interface)",
     "ConnectorFetchPolicy (interface)",
+    "ConnectorHttpResult (interface)",
     "ConnectorInstanceAPIKeyAuth (type)",
     "ConnectorInstanceAPIKeyAuthSchema (const)",
     "ConnectorInstanceAppCredentialAuth (type)",
@@ -37,6 +38,10 @@
     "ConnectorInstanceOAuth2AuthorizationCodeAuthSchema (const)",
     "ConnectorInstanceOAuth2ClientCredentialsAuth (type)",
     "ConnectorInstanceOAuth2ClientCredentialsAuthSchema (const)",
+    "ConnectorInstanceSignedAliyunAcs3Auth (type)",
+    "ConnectorInstanceSignedAliyunAcs3AuthSchema (const)",
+    "ConnectorInstanceSignedAuth (type)",
+    "ConnectorInstanceSignedAuthSchema (const)",
     "ConnectorMaterialization (interface)",
     "ConnectorMaterializationHandler (type)",
     "ConnectorOAuth2Grant (type)",
@@ -45,9 +50,15 @@
     "ConnectorParsed (type)",
     "ConnectorProviderContext (interface)",
     "ConnectorProviderFactory (type)",
+    "ConnectorRequestSignature (interface)",
+    "ConnectorRequestSigner (interface)",
     "ConnectorRetryStrategy (type)",
     "ConnectorRetryStrategySchema (const)",
     "ConnectorSchema (const)",
+    "ConnectorSignableRequest (interface)",
+    "ConnectorSignedResponse (interface)",
+    "ConnectorSigningScheme (type)",
+    "ConnectorSigningSchemeSchema (const)",
     "ConnectorState (type)",
     "ConnectorType (type)",
     "ConnectorTypeSchema (const)",
@@ -63,6 +74,7 @@
     "connectorFetchOptions (function)",
     "defineConnector (function)",
     "isConnectorCredentialRejected (function)",
-    "isConnectorUpstreamUnavailable (function)"
+    "isConnectorUpstreamUnavailable (function)",
+    "readConnectorResponse (function)"
   ]
 }

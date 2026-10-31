@@ -211,3 +211,63 @@ describe('ConnectorRestPlugin — a credential the upstream refuses (#27237)', (
         await kernel.shutdown();
     });
 });
+
+// ADR-0143 D2.3 end to end, on the REAL host and the REAL rest provider: a
+// declarative `signed` instance is materialized with the host's signer, every
+// call carries an ACS3-HMAC-SHA256 signature, and the signing key appears in
+// nothing the instance sends or publishes. (The signature's bytes are pinned
+// against the vendor's worked example in service-automation's signer test.)
+describe('ConnectorRestPlugin — a declarative `signed` instance (ADR-0143 D2.3)', () => {
+    it('signs every call with the key its credentialRef names, and never sends or lists the key', async () => {
+        const KEY = 'dummy-aliyun-access-key-secret-26710';
+        const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+        const impl = (async (url: string, init: RequestInit) => {
+            calls.push({ url, headers: init.headers as Record<string, string> });
+            return new Response('{"RequestId":"r-1"}', { status: 200, headers: { 'content-type': 'application/json' } });
+        }) as unknown as typeof fetch;
+        const declared = [{
+            name: 'aliyun_ecs',
+            label: 'Aliyun ECS',
+            type: 'api',
+            provider: 'rest',
+            providerConfig: { baseUrl: 'https://ecs.cn-shanghai.aliyuncs.com', defaultHeaders: { 'x-acs-version': '2014-05-26' } },
+            auth: { type: 'signed', scheme: 'aliyun-acs3-hmac-sha256', keyId: 'YourAccessKeyId', credentialRef: 'ALIYUN_SECRET_26710' },
+        }];
+        const kernel = new LiteKernel();
+        kernel.use(new AutomationServicePlugin({ credentialResolver: (r) => (r === 'ALIYUN_SECRET_26710' ? KEY : undefined) }));
+        kernel.use(new ConnectorRestPlugin({ fetchImpl: impl }));
+        kernel.use({
+            name: 'test.metadata',
+            type: 'standard',
+            version: '1.0.0',
+            dependencies: [],
+            async init(ctx: any) {
+                ctx.registerService('objectql', { registry: { listItems: (t: string) => (t === 'connector' ? declared : []) } });
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        const engine = kernel.getService<AutomationEngine>('automation');
+        expect(engine.getConnectorDegradedReason('aliyun_ecs')).toBeUndefined();
+
+        const request = engine.resolveConnectorAction('aliyun_ecs', 'request')!;
+        const answered = await request({ method: 'POST', path: '/', query: { RegionId: 'cn-shanghai' }, headers: { 'x-acs-action': 'DescribeRegions' } }, {} as never);
+        await request({ method: 'POST', path: '/', query: { RegionId: 'cn-shanghai' }, headers: { 'x-acs-action': 'DescribeRegions' } }, {} as never);
+        expect(answered).toEqual({ status: 200, ok: true, body: { RequestId: 'r-1' } });
+
+        expect(calls).toHaveLength(2);
+        expect(calls[0]!.url).toBe('https://ecs.cn-shanghai.aliyuncs.com/?RegionId=cn-shanghai');
+        expect(calls[0]!.headers.authorization).toMatch(
+            /^ACS3-HMAC-SHA256 Credential=YourAccessKeyId,SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version,Signature=[0-9a-f]{64}$/,
+        );
+        expect(calls[0]!.headers['x-acs-action']).toBe('DescribeRegions');
+        // Two calls, two nonces, two signatures: nothing is replayed.
+        expect(calls[0]!.headers['x-acs-signature-nonce']).not.toBe(calls[1]!.headers['x-acs-signature-nonce']);
+        expect(calls[0]!.headers.authorization).not.toBe(calls[1]!.headers.authorization);
+
+        expect(JSON.stringify(calls)).not.toContain(KEY);
+        expect(JSON.stringify(engine.getConnectorDescriptors())).not.toContain(KEY);
+
+        await kernel.shutdown();
+    });
+});

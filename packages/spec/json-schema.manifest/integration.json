@@ -15,8 +15,11 @@
     "integration/ConnectorInstanceOAuth2Auth",
     "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth",
     "integration/ConnectorInstanceOAuth2ClientCredentialsAuth",
+    "integration/ConnectorInstanceSignedAliyunAcs3Auth",
+    "integration/ConnectorInstanceSignedAuth",
     "integration/ConnectorOAuth2Grant",
     "integration/ConnectorRetryStrategy",
+    "integration/ConnectorSigningScheme",
     "integration/ConnectorType",
     "integration/DeclarativeConnectorEntry",
     "integration/RetryConfig"

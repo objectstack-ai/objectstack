@@ -339,3 +339,27 @@ describe('[ADR-0143 D4] createConnectorCredentialSource — a grant-bearing kind
         expect((refusal as Error).message).not.toContain('grant-bearing');
     });
 });
+
+describe('[ADR-0143 D2.3] createConnectorCredentialSource — a `signed` instance is refused, not lent', () => {
+    // A signed instance's key signs each of its own requests and never leaves
+    // the host, so there is no credential to hand a datasource — and the
+    // borrow refuses without reading the chain.
+    it('refuses to lend a `signed` instance (422, naming the kind and the instance)', async () => {
+        const reads = { n: 0 };
+        const lender = createConnectorCredentialSource({
+            readDeclared: async () => [sap({
+                auth: { type: 'signed', scheme: 'aliyun-acs3-hmac-sha256', keyId: 'YourAccessKeyId', credentialRef: REF },
+            })],
+            chain: async () => { reads.n += 1; return { env: () => DUMMY_VALUE }; },
+            vaultWired: () => false,
+            generation: () => 0,
+        });
+        const refusal = await lender.borrow('sap_s4').catch((e: Error) => e);
+        expect(refusal).toMatchObject({ code: 'VALIDATION_ERROR', status: 422 });
+        expect((refusal as Error).message).toContain("connector instance 'sap_s4'");
+        expect((refusal as Error).message).toContain("auth: { type: 'signed' }");
+        expect((refusal as Error).message).toContain('never leaves the server');
+        expect((refusal as Error).message).not.toContain(DUMMY_VALUE);
+        expect(reads.n).toBe(0);
+    });
+});
