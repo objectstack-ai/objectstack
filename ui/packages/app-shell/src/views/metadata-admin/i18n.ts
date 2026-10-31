@@ -893,6 +893,71 @@ export function translateValidationMessage(
 }
 
 /**
+ * The structural slice of a Zod issue that a rendered message may be chosen
+ * by: its `code` and the parameters Zod reports beside it. Carried next to the
+ * spec's own `message` from `validateMetadataDraft`, so a translation is picked
+ * by WHAT the issue is, never by reading its English.
+ */
+export interface SchemaIssueDetail {
+  /** Zod 4 issue discriminator (`too_small`, `invalid_format`, …). */
+  code: string;
+  /** `too_small`: what was measured (`string`, `array`, `number`, …). */
+  origin?: string;
+  /** `too_small`: the bound, and whether the bound itself is allowed. */
+  minimum?: number;
+  inclusive?: boolean;
+  /** `invalid_format`: the format family (`regex`, `email`, …). */
+  format?: string;
+  /** `invalid_format` with `format: 'regex'`: the pattern, as Zod reports it. */
+  pattern?: string;
+}
+
+/**
+ * The spec's identifier grammars, keyed by the pattern source its schemas
+ * declare (`@objectstack/spec`, `shared/identifiers.zod.ts`), each to the zh row
+ * that says what the grammar asks for. A pattern not listed keeps the spec's
+ * own message. `ResourceEditPage.identifierIssueI18n-28369.test.tsx` parses the
+ * live schemas and reds when a pattern here stops matching what they report.
+ */
+const SPEC_PATTERN_ROWS: Readonly<Record<string, string>> = Object.freeze({
+  '^[a-z][a-z0-9_]*$': 'engine.validation.spec.snakeCaseIdentifier',
+  '^[a-z][a-z0-9_.]*$': 'engine.validation.spec.systemIdentifier',
+});
+
+/** `/source/flags` or a bare `source` → `source`. */
+function patternSource(pattern: string): string {
+  const m = pattern.match(/^\/(.*)\/[a-z]*$/s);
+  return m ? m[1] : pattern;
+}
+
+/**
+ * The text to render for one schema issue in the reader's locale.
+ *
+ * The spec's message is the contract's voice, and English is its language.
+ * The `engine.validation.spec.*` family has zh rows only, read through
+ * {@link tOptional}: an en console finds nothing and shows the spec's own
+ * sentence, never a copy of it kept in this repo. An issue with no `detail`
+ * (a server diagnostic, a CEL lint finding) takes
+ * {@link translateValidationMessage} unchanged.
+ */
+export function translateSchemaIssue(
+  issue: { message: string; detail?: SchemaIssueDetail },
+  locale?: SupportedLocale | string,
+): string {
+  const d = issue.detail;
+  if (d?.code === 'too_small' && d.origin === 'string' && typeof d.minimum === 'number' && d.inclusive !== false) {
+    const row = tOptional('engine.validation.spec.stringTooShort', locale);
+    if (row) return row.replace('{minimum}', String(d.minimum));
+  }
+  if (d?.code === 'invalid_format' && d.format === 'regex' && typeof d.pattern === 'string') {
+    const key = SPEC_PATTERN_ROWS[patternSource(d.pattern)];
+    const row = key ? tOptional(key, locale) : undefined;
+    if (row) return row;
+  }
+  return translateValidationMessage(issue.message, locale);
+}
+
+/**
  * Returns the locale string most browsers report (matches navigator.language).
  *
  * ⚠️ Non-reactive and browser-only — it ignores the app language picked in
