@@ -59,15 +59,15 @@ function useFieldOptions(objectName: string | undefined): Array<{ value: string;
   );
 }
 
+/** The elements `FilterBuilderField` reads and writes. */
+type FilterElements = NonNullable<React.ComponentProps<typeof FilterBuilderField>['value']>;
+
 /**
  * A block prop that is a spec view filter list (`record:related_list.filter`:
  * flat rules, any of which may be an any-of group `{ or: [rule, ...] }`), edited with the list toolbar's own filter builder — the one the
  * `filter-builder` form widget renders for a view's and a page's filters — over
  * the fields of `objectName`. Clearing the last rule removes the key.
  */
-/** The elements `FilterBuilderField` reads and writes. */
-type FilterElements = NonNullable<React.ComponentProps<typeof FilterBuilderField>['value']>;
-
 function FilterRulesField({ label, objectName, value, onChange, disabled }: {
   label: string; objectName: string | undefined; value: unknown;
   onChange: (v: FilterElements | undefined) => void;

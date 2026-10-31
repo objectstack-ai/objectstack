@@ -10,7 +10,7 @@ feat(console): a stored view filter's OR group filters the list, and the filter 
 
 Clause-②: yes (widening: `@object-ui/core` adds the export `builderRulesOfSpecFilter` and its result type `BuilderFilterRules`; no schema, accept set or error code changes)
 Metadata-protocol: none
-Skills-docs: follow-up owed — skills/objectstack-ui/rules/list-views.md, skills/objectstack-ui/evals/views-apps-actions-pages.json (the any-of group is not taught there yet); `content/docs/ui/views.mdx` gains a Base filter section that states it
+Skills-docs: follow-up #28476 — skills/objectstack-ui/rules/list-views.md, skills/objectstack-ui/evals/views-apps-actions-pages.json (the any-of group is not taught there yet); `content/docs/ui/views.mdx` gains a Base filter section that states it
 
 A view filter list may hold an any-of group beside its rules, `{ or: [rule, ...] }` (`ViewFilterOrGroupSchema` in `@objectstack/spec/ui`): the list ANDs its elements and the group ORs its rules. Until now no console reader applied it. The list query passed the group through, the server refused the query as a malformed filter (400 `INVALID_FILTER`), and the view showed no rows.
 
