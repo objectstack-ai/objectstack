@@ -2352,6 +2352,13 @@ function notifyWithheldMentions(
  * present only when at least one entry parsed: an answer without the key —
  * including one from a runtime that predates it — leaves the event exactly as
  * it was.
+ *
+ * `notice` is the same answer's `notice` (objectstack-ai/objectstack#28000):
+ * the one message a hook on the write set for the person who made it, info
+ * severity, the server's text as written. It rides this event like `warnings`
+ * does, so the record save surface that claims its write's answer feedback
+ * shows it on that write's one toast (objectstack-ai/objectstack#28252). It
+ * is present only when the answer carried a non-empty string.
  */
 export interface WriteWarningEvent {
   operation: 'create' | 'update';
@@ -2359,6 +2366,7 @@ export interface WriteWarningEvent {
   id?: string | number;
   droppedFields: DroppedFieldsNotice[];
   warnings?: ValidateDataIssue[];
+  notice?: string;
 }
 
 /** Event listener type for write-warning (dropped-fields) events. */
@@ -2825,6 +2833,17 @@ function readWriteWarnings(result: unknown): ValidateDataIssue[] {
     if (parsed.success) out.push(parsed.data);
   }
   return out;
+}
+
+/**
+ * Read a single-record write answer's `notice` — the message a hook set for
+ * the requester (objectstack-ai/objectstack#28000). The spec declares it a
+ * non-empty string; anything else, the key's absence included, answers
+ * `undefined`, so an answer from a runtime that predates it adds nothing.
+ */
+function readWriteNotice(result: unknown): string | undefined {
+  const raw = (result as { notice?: unknown } | null | undefined)?.notice;
+  return typeof raw === 'string' && raw !== '' ? raw : undefined;
 }
 
 /**
@@ -4120,9 +4139,11 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * `object` healed from `resource` — never asserted into the union, and the
    * entry itself never dropped for them (objectui#4934, `f75810e7c`).
    *
-   * The same answer's `warnings` (objectui#12107) rides this one event: it is
-   * emitted when either list is non-empty, so a write whose only news is an
-   * advisory rule hit still reaches the subscriber, with `droppedFields: []`.
+   * The same answer's `warnings` (objectui#12107) and `notice`
+   * (objectstack-ai/objectstack#28000) ride this one event: it is emitted when
+   * any of the three is present, so a write whose only news is an advisory rule
+   * hit or a hook's notice still reaches the subscriber, with
+   * `droppedFields: []`.
    */
   private notifyDroppedFields(
     operation: 'create' | 'update',
@@ -4142,13 +4163,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       droppedFields = withoutNoOpDrops(valid, sent, stored);
     }
     const warnings = readWriteWarnings(result);
-    if (droppedFields.length === 0 && warnings.length === 0) return;
+    const notice = readWriteNotice(result);
+    if (droppedFields.length === 0 && warnings.length === 0 && notice === undefined) return;
     this.emitWriteWarning({
       operation,
       resource,
       ...(id !== undefined ? { id } : {}),
       droppedFields,
       ...(warnings.length > 0 ? { warnings } : {}),
+      ...(notice !== undefined ? { notice } : {}),
     });
   }
 

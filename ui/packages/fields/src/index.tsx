@@ -974,7 +974,19 @@ export function PercentCellRenderer({ value, field }: CellRendererProps): React.
   const barValue = percentDisplayValue(numValue, percentScale);
   const formatted = formatPercent(numValue, percentScale, scale, locale);
   const clampedBar = Math.max(0, Math.min(100, barValue));
-  
+
+  // The field's read-only face, `FieldSchema.percentDisplay` in
+  // `@objectstack/spec` (objectstack#28255): `plain` is a rate or a
+  // probability rather than progress (an opportunity's win probability), so it
+  // prints the percentage alone. Absent or `bar` keeps the bar below. Only the
+  // literal `plain` turns the bar off: the spec refuses any other value, so
+  // there is no second spelling to accept here. Every host draws this one
+  // renderer (grid cell, detail field, header chip), and each reads the key off
+  // the field metadata its relay site copies from the object definition.
+  if (percentField.percentDisplay === 'plain') {
+    return <span className="tabular-nums whitespace-nowrap">{formatted}</span>;
+  }
+
   // Layout contract (objectstack#5066): THE NUMBER IS THE CONTENT, THE BAR IS
   // DECORATION. The bar used to be `w-16 shrink-0` while the value span was
   // shrinkable, so in a narrow clipping container — a `record:highlights` chip

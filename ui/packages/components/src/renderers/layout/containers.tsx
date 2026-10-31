@@ -213,6 +213,7 @@ const KNOWN_LABEL_DICT: Record<string, Record<string, string>> = {
     Details: '詳情',
     Related: '相關',
     Timeline: '時間線',
+    'Activity stream': '動態',
     Activity: '活動',
     History: '歷史',
     Notes: '備註',
@@ -260,8 +261,14 @@ const KNOWN_LABEL_KEYS: Record<string, string> = {
   Related: 'detail.related',
   Activity: 'detail.activity',
   History: 'detail.history',
-  // The synthesized record page's one timeline stream tab (objectstack#27055).
-  Timeline: 'detail.timeline',
+  // The synthesized record page's one stream tab (objectstack#27055), 「动态」
+  // since objectstack#27524. Its own token, not `Timeline`: that word is an
+  // author's too (the served approval page's history tab), and mapping it to
+  // `detail.timeline` would now rename an authored Timeline tab 动态.
+  'Activity stream': 'detail.timeline',
+  // An authored `Timeline` stays a timeline: the pack's own word for one (the
+  // timeline view type's label, in all ten packs).
+  Timeline: 'console.objectView.viewTypeTimeline',
   Attachments: 'detail.attachments',
   Approvals: 'detail.approvalsPanelTitle',
   Discussion: 'detail.discussion',
@@ -2404,6 +2411,22 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       if (!src) return false;
       return evalHeaderPredicate(d, `page:header action "${String(actionName)}" disabled`, true);
     };
+    // The reader's own state (`ActionSchema.pressed`, objectstack#27946): a
+    // DECLARED predicate makes the button a toggle, drawn pressed while it is
+    // TRUE. Same entry and bindings as `visible` / `disabled`; its fail
+    // direction is "not pressed" (`fallback: false`), said once — a fault
+    // draws the plain button and never claims the reader acted. Display only:
+    // nothing here gates, greys or routes on it. `undefined` = no predicate
+    // (not a toggle); a boolean is refused by the spec at parse, so it gets no
+    // reading here.
+    const pressedFor = (action: any): boolean | undefined => {
+      const p = action?.pressed;
+      const src = typeof p === 'string'
+        ? p
+        : (p && typeof p === 'object' && typeof (p as any).source === 'string' ? (p as any).source : undefined);
+      if (!src || src.trim() === '') return undefined;
+      return evalHeaderPredicate(p, `page:header action "${String(action?.name ?? action?.id)}" pressed`, false);
+    };
     // A live inline-edit session disables actions the host flagged with
     // `disableDuringInlineEdit` (objectui#2572 item 4) — see `inlineEditing`
     // at the top of the renderer.
@@ -2442,6 +2465,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       const actionKey = action.name || action.id || `header-action-${idx}`;
       const disabledReason = disabledReasonFor(action);
       const reasonId = `${disabledReasonIdBase}-reason-${idx}`;
+      const pressed = pressedFor(action);
       const button = (
         <Button
           key={actionKey}
@@ -2449,7 +2473,14 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           size={size}
           disabled={disabled}
           aria-describedby={disabledReason ? reasonId : undefined}
-          className="gap-2"
+          aria-pressed={pressed}
+          // The pressed face: Shadcn's toggle-on colours, keyed off the
+          // attribute so the face and `aria-pressed` cannot disagree (the
+          // same spelling as `PanelToggles` and `DeclaredActionsBar`).
+          className={cn(
+            'gap-2',
+            pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
+          )}
           onClick={() => {
             if (typeof action.onClick === 'function') {
               void action.onClick();

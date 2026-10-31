@@ -10,8 +10,9 @@
  * objectstack#27055, Target 3 — the timeline is ONE stream: discussion
  * (`sys_comment`), activity (`sys_activity`) and field changes
  * (`sys_audit_log`) merged newest first, filtered by the chips 全部 / 活动 /
- * 讨论 / 变更, system entries drawn as one compact muted line, and
- * 「查看全部 N 条 →」 at the foot.
+ * 讨论 / 变更, system entries drawn as one compact muted line, and paged at
+ * the foot (objectstack#27524: in full it is the 动态 tab; its panel's
+ * 「查看全部 N 条 →」 is pinned in `RecordTimelinePanel-27524.test.tsx`).
  */
 
 import React from 'react';
@@ -107,21 +108,21 @@ describe('record:activity on the default record page is the stream', () => {
       </DefaultRecordPageContext.Provider>,
     );
 
-  it('merges the field changes in, pages at 20, and 「查看全部 N 条」 shows the rest', () => {
+  it('merges the field changes in, pages at 20, and the foot draws the next page (objectstack#27524)', () => {
     const { container } = mount(true);
     expect(container.querySelector('[data-stream-filters]')).toBeTruthy();
-    const viewAll = container.querySelector('[data-stream-view-all]') as HTMLButtonElement;
-    expect(viewAll).toBeTruthy();
-    // 25 notes + the call + the audit change.
-    expect(viewAll.textContent).toContain('27');
+    // 25 notes + the call + the audit change: 27, twenty a page.
+    const more = container.querySelector('[data-stream-load-more]') as HTMLButtonElement;
+    expect(more).toBeTruthy();
     // The page is the NEWEST twenty (newest first): the call, the change, Note 24 … Note 7.
     expect(screen.getByText('Note 24')).toBeTruthy();
     expect(screen.getByText('Note 7')).toBeTruthy();
     expect(screen.queryByText('Note 6')).toBeNull();
     expect(screen.queryByText('Note 0')).toBeNull();
-    fireEvent.click(viewAll);
-    expect(container.querySelector('[data-stream-view-all]')).toBeNull();
+    fireEvent.click(more);
+    // The next page: the seven left, and no more to load.
     expect(screen.getByText('Note 0')).toBeTruthy();
+    expect(container.querySelector('[data-stream-load-more]')).toBeNull();
   });
 
   it('a chip filters the whole stream, not the first page', () => {

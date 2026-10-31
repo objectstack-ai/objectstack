@@ -616,6 +616,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "千位分隔符",
         helpText: "显示值时的数字分组（千位分隔符）。未设置：由渲染端决定；未改动过的开关不写入任何值，所以即使渲染端会分组，它也显示为关闭。关闭：从不分组，例如年份或 ID。开启：始终分组。"
       },
+      percentDisplay: {
+        label: "百分比显示",
+        helpText: "只读时的显示方式（列表单元格与记录页）。未设置：百分比旁显示进度条。条形：始终显示进度条，用于进度。纯数字：只显示百分比，用于比率或概率。"
+      },
       currencyConfig: {
         label: "货币配置",
         helpText: "此字段使用哪种货币——货币字段，或返回类型为“货币”的公式字段。未设置时为 dynamic 模式。任何模式下值都是一个纯数字。"

@@ -25,7 +25,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField } from '@object-ui/types';
 import { resolveFieldScale } from '@objectstack/spec/data';
-import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, notifyDataChanged, useMetadata } from '@object-ui/react';
+import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -2311,19 +2311,27 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     if (id === undefined || id === null) {
       throw new Error('Cannot persist inline edit: row has no id/_id.');
     }
+    // objectstack-ai/objectstack#28252 — the row's write answer feedback (its
+    // warnings and its hook's notice) rides the save toast below, so the
+    // write is one toast.
+    const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
     try {
-      await writeRowGuarded(dataSource, objectName, id, changes, row);
-    } catch (err) {
-      if (!isConcurrentUpdateError(err)) throw err;
-      // A reload re-reads through the bus; there is nothing of ours to show.
-      if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)) === 'reloaded') return;
+      try {
+        await writeRowGuarded(dataSource, objectName, id, changes, row);
+      } catch (err) {
+        if (!isConcurrentUpdateError(err)) throw err;
+        // A reload re-reads through the bus; there is nothing of ours to show.
+        if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)) === 'reloaded') return;
+      }
+      // Refresh so the grid shows the persisted values.
+      setRefreshKey(k => k + 1);
+      // objectui#12303 — the write is said, through the console's shared toast
+      // (the one the form, kanban and view surfaces raise). Only here, once the
+      // row landed: a refusal rejects above, and the table flags the row.
+      toastRecordSave(toast, t('table.saved', { count: 1 }), claim.take(undefined));
+    } finally {
+      claim.release();
     }
-    // Refresh so the grid shows the persisted values.
-    setRefreshKey(k => k + 1);
-    // objectui#12303 — the write is said, through the console's shared toast
-    // (the one the form, kanban and view surfaces raise). Only here, once the
-    // row landed: a refusal rejects above, and the table flags the row.
-    toast.success(t('table.saved', { count: 1 }));
   };
 
   const defaultBatchSave = async (
@@ -2343,6 +2351,26 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that landed are reported as saved, and only the rows that did not are
     // handed back to the table as `failed`.
     const ids = changes.map(({ row }) => resolveRecordId(row));
+    // objectstack-ai/objectstack#28252 — each row's write answer feedback rides
+    // the one "Save All" toast below, as the single-row save's does.
+    const claims: AnswerWarningClaim[] = ids.flatMap((id) =>
+      id === undefined || id === null ? [] : [claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id })],
+    );
+    try {
+      return await saveRowsClaimed(dataSource, objectName, changes, ids, claims);
+    } finally {
+      for (const claim of claims) claim.release();
+    }
+  };
+
+  /** The body of {@link defaultBatchSave}, run while its rows' claims are open. */
+  const saveRowsClaimed = async (
+    dataSource: DataSource,
+    objectName: string,
+    changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>,
+    ids: Array<string | undefined>,
+    claims: AnswerWarningClaim[],
+  ): Promise<BatchSaveOutcome | undefined> => {
     const attempts = await Promise.allSettled(
       changes.map(({ changes: rowChanges, row }, i) => {
         const id = ids[i];
@@ -2383,7 +2411,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       // shared toast, counting only the rows the server accepted. A row that
       // failed is not in the count: the table keeps it, flags it and shows
       // the reason. A reloaded row wrote nothing, so it is not either.
-      toast.success(t('table.saved', { count: saved }));
+      // A row that wrote nothing parked nothing, so every claim is read.
+      const feedback: RecordSaveFeedback = { warnings: [] };
+      const notices: string[] = [];
+      for (const claim of claims) {
+        const own = claim.take(undefined);
+        for (const w of own.warnings) if (!feedback.warnings.includes(w)) feedback.warnings.push(w);
+        if (own.notice && !notices.includes(own.notice)) notices.push(own.notice);
+      }
+      if (notices.length > 0) feedback.notice = notices.join('\n');
+      toastRecordSave(toast, t('table.saved', { count: saved }), feedback);
     }
     return failed.length > 0 ? { failed } : undefined;
   };

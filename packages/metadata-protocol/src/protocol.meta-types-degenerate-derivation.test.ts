@@ -257,10 +257,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // unavailable) joined the accepted set, and the sample names it.
         // [#27946] 48 → 49: `pressed` (the reader's pressed-state predicate)
         // joined the accepted set, and the sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(49);
+        // [#27944] 49 → 50: `submitText` (the param dialog's submit button
+        // label) joined the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(50);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });

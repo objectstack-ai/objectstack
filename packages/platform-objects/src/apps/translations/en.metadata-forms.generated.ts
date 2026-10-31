@@ -616,6 +616,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Use Grouping",
         helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
       },
+      percentDisplay: {
+        label: "Percent Display",
+        helpText: "How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability."
+      },
       currencyConfig: {
         label: "Currency Config",
         helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in every mode."

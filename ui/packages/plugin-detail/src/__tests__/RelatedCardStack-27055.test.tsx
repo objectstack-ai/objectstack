@@ -60,7 +60,7 @@ const columnsOf = (related = RELATED) =>
   buildDefaultPageColumns(buildDefaultPageSchema({ name: 'lead', fields: {} }, { related, hideDiscussion: true }))!;
 
 const cardOrder = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll('[data-record-column="related"] [data-related-card-id]')).map((el) =>
+  Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
     el.getAttribute('data-related-card-id'),
   );
 
@@ -69,7 +69,7 @@ function Host({ initial, onWrite, related }: { initial?: RelatedArrangement; onW
   const [arrangement, setArrangement] = React.useState<RelatedArrangement | undefined>(initial);
   return (
     <RecordPageColumns
-      tier="three-column"
+      tier="wide"
       columns={columnsOf(related)}
       relatedArrangement={arrangement}
       onRelatedArrangementChange={(next) => {
@@ -129,7 +129,7 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
     expect(container.querySelector('[data-related-foot-line]')).toBeNull();
     fireEvent.click(screen.getByText('down task'));
     expect(cardOrder(container)).toEqual(['note.parent_id', 'task.lead_id', 'call.lead_id']);
-    const foot = container.querySelector('[data-record-column="related"] [data-related-foot-line]')!;
+    const foot = container.querySelector('[data-record-column="right"] [data-related-foot-line]')!;
     expect(foot).not.toBeNull();
     // Not the changed-default hint: the author's default did not change.
     expect(container.querySelector('[data-related-default-changed]')).toBeNull();
@@ -182,14 +182,14 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
 describe('the enlarged related list — ⤢ and ?related= (objectstack#27055, Target 9)', () => {
   it('⤢ asks the host to enlarge that relationship', () => {
     const onEnlarge = vi.fn();
-    render(<RecordPageColumns tier="three-column" columns={columnsOf()} onEnlargeRelated={onEnlarge} />);
+    render(<RecordPageColumns tier="wide" columns={columnsOf()} onEnlargeRelated={onEnlarge} />);
     fireEvent.click(screen.getByText('enlarge note'));
     expect(onEnlarge).toHaveBeenCalledWith('note.parent_id');
   });
 
   it('draws the full list over the page body: the header stays, the columns step aside', () => {
     const { container } = render(
-      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={vi.fn()} />,
+      <RecordPageColumns tier="wide" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={vi.fn()} />,
     );
     const enlarged = container.querySelector('[data-related-enlarged="note.parent_id"]')!;
     expect(enlarged).toBeTruthy();
@@ -205,7 +205,7 @@ describe('the enlarged related list — ⤢ and ?related= (objectstack#27055, Ta
   it('‹ and Esc return to the columns', () => {
     const onClose = vi.fn();
     const { container } = render(
-      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={onClose} />,
+      <RecordPageColumns tier="wide" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={onClose} />,
     );
     fireEvent.click(container.querySelector('[data-related-enlarged-back]')!);
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -214,7 +214,7 @@ describe('the enlarged related list — ⤢ and ?related= (objectstack#27055, Ta
 
   it('an id naming no related list draws the columns', () => {
     const { container } = render(
-      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="ghost.parent_id" />,
+      <RecordPageColumns tier="wide" columns={columnsOf()} enlargedRelated="ghost.parent_id" />,
     );
     expect(container.querySelector('[data-related-enlarged]')).toBeNull();
     expect(container.querySelector('[data-record-columns]')).not.toBeNull();
@@ -223,7 +223,7 @@ describe('the enlarged related list — ⤢ and ?related= (objectstack#27055, Ta
 
 import { ArrangedRelatedTab, RelatedArrangementScopeContext } from '../ArrangedRelatedTab';
 
-describe('the tabbed tier 关联 tab reads the same arrangement (objectstack#27055, Target 7)', () => {
+describe('a page drawn as its strip: the 关联 tab reads the same arrangement (objectstack#27055, Target 7)', () => {
   const pageOf = () => buildDefaultPageSchema({ name: 'lead', fields: {}, enable: { files: true } }, { related: RELATED });
   const relatedTabOf = (page: any) =>
     page.regions[0].components.find((c: any) => c.type === 'page:tabs').properties.items.find((i: any) => i.value === 'related');

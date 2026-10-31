@@ -22,6 +22,8 @@ import {
   type SettingsActionHandler,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
+  type SettingsWritePredicate,
+  type SettingsDisplayOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
@@ -881,6 +883,8 @@ export class SettingsService {
   private organizationSource?: SettingsOrganizationSource;
   /** Live-status providers by namespace — see {@link registerLiveStatus}. */
   private readonly liveStatusProviders = new Map<string, SettingsLiveStatusProvider>();
+  /** Write predicates by namespace, then key — see {@link registerWritePredicate}. */
+  private readonly writePredicates = new Map<string, Map<string, SettingsWritePredicate>>();
   /** Change subscribers, optionally scoped to a namespace. */
   private readonly subscribers = new Set<{
     ns?: string;
@@ -1588,6 +1592,21 @@ export class SettingsService {
   }
 
   /**
+   * Register (or replace) the write predicate of one manifest key — a rule
+   * over engine state that may refuse a CHANGE to the key. See
+   * {@link SettingsWritePredicate}. The last registration wins, the same
+   * override rule as {@link registerAction}.
+   */
+  registerWritePredicate(namespace: string, key: string, predicate: SettingsWritePredicate): void {
+    const reg = this.registry.get(namespace);
+    if (!reg) throw new UnknownNamespaceError(namespace);
+    if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
+    let byKey = this.writePredicates.get(namespace);
+    if (!byKey) this.writePredicates.set(namespace, (byKey = new Map()));
+    byKey.set(key, predicate);
+  }
+
+  /**
    * The namespace's live-status statement as an `info_banner` specifier, ready
    * to head the page, or `undefined` when no provider is registered or the
    * provider has nothing to state.
@@ -1601,12 +1620,18 @@ export class SettingsService {
   async liveStatusOf(
     namespace: string,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<SettingsManifest['specifiers'][number] | undefined> {
     const provider = this.liveStatusProviders.get(namespace);
     if (!provider) return undefined;
     let status: SettingsLiveStatus | undefined;
     try {
-      status = await provider({ namespace, ctx });
+      status = await provider({
+        namespace,
+        ctx,
+        organizationId: async () => organizationReachRowOwner(await this.organizationReachOf(ctx)),
+        locale: display.locale,
+      });
     } catch (err: any) {
       this.logger?.warn?.(
         `SettingsService: the live status of settings namespace '${namespace}' could not be read — `
@@ -2255,11 +2280,15 @@ export class SettingsService {
    * naming each such key (`invalid_value`, `constraint: { scope: 'user' }`):
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
+   *
+   * `display` picks the language of a write predicate's refusal, and nothing
+   * else (see {@link refuseByWritePredicates}).
    */
   async setMany(
     namespace: string,
     patch: Record<string, unknown>,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<Record<string, ResolvedSettingValue>> {
     // The pre-bind window: refuse rather than resolve against a store nothing
     // will ever read. See `assertEngineBound`.
@@ -2338,6 +2367,12 @@ export class SettingsService {
     // state (visible required field empty / pattern mismatch). See
     // validatePatch for the exact semantics.
     await this.validatePatch(namespace, patch, ctx);
+
+    // The keys' write predicates (ADR-0144 D4): rules over engine state that
+    // may refuse a change the declarations above accept. After them, so a
+    // malformed value is told about its own fault first; before the crypto
+    // pass and every write, so a refused batch writes nothing.
+    await this.refuseByWritePredicates(reg, namespace, patch, ctx, reach, display);
 
     // #8026 — a declared-encrypted key with nothing able to encrypt it fails
     // the WHOLE batch, here, rather than part-way down the write loop below.
@@ -2534,6 +2569,52 @@ export class SettingsService {
       out[key] = await this.get(namespace, key, ctx);
     }
     return out;
+  }
+
+  /**
+   * Ask each patched key's {@link SettingsWritePredicate}, when the patch
+   * changes the key, and refuse the whole batch with every refusal at once.
+   *
+   * "Changes" compares the submitted value (`null` / `undefined` read as a
+   * clear) with the value the caller's cascade resolves today, so re-saving
+   * the value in force — the console posts a form's dirty keys, and a form
+   * can post back what it read — is never refused.
+   */
+  private async refuseByWritePredicates(
+    reg: RegisteredManifest,
+    namespace: string,
+    patch: Record<string, unknown>,
+    ctx: SettingsContext,
+    reach: OrganizationReach | undefined,
+    display: SettingsDisplayOptions,
+  ): Promise<void> {
+    const byKey = this.writePredicates.get(namespace);
+    if (!byKey) return;
+    const refusals: FieldError[] = [];
+    for (const [key, submitted] of Object.entries(patch)) {
+      const predicate = byKey.get(key);
+      if (!predicate) continue;
+      const next = submitted ?? null;
+      const current = (await this.get(namespace, key, ctx)).value ?? null;
+      if (stableStringify(next) === stableStringify(current)) continue;
+      const scope = reg.scopes.get(key)!;
+      const organizationId = scope === 'global' || !reach ? undefined : organizationReachRowOwner(reach) ?? null;
+      const refusal = await predicate({ namespace, key, next, current, organizationId, ctx, locale: display.locale });
+      if (!refusal) continue;
+      const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
+        .find((s) => s.key === key);
+      const label = typeof spec?.label === 'string' ? spec.label : key;
+      refusals.push({
+        field: key,
+        // ADR-0114's slot for "rejected for a reason no other member names":
+        // the value is well-formed; the system's state refuses the change.
+        code: 'invalid_value',
+        message: refusal.message,
+        label,
+        ...(refusal.constraint ? { constraint: refusal.constraint } : {}),
+      });
+    }
+    if (refusals.length > 0) throw new SettingsValidationError(namespace, refusals);
   }
 
   /**

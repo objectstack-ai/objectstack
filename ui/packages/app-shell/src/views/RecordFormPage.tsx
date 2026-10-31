@@ -175,7 +175,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   // this page is open, the write-warning channel parks the answer warnings of
   // the write the page makes (this record's update, or a create of this
   // object) on the claim below instead of toasting them, and this toast
-  // carries them.
+  // carries them — with the answer's notice (objectstack-ai/objectstack#28252).
   const answerWarningClaim = useRef<AnswerWarningClaim | null>(null);
   useEffect(() => {
     if (!dataSource || !objectName) return;
@@ -191,13 +191,13 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   }, [dataSource, mode, objectName, recordId]);
 
   const handleSuccess = useCallback((saved?: any) => {
-    const warnings = answerWarningClaim.current?.take(saved) ?? [];
+    const feedback = answerWarningClaim.current?.take(saved);
     toastRecordSave(toast, recordSaveMessage(t, {
       label,
       objectDef,
       saved,
       mode,
-    }), warnings);
+    }), feedback);
     goBack();
   }, [mode, t, label, objectDef, goBack]);
 

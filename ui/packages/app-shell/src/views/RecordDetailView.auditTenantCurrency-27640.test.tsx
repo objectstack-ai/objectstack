@@ -22,9 +22,9 @@
  * the record page's cells read. A `record`-mode field keeps its code in a
  * sibling field of the row, which the per-value call is not handed, so it
  * stays a plain number with the tenant currency set: the tenant default is
- * never its fallback. The page is the synthesized one, opened on its History
- * stream through the `tab` URL param; the diff line is read off the rendered
- * timeline, the way a user sees it.
+ * never its fallback. The page is the synthesized one, opened on its 动态 tab
+ * through the `related` URL param; the diff line is read off the rendered
+ * stream, the way a user sees it.
  */
 
 import * as React from 'react';
@@ -150,7 +150,7 @@ async function diffLines(currency: string | undefined): Promise<Record<string, s
   render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <LocalizationProvider value={{ locale: 'en-US', currency }}>
-        <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
+        <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
           <MetadataCtx.Provider value={makeMetadata()}>
             <RecordDetailView
               dataSource={makeDataSource()}

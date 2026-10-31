@@ -438,7 +438,7 @@ import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
-import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress } from './protocol-environment-rows.js';
+import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
@@ -10844,12 +10844,18 @@ export class ObjectStackProtocolImplementation implements
         // The package-less binding ({@link packagelessReadAddress}'s), selected
         // from those rows; the `version` below ({@link readVersionToken})
         // takes the same binding instead of reading it again.
-        const packagelessBinding = readState === 'active' && !request.packageId
-            ? (await this.packagelessAddress(
+        const packagelessAddressed = readState === 'active' && !request.packageId
+            ? await this.packagelessAddress(
                 PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member, 'active', activeRows,
-            )).packageId
+            )
             : undefined;
-        const contentPackageId = request.packageId || (packagelessBinding ?? undefined);
+        const packagelessBinding = packagelessAddressed?.packageId;
+        // [#28238] The content, though, is {@link packagelessContentPackage}'s:
+        // the code package that ships the name is a candidate too, so a row
+        // another package stored under the name is not served for it.
+        const contentPackageId = request.packageId || (packagelessAddressed
+            ? packagelessContentPackage(packagelessAddressed, this.shippedArtifactsOf(request.type, request.name))
+            : undefined);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -10868,7 +10874,7 @@ export class ObjectStackProtocolImplementation implements
                     state: 'draft',
                     ...(draftContentAddress
                         ? { packageId: draftContentAddress.packageId }
-                        : contentPackageId ? { packageId: contentPackageId } : {}),
+                        : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
                 }))?.row;
                 // [#23715] Two or more packages and no package-unbound draft:
@@ -10928,7 +10934,7 @@ export class ObjectStackProtocolImplementation implements
                 state: readState,
                 ...(readState === 'draft' && draftContentAddress
                     ? { packageId: draftContentAddress.packageId }
-                    : contentPackageId ? { packageId: contentPackageId } : {}),
+                    : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             }, activeRows))?.row;
             // [#23715] Two or more packages and no package-unbound draft: the
@@ -11559,7 +11565,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 state: 'active',
-                ...(contentPackageId ? { packageId: contentPackageId } : {}),
+                ...(contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
             });
             overlayLockLayer = await this.overlayLockLayerAt({
@@ -17077,11 +17083,18 @@ export class ObjectStackProtocolImplementation implements
      * layered read's `effective` and `/published` serve one row. [#23715] The
      * strict draft read asks {@link strictDraftReadAddress} instead: the draft
      * its `version` names.
+     *
+     * [#28238] The code packages that ship the name are candidates too
+     * ({@link packagelessContentPackage}, the rule {@link getMetaItem} applies
+     * to the rows it already read): a row bound to another package is not
+     * served for a name one code package ships, and `null` is the
+     * package-unbound row alone. The write address does not move.
      */
-    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+    private packagelessReadAddress(type: string, name: string, member?: string): Promise<string | null | undefined> {
         // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
         const host: ThisParameterType<typeof packagelessReadAddress> = {
             packagelessAddress: (...a) => this.packagelessAddress(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
         return packagelessReadAddress.call(host, type, name, member);
     }

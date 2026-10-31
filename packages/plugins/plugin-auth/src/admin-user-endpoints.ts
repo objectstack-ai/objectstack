@@ -234,6 +234,7 @@ import { cloudManagedRefusal } from './cloud-managed.js';
 import { temporaryPasswordLength } from './temporary-password-length.js';
 import { isCloudManaged } from '@objectstack/core';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
+import type { FieldErrorCode } from '@objectstack/spec/api';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
@@ -278,7 +279,7 @@ export function generateTemporaryPassword(length = 16): string {
 /**
  * [#24032] The body, or the refusal message for a declared-JSON body that does
  * not parse: it was read as `{}`, which answered "userId is required" (or
- * "Either email or phoneNumber is required") for a body that carried the field
+ * "Email is required") for a body that carried the field
  * (see request-json-body.ts). A well-formed body that is not an object still
  * reads as no fields, as before.
  */
@@ -293,6 +294,26 @@ async function parseJson(
 
 function badRequest(message: string): EndpointResult {
   return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message } } };
+}
+
+/**
+ * [#28289] A refusal for inputs left empty: `400 VALIDATION_FAILED` with one
+ * `fields[]` entry per input, code `required` (the closed ADR-0114 catalog) —
+ * the envelope the grant refusal passes through and the data doors answer, so
+ * the console's field-error reader needs no case for this door.
+ */
+function requiredFieldsRefusal(message: string, fields: string[]): EndpointResult {
+  return {
+    status: 400,
+    body: {
+      success: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        message,
+        fields: fields.map((field) => ({ field, code: 'required' satisfies FieldErrorCode, message })),
+      },
+    },
+  };
 }
 
 /**
@@ -694,7 +715,14 @@ export async function runAdminCreateUser(
     }
   }
   if (!hasEmail && !phoneNumber) {
-    return badRequest('Either email or phoneNumber is required');
+    // Named in the dialog's words, not the body's keys: an administrator sees
+    // an Email field, and a Phone Number field only where phone sign-in is on.
+    // [#28289] Field-level, as the grant refusal below is: one `fields[]`
+    // entry per input that would satisfy it, so a client marks the input and
+    // words it in its own language instead of showing this sentence.
+    const phoneSignIn = deps.phoneNumberEnabled?.() === true;
+    const message = phoneSignIn ? 'Email or phone number is required' : 'Email is required';
+    return requiredFieldsRefusal(message, phoneSignIn ? ['email', 'phoneNumber'] : ['email']);
   }
   const email = hasEmail ? (rawEmail as string).trim() : generatePlaceholderEmail();
   const name =

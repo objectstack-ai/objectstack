@@ -29,15 +29,16 @@ deployment and to the sender. Scaffolded apps list the three executors in
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value slot.
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
   default `X-API-Key`, or `paramName` for a query-string key); `basic` (`username`
-  stays in metadata). A secret in a url path has no variant — use a
+  stays in metadata); `signed` on `openapi` / `rest` (`scheme`
+  `aliyun-acs3-hmac-sha256` or `tencentcloud-tc3-hmac-sha256`, `keyId`) signs each
+  request. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
 - `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
 
 ## 1 · OpenAPI document, static key — Stripe balance, nightly
 
 ```ts
-// Trim the vendor's OpenAPI 3.x document to the operations the app calls; its path
-// is package-relative.
+// Trim the vendor's OpenAPI 3.x document to the operations the app calls.
 export const StripeConnector = defineConnector({
   name: 'stripe', label: 'Stripe', type: 'api', provider: 'openapi',
   providerConfig: { spec: './src/connectors/stripe.trimmed.json' },
@@ -78,7 +79,7 @@ export const GitHubMcp = defineConnector({
   providerConfig: {
     transport: { kind: 'http', url: 'https://api.githubcopilot.com/mcp/',  // `stdio` spawns a local process:
                  headers: { 'X-MCP-Readonly': 'true' } },   // denied unless the host allowlists the command
-    include: ['search_issues'],                             // tool-name allowlist → the actions
+    include: ['search_issues'],
   },
   auth: { type: 'bearer', credentialRef: 'GITHUB_MCP_TOKEN' }, // folded into the request headers
 });
@@ -125,7 +126,7 @@ export const CarrierCallback = defineFlow({
 `x-objectstack-signature: t=<unix>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`
 under `CARRIER_HOOK_SECRET`. The door has no unsigned form and verifies no other
 scheme, so a vendor whose webhook signs its own header cannot post here today:
-name the gap and poll its status (recipe 1's shape) until vendor schemes verify.
+poll its status (recipe 1's shape) until vendor schemes verify.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
@@ -148,9 +149,10 @@ Each `operationId` is a named action in the flow palette and to agents;
 
 ## Not yet — declare the rest, mark the integration blocked, write no plugin
 
-- **OAuth-protected vendor** (DocuSign, Salesforce, Google): the declarative `auth`
-  union has no `oauth2`; the authorization-code / refresh
-  lifecycle is not delivered in the open tier. Do not park a short-lived access
-  token behind a `bearer` ref. Blocked on the platform's outbound-OAuth card.
-- **Signature-authenticated vendor** (Alipay, WeChat Pay, Aliyun — RSA2 / HMAC
-  canonical-request signing): no auth kind signs requests today; blocked on the request-signing card.
+- **OAuth-protected vendor** (DocuSign, Salesforce, Google): `auth` declares
+  `oauth2` (`authorization_code` / `client_credentials`) and `app-credential`
+  (`feishu` / `dingtalk` / `wecom`), but no server runs the grant yet: the
+  instance is held degraded, calling no upstream. Do not park a short-lived
+  token behind a `bearer` ref. Blocked on the outbound-OAuth card.
+- **RSA-signing vendor** (Alipay, WeChat Pay): no `signed` scheme signs RSA yet;
+  blocked on the request-signing card.

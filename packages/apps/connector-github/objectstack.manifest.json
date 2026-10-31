@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schemas.objectstack.dev/template-manifest.json",
+  "manifestId": "app.objectstack.connector-github",
+  "name": "connector-github",
+  "specVersion": "^18.0.0",
+  "displayName": "GitHub",
+  "description": "Search and read GitHub issues and pull requests from flows, through GitHub's remote MCP server. Read only.",
+  "category": "devtools",
+  "tags": ["github", "mcp", "connector", "issues"],
+  "license": "Apache-2.0",
+  "homepageUrl": "https://github.com/objectstack-ai/objectstack/tree/main/packages/apps/connector-github",
+  "readmePath": "README.md"
+}
