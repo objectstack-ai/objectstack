@@ -502,5 +502,10 @@ describe('a bound action saved at runtime through the metadata door reaches its 
         expect(attached).toHaveLength(1);
         expect(attached[0]).toBe(engine.registry.getItem('action', 'rename_org'));
         expect(attached[0].target).toBe('https://example.com/customised');
+
+        // Lifting the shadow (the delete heal's first tier) serves the packaged declaration again.
+        expect(engine.registry.removeRuntimeShadow('action', 'rename_org')).toBe(true);
+        const restored: any = engine.registry.getObject('ba_org')?.actions?.find((a: any) => a.name === 'rename_org');
+        expect(restored?.target).toBe('https://example.com/rename');
     });
 });
