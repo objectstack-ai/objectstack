@@ -252,6 +252,23 @@
       "status": "dead",
       "verifiedAt": "2026-09-28",
       "note": "REMOVED 2026-09-28 (#20323, ADR-0049 enforce-or-remove) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-18 conversion action-aria-removed. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); write the accessible name as the action's required `label`, and put a region name in the placing node's `aria` block (`page.components[].aria` or the list view `aria`). The `live` grade this row replaces rested on an uncited note — 「PARTIAL — honored by a few objectui renderers, not the core action buttons/menus」 — with no reader behind it: re-measured at the `.objectui-sha` pin f8a9d0fb05, none of the action surfaces (action:button/icon/menu/group/bar, the grid row and bulk action menus, record:quick_actions, the declared-actions bar) reads an action's `aria`; the only `schema.aria` readers there are the placing nodes' own blocks (the record:* page components, the list view, element:button's props). Measured at objectui @f8a9d0fb05 (moved out of the packages/spec/src/ui/action.zod.ts tombstone comment, #23434): none of the surfaces that render an action — `action:button`, `action:icon`, `action:menu`, `action:group`, `action:bar`, the grid's row and bulk action menus, `record:quick_actions`, the declared-actions bar — reads an action's `aria`; the only `schema.aria` readers are the placing nodes' own blocks."
+    },
+    "overrides": {
+      "status": "planned",
+      "verifiedAt": "2026-10-31",
+      "note": "PLANNED RECORD (ADR-0146 D2, the spec card N-08): the override declaration `overrides: { package, basedOn }`, one field set (`OverrideDeclarationFields`, packages/spec/src/kernel/override-declaration.zod.ts) spread on the thirteen types `OVERRIDE_TYPE_CLASSIFICATION` classifies `overridable`. CARRIED today, measured: it survives the metadata save's schema parse, `defineStack()` and `GET /packages/:id/export` (packages/spec/src/kernel/override-declaration.test.ts; packages/runtime/src/domains/packages-export-override-declaration.test.ts). ACTED ON by nothing yet: the write gate that admits a declared override from the paired `<base>.custom` and refuses an undeclared same-named item, and the effective read that serves the declared document over the base's, are later cards of ADR-0146's Rollout (P1). Flip to `live` on the commit that lands the reader, citing it.",
+      "children": {
+        "package": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row): the base package id the declaring item replaces an item of. The pair predicate the write gate will read is `isCustomizationPairOf` (packages/spec/src/kernel/customization-package.ts). The schema refuses a `.custom` id here at parse."
+        },
+        "basedOn": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row). RECORDED, NEVER JUDGED by contract (ADR-0146 D2, 'Decided here' item 2): no door compares it with the installed base, produces an upgrade diff from it, or refuses on it. Its whole reading is a person's (Studio's override chip, the export); it stays `planned` until that reader lands, and must never gain a gate."
+        }
+      }
     }
   }
 }
