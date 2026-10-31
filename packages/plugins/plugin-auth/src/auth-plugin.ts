@@ -3096,7 +3096,11 @@ export class AuthPlugin implements Plugin {
     // D5 allow-list, so a forward is judged by the same network gate. A
     // credential that does not redeem resolves as nobody. See
     // `agent-forward-identity-view.ts`.
-    if (typeof rawApp.use === 'function') rawApp.use(`${basePath}/*`, serveAgentForwardAtIdentityMount);
+    // Inlined so the wildcard fall-through guard (#4116) can read that it
+    // yields: every branch of the seam hands the request on to `next`.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, (c: any, next: () => Promise<void>) => serveAgentForwardAtIdentityMount(c, next));
+    }
 
     // Register /config before the wildcard so it takes precedence.
     // better-auth has no /config endpoint, so without this explicit route
