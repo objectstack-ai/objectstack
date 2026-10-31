@@ -12,6 +12,7 @@ import {
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   CreateRecordConfigSchema,
   FLOW_NODE_EXPRESSION_PATHS,
+  FlowValueSlotSchema,
   ScreenConfigSchema,
   ScriptConfigSchema,
   SubflowConfigSchema,
@@ -38,7 +39,17 @@ describe('isValueEnvelopeSlot — read off the spec expression ledger (objectui#
     expect(isValueEnvelopeSlot(undefined, ['config', 'assignments'])).toBe(false);
   });
 
-  it('offers the envelope on exactly the six hand-table key/value maps the ledger names', () => {
+  it('reads the block an entry is rooted in: a connector_action node’s input map is `connectorConfig.input`', () => {
+    // The ledger roots `connector_action` `input.*` in the node's
+    // `connectorConfig` sibling block. The same key under `config` is not the
+    // map the executor reads (the flow parse refuses it as a loose key), so it
+    // is not offered there.
+    expect(isValueEnvelopeSlot('connector_action', ['connectorConfig', 'input'])).toBe(true);
+    expect(isValueEnvelopeSlot('connector_action', ['config', 'input'])).toBe(false);
+    expect(isValueEnvelopeSlot('subflow', ['connectorConfig', 'input'])).toBe(false);
+  });
+
+  it('offers the envelope on exactly the seven hand-table key/value maps the ledger names', () => {
     // The key/value editor serves many maps (params, headers, filters, inputs)
     // where an object naming a `dialect` is plain data. Every keyValue field in
     // the designer table is enumerated here. If the ledger declares another
@@ -51,6 +62,11 @@ describe('isValueEnvelopeSlot — read off the spec expression ledger (objectui#
     // again at 18.0.0-next.0 (ADR-0032 §3), which declares `screen`
     // `defaults.*`, `script` `inputs.*` and `subflow` `input.*` as well; the
     // next case measures the same confirmation for those three (objectui#12030).
+    // It grew to seven when `isValueEnvelopeSlot` started reading an entry's
+    // block, so the `connector_action` input map the ledger roots in
+    // `connectorConfig` is offered at the path the designer table writes; the
+    // next case measures its confirmation against the judge `registerFlow`
+    // applies there.
     const keyValueFields = FLOW_NODE_CONFIG_TYPES.flatMap((type) =>
       fieldsForNodeType(type)
         .filter((f) => f.kind === 'keyValue')
@@ -62,18 +78,18 @@ describe('isValueEnvelopeSlot — read off the spec expression ledger (objectui#
       .map(({ type, path }) => `${type}:${path.join('.')}`);
     expect(offered.sort()).toEqual([
       'assignment:config.assignments',
+      'connector_action:connectorConfig.input',
       'create_record:config.fields',
       'screen:config.defaults',
       'script:config.inputs',
       'subflow:config.input',
       'update_record:config.fields',
     ]);
-    // The ledger's whole `value`-role list at 18.0.0-next.0. The six `KEY.*`
-    // maps above are the ones a key/value cell serves; the rest are single
-    // values (a filter, a collection, a recipient list, a record id) or a
-    // nested path, which this editor does not render per entry. The list grew
-    // at #27968 / #28150 with the one entry rooted in `connectorConfig`
-    // (`connector_action:input.*`), which `isValueEnvelopeSlot` does not offer.
+    // The ledger's whole `value`-role list. The seven `KEY.*` maps above are
+    // the ones a key/value cell serves; the rest are single values (a filter,
+    // a collection, a recipient list, a record id) or a nested path, which this
+    // editor does not render per entry. The list grew at #27968 / #28150 with
+    // the one entry rooted in `connectorConfig` (`connector_action:input.*`).
     expect(
       FLOW_NODE_EXPRESSION_PATHS.filter((e) => e.role === 'value').map((e) => `${e.nodeType}:${e.path}`).sort(),
     ).toEqual([
@@ -110,6 +126,10 @@ describe('isValueEnvelopeSlot — read off the spec expression ledger (objectui#
       'screen:defaults': (v: unknown) => ScreenConfigSchema.safeParse({ defaults: { name: v } }),
       'script:inputs': (v: unknown) => ScriptConfigSchema.safeParse({ function: 'my_fn', inputs: { name: v } }),
       'subflow:input': (v: unknown) => SubflowConfigSchema.safeParse({ flowName: 'child_flow', input: { name: v } }),
+      // The input map's block schema does not judge its values: `registerFlow`
+      // judges each envelope the ledger resolves there with the value-slot
+      // schema, and the `{…}` token with `flowNodeValueTemplateRefusals`.
+      'connector_action:connectorConfig.input': (v: unknown) => FlowValueSlotSchema.safeParse(v),
     } as const;
     const MALFORMED = [{ dialect: 'cel' }, { dialect: 'js', source: 'a' }];
     for (const [slot, parse] of Object.entries(slots)) {
