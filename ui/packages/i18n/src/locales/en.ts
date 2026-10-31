@@ -3383,6 +3383,7 @@ const en = {
         submitting: 'Updating…',
         mismatch: 'New passwords do not match.',
         sameAsTemporary: 'Choose a new password that is different from your temporary password.',
+        wrongPassword: 'The password you entered is incorrect. Check it and try again.',
         failed: 'Could not change password.',
       },
       mfa: {

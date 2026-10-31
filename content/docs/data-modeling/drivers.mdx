@@ -944,11 +944,13 @@ export default defineStack({
 ```
 
 Each `url` must be credential-free when the stack is published: a
-`user:password@` URL is refused, like an inline `config.password`. Bind the
-password through `external.credentialsRef` instead, keeping the user in the URL
-(`mongodb://svc@host/db`): the bound secret is injected beside it at connect. The
-[read-only example](#read-only-grant-it-at-the-database-not-in-metadata) below
-shows the binding.
+`user:password@` URL is refused, like an inline `config.password`. Keep the user
+in the URL (`mongodb://svc@host/db`) and supply the password at runtime: a
+datasource declared in code reads it at connect from `OS_DATASOURCE_<NAME>_PASSWORD`
+(`OS_DATASOURCE_ANALYTICS_PASSWORD` here), which `os serve` / `os start` honour by
+default, and the value is injected beside the user. A datasource created through
+Setup binds it through `external.credentialsRef` instead. See
+[Credentials](/docs/data-modeling/external-datasources#4-credentials).
 
 Then in your object definition:
 
@@ -990,19 +992,21 @@ export const Analytics = defineDatasource({
   driver: 'postgres',
   // The connection itself cannot write. Nothing in the app can talk past it.
   config: { host: 'db.internal', database: 'analytics', username: 'analytics_ro' },
-  // The account's password, bound through the secret store (see below).
-  external: { credentialsRef: 'sys_secret:9f2c…' },
+  // The account's password is read at connect from OS_DATASOURCE_ANALYTICS_PASSWORD.
   active: true,
 });
 ```
 
 The read-only account's password never goes in `config`: the driver contract
-refuses `config.password`, and a `user:password@` URL, at publish. Bind it
-instead. The Setup → Datasources connection form's secret field encrypts it into
-`sys_secret` and stores the opaque handle at `external.credentialsRef`, or you
-write a handle the secret store minted there yourself. `credentialsRef` is the
-one `external` key a `managed` datasource may carry; every federation key is
-still refused there. See
+refuses `config.password`, and a `user:password@` URL, at publish. Because this
+datasource is defined in code, the runtime reads the password at connect from
+`OS_DATASOURCE_ANALYTICS_PASSWORD`, derived from its name. The CLI host
+(`os serve` / `os start`) reads it by default; elsewhere the host turns it on
+with `OS_DATASOURCE_ENV_CREDENTIALS=on`. The same datasource created through
+Setup → Datasources binds the password instead: the connection form's secret
+field encrypts it into `sys_secret` and stores the opaque handle at
+`external.credentialsRef`. `credentialsRef` is the one `external` key a `managed`
+datasource may carry; every federation key is still refused there. See
 [Credentials](/docs/data-modeling/external-datasources#4-credentials).
 
 Note that a read-only account also refuses **DDL**, so such a datasource cannot

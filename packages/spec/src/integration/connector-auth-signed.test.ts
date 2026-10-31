@@ -31,6 +31,13 @@ const aliyun = {
   credentialRef: 'ALIYUN_ACCESS_KEY_SECRET',
 };
 
+const tencent = {
+  type: 'signed',
+  scheme: 'tencentcloud-tc3-hmac-sha256',
+  keyId: 'test-secret-id',
+  credentialRef: 'TENCENT_SECRET_KEY',
+};
+
 /** The issues of a refused parse, as `code @ path` — what each refusal pins. */
 function refused(input: unknown) {
   const result = DeclarativeConnectorEntrySchema.safeParse(input);
@@ -47,12 +54,20 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
     expect(DeclarativeConnectorEntrySchema.parse(entry(aliyun, openapi)).auth).toEqual(aliyun);
   });
 
+  it('CONTROL: accepts tencentcloud-tc3-hmac-sha256 with a SecretId and the SecretKey as a reference, on rest and openapi', () => {
+    const cvm = { providerConfig: { baseUrl: 'https://cvm.tencentcloudapi.com' } };
+    expect(DeclarativeConnectorEntrySchema.parse(entry(tencent, cvm)).auth).toEqual(tencent);
+    const openapi = { provider: 'openapi', providerConfig: { spec: './cvm-openapi.json' } };
+    expect(DeclarativeConnectorEntrySchema.parse(entry(tencent, openapi)).auth).toEqual(tencent);
+  });
+
   it('refuses an unknown scheme at `auth.scheme`, naming the scheme it got and the ones that ship', () => {
     for (const scheme of ['aws-sigv4', 'wechatpay-rsa2048', 'hmac-sha256-generic', 'alipay-rsa2']) {
       const issues = refused(entry({ ...aliyun, scheme }));
       expect(issues.map((i) => `${i.code} @ ${i.path.join('.')}`)).toEqual(['invalid_union @ auth.scheme']);
       expect(issues[0]!.message).toContain(`"${scheme}"`);
       expect(issues[0]!.message).toContain("'aliyun-acs3-hmac-sha256'");
+      expect(issues[0]!.message).toContain("'tencentcloud-tc3-hmac-sha256'");
     }
   });
 
@@ -63,13 +78,15 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
     expect(issues[0]!.message).toContain('needs a `scheme`');
   });
 
-  it('refuses each inline-secret spelling by name, pointing at credentialRef', () => {
-    for (const key of ['secret', 'privateKey', 'secretKey', 'accessKeySecret']) {
-      const issues = refused(entry({ ...aliyun, [key]: 'inline' }));
-      expect(issues.map((i) => [i.code, i.path.join('.'), (i as { keys?: string[] }).keys])).toEqual([
-        ['unrecognized_keys', 'auth', [key]],
-      ]);
-      expect(issues[0]!.message).toContain('credentialRef');
+  it('refuses each inline-secret spelling by name, pointing at credentialRef, on every scheme', () => {
+    for (const shape of [aliyun, tencent]) {
+      for (const key of ['secret', 'privateKey', 'secretKey', 'accessKeySecret']) {
+        const issues = refused(entry({ ...shape, [key]: 'inline' }));
+        expect(issues.map((i) => [i.code, i.path.join('.'), (i as { keys?: string[] }).keys])).toEqual([
+          ['unrecognized_keys', 'auth', [key]],
+        ]);
+        expect(issues[0]!.message).toContain('credentialRef');
+      }
     }
   });
 
@@ -84,6 +101,13 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
   it("answers Alibaba Cloud's own word for the key id with `keyId`", () => {
     const { keyId, ...rest } = aliyun;
     const issues = refused(entry({ ...rest, accessKeyId: keyId }));
+    const unknown = issues.find((i) => i.code === 'unrecognized_keys')!;
+    expect(unknown.message).toContain('keyId');
+  });
+
+  it("answers Tencent Cloud's own word for the key id with `keyId`", () => {
+    const { keyId, ...rest } = tencent;
+    const issues = refused(entry({ ...rest, secretId: keyId }));
     const unknown = issues.find((i) => i.code === 'unrecognized_keys')!;
     expect(unknown.message).toContain('keyId');
   });
@@ -109,5 +133,6 @@ describe('ADR-0143 D2.3 — `signed` instance auth', () => {
 
   it('is a member of the closed instance-auth union', () => {
     expect(ConnectorInstanceAuthSchema.safeParse(aliyun).success).toBe(true);
+    expect(ConnectorInstanceAuthSchema.safeParse(tencent).success).toBe(true);
   });
 });

@@ -2826,6 +2826,7 @@ const de = {
         submitting: "Wird aktualisiert…",
         mismatch: "Die neuen Passwörter stimmen nicht überein.",
         sameAsTemporary: "Wählen Sie ein neues Passwort, das sich von Ihrem temporären Passwort unterscheidet.",
+        wrongPassword: "Das eingegebene Passwort ist falsch. Prüfen Sie es und versuchen Sie es erneut.",
         failed: "Passwort konnte nicht geändert werden.",
       },
       mfa: {
