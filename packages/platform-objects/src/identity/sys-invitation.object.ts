@@ -205,6 +205,8 @@ export const SysInvitation = ObjectSchema.create({
         fields: [{ path: 'acceptUrl', label: 'Invite link' }],
         acknowledge: 'Done',
       },
+      // ADR-0011 identity-actions note, bucket H: human-only, no `ai` block.
+      // It answers the accept link, a bearer credential.
     },
 
     // ── Recipient-side actions (the invited user) ────────────────────
