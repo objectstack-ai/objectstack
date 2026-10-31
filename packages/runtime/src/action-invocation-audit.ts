@@ -49,7 +49,9 @@
  *    `<object>/<action>` of the outer action, the same header the inner door
  *    already reads for its loop refusal. A HINT, not a surface: any caller
  *    can send the mark, so a forged one mislabels this hint and nothing else,
- *    and the inner row's `surface: 'rest'` stays the door's own.
+ *    and the inner row's `surface: 'rest'` stays the door's own. Because it is
+ *    caller text written into the ledger, only a mark in the forwarding
+ *    door's own shape is recorded ({@link actionInvocationForwardedFrom}).
  *
  * ## The writer
  *
@@ -65,6 +67,7 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 import { resolveThrownHttpError } from '@objectstack/types';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
@@ -133,14 +136,32 @@ export function actionInvocationTarget(action: any, isDeclarativeUpdate: boolean
 }
 
 /**
+ * The longest forward mark the inner row records. Two machine names and a
+ * slash; a declared object or action name is a storage identifier, far below
+ * this. A longer header is not a mark any forwarding door wrote.
+ */
+export const ACTION_FORWARD_MARK_MAX_LENGTH = 255;
+
+/**
  * The forward mark a request arrived carrying, for the inner row's
  * `forwardedFrom` — read from the header the forwarding door sets
  * (`API_FORWARD_MARK_HEADER`, passed in so this file does not import the
  * dispatch module that imports it). A hint, not a surface: see the header.
+ *
+ * The header is caller-controlled text bound for the compliance ledger, so it
+ * is recorded only in the shape the forwarding door writes — `OBJECT/ACTION`,
+ * each segment a machine name by `SnakeCaseIdentifierSchema` (the grammar the
+ * object and action declarations are held to, `global` for an object-less
+ * action included), at most {@link ACTION_FORWARD_MARK_MAX_LENGTH} characters.
+ * Anything else is left out of the row. Never a refusal: the mark gates
+ * nothing here, and the door's answer is the same either way.
  */
 export function actionInvocationForwardedFrom(requestContext: HttpProtocolContext | undefined, markHeader: string): string | undefined {
     const mark = requestContext?.request?.headers?.[markHeader];
-    return typeof mark === 'string' && mark.trim() !== '' ? mark.trim() : undefined;
+    if (typeof mark !== 'string' || mark.length > ACTION_FORWARD_MARK_MAX_LENGTH) return undefined;
+    const segments = mark.split('/');
+    if (segments.length !== 2) return undefined;
+    return segments.every((segment) => SnakeCaseIdentifierSchema.safeParse(segment).success) ? mark : undefined;
 }
 
 /**

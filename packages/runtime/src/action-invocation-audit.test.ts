@@ -29,6 +29,7 @@ import {
     actionInvocationFailure,
     actionInvocationForwardedFrom,
     actionInvocationTarget,
+    ACTION_FORWARD_MARK_MAX_LENGTH,
 } from './action-invocation-audit.js';
 
 const OBJECT = 'aud_lead';
@@ -347,12 +348,25 @@ describe('[#28281] an api forward to another action route: the two rows name eac
         expect(rig.events[0].target).toBe(API.target);
     });
 
-    it('a forged mark is recorded as the hint it is, and moves nothing else on the row', async () => {
+    it('a forged mark in the forward\'s shape is recorded as the hint it is, and moves nothing else on the row', async () => {
         const rig = makeRig();
         const res = await rig.viaRest(SCRIPT, { userId: 'u_member' }, { [API_FORWARD_MARK_HEADER]: 'aud_lead/forged' });
         expect(res.status).toBe(200);
         expect(rig.events).toHaveLength(1);
         expect(rig.events[0]).toMatchObject({ forwardedFrom: 'aud_lead/forged', outcome: 'succeeded', branch: 'script' });
+        expect(rig.events[0].context.surface).toBe('rest');
+    });
+
+    it.each([
+        ['over-long', `aud_lead/${'x'.repeat(4096)}`],
+        ['malformed', 'aud_lead/forward_lead; DROP TABLE sys_audit_log'],
+    ])('a forged %s mark is left out of the row; the call is answered and recorded exactly as without it', async (_kind, mark) => {
+        const rig = makeRig();
+        const res = await rig.viaRest(SCRIPT, { userId: 'u_member' }, { [API_FORWARD_MARK_HEADER]: mark });
+        expect(res.status).toBe(200);
+        expect(rig.events).toHaveLength(1);
+        expect(rig.events[0]).toMatchObject({ actionName: SCRIPT.name, outcome: 'succeeded', branch: 'script' });
+        expect(rig.events[0].forwardedFrom).toBeUndefined();
         expect(rig.events[0].context.surface).toBe('rest');
     });
 });
@@ -413,11 +427,21 @@ describe('[#27908] the helpers', () => {
         expect(actionInvocationTarget({ type: 'api', target: '  ' }, false)).toBeUndefined();
     });
 
-    it('actionInvocationForwardedFrom reads a non-empty string mark and nothing else', () => {
-        const at = (headers: Record<string, unknown>) => ({ request: { headers } }) as any;
-        expect(actionInvocationForwardedFrom(at({ [API_FORWARD_MARK_HEADER]: 'o/a' }), API_FORWARD_MARK_HEADER)).toBe('o/a');
-        expect(actionInvocationForwardedFrom(at({ [API_FORWARD_MARK_HEADER]: '' }), API_FORWARD_MARK_HEADER)).toBeUndefined();
-        expect(actionInvocationForwardedFrom(at({ [API_FORWARD_MARK_HEADER]: ['o/a'] }), API_FORWARD_MARK_HEADER)).toBeUndefined();
+    it('actionInvocationForwardedFrom records only a mark in the forwarding door\'s own shape', () => {
+        const read = (mark: unknown) => actionInvocationForwardedFrom(
+            { request: { headers: { [API_FORWARD_MARK_HEADER]: mark } } } as any, API_FORWARD_MARK_HEADER);
+        expect(read('aud_lead/forward_lead')).toBe('aud_lead/forward_lead');
+        expect(read('global/log_call')).toBe('global/log_call');
+        const longest = `${'a'.repeat(127)}/${'b'.repeat(127)}`;
+        expect(longest).toHaveLength(ACTION_FORWARD_MARK_MAX_LENGTH);
+        expect(read(longest)).toBe(longest);
+        for (const malformed of [
+            '', 'aud_lead', 'aud_lead/', '/forward_lead', 'aud_lead/forward_lead/extra', 'Aud_Lead/forward_lead',
+            'aud_lead/forward lead', ' aud_lead/forward_lead', 'aud_lead/forward_lead\n', '*/log_call', 'a/forward_lead',
+            '1lead/forward_lead', `${'a'.repeat(128)}/${'b'.repeat(127)}`, ['aud_lead/forward_lead'], 42,
+        ]) {
+            expect(read(malformed)).toBeUndefined();
+        }
         expect(actionInvocationForwardedFrom(undefined, API_FORWARD_MARK_HEADER)).toBeUndefined();
     });
 
