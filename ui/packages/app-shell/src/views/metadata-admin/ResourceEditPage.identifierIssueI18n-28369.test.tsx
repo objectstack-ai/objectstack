@@ -123,7 +123,7 @@ async function bannerLinesForChineseLabel(): Promise<HTMLElement[]> {
       <MetadataResourceEditPage type="permission" name="" createMode />
     </MemoryRouter>,
   );
-  const labelBox = (await screen.findByRole('textbox', { name: /^(Label|显示名称)/ }, { timeout: 8000 })) as HTMLInputElement;
+  const labelBox = (await screen.findByRole('textbox', { name: /^(Label|标签)/ }, { timeout: 8000 })) as HTMLInputElement;
   fireEvent.change(labelBox, { target: { value: '销售运营' } });
   const banner = await screen.findByTestId('metadata-validation-banner', {}, { timeout: 8000 });
   await waitFor(() => expect(banner.querySelectorAll('[data-testid="metadata-diagnostics-item"]').length).toBeGreaterThanOrEqual(2));
