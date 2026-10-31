@@ -50,13 +50,11 @@ export {
   type OfflineDataSourceOptions,
   type QueueableDataSource,
 } from './createOfflineDataSource.js';
-export { useOfflineSync, type OfflineSyncState } from './useOfflineSync.js';
 export {
   getServiceWorkerSource,
-  requestBackgroundSync,
   type ServiceWorkerSourceOptions,
 } from './serviceWorkerSource.js';
-export { BREAKPOINTS, resolveResponsiveValue } from './breakpoints.js';
+export { BREAKPOINTS } from './breakpoints.js';
 
 // Re-export types for convenience
 export type {
