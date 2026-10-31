@@ -53,7 +53,11 @@ const gridOf = (container: HTMLElement) =>
 
 describe('framelessSectionColumns — 1–3 columns by the fields a section shows', () => {
   it('one field one column, two to five two, six and more three', () => {
-    expect([0, 1, 2, 5, 6, 12].map(framelessSectionColumns)).toEqual([1, 1, 2, 2, 3, 3]);
+    expect([0, 1, 2, 5, 6, 12].map((n) => framelessSectionColumns(n))).toEqual([1, 1, 2, 2, 3, 3]);
+  });
+
+  it('never more than the cap: two beside a 320 px right column (objectstack#27524)', () => {
+    expect([0, 1, 2, 6, 12].map((n) => framelessSectionColumns(n, 2))).toEqual([1, 1, 2, 2, 2]);
   });
 });
 

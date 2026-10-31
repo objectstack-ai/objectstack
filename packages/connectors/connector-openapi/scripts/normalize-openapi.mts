@@ -7,8 +7,8 @@
  *
  *   pnpm --filter @objectstack/connector-openapi normalize-openapi \
  *     --in <file | http(s) URL> --out <file.json> \
- *     [--include-pattern <regex>]... [--max-depth <n>] [--server-url <url>] \
- *     [--empty-consumes <media type>]
+ *     [--include-pattern <regex>]... [--trim] [--max-depth <n>] \
+ *     [--server-url <url>] [--empty-consumes <media type>]
  *
  * The runtime never converts: `openapi-provider.ts` refuses a document that is
  * not 3.x, and the generator skips a `$ref` parameter, request body or response
@@ -25,8 +25,24 @@
  *      `securitySchemes` stay: they are referenced by name, not by `$ref`);
  *   5. make `servers[0].url` absolute (server variables take their defaults; a
  *      relative URL resolves against the source URL, or `--server-url`);
- *   6. optionally compute the `providerConfig.include` list from allow-patterns;
+ *   6. optionally compute the `providerConfig.include` list from allow-patterns,
+ *      and with `--trim` keep ONLY the operations they match (below);
  *   7. write the JSON and print its sha256 -- the hash of the bytes written.
+ *
+ * ## `--trim`: package the operations the app calls, not the vendor's catalogue
+ *
+ * Without `--trim` the whole document is written and the allow-patterns only
+ * compute `include`: the app can widen `include` later by editing config. A
+ * large vendor document is then shipped whole -- measured on Stripe's
+ * `spec3.json`, 612 operations and 63,317,655 bytes at the default depth for an
+ * app that calls six. `--trim` (which requires at least one
+ * `--include-pattern`) drops every path operation no pattern matches, every
+ * path item left with none, and `webhooks`, BEFORE step 4 -- so only the kept
+ * operations are dereferenced, and nothing reachable only from a dropped one
+ * survives into the output. The `include` list is the same one an untrimmed
+ * run computes (the same patterns, the same `operationActionKey`), and the
+ * printed sha256 is still the hash of the bytes written: the trimmed bytes.
+ * The `securitySchemes` stay, as in step 4: they are referenced by name.
  *
  * ## Where a `$ref` is cut, and why it has to be
  *
@@ -89,6 +105,8 @@ export interface NormalizeOptions {
   input: string;
   /** Allow-patterns (JavaScript regular expressions) for the generated `include` list. */
   includePatterns?: readonly string[];
+  /** Keep only the operations {@link includePatterns} match (requires at least one pattern). */
+  trim?: boolean;
   /** Named-schema hops inlined before a stub (default {@link DEFAULT_MAX_DEPTH}). */
   maxDepth?: number;
   /** Absolute http(s) URL that replaces `servers[0].url`. */
@@ -113,8 +131,10 @@ export interface NormalizeResult {
   sourceVersion: string;
   /** The output document's `openapi` version. */
   openapi: string;
-  /** Every operation's action key, in document order, de-duplicated. */
+  /** Every written operation's action key, in document order, de-duplicated. */
   operationKeys: string[];
+  /** Operations in the source document -- more than `operationKeys` only when trimmed. */
+  sourceOperations: number;
   /** The `providerConfig.include` list, when allow-patterns were given. */
   include?: string[];
   /** Schema references replaced by a stub, by reason. */
@@ -144,6 +164,12 @@ export async function normalizeOpenApi(options: NormalizeOptions): Promise<Norma
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
   if (!Number.isInteger(maxDepth) || maxDepth < 0) {
     throw new NormalizeError(`--max-depth must be a non-negative integer, got ${String(options.maxDepth)}.`);
+  }
+  const patterns = compilePatterns(options.includePatterns);
+  if (options.trim && patterns.length === 0) {
+    throw new NormalizeError(
+      '--trim keeps only the operations --include-pattern matches; give at least one --include-pattern.',
+    );
   }
   const fromUrl = isHttpUrl(options.input);
   const origin = fromUrl ? options.input : resolvePath(options.cwd ?? process.cwd(), options.input);
@@ -212,6 +238,15 @@ export async function normalizeOpenApi(options: NormalizeOptions): Promise<Norma
   // only existed to be referenced.
   const cuts: CutCounts = { recursive: 0, maxDepth: 0, extension: 0 };
   const deref = new Dereferencer(document, maxDepth, cuts);
+  // `--trim` selects BEFORE dereferencing: a dropped operation is never walked.
+  let sourceOperations: number | undefined;
+  if (options.trim) {
+    const trimmed = trimPaths(document.paths, patterns, deref);
+    sourceOperations = trimmed.sourceOperations;
+    if (trimmed.kept === 0) throw noMatch(sourceOperations);
+    document = { ...document, paths: trimmed.paths };
+    delete document.webhooks;
+  }
   const out: JsonObject = {};
   for (const [key, value] of Object.entries(document)) {
     if (key === 'x-ext' || key === 'x-ext-urls') continue;
@@ -230,27 +265,9 @@ export async function normalizeOpenApi(options: NormalizeOptions): Promise<Norma
   const operations = listOperations(out);
   const operationKeys = [...new Set(operations.map((op) => op.key))];
   let include: string[] | undefined;
-  if (options.includePatterns && options.includePatterns.length > 0) {
-    const patterns = options.includePatterns.map((source) => {
-      try {
-        return new RegExp(source);
-      } catch (err) {
-        throw new NormalizeError(`--include-pattern '${source}' is not a valid regular expression: ${(err as Error).message}`);
-      }
-    });
-    include = [
-      ...new Set(
-        operations
-          .filter((op) => patterns.some((p) => p.test(op.key) || p.test(`${op.method.toUpperCase()} ${op.path}`)))
-          .map((op) => op.key),
-      ),
-    ];
-    if (include.length === 0) {
-      throw new NormalizeError(
-        `--include-pattern matched none of the ${operationKeys.length} operation(s); a pattern is tested against ` +
-          `each action key (an operationId, or the method_path key) and against 'METHOD /path'.`,
-      );
-    }
+  if (patterns.length > 0) {
+    include = [...new Set(operations.filter((op) => matches(patterns, op)).map((op) => op.key))];
+    if (include.length === 0) throw noMatch(operations.length);
   }
 
   // 7. The bytes, and their hash.
@@ -263,11 +280,78 @@ export async function normalizeOpenApi(options: NormalizeOptions): Promise<Norma
     sourceVersion,
     openapi: String(out.openapi),
     operationKeys,
+    sourceOperations: sourceOperations ?? operations.length,
     include,
     cuts,
     refsLeft: countRefs(out),
     filledConsumes,
   };
+}
+
+/** Compile the allow-patterns; an invalid one is a refusal naming it. */
+function compilePatterns(sources: readonly string[] | undefined): RegExp[] {
+  return (sources ?? []).map((source) => {
+    try {
+      return new RegExp(source);
+    } catch (err) {
+      throw new NormalizeError(`--include-pattern '${source}' is not a valid regular expression: ${(err as Error).message}`);
+    }
+  });
+}
+
+/** An allow-pattern is tested against the action key and against 'METHOD /path'. */
+const matches = (patterns: readonly RegExp[], op: { key: string; method: string; path: string }): boolean =>
+  patterns.some((p) => p.test(op.key) || p.test(`${op.method.toUpperCase()} ${op.path}`));
+
+const noMatch = (total: number): NormalizeError =>
+  new NormalizeError(
+    `--include-pattern matched none of the ${total} operation(s); a pattern is tested against ` +
+      `each action key (an operationId, or the method_path key) and against 'METHOD /path'.`,
+  );
+
+/**
+ * `--trim`: the `paths` object with only the operations a pattern matches. A
+ * path item keeps its non-operation keys (`parameters`, `summary`, `servers`,
+ * extensions); one left with no operation is dropped. A `$ref` path item is
+ * resolved first (its operations live in the target), without walking it.
+ */
+function trimPaths(
+  paths: Json | undefined,
+  patterns: readonly RegExp[],
+  deref: Dereferencer,
+): { paths: JsonObject; kept: number; sourceOperations: number } {
+  const out: JsonObject = {};
+  let kept = 0;
+  let sourceOperations = 0;
+  for (const [path, raw] of Object.entries(isObject(paths) ? paths : {})) {
+    if (path.startsWith('x-')) {
+      put(out, path, raw);
+      continue;
+    }
+    const item = deref.target(raw);
+    if (!isObject(item)) continue;
+    const trimmed: JsonObject = {};
+    let keptHere = 0;
+    for (const [key, value] of Object.entries(item)) {
+      const method = HTTP_METHODS.find((m) => m === key);
+      if (method === undefined) {
+        put(trimmed, key, value);
+        continue;
+      }
+      if (!isObject(value)) continue;
+      sourceOperations++;
+      const operationId = typeof value.operationId === 'string' ? value.operationId : undefined;
+      if (matches(patterns, { key: operationActionKey({ operationId, method, path }), method, path })) {
+        put(trimmed, key, value);
+        keptHere++;
+      }
+    }
+    if (keptHere > 0) {
+      put(out, path, trimmed);
+      kept += keptHere;
+    }
+  }
+  return { paths: out, kept, sourceOperations };
 }
 
 /** Count `$ref` keys anywhere in a value. */
@@ -389,6 +473,27 @@ class Dereferencer {
       }
     }
     return out;
+  }
+
+  /**
+   * A `$ref` object's target, followed to the end of its chain with the
+   * referring object's sibling keys laid over it, and nothing inside walked:
+   * what a `$ref` path item stands for, before `--trim` selects its operations.
+   */
+  target(node: Json): Json {
+    const seen = new Set<string>();
+    let current = node;
+    let siblings: JsonObject = {};
+    while (isObject(current) && typeof current.$ref === 'string') {
+      if (seen.has(current.$ref)) {
+        throw new NormalizeError(`the document's $ref '${current.$ref}' refers to itself outside a schema; it has no inline form.`);
+      }
+      seen.add(current.$ref);
+      const { $ref, ...rest } = current;
+      siblings = { ...rest, ...siblings };
+      current = this.resolve($ref);
+    }
+    return isObject(current) ? { ...current, ...siblings } : current;
   }
 
   /** Literal data: a `$ref` to it is resolved, and nothing inside it is walked. */
@@ -537,7 +642,7 @@ function listOperations(doc: JsonObject): { key: string; method: string; path: s
 }
 
 const USAGE =
-  'usage: normalize-openapi --in <file | http(s) URL> --out <file.json> [--include-pattern <regex>]... ' +
+  'usage: normalize-openapi --in <file | http(s) URL> --out <file.json> [--include-pattern <regex>]... [--trim] ' +
   `[--max-depth <n> (default ${DEFAULT_MAX_DEPTH})] [--server-url <url>] [--empty-consumes <media type>]`;
 
 /**
@@ -547,8 +652,13 @@ const USAGE =
  */
 export async function main(argv: readonly string[], io = { out: process.stdout, err: process.stderr }): Promise<number> {
   const flags: Record<string, string[]> = {};
+  let trim = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] as string;
+    if (arg === '--trim') {
+      trim = true;
+      continue;
+    }
     const value = argv[i + 1];
     if (!/^--(in|out|include-pattern|max-depth|server-url|empty-consumes)$/.test(arg) || value === undefined) {
       io.err.write(`normalize-openapi: unexpected argument '${arg}'.\n${USAGE}\n`);
@@ -573,6 +683,7 @@ export async function main(argv: readonly string[], io = { out: process.stdout, 
       input,
       cwd,
       includePatterns: flags['include-pattern'],
+      trim,
       maxDepth: depthFlag === undefined ? undefined : Number(depthFlag),
       serverUrl: single('server-url'),
       emptyConsumes: single('empty-consumes'),
@@ -590,6 +701,7 @@ export async function main(argv: readonly string[], io = { out: process.stdout, 
           sourceVersion: result.sourceVersion,
           openapi: result.openapi,
           operations: result.operationKeys.length,
+          ...(trim ? { trimmedFrom: result.sourceOperations } : {}),
           maxDepth: depthFlag === undefined ? DEFAULT_MAX_DEPTH : Number(depthFlag),
           cuts: result.cuts,
           refsLeft: result.refsLeft,

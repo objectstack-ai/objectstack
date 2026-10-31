@@ -184,8 +184,19 @@ match.
 ```bash
 pnpm --filter @objectstack/connector-openapi normalize-openapi \
   --in https://example.com/openapi.yaml --out ./specs/crm-openapi.json \
-  --include-pattern '^GET /v1/customers'
+  --include-pattern '^GET /v1/customers' --trim
 ```
+
+With `--trim` the document it writes holds **only** the operations the
+patterns match: every other operation, every path item left with none, and
+`webhooks` are dropped before inlining, so nothing reachable only from a
+dropped operation is written, and the printed sha256 is the hash of those
+trimmed bytes. Package that output — a large vendor document shrinks to the
+operations the app calls (Stripe's 612 operations, 63 MB at the default
+depth, become about 1.9 MB for six). Without `--trim` the whole document is
+written and the patterns only compute `include`, so `include` can be widened
+later by editing config alone; with it, widening means re-running the script.
+`--trim` without an `--include-pattern` is refused.
 
 Inlining is bounded: a recursive schema, or one more than `--max-depth`
 (default 2) named schemas deep, becomes a typed stub whose description names

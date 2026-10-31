@@ -235,6 +235,13 @@ function renderRecordPage() {
 }
 
 const attr = (probe: HTMLElement, name: string) => probe.getAttribute(`data-${name}`);
+/**
+ * The probe. The page draws its blocks through several renderers since
+ * objectstack#27524 (the header, the details, each right-column panel), all
+ * inside the one `<InlineEditProvider>`, so every probe prints the same
+ * values: the first is read.
+ */
+const pageProbe = async () => (await screen.findAllByTestId('inline-probe'))[0];
 
 let consoleError: ReturnType<typeof vi.spyOn>;
 
@@ -258,7 +265,7 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   it('a non-participant on a record held by a locking approval is offered no inline edit', async () => {
     stubApprovalsApi({ row: null }, { locked: true });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
 
     await waitFor(() => expect(attr(probe, 'locked')).toBe('true'));
     expect(lockGets).toHaveLength(1);
@@ -272,7 +279,7 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   it('a record the server reports unlocked opens editable', async () => {
     stubApprovalsApi({ row: null }, { locked: false });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
 
     await waitFor(() => expect(lockGets).toHaveLength(1));
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
@@ -284,7 +291,7 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   it('without the approvals service (lock read 501) nothing changes: an answered empty read is not locked', async () => {
     stubApprovalsApi({ row: null }, { refused: 501 });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
 
     await waitFor(() => expect(lockGets).toHaveLength(1));
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
@@ -296,7 +303,7 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   it('the 501 of a composition without the approvals service logs nothing, and the lock is not read again (objectstack#26632)', async () => {
     stubApprovalsApi({ row: null }, { refused: 501 });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
     await waitFor(() => expect(lockGets).toHaveLength(1));
     expect(lockErrorLines()).toEqual([]);
@@ -306,7 +313,7 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
     cleanup();
     renderRecordPage();
     await waitFor(() => expect(listGets.length).toBeGreaterThanOrEqual(2));
-    const again = await screen.findByTestId('inline-probe');
+    const again = await pageProbe();
     await waitFor(() => expect(attr(again, 'approval-read-answered')).toBe('true'));
     expect(attr(again, 'locked')).toBe('false');
     expect(lockGets).toHaveLength(1);
@@ -316,7 +323,7 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   it('any other lock-read failure still logs, and the next open asks again', async () => {
     stubApprovalsApi({ row: null }, { refused: 500 });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
     await waitFor(() => expect(lockErrorLines()).toHaveLength(1));
     expect(String(lockErrorLines()[0][0])).toContain(`GET `);
@@ -331,7 +338,7 @@ describe('record page lock for a reader outside the approval (objectstack#25934)
   it('a participant\'s pending request decides, and the record lock is not read', async () => {
     stubApprovalsApi({ row: pendingRequest({ lock_record: false }) }, { locked: true });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
 
     await waitFor(() => expect(attr(probe, 'approval-pending')).toBe('true'));
     expect(attr(probe, 'locked')).toBe('false');

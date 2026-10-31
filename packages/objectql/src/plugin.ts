@@ -1340,6 +1340,51 @@ export class ObjectQLPlugin implements Plugin {
                 error: e.message,
             });
         }
+
+        // [ADR-0144 D4, Open item 4] The localization the write-time home
+        // projection reads: the organization's `localization.currency` (the
+        // home currency it converts into) and `localization.timezone` (the
+        // zone a `datetime` document date is dated in; ruling 6539345871,
+        // letter B), in one grouped `getMany` read. The settings service is
+        // resolved when a write asks, not here, so plugin order cannot leave
+        // the projection without it. No settings service, or a `localization`
+        // namespace or key not registered, is an unset setting — an unset home
+        // currency is refused, never defaulted, and an unset timezone reads
+        // UTC; a read that FAILS is the write's failure, not an unset setting.
+        const isUnregisteredSetting = (e: any) => e?.code === 'SETTINGS_UNKNOWN_NAMESPACE' || e?.code === 'SETTINGS_UNKNOWN_KEY';
+        const settingText = (resolved: { value?: unknown } | undefined) => (typeof resolved?.value === 'string' ? resolved.value : undefined);
+        this.ql.setHomeLocalizationResolver(async (organizationId) => {
+            let settings: {
+                get?: (ns: string, key: string, c?: Record<string, unknown>) => Promise<{ value?: unknown } | undefined>;
+                getMany?: (ns: string, keys: string[], c?: Record<string, unknown>) => Promise<Record<string, { value?: unknown } | undefined>>;
+            } | undefined;
+            try {
+                settings = ctx.getService('settings') as typeof settings;
+            } catch {
+                return undefined;
+            }
+            if (!settings || typeof settings.get !== 'function') return undefined;
+            const scope = organizationId !== undefined ? { tenantId: organizationId } : {};
+            if (typeof settings.getMany === 'function') {
+                try {
+                    const many = await settings.getMany('localization', ['currency', 'timezone'], scope);
+                    return { currency: settingText(many?.currency), timezone: settingText(many?.timezone) };
+                } catch (e: any) {
+                    // `getMany` is all-or-nothing: one unregistered key refuses
+                    // both, so each is asked on its own below.
+                    if (!isUnregisteredSetting(e)) throw e;
+                }
+            }
+            const one = async (key: string) => {
+                try {
+                    return settingText(await settings!.get!('localization', key, scope));
+                } catch (e: any) {
+                    if (isUnregisteredSetting(e)) return undefined;
+                    throw e;
+                }
+            };
+            return { currency: await one('currency'), timezone: await one('timezone') };
+        });
     }
 
     // Initialize drivers (calls driver.connect() which sets up persistence)

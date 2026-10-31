@@ -113,8 +113,10 @@ administrator, not for a contributor:
   every one of them ([Setting a credential](/docs/automation/connectors#setting-a-credential)).
   The README is still where the administrator learns what each value is and
   where to get it. An app that ships declarative
-  connectors gains an offline spec-normalization tool with
-  [#26709](https://github.com/objectstack-ai/objectstack/issues/26709).
+  OpenAPI connectors produces its packaged document with the offline
+  `normalize-openapi` script: `--trim` keeps only the operations the app calls,
+  and the sha256 it prints is the one to record here
+  ([`provider: 'openapi'`](/docs/automation/connectors#provider-openapi--one-action-per-operation)).
 
 ## Build and verify before publishing
 

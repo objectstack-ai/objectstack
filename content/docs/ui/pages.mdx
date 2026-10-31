@@ -180,33 +180,33 @@ replacement.
 ### The synthesized default
 
 A record page needs no authoring. With no page assigned, the Console synthesizes one from
-the object: a header, the highlights strip and a tab strip of **Details**, **Timeline** and
-**Related**, plus **Approvals** when the record has approval requests. A relationship whose
-child field declares `relatedList: 'primary'` is part of the record's body: its list is a
-full-width table inside **Details**, after the first field section, with no tab of its own.
-The other related lists are cards in the shared **Related** tab, which an object with
-`enable: { files: true }` closes with its attachments. **Timeline** is one stream: the
-discussion composer on top, then the discussion, the activity and, with
-`enable: { trackHistory: true }`, the record's field changes, filtered by All / Activity /
-Discussion / Changes; there is no separate History tab. Moving a child table into the
-record's body is therefore a one-word change on the relationship field, not a
-page-authoring task, and `relatedList: false` leaves a child off the page.
+the object: a header, the highlights strip, the record's **details**, and a right column of
+panels: **动态** (Activity) first, then the related lists, **Approvals** when the record has
+approval requests, and the attachments of an object with `enable: { files: true }`. A
+relationship whose child field declares `relatedList: 'primary'` is part of the record's body:
+its list is a full-width table in the details, after the first field section, with no panel of
+its own. **动态** is one stream: the discussion, the activity and, with
+`enable: { trackHistory: true }`, the record's field changes; there is no separate History tab.
+Its panel shows a one-line composer and the newest entries, and its header opens the whole
+stream (`?related=timeline`), filtered by All / Activity / Discussion / Changes. A related
+panel's header opens that list's whole table the same way (`?related=<object>.<field>`).
+Moving a child table into the record's body is therefore a one-word change on the
+relationship field, not a page-authoring task, and `relatedList: false` leaves a child off the
+page.
 
-The Console lays the page out by the width of the surface it occupies (the drawer, the
-split pane or the full page), never by the viewport. From 1280 px the tabs become three
-columns: details, the timeline stream and the
-related lists as cards with Approvals, Attachments and the created/updated line. From
-1024 px the related column folds into a rail behind a **Related (N)** toggle. Below that, and
-always in a drawer or split pane, the tab strip is drawn. `?tab=` selects a tab in the strip.
+The Console lays the page out by the width of the surface it occupies (the full page, the split
+pane or the drawer), never by the viewport, and by one rule. From 760 px the details sit beside
+the right column, 320 px wide; from 1120 px the right column is 380 px and a details section
+takes up to three field columns. Below 760 px (the split pane, a phone) the page is one column:
+the details, then the right column's panels in their order. The **⊟** switch at the end of the
+record header's actions (`⌘⇧,`) hides the right column for the reader, per object.
 
-In the column tiers the related column loads in steps, and the details column never waits for
-it. The page asks every card's count in one request set, sent beside the record read, and the
-cards show placeholders until those counts land. A card counted at 0 is its title row alone
-and reads no rows. A card above 0 reads its first three rows once it scrolls into view, asking
-only for the record's name field and one status or date field. When the timeline column is
-switched off, its **Activity** card in the related column stays closed, and reads nothing, until
-it is opened. In a drawer, the record that **↑** / **↓** would show next has its related counts
-read ahead.
+The related panels load in steps, and the details never wait for them. The page asks every
+panel's count in one request set, sent beside the record read, and the panels show
+placeholders until those counts land. A panel counted at 0 reads no rows, and two or more of
+them fold into one line. A panel above 0 reads its first three rows once it scrolls into view,
+asking only for the record's name field and one status or date field. In a drawer, the record
+that **↑** / **↓** would show next has its related counts read ahead.
 
 ### Slotted pages
 
@@ -219,12 +219,12 @@ synthesizer fills in the rest. A slotted page authors `slots`, not `regions`:
 | `actions` | The action bar (`record:quick_actions`) |
 | `alerts` | The alert banners above the body |
 | `highlights` | The highlights strip |
-| `details` | The body of the Details tab; the other tabs stay synthesized |
+| `details` | The record's details; the rest of the page stays synthesized |
 | `discussion` | The discussion panel |
 
 Each slot takes one component or an array of them, and replaces its part whole: there is no
-deep merge. There is no `tabs` slot: the tab strip is composed from the object's fields and
-relationship flags. To change which related lists appear or their order, set `relatedList` /
+deep merge. There is no `tabs` slot: the page's panels are composed from the object's fields
+and relationship flags. To change which related lists appear or their order, set `relatedList` /
 `relatedList: 'primary'` on the child's reference field; a page that needs its own strip is
 `kind: 'full'`, drawn as authored. `slots.tabs`, `slots.related` and `slots.relatedLists` are
 refused by name, and `os migrate meta --from 17` drops a stored `slots.tabs`.
