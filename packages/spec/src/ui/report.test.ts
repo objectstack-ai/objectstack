@@ -631,7 +631,7 @@ describe('ReportSchema refuses a chart `seriesBy` that cannot split', () => {
   it('a joined report is untouched — its `chart` refusal stands alone, at `chart`', () => {
     const joined = {
       name: 'joined_pipeline', label: 'Joined', type: 'joined',
-      blocks: [{ name: 'a', label: 'A', type: 'summary', dataset: 'opportunities', values: ['amount'] }],
+      blocks: [{ name: 'open_block', type: 'summary', dataset: 'opportunities', rows: ['owner'], values: ['amount'] }],
       chart: { type: 'pie', xAxis: 'owner', yAxis: 'amount', seriesBy: 'owner' },
     };
     const r = ReportSchema.safeParse(joined);
