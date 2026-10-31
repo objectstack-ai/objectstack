@@ -464,6 +464,7 @@ describe('#6216 — the field set is CLOSED', () => {
     'skipStateMachine',
     'preserveAudit',
     'keptOptionValues',
+    'surface',
   ];
 
   it('every ExecutionContext field is either assembled at the entry or declared non-entry', () => {

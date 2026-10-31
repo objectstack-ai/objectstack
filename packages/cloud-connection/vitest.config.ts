@@ -86,6 +86,14 @@ export default defineConfig({
         find: /^@objectstack\/plugin-security$/,
         replacement: path.resolve(__dirname, '../plugins/plugin-security/src/index.ts'),
       },
+      // [#27627] `runtime-config-etag.test.ts` drives the per-request
+      // Server-Timing gate the route opens for an admin (`allowPerfDisclosure`),
+      // so it judges THIS checkout's gate, not an `observability/dist` that may
+      // be behind it. Anchored like the entries above.
+      {
+        find: /^@objectstack\/observability$/,
+        replacement: path.resolve(__dirname, '../observability/src/index.ts'),
+      },
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".
