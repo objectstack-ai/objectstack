@@ -227,6 +227,22 @@ describe('objectstack#28434 · a row\'s context menu lists exactly its "⋮" ite
     await waitFor(() => expect(fetchMock.mock.calls.map((call) => call[0])).toContain('/api/archive'));
   });
 
+  it('a row whose every action is hidden by its predicate still opens Open and Open in new tab', async () => {
+    // One gated action, no Edit/Delete, rows not selectable: Globex (active)
+    // offers nothing, yet the table offers row actions, so its menu still opens.
+    renderGrid({
+      rowActionDefs: [SECONDARY_ACTIONS[0]],
+      schema: { operations: { update: false, delete: false }, selection: { type: 'none' } },
+    });
+    await settle();
+    expect(within(rowOf('Globex')).queryByTestId('row-action-trigger')).toBeNull();
+    let allowed = true;
+    act(() => { allowed = rightClick(plainCellOf('Globex')); });
+    expect(allowed).toBe(false);
+    const menu = await screen.findByTestId('row-context-menu');
+    expect(itemIds(menu)).toEqual(OPEN_ITEMS);
+  });
+
   it('CONTROL — without a host record URL there is no Open in new tab, and Open stays', async () => {
     renderGrid({ host: false });
     await settle();
@@ -350,7 +366,7 @@ describe('objectstack#28434 · the browser keeps its own menu where it is the us
     expect(await screen.findByTestId('row-context-menu')).toBeInTheDocument();
   });
 
-  it('CONTROL — a grid whose rows offer no action and cannot be selected keeps the browser\'s menu', async () => {
+  it('CONTROL — a grid with no row action at all whose rows cannot be selected keeps the browser\'s menu', async () => {
     renderGrid({ rowActionDefs: [], schema: { operations: { update: false, delete: false }, selection: { type: 'none' } } });
     await waitFor(() => expect(screen.getByText('Initech')).toBeInTheDocument());
     expect(screen.queryAllByTestId('row-action-trigger')).toHaveLength(0);

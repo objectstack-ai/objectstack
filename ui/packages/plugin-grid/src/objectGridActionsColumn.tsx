@@ -223,9 +223,11 @@ export function resolveObjectGridActionsColumn({
     userLeftPinnedCount > 0 || pinnedRightCols.some((c: any) => c.accessorKey !== '_actions');
 
   return {
-    // objectstack#28434 — the row context menu reads the cell's own props and
+    // objectstack#28434 — the row context menu reads the cell's own props,
+    // whether this table offers row actions at all (a face-level answer), and
     // the cell's own "does this row offer anything" verdict.
     rowActionMenuProps,
+    tableOffersRowActions: hasActions || hasRowActions,
     rowOffersAction: (row: any): boolean => (hasActions || hasRowActions) && rowOffersAction(row),
     columnsWithActions, hasActions, hasPinnedColumns, hasUserPinnedColumns, pinnedLeftCols,
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,

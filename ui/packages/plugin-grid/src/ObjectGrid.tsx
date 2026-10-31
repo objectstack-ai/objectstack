@@ -1668,7 +1668,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // The Actions column and the pinned column sets (`./objectGridActionsColumn`).
   const {
-    rowActionMenuProps, rowOffersAction,
+    rowActionMenuProps, rowOffersAction, tableOffersRowActions,
     columnsWithActions, hasActions, hasPinnedColumns, hasUserPinnedColumns, pinnedLeftCols,
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   } = resolveObjectGridActionsColumn({
@@ -2630,7 +2630,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         />
       );
     }
-    if (!rowOffersAction(row) && !selectionMode) return null;
+    // The browser's menu stays on a table that offers no row action at all and
+    // whose rows cannot be selected — a face-level answer, so a row whose own
+    // actions are all hidden by their predicates still opens Open / Open in
+    // new tab like its neighbours.
+    if (!tableOffersRowActions && !selectionMode) return null;
     const recordId = rowRecordId(row);
     const newTabHref =
       schema.objectName && recordId != null && recordId !== '' && recordLinkHost?.recordHref
@@ -2639,6 +2643,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Open is what a click on the row does: a host's `onRowClick` owns it
     // outright, otherwise the navigation config does, and `none` opens nothing.
     const opens = !!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation);
+    // Nothing at all to list for this row: no Open, no URL, no action.
+    if (!opens && !newTabHref && !rowOffersAction(row)) return null;
     return (
       <RowContextMenuItems
         menu={rowActionMenuProps(row)}
