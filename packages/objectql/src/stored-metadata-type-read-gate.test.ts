@@ -113,52 +113,52 @@ describe('[#27884] stored-row read gate on the stored-metadata tables', () => {
     await engine.init();
     for (const table of ['sys_metadata', 'sys_metadata_history']) {
       engine.registry.registerObject(tableOf(table));
-      await engine.insert(table, { id: `${table}_ds`, type: 'datasource', name: 'ds_pin', metadata: datasourceBody }, { context: { isSystem: true } } as any);
-      await engine.insert(table, { id: `${table}_cat`, type: 'external_catalog', name: 'ds_pin', metadata: '{}' }, { context: { isSystem: true } } as any);
-      await engine.insert(table, { id: `${table}_view`, type: 'view', name: 'v_pin', metadata: viewBody }, { context: { isSystem: true } } as any);
+      await engine.insert(table, { id: `${table}_ds`, type: 'datasource', name: 'ds_pin', metadata: datasourceBody }, { context: { isSystem: true } });
+      await engine.insert(table, { id: `${table}_cat`, type: 'external_catalog', name: 'ds_pin', metadata: '{}' }, { context: { isSystem: true } });
+      await engine.insert(table, { id: `${table}_view`, type: 'view', name: 'v_pin', metadata: viewBody }, { context: { isSystem: true } });
     }
     vi.spyOn((engine as any).logger, 'debug').mockImplementation(() => undefined);
   });
 
   it('a datasource administrator reads the row whole: connection configuration and credentialsRef', async () => {
-    const rows = await engine.find('sys_metadata', { where: { type: 'datasource' }, context: ADMIN } as any);
+    const rows = await engine.find('sys_metadata', { where: { type: 'datasource' }, context: ADMIN });
     expect(rows).toHaveLength(1);
     const body = JSON.parse(rows[0].metadata);
     expect(body.external.credentialsRef).toBe(REF);
     expect(body.config).toMatchObject({ host: HOST, port: 5432, database: 'pin_db', username: 'pin_user' });
-    const one = await engine.findOne('sys_metadata', { where: { id: 'sys_metadata_ds' }, context: ADMIN } as any);
+    const one = await engine.findOne('sys_metadata', { where: { id: 'sys_metadata_ds' }, context: ADMIN });
     expect(one?.type).toBe('datasource');
-    expect(await engine.count('sys_metadata', { context: ADMIN } as any)).toBe(3);
+    expect(await engine.count('sys_metadata', { context: ADMIN })).toBe(3);
   });
 
   for (const [label, caller] of [['the built-in organization administrator', ORG_ADMIN], ['a plain reader', READER]] as const) {
     it(`${label} is served no datasource-family row on sys_metadata (find, findOne, count, aggregate)`, async () => {
-      const listed = await engine.find('sys_metadata', { context: caller } as any);
+      const listed = await engine.find('sys_metadata', { context: caller });
       expect(listed.map((r: any) => r.type).sort()).toEqual(['view']);
       expect(JSON.stringify(listed)).not.toContain(REF);
       expect(JSON.stringify(listed)).not.toContain(HOST);
 
       // Asked for by type: nothing, not a refusal that names the row.
-      expect(await engine.find('sys_metadata', { where: { type: 'datasource' }, context: caller } as any)).toEqual([]);
+      expect(await engine.find('sys_metadata', { where: { type: 'datasource' }, context: caller })).toEqual([]);
       // A get of the row's id answers as a get of a row that does not exist.
-      expect(await engine.findOne('sys_metadata', { where: { id: 'sys_metadata_ds' }, context: caller } as any)).toBeNull();
-      expect(await engine.count('sys_metadata', { where: { type: 'datasource' }, context: caller } as any)).toBe(0);
-      expect(await engine.count('sys_metadata', { context: caller } as any)).toBe(1);
-      const agg: any = await engine.aggregate('sys_metadata', { where: { type: 'external_catalog' }, groupBy: ['type'], aggregations: [{ function: 'count', alias: 'n' }], context: caller } as any);
+      expect(await engine.findOne('sys_metadata', { where: { id: 'sys_metadata_ds' }, context: caller })).toBeNull();
+      expect(await engine.count('sys_metadata', { where: { type: 'datasource' }, context: caller })).toBe(0);
+      expect(await engine.count('sys_metadata', { context: caller })).toBe(1);
+      const agg: any = await engine.aggregate('sys_metadata', { where: { type: 'external_catalog' }, groupBy: ['type'], aggregations: [{ function: 'count', alias: 'n' }], context: caller });
       expect(JSON.stringify(agg)).toContain('"n":0');
     });
   }
 
   it('the history table (the same document, versioned) is gated by the same row', async () => {
-    const author = await engine.find('sys_metadata_history', { context: STUDIO_AUTHOR } as any);
+    const author = await engine.find('sys_metadata_history', { context: STUDIO_AUTHOR });
     expect(author.map((r: any) => r.type)).toEqual(['view']);
-    expect(await engine.findOne('sys_metadata_history', { where: { id: 'sys_metadata_history_ds' }, context: STUDIO_AUTHOR } as any)).toBeNull();
-    const admin = await engine.find('sys_metadata_history', { context: ADMIN } as any);
+    expect(await engine.findOne('sys_metadata_history', { where: { id: 'sys_metadata_history_ds' }, context: STUDIO_AUTHOR })).toBeNull();
+    const admin = await engine.find('sys_metadata_history', { context: ADMIN });
     expect(admin.map((r: any) => r.type).sort()).toEqual(['datasource', 'external_catalog', 'view']);
   });
 
   it('a system read is the platform\'s own and is not narrowed', async () => {
-    const rows = await engine.find('sys_metadata', { context: { isSystem: true } } as any);
+    const rows = await engine.find('sys_metadata', { context: { isSystem: true } });
     expect(rows).toHaveLength(3);
   });
 
@@ -189,10 +189,10 @@ describe('[#27884] realtime events of a datasource-family row carry no body to a
     engine.setRealtimeService(realtime);
     vi.spyOn((engine as any).logger, 'debug').mockImplementation(() => undefined);
 
-    await engine.insert('sys_metadata', { id: 'e_ds', type: 'datasource', name: 'ds_pin', metadata: datasourceBody }, { context: { isSystem: true } } as any);
-    await engine.update('sys_metadata', { id: 'e_ds', metadata: datasourceBody }, { context: { isSystem: true } } as any);
-    await engine.insert('sys_metadata', { id: 'e_cat', type: 'external_catalog', name: 'ds_pin', metadata: '{"tables":[]}' }, { context: { isSystem: true } } as any);
-    await engine.insert('sys_metadata', { id: 'e_view', type: 'view', name: 'v_pin', metadata: viewBody }, { context: { isSystem: true } } as any);
+    await engine.insert('sys_metadata', { id: 'e_ds', type: 'datasource', name: 'ds_pin', metadata: datasourceBody }, { context: { isSystem: true } });
+    await engine.update('sys_metadata', { id: 'e_ds', metadata: datasourceBody }, { context: { isSystem: true } });
+    await engine.insert('sys_metadata', { id: 'e_cat', type: 'external_catalog', name: 'ds_pin', metadata: '{"tables":[]}' }, { context: { isSystem: true } });
+    await engine.insert('sys_metadata', { id: 'e_view', type: 'view', name: 'v_pin', metadata: viewBody }, { context: { isSystem: true } });
 
     expect(published).toHaveLength(4);
     for (const event of published.slice(0, 3)) {
