@@ -143,6 +143,17 @@ export interface HonoPluginOptions {
 }
 
 /**
+ * [#27627] The aggregate `Server-Timing` marks every timed response carries,
+ * zero when the request spent nothing there — `db` (the SQL driver counts each
+ * query into it) and `meta` (the `/meta` routes count each metadata read). With
+ * `total`, the three a reading needs to split origin time.
+ */
+const SEEDED_TIMING_MARKS: ReadonlyArray<readonly [name: string, unit: string]> = [
+    ['db', 'queries'],
+    ['meta', 'reads'],
+];
+
+/**
  * How much per-request timing the caller opted into via `X-OS-Debug-Timing`:
  *  - `off`   — no header sent (or an unrecognized value).
  *  - `basic` — `1` / `true` / `yes` / `on`: the `Server-Timing` header only.
@@ -344,6 +355,13 @@ export class HonoServerPlugin implements Plugin {
                 const gate: PerfDisclosureGate = { allowed: globalTiming };
                 const endTotal = timing.start('total', 'Total server time');
                 await runWithPerfTiming(timing, () => runWithPerfDisclosure(gate, () => next()));
+                // [#27627] `db` and `meta` on EVERY timed response: a request
+                // that ran no SQL or read no metadata says so with a zero mark,
+                // so "no time spent there" never reads like "not instrumented"
+                // (the two looked identical before — an absent member).
+                for (const [name, unit] of SEEDED_TIMING_MARKS) {
+                    if (!timing.marks().some((m) => m.name === name)) timing.record(name, 0, `0 ${unit}`);
+                }
                 endTotal();
                 if (!gate.allowed) return; // per-request, unverified caller — withhold
                 const header = timing.toHeader();

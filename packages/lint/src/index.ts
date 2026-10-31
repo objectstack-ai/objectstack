@@ -1112,13 +1112,14 @@ export type {
 
 // The runtime publish gate over that registry. Also published as the
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.
-// That subpath narrows the EXPORT surface to these six names, not the module
+// That subpath narrows the EXPORT surface to these names, not the module
 // graph: measured, it reaches 70 of this entry's 72 modules and 93.8% of its
 // bundled bytes, and it does name the modules that reach the source parsers.
 // `runtime.ts`'s header carries the measurement and what the narrowing buys.
 export {
   buildRuntimeWriteSnapshots,
   narrowObjectsToPackageClosure,
+  resolvePackageClosure,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,

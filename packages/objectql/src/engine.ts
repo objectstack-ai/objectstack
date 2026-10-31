@@ -315,6 +315,18 @@ import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from '.
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
 import { assertRecordCurrencyCodes, touchesRecordCurrency } from './validation/record-currency-code.js';
+import {
+  EXCHANGE_RATE_OBJECT,
+  homeAmountsTouched,
+  memoizeHomeAmountServing,
+  planHomeAmounts,
+  projectHomeAmounts,
+  settleBulkHomeAmounts,
+  type HomeAmountPlanEntry,
+  type HomeAmountServing,
+  type HomeLocalization,
+  type HomeLocalizationResolver,
+} from './home-amount-projection.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
@@ -9655,6 +9667,149 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [ADR-0144 D4, Open item 4] Where the write-time home projection reads an
+   * organization's localization: its `localization.currency` setting (the
+   * home currency) and its `localization.timezone` setting (the zone a
+   * `datetime` document date is dated in; ruling 6539345871, letter B), each
+   * `undefined` when unset. Bridged by `ObjectQLPlugin`, which resolves the
+   * settings service when a write asks, not when it starts. With no resolver
+   * every organization's home currency is unset, so a write of an amount
+   * declaring `homeAmount` is refused `ERR_HOME_CURRENCY_UNSET` — the engine
+   * never assumes one — and an unset timezone reads UTC.
+   */
+  setHomeLocalizationResolver(resolver: HomeLocalizationResolver | undefined): void {
+    this.homeLocalizationResolver = resolver;
+  }
+
+  private homeLocalizationResolver?: HomeLocalizationResolver;
+
+  /**
+   * [ADR-0144 D5, Open item 2] What one write's home projection reads, memoized
+   * for that write: each organization's home currency once, and each
+   * (organization, currency, document date) rate once, however many rows ask.
+   *
+   * The rate is the `sys_exchange_rate` row of that currency with the latest
+   * `effective_date` on or before the document date, in the organization the
+   * row lands in. Read `sudo()`-shaped (`{ ...context, isSystem: true }`): a
+   * rank-and-file writer cannot read the rate table (parameter 2 makes it an
+   * administrator's object), yet every write of theirs is converted through
+   * it; the caller's transaction rides along, and `tenantId` is the row's own
+   * organization, so one organization's rate never converts another's
+   * amount. An install without the rate object registered has no rate for any
+   * currency.
+   */
+  private homeAmountServing(context: ExecutionContext | undefined): HomeAmountServing {
+    // One settings read per organization per write answers both the home
+    // currency and the timezone.
+    const localizations = new Map<string, Promise<HomeLocalization | undefined>>();
+    const localizationOf = (organizationId: string | undefined) => {
+      const key = organizationId ?? '';
+      let hit = localizations.get(key);
+      if (!hit) {
+        hit = Promise.resolve(this.homeLocalizationResolver?.(organizationId));
+        localizations.set(key, hit);
+      }
+      return hit;
+    };
+    return memoizeHomeAmountServing({
+      homeCurrency: async (organizationId) => (await localizationOf(organizationId))?.currency,
+      timezone: async (organizationId) => (await localizationOf(organizationId))?.timezone,
+      rateOn: async (organizationId, currency, onOrBefore) => {
+        if (!this._registry.getObject(EXCHANGE_RATE_OBJECT)) return undefined;
+        const rows = await this.find(EXCHANGE_RATE_OBJECT, {
+          where: { currency, effective_date: { $lte: onOrBefore } },
+          orderBy: [{ field: 'effective_date', order: 'desc' }],
+          limit: 1,
+          fields: ['rate', 'effective_date'],
+          context: {
+            ...(context ?? {}),
+            isSystem: true,
+            ...(organizationId !== undefined ? { tenantId: organizationId } : {}),
+          } as ExecutionContext,
+        });
+        const row = rows[0] as { rate?: unknown; effective_date?: unknown } | undefined;
+        if (!row) return undefined;
+        const effective = row.effective_date;
+        return {
+          rate: row.rate,
+          effectiveDate: effective instanceof Date ? effective.toISOString().slice(0, 10) : (typeof effective === 'string' ? effective : undefined),
+        };
+      },
+    });
+  }
+
+  /**
+   * [ADR-0144 D5] The organization a written row belongs to, for its home
+   * projection: the row's own `organization_id`, else the writer's active
+   * organization, else the organization a system insert resolved — the
+   * assignment seam's reading, so both seams convert and route one row under
+   * one organization.
+   */
+  private static homeAmountOrganizationOf(
+    row: Record<string, unknown> | null | undefined,
+    context: ExecutionContext | undefined,
+    derived?: string | undefined,
+  ): string | undefined {
+    const own = row?.organization_id;
+    if (own !== undefined && own !== null && own !== '') return String(own);
+    if (context?.tenantId) return String(context.tenantId);
+    return derived ?? undefined;
+  }
+
+  /**
+   * [ADR-0144 D5] The `validate()` preview's run of the home projection: the
+   * write's own computation over the preview's image (the insert row, or the
+   * stored row with the patch over it), answering nothing and writing
+   * nothing — it throws exactly the refusal the write would.
+   */
+  private async previewHomeAmounts(
+    object: string,
+    schema: unknown,
+    mode: 'insert' | 'update',
+    row: Record<string, unknown>,
+    image: Record<string, unknown>,
+    context: ExecutionContext | undefined,
+    recordId: unknown,
+  ): Promise<void> {
+    const plan = planHomeAmounts(schema);
+    const entries = mode === 'insert' ? plan : homeAmountsTouched(plan, row);
+    if (entries.length === 0) return;
+    await projectHomeAmounts(entries, image, this.homeAmountServing(context), {
+      object,
+      operation: mode,
+      organizationId: ObjectQL.homeAmountOrganizationOf(image, context),
+      recordId,
+    });
+  }
+
+  /**
+   * [ADR-0144 D5] Project a by-id update's home amounts onto its FINAL patch:
+   * only the declarations the patch touches ({@link homeAmountsTouched}),
+   * computed over the stored row with the patch laid over it. Shared by the
+   * write and its `validate()` preview, so a dry run refuses what the write
+   * refuses.
+   */
+  private async projectHomeAmountsOntoPatch(
+    object: string,
+    plan: readonly HomeAmountPlanEntry[],
+    prior: Record<string, unknown> | null | undefined,
+    patch: Record<string, unknown>,
+    context: ExecutionContext | undefined,
+    recordId: unknown,
+    serving: HomeAmountServing = this.homeAmountServing(context),
+  ): Promise<void> {
+    const touched = homeAmountsTouched(plan, patch);
+    if (touched.length === 0) return;
+    const image = { ...(prior ?? {}), ...patch };
+    Object.assign(patch, await projectHomeAmounts(touched, image, serving, {
+      object,
+      operation: 'update',
+      organizationId: ObjectQL.homeAmountOrganizationOf(image, context),
+      recordId,
+    }));
+  }
+
+  /**
    * Locale + translation hooks handed to the validators so a rejected write is
    * reported in the caller's language (#3957).
    *
@@ -14530,6 +14685,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveOptionPermissions: (...a) => this.resolveOptionPermissions(...a),
       getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
       assertReferencesResolve: (...a) => this.assertReferencesResolve(...a),
+      previewHomeAmounts: (...a) => this.previewHomeAmounts(...a),
     };
     return validate.call(host, object, data, options);
   }
@@ -15582,6 +15738,35 @@ export class ObjectQL implements IObjectQLEngine {
               options.onFieldsDropped(drop);
             } catch (err) {
               this.logger.warn('onFieldsDropped listener threw — ignored', { object, error: err });
+            }
+          }
+        }
+        // [ADR-0144 D5] The write-time home projection — after every hook,
+        // strip and re-default, so the values it writes are the ones stored
+        // (a `readonly` strip never takes them, and a `defaultValue` on the
+        // home or rate field never stands), and before validation, which then
+        // judges them like any other stored value (the rate field's `scale`
+        // included). In every context: a system writer's value for either
+        // field is recomputed over too. A row it refuses (no home currency, no
+        // rate in force on the document date) is culled per row under partial
+        // mode, and nothing is written for it. Free for an object declaring no
+        // `homeAmount` (`planHomeAmounts` is one loop over the field names).
+        const homeAmountPlan = planHomeAmounts(schemaForValidation);
+        if (homeAmountPlan.length > 0) {
+          const homeServing = this.homeAmountServing(opCtx.context);
+          for (let i = 0; i < rows.length; i++) {
+            if (rowErrors[i] !== undefined) continue;
+            const row = rows[i] as Record<string, unknown> | null | undefined;
+            if (!row || typeof row !== 'object') continue;
+            try {
+              Object.assign(row, await projectHomeAmounts(homeAmountPlan, row, homeServing, {
+                object,
+                operation: 'insert',
+                organizationId: ObjectQL.homeAmountOrganizationOf(row, opCtx.context, derivedOrganizationId),
+              }));
+            } catch (e) {
+              if (!partialMode) throw e;
+              rowErrors[i] = e;
             }
           }
         }
@@ -17361,6 +17546,25 @@ export class ObjectQL implements IObjectQLEngine {
                    applyStoredExpressionsToPatch(patch, computed!, priorRecord);
                }
                assertNoStrictDrops();
+               // [ADR-0144 D5] The write-time home projection on the by-id
+               // path, over the stored row with the FINAL payload laid over it
+               // — after the hooks, both strips and the strict refusal, so its
+               // values are never stripped and a strict caller is told about
+               // its own payload first — and before the second validation pass,
+               // which judges what it wrote. Only when the payload touches an
+               // amount declaring `homeAmount`, its code, its document date or
+               // one of the two projected fields: an unrelated edit never
+               // re-reads a rate. A value a system or `preserveAudit` writer
+               // sent for the home or rate field is recomputed over.
+               {
+                   const homeAmountPlan = planHomeAmounts(updateSchema);
+                   if (homeAmountPlan.length > 0) {
+                       await this.projectHomeAmountsOntoPatch(
+                         object, homeAmountPlan, priorRecord, hookContext.input.data as Record<string, unknown>,
+                         opCtx.context, hookContext.input.id,
+                       );
+                   }
+               }
                // [#21663] The payload is FINAL here (see the seam below), so
                // every readonly value on it is one the driver will store: a
                // system writer's (the strip above never ran for it), a hook's,
@@ -17700,6 +17904,35 @@ export class ObjectQL implements IObjectQLEngine {
                    }
                }
                assertNoStrictDrops();
+               // [ADR-0144 D5] The write-time home projection on the predicate
+               // path, at the by-id branch's point and for its reasons. One
+               // patch reaches every matched row, so each matched row (the D7
+               // read — `readPriorRows` is a memo) is projected with the patch
+               // laid over it, and {@link settleBulkHomeAmounts} keeps a
+               // projected value only when it is the same on every row; a patch
+               // that would convert to different values is refused before the
+               // statement. A refusal of any matched row (no home currency, no
+               // rate on its document date) refuses the whole update.
+               {
+                   const homeAmountPlan = planHomeAmounts(updateSchema);
+                   const homePatch = hookContext.input.data as Record<string, unknown>;
+                   const touched = homeAmountsTouched(homeAmountPlan, homePatch);
+                   if (touched.length > 0) {
+                       const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
+                       const homeServing = this.homeAmountServing(opCtx.context);
+                       const projected: Array<Record<string, unknown>> = [];
+                       for (const row of matched) {
+                           const image = { ...row, ...homePatch };
+                           projected.push(await projectHomeAmounts(touched, image, homeServing, {
+                             object,
+                             operation: 'update',
+                             organizationId: ObjectQL.homeAmountOrganizationOf(image, opCtx.context),
+                             recordId: row.id,
+                           }));
+                       }
+                       hookContext.input.data = settleBulkHomeAmounts(touched, homePatch, projected, object) as any;
+                   }
+               }
                // [#21663] The predicate-path twin of the by-id second pass, at the
                // same point and for the same reason: the readonly values left on
                // the final payload are stored, so their SHAPE is judged — before

@@ -29,7 +29,7 @@ import {
 import { Badge, Switch } from '@object-ui/components';
 import { cn } from '@object-ui/components';
 import type { MetadataLayered } from '@object-ui/data-objectstack';
-import { t, tFormat, translateConsoleValue, type SupportedLocale } from './i18n.js';
+import { t, tFormat, translateConsoleValue, type SupportedLocale } from '../metadata-admin/i18n.js';
 
 export interface LayeredDiffProps {
   layered: MetadataLayered<Record<string, unknown>> | null;

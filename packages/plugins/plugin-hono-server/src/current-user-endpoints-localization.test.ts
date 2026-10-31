@@ -188,7 +188,7 @@ function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, setti
         });
         return { status: res.status, body: await res.json() as any };
     };
-    return { get, reads };
+    return { get, reads, app };
 }
 
 describe('/auth/me/localization — the signed-in user\'s language, three rungs (#14788)', () => {
@@ -332,5 +332,58 @@ describe('/auth/me/localization — the regional defaults are RESOLVED, not alwa
         expect(body).toEqual({ authenticated: false });
         // Anti-vacuity: no settings read is issued for a caller with no session.
         expect(reads.filter((r) => r.object === 'sys_setting')).toEqual([]);
+    });
+});
+
+// [#27627] Every renderer reads this on every load, and the cloud reading
+// measured it at 8.2 s under a burst, with no validator at all. The signed-in
+// answer is per caller (their own `locale`, their tenant's defaults), so it is
+// `private, no-cache` under the weak validator of THIS caller's body
+// (`representationEtag`, `@objectstack/types`), and `304` when the caller
+// already holds it.
+describe('/auth/me/localization — a per-caller validator (#27627)', () => {
+    const request = (app: Hono, headers: Record<string, string> = {}) =>
+        app.request(`http://localhost${ME_LOCALIZATION}`, { headers });
+
+    it('the signed-in answer carries a weak ETag, private, no-cache and Vary: Accept-Language', async () => {
+        const { app } = mount({ storedLocale: 'zh-CN' });
+        const res = await request(app);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('etag')).toMatch(/^W\/"[0-9a-f]{16}"$/);
+        expect(res.headers.get('cache-control')).toBe('private, no-cache');
+        expect(res.headers.get('vary')).toContain('Accept-Language');
+    });
+
+    it('an unchanged answer revalidates to a bodiless 304', async () => {
+        const { app } = mount({ storedLocale: 'zh-CN' });
+        const etag = (await request(app)).headers.get('etag')!;
+        const again = await request(app, { 'if-none-match': etag });
+        expect(again.status).toBe(304);
+        expect(await again.text()).toBe('');
+    });
+
+    it('two users whose answers differ hold different tags, and one tag never revalidates the other\'s body', async () => {
+        const zh = mount({ storedLocale: 'zh-CN' });
+        const ja = mount({ storedLocale: 'ja-JP' });
+        const zhTag = (await request(zh.app)).headers.get('etag')!;
+        const jaTag = (await request(ja.app)).headers.get('etag')!;
+        expect(zhTag).not.toBe(jaTag);
+        const crossed = await request(ja.app, { 'if-none-match': zhTag });
+        expect(crossed.status).toBe(200);
+        expect(((await crossed.json()) as any).locale).toBe('ja-JP');
+    });
+
+    it('a change moves the tag: the request language decides the answer when no locale is stored', async () => {
+        const { app } = mount({});
+        const en = (await request(app, { 'accept-language': 'en-US' })).headers.get('etag')!;
+        const fr = await request(app, { 'accept-language': 'fr-FR', 'if-none-match': en });
+        expect(fr.status).toBe(200);
+        expect(fr.headers.get('etag')).not.toBe(en);
+    });
+
+    it('the signed-out answer carries no validator', async () => {
+        const { app } = mount({ authenticated: false });
+        const res = await request(app);
+        expect(res.headers.get('etag')).toBeNull();
     });
 });

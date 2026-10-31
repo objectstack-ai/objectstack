@@ -1387,6 +1387,13 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': '显示系统对象（{count}）',
   'engine.inspector.objectPicker.hideSystem': '隐藏系统对象',
   'engine.inspector.objectPicker.noMatch': '没有匹配的对象。按 Enter 保留输入的内容。',
+  // objectstack#28240 — objects outside the edited package's closure.
+  'engine.inspector.objectPicker.groupOutside': '不在本软件包的依赖范围内',
+  'engine.inspector.objectPicker.showOutside': '显示不在本软件包依赖范围内的对象（{count}）',
+  'engine.inspector.objectPicker.hideOutside': '隐藏不在本软件包依赖范围内的对象',
+  'engine.inspector.objectPicker.outsideReason': '{package} 只能使用自己的对象、它声明为依赖的软件包中的对象以及系统对象。要使用其中的对象，请声明对它所属软件包的依赖。',
+  'engine.inspector.objectPicker.outsideFrom': '来自 {package}',
+  'engine.inspector.objectPicker.declareDependency': '声明依赖',
   // Add affordances
   'engine.inspector.add.widget': '添加组件',
   'engine.inspector.add.block': '添加区块',
@@ -3759,6 +3766,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.translationPreview.more': '另有 {count} 项…',
   'engine.translationPreview.keyCountOne': '{{count} 个键}',
   'engine.translationPreview.keyCountOther': '{{count} 个键}',
+  // Studio 项工具栏：Setup 项页面的项工具,在每个支柱的项头部提供（objectstack#28239）。
+  'engine.studio.itemTools.group': '项工具',
+  'engine.studio.itemTools.sourceReadOnly': '只读：此项无法在这里编辑。',
+  'engine.studio.itemTools.layersFailed': '无法读取此项的分层：{message}',
+  'engine.studio.itemTools.layersRetry': '重试',
 };
 
 export default STUDIO_ZH;

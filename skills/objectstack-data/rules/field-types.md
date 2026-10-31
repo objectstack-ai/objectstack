@@ -50,7 +50,7 @@ fields: {
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
-| `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency) |
+| `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency, currencyField, homeAmount) |
 | `percent` | Percentage values (0-100) | `min`, `max`, `precision` |
 
 ## Date & Time
@@ -178,8 +178,8 @@ stored field to `'record'`? Backfill: `os migrate record-currency-codes`.
 
 `homeAmount` (`'record'` only, all three required): the engine stores the
 home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
-(`date`) rate, and that rate in `rateField` (`number`), both `readonly: true`.
-Cross-currency totals sum `field`.
+(`date`/`datetime`) rate, and that rate in `rateField` (`number`), both
+`readonly: true`. Cross-currency totals sum `field`.
 
 ### Select with Default
 

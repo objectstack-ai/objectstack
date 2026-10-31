@@ -560,11 +560,6 @@ export const VACUOUS_GROUPS = [
     card: 'objectui#7908',
   },
   {
-    glob: 'lazy-test.mjs',
-    reason: 'Root-level test helper, the only JS-family file at the repository root besides the config.',
-    card: 'objectui#7908',
-  },
-  {
     glob: 'packages/*/scripts/**/*.mjs',
     reason:
       'Per-package tooling, dominated by plugin-gantt verification scripts plus the build-css ' +

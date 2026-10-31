@@ -282,11 +282,18 @@ describe('#6241 — the cached branch cannot be spelled around either', () => {
     expect(protocol2.getMetaItemCached).toHaveBeenCalledTimes(1);
   });
 
-  it('the price of the bypass, pinned rather than hidden: gated reads carry no ETag', async () => {
-    const { rest } = setupCached();
+  it('a gated read bypasses the shared validator, and carries the validator of its own served body instead', async () => {
+    // This pinned "gated reads carry no ETag" — the price of the bypass —
+    // until #27627 gave the uncached exit the body-hash validator
+    // (`representationEtag`): the SHARED cache's ETag still never fronts a
+    // gated body, which is what the bypass is for.
+    const { rest, protocol } = setupCached();
     const res = await getItem(rest, 'books', 'manual');
 
     expect(res.statusCode).toBe(200);
-    expect(res.header.mock.calls.map((c: any[]) => c[0])).not.toContain('ETag');
+    expect(protocol.getMetaItemCached).not.toHaveBeenCalled();
+    const etag = res.header.mock.calls.find((c: any[]) => c[0] === 'ETag')?.[1];
+    expect(etag).toMatch(/^W\/"[0-9a-f]{16}"$/);
+    expect(res.header.mock.calls).toContainEqual(['Cache-Control', 'private, no-cache']);
   });
 });

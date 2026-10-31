@@ -28,6 +28,7 @@ import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './obje
 import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
+import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import {
   COMMENT_REACTION_REMOVE_ROUTE,
@@ -307,25 +308,28 @@ export class AuditPlugin implements Plugin {
     // hooks, i.e. at request time, so the engine is resolved per call rather
     // than captured: the service exists from init() while `objectql` only
     // resolves at kernel:ready, and every caller arrives long after both.
-    ctx.registerService(
-      'audit',
-      createAuthEventAuditSink({
-        getEngine: () => {
-          try {
-            return ctx.getService<IDataEngine>('objectql');
-          } catch {
-            // Same fallback alias `start()` uses below — some kernels register
-            // the engine as `data`.
-            try {
-              return ctx.getService<IDataEngine>('data');
-            } catch {
-              return undefined;
-            }
-          }
-        },
-        logger: ctx.logger,
-      }),
-    );
+    //
+    // [#27908] The same slot carries the action-invocation writer
+    // (`recordActionInvocation`): the two action doors in `@objectstack/runtime`
+    // resolve it per request and hand it one event per invocation, naming the
+    // door it came through (ruling 6513869839 on #27681, parameter 3).
+    const getLedgerEngine = (): IDataEngine | undefined => {
+      try {
+        return ctx.getService<IDataEngine>('objectql');
+      } catch {
+        // Same fallback alias `start()` uses below — some kernels register
+        // the engine as `data`.
+        try {
+          return ctx.getService<IDataEngine>('data');
+        } catch {
+          return undefined;
+        }
+      }
+    };
+    ctx.registerService('audit', {
+      ...createAuthEventAuditSink({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+    });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
     // service on kernel:ready (the i18n plugin may register after this one).

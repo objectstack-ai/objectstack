@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -63,7 +63,7 @@
         {
           "clause": "runRlsProofs reports rls-consistent (or member-visible on deliberately public objects) for every non-skipped showcase object; any rls-hole verdict is a FAIL and files an issue",
           "oracle": "test",
-          "verify": "run `objectstack verify --rls` (or runRlsProofs(stack, adminToken, memberToken, config) from packages/verify/src/rls.ts directly); summary.holes must be 0. A bare `objectstack verify` emits no PROVEN/HOLES line and cannot satisfy this clause",
+          "verify": "run `objectstack verify --rls` (or runRlsProofs(stack, adminToken, memberToken, config) from packages/verify/src/rls.ts directly); summary.holes must be 0. A bare `objectstack verify` emits no PROVEN/HOLES line and cannot satisfy this clause. An object whose report line carries `[target adopted from existing rows — admin create failed (STATUS)]` was proven on a SEEDED row, not one this run created: when the app's own validation refuses the probe's derived create body, the sweep adopts an existing row so the object and its dependents are still probed (packages/verify/src/rls.ts, the #7685 cascade-stopper; RlsResult target 'adopted'). On the stock showcase that is showcase_account, whose derived admin create answers 400 (QA run #27409), and the verdict on the adopted row stands. The run record names every object whose proof rode an adopted row. The derived-body 400 is the app's validation answering a body the sweep invented, not an RLS finding",
           "evidence": "formatRlsReport output"
         },
         {
@@ -142,6 +142,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). acceptance[2], acceptance[3] and negative[0] are now pinned at their oracle's layer (api, in-process HTTP) in showcase-private-owd.dogfood.test.ts: the admin re-read proving the refused foreign PATCH changed nothing, and the admin's list of every row the file created. automated.ref names both cases and says why acceptance[5], negative[1] and negative[2] stay with the run. No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-31",
+          "change": "acceptance[4].verify names the adopted-row proof. In QA run #27409's `objectstack verify --rls` block, showcase_account's RLS proof rode a seeded row because the sweep's derived admin create was refused 400. Source agrees: packages/verify/src/rls.ts falls back to adopting an existing row when the app's validation rejects the derived body (the #7685 cascade-stopper, RlsResult target 'adopted', report suffix '[target adopted from existing rows — admin create failed (STATUS)]'), so the object and its dependents are probed instead of skipped. The verify text now says the adopted-row verdict stands, asks the run record to name the objects that rode one, and records that the derived-body 400 is not an RLS finding. No assertion is relaxed: summary.holes must still be 0. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228",
+          "ref": "#27409"
         }
       ]
     },
@@ -493,7 +499,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -517,11 +523,11 @@
       "steps": [
         "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set by inserting the sys_user_permission_set row (system context), mirroring showcase-permission-zoo.dogfood.test.ts. ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
         "as admin (or a helper member), seed one FOREIGN-owned probe row per object under test (e.g. a showcase_private_note, showcase_inquiry, showcase_invoice + line, showcase_announcement owned by someone other than the persona)",
-        "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + error.code for each cell",
+        "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + the top-level body.code for each cell (acceptance[1])",
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
         "for rows with modifyAllRecords:true (ops on showcase_announcement): PATCH the foreign-owned announcement; re-run the same PATCH as member_default (modifyAllRecords:false)",
         "for the guest_portal row pair on showcase_inquiry (create:true, read:false): record clause 5 blocked(dependency, #23267) per knownGaps[2]: no door binds a set to the guest anchor (ADR-0138 D3 item 5, ruling C), a member holding the set reads inquiries through the baseline, and REST anonymous answers 401 to both verbs",
-        "for the 4 showcase_field_ops_delegate × sys_* rows, drive the delegate by hand; for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant",
+        "for the 4 showcase_field_ops_delegate × sys_* rows: their 16 cells are pinned by the dogfood case 'the 16 showcase_field_ops_delegate × sys_* cells answer the matrix' (automated.ref) — cite its output per RUNNER rule 6 rather than re-deriving it; when a run drives the delegate live as well, for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant",
         "record the full verb × set × object verdict matrix and diff it against access-matrix.json (unioned with the baseline per the known gap above)"
       ],
       "acceptance": [
@@ -532,9 +538,9 @@
           "evidence": "the verdict matrix + spot re-reads"
         },
         {
-          "clause": "every withheld cell is DENIED SERVER-SIDE with the ledgered code: verbs marked false answer 403 with error.code PERMISSION_DENIED (rest-server maps explicit security denials to 403 PERMISSION_DENIED) — except a verb the object does not expose over the API at all, which answers 405 OBJECT_API_METHOD_NOT_ALLOWED for every caller (sys_user create and delete) — UI absence never counts (ADR-0124 D1)",
+          "clause": "every withheld cell is DENIED SERVER-SIDE with the ledgered code: verbs marked false answer 403 with the top-level code PERMISSION_DENIED — the data door's wire envelope is {error: MESSAGE, code, object}, so the code is body.code and body.error is the message string (packages/types/src/data-error-classification.ts#mapDataError; rest-server maps explicit security denials to 403 PERMISSION_DENIED) — except a verb the object does not expose over the API at all, which answers 405 OBJECT_API_METHOD_NOT_ALLOWED for every caller (sys_user create and delete) — UI absence never counts (ADR-0124 D1)",
           "oracle": "api",
-          "verify": "per-cell status 403 and body code PERMISSION_DENIED (405 + OBJECT_API_METHOD_NOT_ALLOWED on the sys_user create and delete cells, for the admin control too); capture any cell answering a different code for triage",
+          "verify": "per-cell status 403 and top-level body.code PERMISSION_DENIED — body.error.code does not exist on this door (405 + body.code OBJECT_API_METHOD_NOT_ALLOWED on the sys_user create and delete cells, for the admin control too); capture any cell answering a different code for triage",
           "evidence": "the verdict matrix"
         },
         {
@@ -564,7 +570,7 @@
         {
           "clause": "every variant (permission set) is driven over EVERY object row access-matrix.json lists for it, and the run record carries one verdict per cell — a set skipped or an object row skipped makes the item at best partial",
           "oracle": "api",
-          "verify": "verdict matrix dimensions match access-matrix.json entries (45 rows × 4 verbs at revision 8: the 41 showcase_* rows are 164 cells, 87 effective-allow and 77 effective-deny after the baseline union, and only these are judged by the dogfood pin; the 4 showcase_field_ops_delegate × sys_* rows are 16 hand-driven cells per steps[6]; recount from the file each run)",
+          "verify": "verdict matrix dimensions match access-matrix.json entries (45 rows × 4 verbs at revision 8: the 41 showcase_* rows are 164 cells, 87 effective-allow and 77 effective-deny after the baseline union, judged by the dogfood pin's persona sweep; the 4 showcase_field_ops_delegate × sys_* rows are 16 more cells, pinned since revision 9 by the same file's case 'the 16 showcase_field_ops_delegate × sys_* cells answer the matrix' (automated.ref), so the pin covers all 45 rows × 4 verbs; recount from the file each run)",
           "evidence": "the matrix artifact"
         }
       ],
@@ -652,6 +658,12 @@
           "date": "2026-10-27",
           "change": "Card #26623 asked for an area-level provisioning recipe that binds the guest anchor so acceptance[5] can be scored. No such recipe can be written, because no door binds a set to the guest anchor: ADR-0138 D3 item 5, amended by ruling C on #23267 (comment 6159279205), builds that door only when a named deployment needs one. So no area recipe and no fixtures.provisioning reference were added, and the product card is the existing, ruled #23267 rather than a new one. acceptance[5] was re-driven once over REST on a fresh stock showcase boot at main 1708115e2f: the admin's GET /api/v1/meta/position/guest answered 200 with the packaged anchor (provenance package, no permissionSets); PUT /api/v1/meta/position/guest naming showcase_guest_portal answered 403 NOT_OVERRIDABLE and the re-read was unchanged; GET /api/v1/security/suggested-bindings listed one row, the confirmed everyone suggestion for showcase_member_default, and no guest row; anonymous POST and GET /api/v1/data/showcase_inquiry each answered 401 UNAUTHENTICATED. Verdict: blocked(dependency, #23267). knownGaps[2] now records the clause as a ruled product limit, not a fixture gap, with the refusals and the pin that holds them (guest-grants-channel.dogfood.test.ts); steps[5] and the closing words of automated.ref say blocked(dependency) to match. No other clause or status changed",
           "ref": "#26623"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "Two findings of QA run #27481. acceptance[1] (clause, verify) and steps[2] said error.code PERMISSION_DENIED; the data door answers {error: MESSAGE, code, object} (packages/types/src/data-error-classification.ts mapDataError), and showcase-crud-persona-matrix.dogfood.test.ts reads the top-level code for every denial and for the 405 OBJECT_API_METHOD_NOT_ALLOWED cells. The clause now names body.code, and the verify says body.error.code does not exist on this door. acceptance[6].verify and steps[6] still called the 16 showcase_field_ops_delegate × sys_* cells hand-driven, though automated.ref has pinned them since revision 9 (that revision's row noted both were left behind). Both now name the pin case, so the pin covers all 45 rows × 4 verbs; steps[6]'s own-row rule for sys_user_position stays for a live pass. No assertion is weakened. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6493994883",
+          "ref": "#27481"
         }
       ]
     },
@@ -660,7 +672,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -681,8 +693,8 @@
         "boot the showcase on its own port and DB; create members A and B (baseline), two contributor members C1/C2 (grant showcase_contributor), an ops member, an auditor member",
         "private: as A create a showcase_private_note; as B list, GET by id, PATCH it",
         "public_read: as admin (or ops) create a showcase_announcement owned by someone other than B; as B GET list + by id, then PATCH it; as ops PATCH the same announcement (modifyAllRecords contrast)",
-        "public_read_write: as admin create a showcase_project; as C1 (allowEdit:true on projects, no project RLS) GET it and PATCH a non-FLS field (e.g. name suffix) — record-level write open by OWD; as A (member_default, allowEdit:false) attempt the same PATCH — the object-level bit must still gate",
-        "controlled_by_parent: as C1 POST /api/v1/data/showcase_invoice {\"name\": \"INV-C1-1\", \"owner\": \"<C1 email>\", \"status\": \"draft\"} then POST /api/v1/data/showcase_invoice_line {\"invoice\": <that id>, \"product\": <seeded product id>, \"quantity\": 1}; as C2 list lines, GET C1's line by id, PATCH it",
+        "public_read_write: as admin create a showcase_project with status 'planned' in the body — project_status_flow declares initialStates ['planned'] with insert among its events, so any other initial status answers 400 invalid_initial_state (examples/app-showcase/src/data/objects/project.object.ts; QA run #27481); as C1 (allowEdit:true on projects, no project RLS) GET it and PATCH a non-FLS field (e.g. name suffix) — record-level write open by OWD; as A (member_default, allowEdit:false) attempt the same PATCH — the object-level bit must still gate",
+        "controlled_by_parent: as C1 POST /api/v1/data/showcase_invoice {\"name\": \"INV-C1-1\", \"owner\": \"<C1 email>\", \"account\": \"<a seeded, non-churned showcase_account id>\", \"status\": \"draft\"} (account is a required lookup, so a body without it is refused 400, and an invoice on a churned account is refused by the no_invoice_for_churned_account rule — examples/app-showcase/src/data/objects/invoice.object.ts; QA run #27481) then POST /api/v1/data/showcase_invoice_line {\"invoice\": <that id>, \"product\": <seeded product id>, \"quantity\": 1}; as C2 list lines, GET C1's line by id, PATCH it",
         "as C1: GET/PATCH their OWN line by id (the entitled side of ADR-0055 derivation)",
         "as auditor: list showcase_invoice_line — viewAllRecords crosses the derived scope",
         "capture per-model, per-persona verb outcomes"
@@ -797,6 +809,12 @@
           "date": "2026-10-29",
           "change": "fixtures.requires[1] says what a contributor create with a foreign or absent owner answers: the showcase contributor set now carries the ownership check on insert as well as update (invoice_owner_on_create beside invoice_owner_immutable, examples/app-showcase/src/security/permission-sets.ts), so it is refused 403 PERMISSION_DENIED with nothing written, clone included. No clause changed",
           "ref": "claude/harden-invoice-owner-check-on-create"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "steps[3] and steps[4] name the bodies the showcase accepts, as QA run #27481 found. steps[4]'s invoice body omitted account, a required lookup on showcase_invoice (examples/app-showcase/src/data/objects/invoice.object.ts), and an account must not be churned (rule no_invoice_for_churned_account). steps[3]'s project create names status 'planned': project_status_flow declares initialStates ['planned'] with insert among its events (project.object.ts), so any other initial status answers 400 invalid_initial_state, which #27481 hit with 'completed'. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6493994883",
+          "ref": "#27481"
         }
       ]
     },
@@ -805,7 +823,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -831,7 +849,7 @@
         "re-read the project system-side; compare budget before/after",
         "as admin: PATCH the same budget field to a new value and re-read (the entitled side)",
         "in the console as the contributor: open the project's detail/edit form; screenshot; inspect the state of the budget and spent controls — the two budget figures the edit form renders (project.view.ts form section 'Budget & Schedule': budget, spent, start_date, end_date). budget_remaining is a formula field and is not on the edit form at all",
-        "read-mask half (see knownGaps): grant the STOCK showcase_client_liaison set (fixtures.requires[2] — the readable:false grant on budget, spent and budget_remaining; no scratch set is needed) to a fresh member who holds no showcase_contributor, then GET the project as that member and inspect whether the masked field is absent/nulled in the API body AND blank in the UI render",
+        "read-mask half (see knownGaps): grant the STOCK showcase_client_liaison set (fixtures.requires[2] — the readable:false grant on budget, spent and budget_remaining; no scratch set is needed) to a fresh member who holds no showcase_contributor, then GET the project as that member and inspect that the three fields' KEYS are absent from the API body — a readable:false grant deletes the key (the strip mechanism, knownGaps[2]), and a key present with a null or placeholder value is not that shape — AND blank in the UI render",
         "as admin GET the same row — the unmasked contrast"
       ],
       "acceptance": [
@@ -860,9 +878,9 @@
           "evidence": "screenshot + DOM read"
         },
         {
-          "clause": "read masking (given the scratch readable:false grant): the masked field is absent or nulled in the member's API read AND blank in their UI render, while admin's read carries the value — API and UI agree, both personas",
+          "clause": "read masking (given the STOCK showcase_client_liaison readable:false grant, fixtures.requires[2], held by a member who holds no showcase_contributor): budget, spent and budget_remaining are ABSENT from the member's API read — the key deleted, not nulled, because a readable:false grant strips (knownGaps[2]) — AND blank in their UI render, while admin's read carries the values — API and UI agree, both personas",
           "oracle": "api",
-          "verify": "member GET body lacks/nulls the field; admin GET carries it; UI screenshots per persona match their API bodies",
+          "verify": "member GET body lacks all three keys (a key present with null or a placeholder is a FAIL of this clause; QA run #27409 measured the keys absent); admin GET carries them; UI screenshots per persona match their API bodies",
           "evidence": "both GET bodies + screenshots"
         }
       ],
@@ -925,6 +943,12 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). acceptance[0]'s re-read of the contributor's name edit and acceptance[2]'s admin budget write with its re-read are now pinned in showcase-permission-zoo.dogfood.test.ts at the api oracle's layer (in-process HTTP). acceptance[3] and the UI half of acceptance[4] stay a live browser leg; automated.ref says why (no browser in the dogfood suite, no new CI lane). No clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "acceptance[4] (clause, verify) and steps[5] are made precise. The clause still said 'given the scratch readable:false grant' and 'absent or nulled'; since #9308 fixture 4 the stock showcase_client_liaison set is that grant (fixtures.requires[2], which already said so), and QA run #27409 measured the wire shape: the keys are absent. Source agrees: plugin-security field-masker.ts deletes a non-readable field from the result (the strip), and showcase-client-liaison-fixtures.dogfood.test.ts asserts key absence for all three budget figures. So the clause names the stock grant and all three fields, and a key present with null or a placeholder is a FAIL, never a pass: stronger, not weaker. The UI half is unchanged. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228",
+          "ref": "#27409"
         }
       ]
     },
@@ -1290,7 +1314,7 @@
       "title": "Per-record manual shares grant, scope, and revoke access on a private-OWD record; rule evaluate reconciles the audience",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1305,7 +1329,7 @@
           "showcase_private_note (sharingModel: private — member_default grants create/read/edit, so a non-owner sees nothing without a share)",
           "three fresh sign-ups (A/B/C) whose sys_user ids are resolved via a system-context read",
           "the seeded criteria sharing rule share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private) + at least one qualified contact at company Northwind — seeded as Nora West (examples/app-showcase/src/security/sharing-rules.ts) — for the evaluate clause",
-          "a holder of the manager position, so the rule's recipient expansion is non-empty. Since #9237 the STOCK boot already satisfies this — the seeded dev admin holds manager (sys_user_position usp_showcase_admin_manager) and the boot backfill materialises the grant — so an evaluate with no extra assignment answers grantsCreated 0 out of IDEMPOTENCE, not emptiness. Read the gap off expandedUsers/matchedRecords, and assign the position to one more persona so a created grant is observable"
+          "a holder of the manager position, so the rule's recipient expansion is non-empty. Since #9237 the STOCK boot already satisfies this — the seeded dev admin holds manager (sys_user_position usp_showcase_admin_manager) and the boot backfill materialises the grant — so an evaluate with no extra assignment answers grantsCreated 0 out of IDEMPOTENCE, not emptiness. Read the gap off expandedUsers/matchedRecords. Assigning the position to one more persona does NOT make a created grant observable on evaluate either: the sys_user_position insert itself re-evaluates every position-recipient rule naming manager for the one user the row names, in the same write path (packages/plugins/plugin-sharing/src/recipient-membership-recompute.ts#bindRecipientMembershipRecompute, bound by sharing-plugin.ts), so that persona's grant is materialised before the insert returns and the evaluate that follows answers grantsCreated 0 again (QA run #27392). The observable is the rule-sourced sys_record_share row for that persona (recipient_id = its sys_user id, source 'rule', source_id = the rule's id), never grantsCreated > 0"
         ]
       },
       "steps": [
@@ -1319,7 +1343,7 @@
         "as B (a non-manager on A's note): POST /api/v1/data/showcase_private_note/<A id>/shares granting themselves — must be refused (creating a share is not a reader's power, ADR-0111 D5)",
         "revoke-scope probe — run it BEFORE the real revoke, while the share still EXISTS: attempt DELETE of the shareId through the SECOND note's path (/data/showcase_private_note/<A second id>/shares/<shareId>) — must be refused (the URL's object/id is the revoke scope, ADR-0111 D4) AND the share must survive the attempt. Ordered after the revoke it proves nothing: the shareId no longer exists by then, so the same refusal comes back for a share that is simply gone",
         "as A: DELETE /api/v1/data/showcase_private_note/<A id>/shares/<shareId> → 204; then as B: GET the note by id again — refused once more",
-        "as admin: assign the manager position to one persona (Setup -> Access Control), then POST /api/v1/sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate — capture the reconcile result; read sys_record_share for the matched contact"
+        "as admin: assign the manager position to one persona (Setup -> Access Control) — the assignment itself materialises that persona's rule grant (fixtures.requires[3]) — then POST /api/v1/sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate — capture the reconcile result, which answers grantsCreated 0 (idempotent) beside matchedRecords >= 1; read sys_record_share for the matched contact: the rule-sourced row whose recipient_id is the newly assigned persona is the created grant, read off the row and never off grantsCreated"
       ],
       "acceptance": [
         {
@@ -1422,6 +1446,12 @@
           "date": "2026-10-20",
           "change": "steps[0] respelled: 'boot showcase isolated (own port + file DB, dogfood skill §0)' → 'boot the showcase on its own port and file DB (dogfood skill §0)'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed",
           "ref": "#25003"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[3] and steps[10]: assigning the manager position no longer reads as a way to make evaluate report a created grant. QA run #27392 measured it: the sys_user_position insert already materialised the rule grant, and the evaluate after it answered grantsCreated 0 with matchedRecords >= 1. Source agrees: bindRecipientMembershipRecompute (plugin-sharing recipient-membership-recompute.ts, bound in sharing-plugin.ts) re-evaluates every position-recipient rule naming the written position for the one user the row names, before the write returns. Both now say the created grant is read off the rule-sourced sys_record_share row for the newly assigned persona (recipient_id, source 'rule', source_id = the rule id), never off grantsCreated. acceptance[6] is unchanged: it already asks for that row and allows grantsCreated/grantsUpdated as the body reports them. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488404069",
+          "ref": "#27392"
         }
       ]
     },
@@ -2277,7 +2307,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2295,10 +2325,10 @@
       "steps": [
         "boot showcase with the console; admin session; provision member M granted a writable set S that WITHHOLDS a verb on an object (e.g. delete:false on showcase_task); as M create the showcase_task rows the DELETE probes below use — M's OWN rows, never seeded ids: a set silent on writeScope is owner-only (packages/plugins/plugin-security/src/permission-evaluator.ts getEffectiveScope), so a seeded task owned by someone else stays refused after the verb flips ON and confounds the verb with ownership",
         "baseline: as M, DELETE /api/v1/data/showcase_task/<one of M's own ids> — must be refused 403 (the withheld verb)",
-        "in the console Permission Matrix editor for S, flip delete ON for showcase_task; save (draft) then publish — capture PUT /api/v1/meta/permission/S and POST /api/v1/meta/permission/S/publish",
+        "in the console Permission Matrix editor for S (Setup's metadata-admin door, which mounts the editor with no packageId), flip delete ON for showcase_task and Save. That Save is a plain PUT that lands state:'active' at once, not a draft: only a package-scoped editor (Studio's Access pillar, packageId set) saves with mode 'draft' (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx, the saveVersioned call; QA run #27441). Capture PUT /api/v1/meta/permission/S, then POST /api/v1/meta/permission/S/publish, which answers 404 code NO_DRAFT after that active save, per acceptance[1]; a run that edits through the package door instead publishes the pending draft and captures a 2xx",
         "as M: DELETE /api/v1/data/showcase_task/<another of M's own ids> — must now be 2xx (access flipped)",
-        "flip delete back OFF in the matrix; publish; as M: DELETE again — must be refused 403",
-        "field-level half: flip an FLS bit (a showcase_project field editable:false→true) in the lower matrix; publish; as M PATCH that field — the write flips accordingly",
+        "flip delete back OFF in the matrix and Save (active at once, as in steps[2]; publish only a package-door draft); as M: DELETE again — must be refused 403",
+        "field-level half: flip an FLS bit (a showcase_project field editable:false→true) in the lower matrix and Save (as in steps[2]); as M PATCH that field — the write flips accordingly",
         "assign/unassign: grant M a SECOND permission set (insert sys_user_permission_set) — M gains its verbs; remove the row — the access retracts",
         "re-open the editor for S and read the checkbox state for the flipped verb"
       ],
@@ -2377,6 +2407,12 @@
           "date": "2026-10-19",
           "change": "steps[0], [1] and [3] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.permission-matrix-edit-loop step 4; wave anchor #24579 §3): the DELETE probes named seeded task ids, but a permission set silent on writeScope is owner-only (plugin-security permission-evaluator.ts), so a seeded row owned by someone else stays refused after the delete bit flips ON. The probes now use rows M creates. No clause changed",
           "ref": "#24632"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "steps[2], [4] and [5] said 'save (draft) then publish'. The console Save on the Setup door lands active, as QA run #27441 measured. Source agrees: PermissionMatrixEditor.tsx's saveVersioned call adds mode 'draft' only when the editor is mounted with a packageId (Studio's Access pillar), and Setup's metadata-admin door mounts it with none, so its Save is a plain PUT that writes state 'active'. The steps now say Save, and that the publish call then answers 404 NO_DRAFT. acceptance[1] already scored both paths and is unchanged. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6490438726",
+          "ref": "#27441"
         }
       ]
     },
@@ -3748,7 +3784,7 @@
       "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -3759,16 +3795,17 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed). That default `os dev` first compiles objectstack.config.ts into the app's own dist/objectstack.json (packages/cli/src/commands/dev.ts, the `compile` flag, default on), so when several runners boot from one shared checkout, boot with `pnpm -C examples/app-showcase exec objectstack dev --fresh --no-compile -p PORT` instead: --no-compile serves the existing artifact as built (it still compiles when the artifact is missing, and warns when the artifact is older than the sources), so one compile boot beforehand keeps it current and no concurrent boot rewrites it (QA run #27481)",
           "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
           "on the walled boot: a second organization whose owner is granted manage_metadata but not the platform_admin position. No HTTP door places that grant on a walled boot (QA run #24783): the operator's insert into an organization it is not a member of is refused by the Layer 0 tenant check, 403 '… organization_id is outside the caller's organization scope' (packages/plugins/plugin-security/src/security-plugin-write-tenant-wall.ts#denyTenantPlacement), and the owner's own insert is refused by ADR-0090 D12 condition (c), because manage_metadata is declared scope 'platform' (packages/spec/src/security/capabilities.ts; packages/plugins/plugin-security/src/delegated-admin-gate.ts#organizationBoundaryFailure). The recipe is the dogfood harness's: the operator saves a permission set carrying systemPermissions ['manage_metadata'], and the grant row {user_id, permission_set, organization_id} is a system-context engine insert stamped with that organization, as packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts#boot places it, or a direct row on the run's own scratch DB, as QA run #24783 placed it. Record it in the run record as a fixture write made outside HTTP"
         ],
         "knownGaps": [
-          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence. The three wall-* dogfood pins boot the CRM example (@objectstack/example-crm: crm_lead and its package), not the showcase the steps name, so their door answers are the same doors on another app's objects; a live run drives the steps' showcase objects and does not match object names against the pins. Their single-posture CONTROL drives a manage_metadata holder below the operator, a stronger control than acceptance[2]'s seeded admin, which no pin drives on single: that admin leg is hand-driven"
+          "Every live leg here needs the walled boot fixtures.requires[1] names and the second organization fixtures.requires[2] names. On 18.0.0 os serve — and os dev / os start, which boot through it — boots OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true): 18.x step 4 (#24580) deleted the walled boot refusal (serve.ts walledPostureRefusal) before 18.0.0, and of the published prereleases only 18.0.0-next.5 carries it. The walled boot is provisioned per RUNNER.md's environment-facts entry 'A walled boot is a fixture of its own': the multi-org runtime declared by the app (no example app declares it), OS_PLATFORM_OWNER_EMAIL, and a declared OS_AUTH_MEMBERSHIP_POLICY; each one absent refuses an os dev boot naming itself, while a bare os serve in production mode judges none of them until OS_AUTH_SECRET is set (that entry). On that boot the second organization is created through POST /api/v1/auth/organization/create (RUNNER.md 'A stock `single` boot holds exactly one organization, and no door mints a second; a walled boot mints them through the auth API'). A run that does not provision them records acceptance[1], acceptance[2] and negative[0] blocked(fixture) naming those entries, never fail. steps[3]'s single-posture admit is only the control for the walled refusal and proves nothing alone. acceptance[0]'s pins boot the walled posture at kernel level and stay the item's pinned evidence. The three wall-* dogfood pins boot the CRM example (@objectstack/example-crm: crm_lead and its package), not the showcase the steps name, so their door answers are the same doors on another app's objects; a live run drives the steps' showcase objects and does not match object names against the pins. Their single-posture CONTROL drives a manage_metadata holder below the operator, a stronger control than acceptance[2]'s seeded admin, which no pin drives on single: that admin leg is hand-driven",
+          "install-local of a catalog-carrying package, named in the title, has no step here: it is scored from acceptance[0]'s pins (packages/qa/dogfood/test/wall-environment-metadata-refusal.dogfood.test.ts drives install-local install, upgrade and uninstall). A live leg must boot from a SCRATCH COPY of the app, never the shared tree, because the operator's admitted control install caches its manifest under the server's working directory, .objectstack/installed-packages (RUNNER.md, the environment fact 'A per-boot OS_HOME and OS_STORAGE_LOCAL_ROOT do NOT isolate a package install'). QA run #27481 left the leg undriven for that reason and scored it from the pins"
         ]
       },
       "steps": [
-        "walled boot, as the org owner: PUT /api/v1/meta/object/qa_walled_probe (a minimal object body that declares sharingModel, e.g. 'private': the admitted repeats in steps[2] and steps[3] reach the save door's authoring rules, which refuse an object with no authored sharingModel 422 security-owd-unset (packages/lint/src/validate-security-posture.ts#SECURITY_OWD_UNSET), a 422 that reads as the admission failing); PUT /api/v1/meta/permission/showcase_member_access (any body); POST /api/v1/meta/view/SOME_VIEW/publish; DELETE /api/v1/packages/com.example.showcase",
+        "walled boot, as the org owner: PUT /api/v1/meta/object/qa_walled_probe (a minimal object body that declares sharingModel, e.g. 'private': the admitted repeats in steps[2] and steps[3] reach the save door's authoring rules, which refuse an object with no authored sharingModel 422 security-owd-unset (packages/lint/src/validate-security-posture.ts#SECURITY_OWD_UNSET), a 422 that reads as the admission failing); PUT /api/v1/meta/permission/showcase_member_default (any body; an EXISTING set, so the refusal is of an overwrite — the showcase declares no showcase_member_access, whose read-back answers 404, and naming it tests a create-refusal instead); POST /api/v1/meta/view/SOME_VIEW/publish; DELETE /api/v1/packages/com.example.showcase",
         "walled boot, as the org owner: POST /api/v1/security/permission-sets/SOME_SET/clone",
         "walled boot, as the operator: repeat the object PUT and confirm it is admitted (then delete the probe)",
         "single-posture boot, as admin: the same object PUT is admitted (control)"
@@ -3845,6 +3882,12 @@
           "date": "2026-10-26",
           "change": "Two checklist-accuracy findings of the 18.2.0 sweep, re-read on main b4199c96, added to knownGaps[0]. From P0 record #25812: the steps name showcase objects while the wall-* dogfood pins boot the CRM example; the item now says so. From Tier 1 record #25815 (acceptance[2]): the pins' single-posture leg is a manage_metadata holder below the operator, not the seeded admin; the admin leg is named hand-driven. No clause or status changed",
           "ref": "#25835"
+        },
+        {
+          "revision": 7,
+          "date": "2026-10-31",
+          "change": "Three findings of the wave-3 sweep. steps[0] PUT /api/v1/meta/permission/showcase_member_access named a set the showcase does not have (QA runs #27409 and #27481: the read-back answers 404), so the refusal it scored was a create-refusal; it now names the existing showcase_member_default (examples/app-showcase/src/security/permission-sets.ts), so the refused write is an overwrite and acceptance[1]'s read-back is 'unchanged', not 404. fixtures.requires[0] keeps `pnpm dev -- --fresh` and adds the shared-checkout boot: a default os dev compiles objectstack.config.ts into the app's dist/objectstack.json (packages/cli/src/commands/dev.ts, compile flag default on), so concurrent runners boot `objectstack dev --fresh --no-compile -p PORT`, which serves the existing artifact (still compiled when missing; warns when stale) — #27481's own boot line. knownGaps[1] is added for the install-local leg #27481 parked as a gap: it rests on the wall-environment-metadata-refusal dogfood pin (acceptance[0]), and a live leg boots from a scratch copy per RUNNER.md's install-isolation fact. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228 (C2a) and 6493994883 (C1)",
+          "ref": "#27481"
         }
       ]
     },

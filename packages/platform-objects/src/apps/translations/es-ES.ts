@@ -59,6 +59,8 @@ export const esES: TranslationData = {
         nav_teams: { label: 'Equipos' },
         nav_organizations: { label: 'Organizaciones' },
         nav_invitations: { label: 'Invitaciones' },
+        nav_position_holders: { label: 'Titulares de posiciones' },
+        nav_permission_set_assignment: { label: 'Asignación de conjuntos de permisos' },
 
         nav_positions: { label: 'Posiciones' },
         nav_capabilities: { label: 'Capacidades' },
