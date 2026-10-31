@@ -2094,8 +2094,10 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
    * ⛔ No spec-side default: absence keeps every board stored before this key
    * exactly as it was, one lane per option.
    *
-   * Lands ahead of its reader: the board draws one lane per option until the
-   * console half reads this key where it builds its lanes.
+   * What the board draws: the listed lanes and no others, in the order the
+   * author wrote them; a record whose value is not listed lands in
+   * `Uncategorized`. Without the key it draws one lane per option, in the
+   * options' own order.
    */
   lanes: z.array(SystemIdentifierSchema)
     .min(1, { message: '`kanban.lanes` lists at least one lane. To draw one lane per option, omit the key.' })
