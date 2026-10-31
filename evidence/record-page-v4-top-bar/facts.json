@@ -1,0 +1,416 @@
+{
+  "login": 200,
+  "ids": {
+    "lead": "73kXfl2oqRPzc3dQ",
+    "contact": "t0raZP-tf9DWe8jP",
+    "product": "nW3wnV8skEy3O9Sx",
+    "leadCount": 21
+  },
+  "task:Send the renewal quote": 201,
+  "task:Book the Q1 review": 400,
+  "01-lead-1440-from-list": {
+    "bar": [
+      {
+        "leading": "线索Mira Costa - Atlas Construction",
+        "position": "1 / 21",
+        "positionTitle": "全部线索 中第 1 条，共 21 条",
+        "controls": [
+          "下一条记录",
+          "上一条记录"
+        ],
+        "height": 40,
+        "width": 1184
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_lead/record/73kXfl2oqRPzc3dQ"
+  },
+  "02-lead-1440-after-step-down": {
+    "bar": [
+      {
+        "leading": "线索Kai Watanabe - Coral Reef Hotels",
+        "position": "2 / 21",
+        "positionTitle": "全部线索 中第 2 条，共 21 条",
+        "controls": [
+          "下一条记录",
+          "上一条记录"
+        ],
+        "height": 40,
+        "width": 1184
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_lead/record/Qwfc1PBko6-t2d61"
+  },
+  "afterK": "/apps/app.objectstack.hotcrm/crm_lead/record/73kXfl2oqRPzc3dQ",
+  "03-lead-1200-direct": {
+    "bar": [
+      {
+        "leading": "线索Mira Costa - Atlas Construction",
+        "position": null,
+        "positionTitle": null,
+        "controls": [],
+        "height": 40,
+        "width": 1152
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_lead/record/73kXfl2oqRPzc3dQ"
+  },
+  "04-contact-split-720": {
+    "bar": [
+      {
+        "leading": "联系人John Smith",
+        "position": null,
+        "positionTitle": null,
+        "controls": [
+          "最大化",
+          "关闭面板"
+        ],
+        "height": 40,
+        "width": 719
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览 (active)",
+      "timeline=动态2",
+      "crm_contract.crm_contact=合同1",
+      "crm_event.related_to_contact=活动1",
+      "crm_event_attendee.crm_contact=活动参与者7",
+      "crm_lead.converted_contact=线索 · 转化联系人0"
+    ],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_contact?recordId=t0raZP-tf9DWe8jP"
+  },
+  "05-contact-maximized": {
+    "bar": [
+      {
+        "leading": "联系人John Smith",
+        "position": null,
+        "positionTitle": null,
+        "controls": [
+          "右栏",
+          "还原",
+          "关闭面板"
+        ],
+        "height": 40,
+        "width": 1184
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览 (active)",
+      "timeline=动态2",
+      "crm_contract.crm_contact=合同1",
+      "crm_event.related_to_contact=活动1",
+      "crm_event_attendee.crm_contact=活动参与者7",
+      "crm_lead.converted_contact=线索 · 转化联系人0",
+      "crm_lead.duplicate_of_contact=线索 · 重复的联系人0",
+      "crm_opportunity.primary_contact=商机0",
+      "crm_task.related_to_contact=任务1",
+      "crm_case.crm_contact=工单2",
+      "crm_quote.crm_contact=报价单2",
+      "crm_campaign_member.crm_contact=营销活动成员3"
+    ],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_contact?recordId=t0raZP-tf9DWe8jP"
+  },
+  "06-contact-split-task-tab": {
+    "bar": [
+      {
+        "leading": "联系人John Smith",
+        "position": null,
+        "positionTitle": null,
+        "controls": [
+          "最大化",
+          "关闭面板"
+        ],
+        "height": 40,
+        "width": 719
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览",
+      "timeline=动态2",
+      "crm_contract.crm_contact=合同1",
+      "crm_event.related_to_contact=活动1",
+      "crm_event_attendee.crm_contact=活动参与者7",
+      "crm_lead.converted_contact=线索 · 转化联系人0",
+      "crm_task.related_to_contact=任务1 (active)"
+    ],
+    "toolbar": [
+      {
+        "chips": [
+          "all=全部1",
+          "mine=我的"
+        ],
+        "text": "全部1我的新建导出"
+      }
+    ],
+    "status": [
+      "1 条"
+    ],
+    "url": "/apps/app.objectstack.hotcrm/crm_contact?recordId=t0raZP-tf9DWe8jP&related=crm_task.related_to_contact"
+  },
+  "taskTabId": "crm_task.related_to_contact",
+  "07-contact-page-task-tab-deep-link": {
+    "bar": [
+      {
+        "leading": "联系人John Smith",
+        "position": null,
+        "positionTitle": null,
+        "controls": [
+          "右栏"
+        ],
+        "height": 40,
+        "width": 1184
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览",
+      "timeline=动态2",
+      "crm_contract.crm_contact=合同1",
+      "crm_event.related_to_contact=活动1",
+      "crm_event_attendee.crm_contact=活动参与者7",
+      "crm_lead.converted_contact=线索 · 转化联系人0",
+      "crm_lead.duplicate_of_contact=线索 · 重复的联系人0",
+      "crm_opportunity.primary_contact=商机0",
+      "crm_task.related_to_contact=任务1 (active)",
+      "crm_case.crm_contact=工单2",
+      "crm_quote.crm_contact=报价单2",
+      "crm_campaign_member.crm_contact=营销活动成员3"
+    ],
+    "toolbar": [
+      {
+        "chips": [
+          "all=全部1",
+          "mine=我的"
+        ],
+        "text": "全部1我的新建导出"
+      }
+    ],
+    "status": [
+      "1 条"
+    ],
+    "url": "/apps/app.objectstack.hotcrm/crm_contact/record/t0raZP-tf9DWe8jP?related=crm_task.related_to_contact"
+  },
+  "07b-contact-page-task-tab-mine": {
+    "bar": [
+      {
+        "leading": "联系人John Smith",
+        "position": null,
+        "positionTitle": null,
+        "controls": [
+          "右栏"
+        ],
+        "height": 40,
+        "width": 1184
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览",
+      "timeline=动态2",
+      "crm_contract.crm_contact=合同1",
+      "crm_event.related_to_contact=活动1",
+      "crm_event_attendee.crm_contact=活动参与者7",
+      "crm_lead.converted_contact=线索 · 转化联系人0",
+      "crm_lead.duplicate_of_contact=线索 · 重复的联系人0",
+      "crm_opportunity.primary_contact=商机0",
+      "crm_task.related_to_contact=任务1 (active)",
+      "crm_case.crm_contact=工单2",
+      "crm_quote.crm_contact=报价单2",
+      "crm_campaign_member.crm_contact=营销活动成员3"
+    ],
+    "toolbar": [
+      {
+        "chips": [
+          "all=全部1",
+          "mine=我的"
+        ],
+        "text": "全部1我的新建导出"
+      }
+    ],
+    "status": [
+      "1 条"
+    ],
+    "url": "/apps/app.objectstack.hotcrm/crm_contact/record/t0raZP-tf9DWe8jP?related=crm_task.related_to_contact"
+  },
+  "08-product-1440": {
+    "bar": [
+      {
+        "leading": "产品PRD-0006 - Analytics Add-on",
+        "position": null,
+        "positionTitle": null,
+        "controls": [
+          "右栏"
+        ],
+        "height": 40,
+        "width": 1184
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览 (active)",
+      "timeline=动态1",
+      "crm_opportunity_line_item.crm_product=商机产品明细6",
+      "crm_price_book_entry.crm_product=价格表条目1",
+      "crm_quote_line_item.crm_product=报价单明细0"
+    ],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_product/record/nW3wnV8skEy3O9Sx"
+  },
+  "09-lead-phone-390": {
+    "bar": [
+      {
+        "leading": "线索Mira Costa - Atlas Construction",
+        "position": null,
+        "positionTitle": null,
+        "controls": [],
+        "height": 40,
+        "width": 390
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_lead/record/73kXfl2oqRPzc3dQ"
+  },
+  "09b-contact-phone-390": {
+    "bar": [
+      {
+        "leading": "联系人John Smith",
+        "position": null,
+        "positionTitle": null,
+        "controls": [],
+        "height": 40,
+        "width": 390
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览 (active)",
+      "timeline=动态2",
+      "crm_contract.crm_contact=合同1",
+      "crm_event.related_to_contact=活动1"
+    ],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_contact/record/t0raZP-tf9DWe8jP"
+  },
+  "10-crm_account-split-pane-counter": {
+    "bar": [
+      {
+        "leading": "客户ACC-000006 - Northwind Energy",
+        "position": "3 / 9",
+        "positionTitle": "全部客户 中第 3 条，共 9 条",
+        "controls": [
+          "下一条记录",
+          "上一条记录",
+          "最大化",
+          "关闭面板"
+        ],
+        "height": 40,
+        "width": 719
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览 (active)",
+      "timeline=动态",
+      "crm_contact.crm_account=联系人1",
+      "crm_contract.crm_account=合同0",
+      "crm_quote.crm_account=报价单0",
+      "crm_account.parent_account=客户0",
+      "crm_event.related_to_account=活动1",
+      "crm_lead.converted_account=线索0",
+      "crm_opportunity.crm_account=商机2"
+    ],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_account?recordId=rP11P-x4VKKkp66S"
+  },
+  "11-crm_account-split-pane-after-step": {
+    "bar": [
+      {
+        "leading": "客户ACC-000002 - Globex Industries",
+        "position": "4 / 9",
+        "positionTitle": "全部客户 中第 4 条，共 9 条",
+        "controls": [
+          "下一条记录",
+          "上一条记录",
+          "最大化",
+          "关闭面板"
+        ],
+        "height": 40,
+        "width": 719
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览 (active)",
+      "timeline=动态",
+      "crm_contact.crm_account=联系人1",
+      "crm_contract.crm_account=合同0",
+      "crm_quote.crm_account=报价单1",
+      "crm_account.parent_account=客户0",
+      "crm_event.related_to_account=活动2",
+      "crm_lead.converted_account=线索0",
+      "crm_opportunity.crm_account=商机3"
+    ],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_account?recordId=bj6bq9xyF532cc-E"
+  },
+  "paneObject": "crm_account",
+  "12-crm_account-page-from-arrow": {
+    "bar": [
+      {
+        "leading": "客户ACC-000005 - Wayne Enterprises",
+        "position": "1 / 9",
+        "positionTitle": "全部客户 中第 1 条，共 9 条",
+        "controls": [
+          "下一条记录",
+          "上一条记录",
+          "右栏",
+          "收为抽屉"
+        ],
+        "height": 40,
+        "width": 1184
+      }
+    ],
+    "crumbRow": false,
+    "tabs": [
+      "overview=概览 (active)",
+      "timeline=动态",
+      "crm_contact.crm_account=联系人1",
+      "crm_contract.crm_account=合同1",
+      "crm_quote.crm_account=报价单1",
+      "crm_account.parent_account=客户0",
+      "crm_event.related_to_account=活动5",
+      "crm_lead.converted_account=线索0",
+      "crm_opportunity.crm_account=商机3",
+      "crm_task.related_to_account=任务1",
+      "crm_case.crm_account=工单8"
+    ],
+    "toolbar": [],
+    "status": [],
+    "url": "/apps/app.objectstack.hotcrm/crm_account/record/YkGMyTphSjqyrbnW"
+  }
+}
