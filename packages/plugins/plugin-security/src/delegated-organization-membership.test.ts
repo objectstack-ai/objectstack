@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: a real SecurityPlugin over a real ObjectQL engine and SQL driver, booted per posture and per fixture (a read-only stack each, plus one per case whose write lands or that brings its own sharing service), every admission probe asked on that stack; slowest CI reading 28.95 s (scheduled full-battery run 41183072927, Test Core suite-ceiling report) x 1.25, rounded up
 
 /**
  * [#25063 · ADR-0090 D10] A delegated operation runs only in an organization
@@ -279,6 +280,38 @@ async function boot(posture: Posture, options: { sharing?: Record<string, unknow
   return { engine, plugin, stored, security };
 }
 
+// [#23181] The first boot's first loads (the driver's and the plugin's cold
+// paths) are paid here, at module scope, outside every case's clock: clocked
+// windows measure behaviour, never loading. Nothing this stack does is read.
+await (await boot('group', { lifetime: 'describe' })).engine.destroy();
+
+/**
+ * [#23181] One stack per posture (and per `seedForReads` or not), booted by
+ * its first case and shared by every case that only READS or is REFUSED: a
+ * refused write stores nothing, and each such case still asserts that
+ * (`stored`), so a shared stack is the stack it would have booted. A case
+ * whose write lands, that hands `boot` its own sharing service, or that pins
+ * another rule's refusal by what is stored, still boots its own. Booting one stack per case was most of this file's wall.
+ */
+const sharedStacks = new Map<string, Promise<Awaited<ReturnType<typeof boot>>>>();
+function shared(posture: Posture, seeded = false) {
+  const key = `${posture}:${seeded ? 'seeded' : 'boot'}`;
+  let stack = sharedStacks.get(key);
+  if (!stack) {
+    stack = boot(posture, { lifetime: 'describe' }).then(async (b) => {
+      if (seeded) await seedForReads(b.engine);
+      return b;
+    });
+    sharedStacks.set(key, stack);
+  }
+  return stack;
+}
+afterAll(async () => {
+  for (const stack of sharedStacks.values()) {
+    try { await (await stack).engine.destroy(); } catch { /* noop */ }
+  }
+});
+
 interface Outcome { ok: boolean; value?: unknown; code?: string; status?: number; message?: string; developerMessage?: string }
 const attempt = async (run: () => Promise<unknown>): Promise<Outcome> => {
   try {
@@ -306,25 +339,25 @@ describe('[#25063 · ADR-0090 D10] a delegated operation in an organization the 
     describe(`\`${posture}\``, () => {
       for (const object of ['qa_account', 'qa_vault']) {
         it(`${object}: a single insert is refused, and nothing is stored`, async () => {
-          const b = await boot(posture);
+          const b = await shared(posture);
           expectMembershipRefusal(await attempt(() => b.engine.insert(object, { id: 'r1', name: 'one' }, { context: operator(ORG_D) } as never)));
           expect(await b.stored(object)).toEqual(SEEDED(object));
         });
 
         it(`${object}: an array insert is refused whole, and nothing is stored`, async () => {
-          const b = await boot(posture);
+          const b = await shared(posture);
           const rows = [{ id: 'r1', name: 'one' }, { id: 'r2', name: 'two' }];
           expectMembershipRefusal(await attempt(() => b.engine.insert(object, rows, { context: operator(ORG_D) } as never)));
           expect(await b.stored(object)).toEqual(SEEDED(object));
         });
 
         it(`${object}: a read is refused`, async () => {
-          const b = await boot(posture);
+          const b = await shared(posture);
           expectMembershipRefusal(await attempt(() => b.engine.find(object, { context: operator(ORG_D) } as never)));
         });
 
         it(`${object}: an update and a delete are refused, and the stored row is unchanged`, async () => {
-          const b = await boot(posture);
+          const b = await shared(posture);
           expectMembershipRefusal(await attempt(() => b.engine.update(object, { id: `${object}_in_d`, name: 'renamed' }, { context: operator(ORG_D) } as never)));
           expectMembershipRefusal(await attempt(() => b.engine.delete(object, { where: { id: `${object}_in_d` }, context: operator(ORG_D) } as never)));
           expect(await b.stored(object)).toEqual(SEEDED(object));
@@ -356,6 +389,9 @@ describe('[#25063] what the rule leaves alone', () => {
     });
 
     it(`\`${posture}\`: a delegated context with NO active organization keeps ADR-0123 D2's refusal`, async () => {
+      // Its own stack, not the shared one: the refusal cells above share it, so
+      // a regression of THIS file's rule would land rows there and red this
+      // case too, for a rule (ADR-0123 D2) that did not move.
       const b = await boot(posture);
       const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r1', name: 'one' }, { context: operator(undefined) } as never));
       expect(outcome.ok).toBe(false);
@@ -411,8 +447,7 @@ describe('[#25106 · ADR-0021 D-C] getReadFilter answers the deny sentinel where
   for (const posture of ['group', 'isolated'] as const) {
     for (const object of PROVIDER_OBJECTS) {
       it(`\`${posture}\` · ${object}: a delegated context in an organization the delegator is not a member of answers RLS_DENY_FILTER itself`, async () => {
-        const b = await boot(posture);
-        await seedForReads(b.engine);
+        const b = await shared(posture, true);
         expect(await b.plugin.getReadFilter(object, operator(ORG_D))).toBe(RLS_DENY_FILTER);
       });
     }
@@ -438,16 +473,14 @@ describe('[#25106] what the rule leaves alone in the read scope', () => {
 
   for (const posture of ['group', 'isolated'] as const) {
     it(`\`${posture}\`: a delegated context in an organization the delegator belongs to keeps its scope`, async () => {
-      const b = await boot(posture);
-      await seedForReads(b.engine);
+      const b = await shared(posture, true);
       for (const object of PROVIDER_OBJECTS) {
         expect(await scopeRows(b, object, operator(ORG_A)), object).toEqual(IN_SET[posture][object]);
       }
     });
 
     it(`\`${posture}\`: the same caller in \`org_d\` WITHOUT the delegation link keeps its scope`, async () => {
-      const b = await boot(posture);
-      await seedForReads(b.engine);
+      const b = await shared(posture, true);
       expect(await scopeRows(b, 'qa_account', operator(ORG_D, false))).toEqual(['qa_account_in_d']);
       expect(await scopeRows(b, 'qa_vault', operator(ORG_D, false))).toEqual(['qa_vault_in_a', 'qa_vault_in_c', 'qa_vault_in_d']);
       expect(await scopeRows(b, 'qa_catalog', operator(ORG_D, false))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
@@ -458,14 +491,13 @@ describe('[#25106] what the rule leaves alone in the read scope', () => {
       // organization-less object keeps its rows. The private object is left
       // out: the delegator holds its grant only inside an organization, so
       // object admission refuses it (`canReadObject`'s half), not this rule.
-      const b = await boot(posture);
-      await seedForReads(b.engine);
+      const b = await shared(posture, true);
       expect(await scopeRows(b, 'qa_account', operator(undefined))).toEqual([]);
       expect(await scopeRows(b, 'qa_catalog', operator(undefined))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
     });
 
     it(`\`${posture}\`: a system context is unscoped`, async () => {
-      const b = await boot(posture);
+      const b = await shared(posture);
       for (const object of PROVIDER_OBJECTS) {
         expect(await b.plugin.getReadFilter(object, { ...SYS_CTX, onBehalfOf: { userId: DELEGATOR } }), object).toBeUndefined();
       }
@@ -473,8 +505,7 @@ describe('[#25106] what the rule leaves alone in the read scope', () => {
   }
 
   it('`single`: there is no wall, so a delegated context in `org_d` keeps its scope', async () => {
-    const b = await boot('single');
-    await seedForReads(b.engine);
+    const b = await shared('single', true);
     expect(await scopeRows(b, 'qa_account', operator(ORG_D))).toEqual(['qa_account_in_a', 'qa_account_in_c', 'qa_account_in_d']);
     expect(await scopeRows(b, 'qa_vault', operator(ORG_D))).toEqual(['qa_vault_in_a', 'qa_vault_in_c', 'qa_vault_in_d']);
     expect(await scopeRows(b, 'qa_catalog', operator(ORG_D))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
@@ -484,8 +515,7 @@ describe('[#25106] what the rule leaves alone in the read scope', () => {
 describe('[#25106 · ADR-0021 D-C] parity: the read scope agrees with the engine find on the same contexts', () => {
   for (const posture of ['group', 'isolated'] as const) {
     it(`\`${posture}\`: refused by find ⇔ the deny sentinel; admitted ⇒ the scope admits exactly the rows find returns`, async () => {
-      const b = await boot(posture);
-      await seedForReads(b.engine);
+      const b = await shared(posture, true);
       const contexts: Record<string, Record<string, unknown>> = {
         'delegated in org_d': operator(ORG_D),
         'delegated in org_a': operator(ORG_A),
@@ -546,7 +576,7 @@ describe('[#25107 · ADR-0090 D10] the probes answer the refusal where the prolo
   for (const posture of ['group', 'isolated'] as const) {
     for (const object of PROVIDER_OBJECTS) {
       it(`\`${posture}\` · ${object}: every admission probe is false, every field projection is empty, and the explanation denies`, async () => {
-        const b = await boot(posture);
+        const b = await shared(posture);
         const answers = await probeAnswers(b, object, operator(ORG_D));
         expect(answers.canReadObject, 'canReadObject').toBe(false);
         expect(answers.canWriteInsert, 'canWriteObject insert').toBe(false);
@@ -565,7 +595,7 @@ describe('[#25107 · ADR-0090 D10] the probes answer the refusal where the prolo
     }
 
     it(`\`${posture}\`: the narrowing diagnostic reports nothing for a delegated read the prologue refuses`, async () => {
-      const b = await boot(posture);
+      const b = await shared(posture);
       expect(await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).toEqual({ narrowed: false });
     });
 
@@ -598,12 +628,12 @@ describe('[#25107] what the rule leaves alone in the probes', () => {
 
   for (const posture of ['group', 'isolated'] as const) {
     it(`\`${posture}\`: a delegated context in an organization the delegator belongs to is admitted by every probe`, async () => {
-      const b = await boot(posture);
+      const b = await shared(posture);
       for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_A)), object);
     });
 
     it(`\`${posture}\`: the same caller in \`org_d\` WITHOUT the delegation link is admitted by every probe`, async () => {
-      const b = await boot(posture);
+      const b = await shared(posture);
       for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_D, false)), object);
     });
 
@@ -611,7 +641,7 @@ describe('[#25107] what the rule leaves alone in the probes', () => {
       // Its writes are ADR-0123 D2's, and the private object's grant lives
       // only inside an organization, so the public objects' reads are the
       // cells this rule could have moved and did not.
-      const b = await boot(posture);
+      const b = await shared(posture);
       for (const object of ['qa_account', 'qa_catalog']) {
         expect(await b.plugin.canReadObject(object, operator(undefined)), object).toBe(true);
         expect(await b.plugin.getReadableFields(object, operator(undefined)), object).toEqual(expect.arrayContaining(ALL_FIELDS));
@@ -619,7 +649,7 @@ describe('[#25107] what the rule leaves alone in the probes', () => {
     });
 
     it(`\`${posture}\`: the narrowing diagnostic still reports a narrowed delegated read in an organization the delegator belongs to`, async () => {
-      const b = await boot(posture);
+      const b = await shared(posture);
       const verdict = await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_A));
       expect(verdict.narrowed).toBe(true);
       expect(verdict.effectiveScope).toBe('own');
@@ -641,7 +671,7 @@ describe('[#25107] what the rule leaves alone in the probes', () => {
   }
 
   it('`single`: there is no wall, so a delegated context in `org_d` is admitted by every probe and its narrowing is reported', async () => {
-    const b = await boot('single');
+    const b = await shared('single');
     for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_D)), object);
     expect((await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).narrowed).toBe(true);
   });
