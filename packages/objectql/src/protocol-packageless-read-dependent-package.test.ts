@@ -27,7 +27,8 @@
  *  - CONTROL: a writable package's OWN item, a name no code package ships,
  *    is still served to the read naming no package (#23291);
  *  - CONTROL: a package-unbound row (the ADR-0005 overlay Setup writes) still
- *    wins over the code package, beside the dependent package's row too.
+ *    wins over the code package; beside the dependent package's row it is now
+ *    what that read serves (the dependent package's row was, before).
  *
  * Not pinned: a declared override (the epic's override core, #28236, has no
  * declaration on `main` to leave untouched), and the env-wide list, which
@@ -274,14 +275,25 @@ describe('[#28238] a dependent package\'s row under a name the base ships is not
         expect(packageless.item._packageId).toBe(DEPENDENT);
     });
 
-    it('CONTROL: a package-unbound row still wins over the code package, beside the dependent package\'s row too', async () => {
+    /** A package-unbound active row, laid down through the engine as the repository's write lays one down. */
+    const storeUnboundRow = (engine: ObjectQL, columns: readonly string[]) => engine.insert('sys_metadata', {
+        type: 'view', name: VIEW, organization_id: null, package_id: null,
+        metadata: JSON.stringify(listBody(columns)), state: 'active', version: 1,
+    }, { context: { isSystem: true } });
+
+    it('CONTROL: a package-unbound row still wins over the code package on the read naming no package', async () => {
+        const { engine, protocol } = await boot();
+        await storeUnboundRow(engine, ['title', 'priority']);
+
+        expect(columnsOf((await read(protocol)).item)).toEqual(['title', 'priority']);
+        expect(columnsOf((await read(protocol, BASE)).item)).toEqual(['title', 'priority']);
+    });
+
+    it('beside the dependent package\'s row, the package-unbound row is what the read naming no package serves', async () => {
         const { engine, protocol } = await boot();
         await installDependent(protocol);
         await saveIntoDependent(protocol, VIEW, DEPENDENT_COLUMNS);
-        await engine.insert('sys_metadata', {
-            type: 'view', name: VIEW, organization_id: null, package_id: null,
-            metadata: JSON.stringify(listBody(['title', 'priority'])), state: 'active', version: 1,
-        }, { context: { isSystem: true } });
+        await storeUnboundRow(engine, ['title', 'priority']);
 
         expect(columnsOf((await read(protocol)).item)).toEqual(['title', 'priority']);
         const layered: any = await (protocol as any).getMetaItemLayered({ type: 'view', name: VIEW });
