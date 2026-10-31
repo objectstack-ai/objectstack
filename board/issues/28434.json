@@ -1,0 +1,37 @@
+{
+  "number": 28434,
+  "kind": "issue",
+  "title": "List grid: right-clicking a row opens that row's actions at the pointer — the same set, gates and order as its ⋯ menu; a row inside a multi-row selection opens the declared bulk actions",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T15:47:04Z",
+  "updated_at": "2026-10-31T18:35:10Z",
+  "closed_at": "2026-10-31T18:30:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28434",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat on the maintainer's instruction. The maintainer asked 「是否建议列表点右键时，展开当前行可用的actions」, the seat recommended the shape below, and the maintainer answered 「两张都立：… 行右键菜单卡开在 domain:ui。」 (2026-10-31).\n\n## Reading (upstream `main` `5da3a8ce31`)\n\n- A list row's actions are reachable only through the row's ⋯ button (`ui/packages/plugin-grid/src/components/RowActionMenu.tsx`). Its items are the object's actions at `locations: ['list_item']` (resolved in `ui/packages/plugin-grid/src/ObjectGrid.tsx` around line 970), gated by each action's `visible` / `disabled` predicate against the row and by the capability gate (objectui#12708), plus the built-in Edit / Delete with their predicates.\n- The grid has a context menu only on **column headers** (`handleColumnContextMenu`, `ui/packages/components/src/renderers/complex/data-table.tsx` line 2110). A right-click on a row gets the browser's menu.\n- Bulk actions are drawn by `BulkActionBar` only from a view's `bulkActions` / `bulkActionDefs`. `ActionSchema.bulkEnabled` is retired (spec 17.0.0), so a single-record action is never implicitly a bulk one.\n\n## Target\n\n1. **Right-click on a row that is not part of a multi-row selection** opens a menu at the pointer.\n   - Its items are exactly the items that row's ⋯ menu shows: same source, same predicates, same capability gate, same order, same confirm dialogs.\n   - Build it from the one resolver `RowActionMenu` uses, not a second list, so the two menus cannot drift.\n   - Above the actions, add two platform items: **Open** and **Open in new tab** (the record URL the row already links to).\n   - When the row has no actions, the menu still shows those two items.\n2. **Right-click on a row that is part of a selection of two or more rows** opens the declared bulk actions for that selection: the same items and gates `BulkActionBar` shows. With no declared bulk action, the menu says the selection count and offers Clear selection, as the bar does. It never lists single-record actions.\n3. **The browser's own menu stays** on a link inside a cell, on a cell in edit mode or any text input, and when the user has a text selection inside the row. Copying text from a list must keep working.\n4. **Keyboard:** the context-menu key and Shift+F10 on a focused row open the same menu. Esc closes it and returns focus to the row.\n5. **Touch:** no long-press menu. Touch keeps the ⋯ button.\n6. **Every surface the ⋯ menu is on:** the menu applies wherever `RowActionMenu` renders today (object list grids, related-list tables, the enlarged related list). It does not apply where rows are not selectable and have no row actions.\n\nNo spec change, no new action location, no new metadata key. The right-click menu is a second way to reach what `list_item` already declares.\n\n## Why (four axes)\n\n- **Business need:** this came from the maintainer's own review of the list on the latest main. On a dense list, the ⋯ column is a small target at the far right edge of a wide row. A right-click reaches the same actions where the pointer already is.\n- **Long-term fit:** one resolver feeds two entry points. Ruled out: expanding all single-record actions when rows are selected (the maintainer's earlier question, 「是否建议列表页选中行时，展开可用的actions」). It mixes selection (a bulk act) with a per-row act, and single actions are not bulk-safe now that `bulkEnabled` is retired.\n- **AI-error resistance:** an app author declares nothing new. A `list_item` action shows up in both menus or in neither, so an AI cannot declare a right-click item that the ⋯ menu does not honour.\n- **Startup focus:** pure renderer work on existing declarations, with no new surface.\n\n## Acceptance\n\n1. On `examples/app-crm`, right-clicking an account row shows the same items, in the same order, as that row's ⋯ menu. An action whose `visible` predicate is false for that row is absent from both.\n2. Select three rows and right-click one of them: the menu shows the view's bulk actions (or count + Clear when none are declared), never a single-record action.\n3. Right-clicking a link inside a cell, or a cell in edit mode, shows the browser menu.\n4. Tests pin item parity with `RowActionMenu` for one row (same resolver input gives the same items), the selection branch, and the native-menu exceptions.\n5. Screenshots at 1440 on the evidence branch: one row menu, one selection menu."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 28448,
+  "kind": "issue",
+  "title": "metadata-protocol: refuse at the save door a tenant overlay that changes a packaged validation rule's condition or type (ruling C′ / B on #27949, the save-door half)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T16:50:06Z",
+  "updated_at": "2026-10-31T16:50:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28448",
+  "body": "domain:server#1 · os-tesla · session_01L9qibz3ZUbZ8Qcn1rDw9yc\n\nFiling gate: ③ the maintainer dispatched this card directly. At 2026-10-31T15:47Z Tesla answered 「同意」 to batch #433. Its item 3 is ruling B on #27949, record 6545641964: \"the save-door half is a follow-up card queued behind the `protocol.ts` serial queue (#6367), `Blocked-by:` the landing PR\". ⛔ Not a claim. No grade is set: triage sets it (the parent is p2).\n\nBlocked-by: #28445\n\n**Business reason.** Ruling C′ (6524229156) sets the boundary. A tenant may reword or switch off a packaged validation rule, but the rule's `condition` and `type` belong to the package. Once #28445 lands, the overlay load path reports such a copy and runs the package's condition. That keeps an upgrade from failing on stored data, but the admin who saved the change gets no answer when they save. This card makes the save door say so, loudly and with the prescription, at the moment the admin writes it.\n\n**Reader who acts:** `domain:server` seat 1 (os-tesla), which holds #27949.\n\n## Wanted\n\n1. A metadata save of a tenant overlay `object` is refused when it carries a same-named copy of a validation rule contributed by the base package or an extender and changes that rule's `condition` or `type`. The refusal comes with C′'s prescription: \"to change the condition, add a rule under a new name, or change it in the package\".\n2. Use the predicate #28445 lands and leaves uncalled (`SchemaRegistry.tenantRuleCopyRefusal`, `packages/objectql/src/registry.ts`), so the load report and the save refusal judge one way.\n3. A copy that changes only `message` or `active` saves. A rule under a new name saves, since D9.2a keeps it additive.\n4. Pins: condition change refused, type change refused, reword saves, `active: false` saves, and a new name saves. Add one ablation per refusal.\n\n**Where:** the metadata save door's refusal set in `packages/metadata-protocol/src/` (`protocol-save-door-refusals.ts` holds its siblings). If the change touches `protocol.ts` itself, it waits its turn in that file's serial queue.\n\n**Contract:** `Clause-②: no` (narrowing: a save that succeeds today is refused), so contract review is owed. `Metadata-protocol: narrowed`; the dev confirms from the diff. No spec key.\n\n**Dedupe:** none found in the parent's thread or its rulings (6524229156, 6545641964). This is the half they name.\n\nLinks: #27949, PR #28445, ruling C′ 6524229156, ruling B 6545641964, ADR-0029 D9.2a."
+}

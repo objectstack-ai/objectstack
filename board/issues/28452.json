@@ -1,0 +1,31 @@
+{
+  "number": 28452,
+  "kind": "issue",
+  "title": "packages: the publish-drafts door accepts a non-string `message` and publishes with the default note instead of refusing it 400",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T17:11:10Z",
+  "updated_at": "2026-10-31T18:54:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28452",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a finding a dev report carried out of scope (#28406 item 4's dev, draft PR #28447, out-of-scope finding 1, os-dev-report 6546543076). ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:server`, `packages/runtime/src/domains/packages.ts` (the `POST /packages/:id/publish-drafts` door, ≈L1890–1915); next PR after #28414 lands, since #28414 is editing the same file now.\nDedupe (open AND closed): \"publish-drafts message validation\" → 9 hits, none about the request body's `message` (closest: #7023 capability floor, #24253 backfill, both closed).\nreach: public HTTP entry, measured by #28447's conformance suite: `POST /api/v1/packages/:id/publish-drafts` with `{\"message\": 42}` answers 200 and publishes with the default \"publish app package …\" note.\n\n**What is wrong.** #28447 declares the door's body as `PublishPackageDraftsRequestSchema` (`message?: string`, `backfill?: { object, field }[]`, unknown keys stripped). The door does not parse its body with it: it forwards `message` only when it is a string and silently drops anything else, so a caller that sends a number, an object or an array gets a 200 and a history row with the default note, never learning its note was ignored. `backfill` is already judged by the protocol (400 `VALIDATION_ERROR`), so only `message` diverges.\n\n**Wanted.** The door parses its body with `PublishPackageDraftsRequestSchema` and refuses a body the schema refuses with 400 `VALIDATION_ERROR` naming `message`. Unknown keys stay stripped (the SDK still sends its deprecated `opts.actor`). Flip the known-divergence pin in `packages/runtime/src/domains/packages-publish-drafts-request-conformance.test.ts` (added by #28447) and the matching sentence of the route-ledger row note.\n\n**Not here.** The body `actor` reads on the six sibling package doors and the app re-save (#28414).\n\nLinks back: #28406, PR #28447, #28414, ADR-0146 D1.\n\nBlocked-by: #28447\n"
+}

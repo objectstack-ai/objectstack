@@ -2,7 +2,7 @@
   "number": 28294,
   "kind": "pull_request",
   "title": "fix(components): a field's Esc in the record drawer no longer steps the pane back or restores it from maximized",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T03:42:31Z",
-  "updated_at": "2026-10-31T04:01:41Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-31T14:39:55Z",
+  "closed_at": "2026-10-31T14:39:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T14:39:53Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28294",

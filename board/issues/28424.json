@@ -1,0 +1,37 @@
+{
+  "number": 28424,
+  "kind": "issue",
+  "title": "spec: a report chart whose `seriesBy` cannot split (single-series type, or the same dimension as `xAxis`) is refused at authoring time, not on the page",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:spec",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T14:50:16Z",
+  "updated_at": "2026-10-31T17:07:07Z",
+  "closed_at": "2026-10-31T17:06:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28424",
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\n## Business rationale\n\nA report author splits a chart by a second dimension (`chart.seriesBy`, delivered by #28206 / #28305) and publishes it. Two combinations parse today and then fail on the page the business user opens:\n\n1. **A single-series chart type with `seriesBy`.** `pie`, `donut`, `funnel` (and `treemap` and `sankey`) draw one series. Such a report parses cleanly, but the renderer draws the one-series refusal panel (`ui/packages/plugin-charts/src/AdvancedChartImpl.tsx`, \"A {family} draws one series, and this chart carries N\"). So the sales manager sees an error box where the pipeline chart should be.\n2. **`seriesBy` equal to `xAxis`.** The split repeats the category, so every series has exactly one point. The chart looks broken, and nothing tells the author why.\n\nBoth are authoring mistakes with no valid reading. The author should hear about them from `os build`, Studio save or `os lint`, not from a user. Dashboards already refuse the same thing for their own spelling: `checkDashboardWidgetChartMeasureArity` in `packages/spec/src/ui/dashboard.zod.ts` refuses a declared dimension with several measures on a type in `SINGLE_SERIES_CHART_TYPES` (objectui#8894 ruling D). The report spelling of that split arrived after that rule and is not covered.\n\nSource: ui seat 2's landing note on #28206 (comment 6544899074). It covers rider S1, the `seriesBy === xAxis` warning in `packages/lint/src/validate-chart-bindings.ts`, which triage dropped from the ui card, and the single-series finding.\n\n## Scope\n\n- **Single-series arm.** Refuse `report.chart.seriesBy` on a type in `SINGLE_SERIES_CHART_TYPES` in the spec, with the same set (one source, not a copy). Name the type, the split, and what to write instead (a bar-family type, or drop `seriesBy`). This mirrors ruling D's dashboard arm.\n- **Same-dimension arm.** Report `seriesBy === xAxis` at authoring time, in the spec refusal or as the lint warning that rider S1 named. The dispatch decides which.\n- Both arms apply only to non-`joined` reports, since a joined report has no chart.\n\n## Out of scope\n\n- Renderer changes. The runtime refusal panel stays as the last line of defence.\n- Skills prose for `seriesBy`, which is #28207."
+}

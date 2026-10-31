@@ -1,0 +1,34 @@
+{
+  "number": 28460,
+  "kind": "pull_request",
+  "title": "docs(spec): manage_connector_connections comments name the organization administrators' default grant",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T17:59:58Z",
+  "updated_at": "2026-10-31T18:55:27Z",
+  "closed_at": "2026-10-31T18:55:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T18:55:25Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28460",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoLXAkT8qKBzZ1B3UVHJPkjN)_\n\nFixes #28453\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`packages/spec` 里三处注释改为如实写明：平台管理员与两个组织管理员权限集（`organization_admin`、`organization_admin_no_bypass`）默认持有 `manage_connector_connections`，其它岗位仍需显式授予。只改注释，不改任何代码、能力清单或测试断言。\n- 为什么改：#28441（裁决 B，记录 6545223261）已让组织管理员默认持有该能力，旧注释仍说\"组织管理员也要显式授予\"，会让读 spec 的作者和 AI 多加一条重复授权，或误告客户管理员没有这项权利。\n- 风险与回滚：零运行时风险；去注释后的 TypeScript 输出与 main 逐文件相同（见 Verification）。回滚即 revert。\n- 先看：`packages/spec/src/security/capabilities.ts` 的 `manage_connector_connections` 注释；`packages/spec/src/identity/platform-admin-capabilities.test.ts` 改指向的 pin；`packages/spec/src/identity/eval-user.zod.ts`。\n- 两分钟验证：`git grep -n \"organization administrator included\" -- packages/spec`，预期无命中。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThree comments, reworded to what #28441 ships (ruling B, record 6545223261): platform administrators and the two shipped organization-administrator sets, `organization_admin` and `organization_admin_no_bypass`, hold `manage_connector_connections` by default, and every other position holds it only by explicit grant.\n\n- `packages/spec/src/security/capabilities.ts`: the `PLATFORM_CAPABILITIES` row's line comment.\n- `packages/spec/src/identity/eval-user.zod.ts`: the line comment above the entry in `ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions`.\n- `packages/spec/src/identity/platform-admin-capabilities.test.ts`: the case comment now says the organization-administrator sets hold it, and points at the pin #28441 added in plugin-security's `default-permission-sets.test.ts`, the case `[ADR-0143 D5] the connector connection capability ships with the platform administrator and both organization-administrator sets, and no other`, which asserts the exact holder list.\n\nNo code, capability list or test assertion changes.\n\n**Contract review:** none owed. No `.describe()` and no exported TSDoc moved: all three edits are `//` line comments inside initializers, not declaration docblocks.\n\n**Changeset:** none (label `skip-changeset`). Measured after `pnpm --filter @objectstack/spec build` on 4f75d57d: the new wording is absent from every `dist/**/*.d.ts` / `.d.mts` file (control: the capability's `description` string is found in dist). The bundler does carry the line comments into the `dist` JS chunks, so the comment bytes there change; no symbol, value or type does.\n\n**Grep:** `git grep -n \"manage_connector_connections\" -- packages/spec skills content/docs` after the edit shows no other spec sentence that contradicts the default grant. Hits outside `packages/spec`: `content/docs/automation/connectors.mdx:535` already says organization administrators hold it by default (updated in #28441); no hit in `skills/`.\n\n## Tests\n\n`pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/identity/platform-admin-capabilities.test.ts` on 4f75d57d: `Test Files 1 passed (1)`, `Tests 6 passed (6)`. No ablation: no tested behaviour moved.\n\n## Acceptance notes\n\n- Branch `claude/project-thread-1t227a` is the card thread's platform-assigned branch; claim 6546643088 names it.\n- `content/docs/permissions/permission-sets.mdx` (the `organization_admin` summary row) was already judged out of scope in #28441's notes, since that row lists a subset of capabilities; not touched here.\n\n## Verification\n\n<details><summary>Comment-only proof</summary>\n\nTypeScript `createPrinter({ removeComments: true })` output of each changed file, `origin/main` (776c1d87) against HEAD (4f75d57d): `capabilities.ts EQUAL`, `eval-user.zod.ts EQUAL`, `platform-admin-capabilities.test.ts EQUAL`.\n\n</details>\n\n<details><summary>Derived gates on 4f75d57d</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 73 families from the 3-file diff. Each ran with stdin from `/dev/null`, exit captured by redirect before any pipe. All 73 exit 0. Three (`check:doc-formula-expressions`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`) first exited 3, PREREQUISITE NOT MET, and were re-run after a whole-tree `pnpm turbo run build --filter='!@objectstack/docs' --concurrency=2` (lock VERDICT command-exit 0). `--ran`: `73 derived famil(ies) accounted for — 73 run, 0 NOT-MEASURED`, exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibyawL9DFnt7gutTH6R)_\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 28453,
+  "kind": "issue",
+  "title": "spec comments still say the organization administrator holds manage_connector_connections only by explicit grant; #28441 grants it by default",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T17:16:45Z",
+  "updated_at": "2026-10-31T18:56:12Z",
+  "closed_at": "2026-10-31T18:55:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28453",
+  "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ③ lane hand-off. Server seat 1's mailbox notice is 6546614356 on #28071. PR #28441 (#28427, ruling B 6545223261, merged 2026-10-31T17:14Z) grants `manage_connector_connections` to `organization_admin` and `organization_admin_no_bypass` by default. The server PR left the spec comments alone, by lane rule.\n\nReach: anyone who reads the spec to learn who may connect a vendor account. That includes the authors and AI agents who build on these comments, and the Setup and permission docs generated from them. Today the comments say the organization administrator cannot connect without an extra grant. That is no longer true, so a reader would add a grant that is already there, or tell a customer admin they lack a right they hold.\n\nDuplicate search: open cards with \"manage_connector_connections\" or \"connector connection\" in the title. None is about these comments.\n\n## Wanted (comment-only, no behaviour)\n\nReword these three to match #28441: platform administrators and the two shipped organization-administrator sets hold the capability by default; every other position holds it only by explicit grant.\n\n- `packages/spec/src/security/capabilities.ts` ≈L103–110.\n- `packages/spec/src/identity/eval-user.zod.ts` ≈L166–169.\n- `packages/spec/src/identity/platform-admin-capabilities.test.ts` ≈L52–54. This one says \"the organization administrator's shipped sets withhold it\" and points at plugin-security's `default-permission-sets.test.ts`. Re-point it to the pin #28441 now carries.\n\n`git grep -n \"manage_connector_connections\" -- packages/spec` should show no other sentence that contradicts this. If it does, fix it in the same PR.\n\n`Clause-②: no`, `Metadata-protocol: none`, patch changeset only if a shipped `.describe()` moves. Comments in `.ts` source ship only through `.d.ts` TSDoc, so measure that."
+}

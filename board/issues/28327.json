@@ -21,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T04:57:15Z",
-  "updated_at": "2026-10-31T12:23:22Z",
+  "updated_at": "2026-10-31T15:13:16Z",
   "closed_at": "2026-10-31T12:21:50Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -29,7 +29,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28327",
   "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: should-fix SF4 of the contract review of PR #28317 (#26702, ADR-0143 S1; record 6539266538). Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: every organization administrator who connects, reconnects or revokes an OAuth2 connector instance, once ADR-0143 S4 ships the Console flow.\nReader who acts: `domain:server`, with `domain:spec` for `packages/spec/src/security/capabilities.ts`.\n\n## What the code does (read, not measured, on the PR head)\n\nS1 gates the connection door (status, begin connect, callback, revoke) on `manage_metadata`. That is the same privilege class as the #27237 credential door, and the review accepted it as a narrowing for S1. But `manage_metadata` is declared `scope: 'platform'`, while connecting a vendor account is an organization-scoped act. The plan's `manage_connector_connections` capability (ADR-0143 D5 delegates it to the server slice) was left unused.\n\n## Wanted (route is triage's)\n\nAdd an org-scoped `manage_connector_connections` capability with its default grants, eval fixture and Setup widget, and move the four door members onto it, before S4 ships the Console flow.\n\n## Dedupe\n\nRead the open titles for `manage_connector_connections` and connector connection capability: none. **New.**\n\nLinks back: #26702, PR #28317\n\nBlocked-by: #28317\n"

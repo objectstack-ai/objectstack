@@ -2,8 +2,8 @@
   "number": 28206,
   "kind": "issue",
   "title": "Report chart draws the seriesBy split: query the second dimension and pivot it into grouped series",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:reports",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T16:45:06Z",
-  "updated_at": "2026-10-31T04:06:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T14:47:18Z",
+  "closed_at": "2026-10-31T14:45:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28206",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the renderer half of #27974, whose contract half lands in PR #28191 (claim 6526104358 names this follow-up; contract review 6528174510 PASS). ⛔ Not a claim. Triage sets the lane and grade.\nReach: any report that wants a bar per X split by Y. HotCRM `opportunity_funnel_owner_stage` (a bar per owner, split by stage) still falls back to an owner × stage `matrix` (hotcrm#2379) until the renderer reads the key.\n\n## Observed (once PR #28191 is on `main`)\n\n- `ReportChartSchema.seriesBy` is declared and checked at publish (`validateChartBindings`, `chart-dimension-unknown`), and its liveness row (`packages/spec/liveness/report.json`, `chart.children.seriesBy`) is `planned` with an author warning: declared, not yet drawn.\n- `ui/packages/plugin-report/src/DatasetReportRenderer.tsx` `DatasetReportChart` queries exactly `[xAxis]` × `[yAxis]` (≈L1210–1230, L1421), so the split is never drawn.\n\n## Wanted\n\n- The renderer widens the report chart query to `[xAxis, seriesBy]` × `[yAxis]` when `seriesBy` is set and passes the rows through `buildChartSeries` (`ui/packages/core/src/utils/chart-series.ts`, the existing two-dimension / one-measure pivot, ≈L592), with a test and an ablation.\n- The liveness row `chart.children.seriesBy` moves from `planned` to `live` in the same PR, with the reader as evidence.\n- Riders named by the contract review 6528174510 (should-fix, non-blocking): **S1** a `warning` in `validateChartBindings` when `seriesBy === xAxis` (the pivot would make every x bucket its own series); **S2** the `chart` row's stale `groupBy` sentence in the liveness note.\n\nDedupe words: report chart seriesBy renderer, DatasetReportChart second dimension, buildChartSeries report.\n\nLinks back: #27974, PR #28191.\n\nBlocked-by: #28191\n"
