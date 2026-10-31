@@ -80,6 +80,9 @@ import {
 } from './studioItemDraftStatus.js';
 import { packagedAutomationPath } from './BuilderLanding.js';
 import { FlowItemMoreMenu } from './FlowItemMoreMenu.js';
+import { FlowCloneDialog, FlowCloneResultNotice, type FlowCloneResult } from './FlowCloneDialog.js';
+import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
+import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
@@ -8848,6 +8851,9 @@ export function AutomationsPillar({
   // and the problem tally its Problems tab carries (reported by the preview).
   const [flowSection, setFlowSection] = React.useState<FlowPreviewSection>('canvas');
   const [problemTally, setProblemTally] = React.useState<FlowProblemTally>({ count: 0, errors: 0 });
+  // ADR-0146 D4 — bumped after a ledger toggle the server accepted: its answer
+  // carries the flag alone, and the flip can move what the engine armed.
+  const [statusNonce, setStatusNonce] = React.useState(0);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -8868,7 +8874,7 @@ export function AutomationsPillar({
     return () => {
       cancelled = true;
     };
-  }, [publishNonce]);
+  }, [publishNonce, statusNonce]);
 
   // #27356 row 19 — a delete re-reads the rail (`flowListNonce`) and leaves
   // the pillar on its empty state: that one re-read opens no other flow.
@@ -9199,6 +9205,64 @@ export function AutomationsPillar({
     onDraftSaved?.({ type: 'flow', name: flow.name });
     toast.success(tFormat('engine.studio.auto.flowDeleted', locale, { item: flow.label || flow.name }));
   }, [client, current, packageId, hasDraft, onDraftSaved, locale]);
+  // ADR-0146 D4 — a read-only package's open flow offers the activation-ledger
+  // switch and Clone (`FlowLedgerSwitch`, `FlowCloneDialog`). The switch reads
+  // the engine's `_status` row for the flow, never the draft's `status`; with
+  // no row served there is nothing to bind and the read-only definition switch
+  // stays as it was. Both doors are pre-judged from the served posture facts;
+  // after any attempt the server's refusal is shown as sent.
+  const ledgerItem = readOnly && packageId !== null;
+  const ledgerOn = ledgerItem && current && flowStatusRead ? flowStatus[current.name]?.enabled : undefined;
+  const ledgerWalled = useFlowLedgerWalledReadOnly();
+  const ledgerWalledReason = ledgerWalled ? t('engine.studio.auto.ledger.walled', locale) : undefined;
+  const [ledgerBusy, setLedgerBusy] = React.useState(false);
+  const [cloning, setCloning] = React.useState(false);
+  const [cloneResult, setCloneResult] = React.useState<FlowCloneResult | null>(null);
+  const [cloneSwitch, setCloneSwitch] = React.useState<{ busy: boolean; refusal: string | null }>({ busy: false, refusal: null });
+  // The ONE ledger toggle, shared by the switch and the clone result's
+  // switch-off offer (objectui#13270), as on Setup's page.
+  const sendLedgerToggle = React.useCallback(
+    async (name: string, enabled: boolean) => {
+      setLedgerBusy(true);
+      try {
+        const outcome = await requestFlowToggle(name, enabled, {
+          http: (status) => tFormat('engine.studio.auto.ledger.toggleFailedHttp', locale, { status }),
+          network: t('engine.studio.auto.ledger.toggleFailed', locale),
+        });
+        if (outcome.ok) {
+          setFlowStatus((m) => (m[name] ? { ...m, [name]: { ...m[name], enabled: outcome.enabled } } : m));
+          setStatusNonce((n) => n + 1);
+        }
+        return outcome;
+      } finally {
+        setLedgerBusy(false);
+      }
+    },
+    [locale],
+  );
+  const toggleLedger = React.useCallback(async () => {
+    if (!current || ledgerOn === undefined || ledgerWalled) return;
+    const flow = current;
+    setError(null);
+    const outcome = await sendLedgerToggle(flow.name, !ledgerOn);
+    // VERBATIM: the posture gate's 403 names the sanctioned path, the subflow
+    // guard's 409 names the callers that would break.
+    if (!outcome.ok) {
+      setError({ message: outcome.message });
+      return;
+    }
+    toast.success(
+      tFormat(outcome.enabled ? 'engine.studio.auto.ledger.switchedOn' : 'engine.studio.auto.ledger.switchedOff', locale, {
+        label: flow.label || flow.name,
+      }),
+    );
+  }, [current, ledgerOn, ledgerWalled, sendLedgerToggle, locale]);
+  const switchCloneSourceOff = React.useCallback(async () => {
+    if (!cloneResult) return;
+    setCloneSwitch({ busy: true, refusal: null });
+    const outcome = await sendLedgerToggle(cloneResult.source, false);
+    setCloneSwitch({ busy: false, refusal: outcome.ok ? null : outcome.message });
+  }, [cloneResult, sendLedgerToggle]);
   // objectstack#26917 — the refusal's way out: the flow holding the identifier
   // is on this rail, so it opens instead of a second one being made. The New
   // button already asked about a held step (objectstack#26845).
@@ -9291,7 +9355,15 @@ export function AutomationsPillar({
   // objectui#11272 — the switch reads and saves the open flow's own
   // document, so it waits for it: not offered over another's.
   const flowSwitchEl =
-    current && flowLoaded
+    current && flowLoaded && ledgerOn !== undefined ? (
+      <FlowLedgerSwitch
+        checked={ledgerOn}
+        busy={ledgerBusy}
+        walledReason={ledgerWalledReason}
+        locale={locale}
+        onToggle={() => void toggleLedger()}
+      />
+    ) : current && flowLoaded
       ? (() => {
           const defaultOff = t('engine.studio.auto.defaultOff', locale);
           // objectstack#27356 — a read-only package's switch cannot be flipped,
@@ -9662,13 +9734,17 @@ export function AutomationsPillar({
                   />
                 )}
                 {!flowTabsEl && autoReadOnlyLinkEl}
-                {current && flowLoaded && !readOnly && packageId !== null && (
+                {/* A writable package's flow: Delete. A read-only package's:
+                    Clone (ADR-0146 D4). */}
+                {current && flowLoaded && packageId !== null && (
                   <FlowItemMoreMenu
                     name={current.name}
                     label={current.label}
                     locale={locale}
-                    disabled={!!saving}
-                    onDelete={() => void deleteOpenFlow()}
+                    disabled={!!saving || ledgerBusy}
+                    onDelete={readOnly ? undefined : () => void deleteOpenFlow()}
+                    onClone={readOnly ? () => setCloning(true) : undefined}
+                    cloneDisabledReason={readOnly ? ledgerWalledReason : undefined}
                   />
                 )}
               </>
@@ -9679,8 +9755,21 @@ export function AutomationsPillar({
               no padded band and no bordered card around the canvas. A refusal
               or a held edit sits above it, inside the column's gutter. */}
           <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            {(error || flowHeld) && (
+            {(error || flowHeld || cloneResult) && (
               <div className="shrink-0 space-y-2 px-6 pb-1 pt-3">
+                {cloneResult && (
+                  <FlowCloneResultNotice
+                    result={cloneResult}
+                    sourceOn={flowStatusRead ? flowStatus[cloneResult.source]?.enabled : undefined}
+                    switchBusy={cloneSwitch.busy}
+                    switchRefusal={cloneSwitch.refusal}
+                    // Where the door puts the copy today: the package-less scope.
+                    openTo={studioOrgScopePath({ type: 'flow', name: cloneResult.name })}
+                    locale={locale}
+                    onSwitchSourceOff={() => void switchCloneSourceOff()}
+                    onDismiss={() => setCloneResult(null)}
+                  />
+                )}
                 {error && (
                   <StudioRefusalStrip
                     refusal={error}
@@ -9858,6 +9947,20 @@ export function AutomationsPillar({
         })()
         )}
       </div>
+
+      {current && ledgerItem && (
+        <FlowCloneDialog
+          open={cloning}
+          onOpenChange={setCloning}
+          source={current.name}
+          sourceLabel={current.label}
+          locale={locale}
+          onCreated={(result) => {
+            setCloneResult(result);
+            setCloneSwitch({ busy: false, refusal: null });
+          }}
+        />
+      )}
 
       <CreateItemDialog
         open={creating}
