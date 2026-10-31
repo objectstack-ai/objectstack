@@ -844,6 +844,15 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../services/service-automation
