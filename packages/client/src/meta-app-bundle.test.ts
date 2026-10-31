@@ -4,7 +4,8 @@
  * [#27627] `meta.getAppBundle` — the app metadata bundle read, conditional in
  * `getCached`'s spelling: `ifNoneMatch` in; `notModified`, `data` and
  * `etag: { value, weak }` out, with the server's `304` answered rather than
- * thrown as a failed request.
+ * thrown as a failed request. `getCached` itself rides the same opt-in: its `304`
+ * branch was unreachable while the transport threw on every non-ok status.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -54,5 +55,24 @@ describe('[#27627] meta.getAppBundle', () => {
         );
         expect(err.httpStatus).toBe(403);
         expect(err.code).toBe('PERMISSION_DENIED');
+    });
+});
+
+describe('[#27627] meta.getCached answers a 304 instead of throwing it', () => {
+    it('sends ifNoneMatch and answers `notModified` with the validator it sent', async () => {
+        const { client, fetchMock } = clientAnswering(304, undefined);
+        const answer = await client.meta.getCached('account', { ifNoneMatch: ETAG });
+        expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/meta/object/account');
+        expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('If-None-Match')).toBe(ETAG);
+        expect(answer).toEqual({ notModified: true, etag: { value: 'a'.repeat(64), weak: false } });
+    });
+
+    it('a refusal still rejects', async () => {
+        const { client } = clientAnswering(404, { success: false, error: { code: 'NOT_FOUND', message: 'No.' } });
+        const err: any = await client.meta.getCached('ghost').then(
+            () => { throw new Error('expected the read to reject'); },
+            (e) => e,
+        );
+        expect(err.httpStatus).toBe(404);
     });
 });

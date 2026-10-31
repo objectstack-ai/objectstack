@@ -2102,9 +2102,11 @@ export class ObjectStackClient {
           headers['If-Modified-Since'] = cacheOptions.ifModifiedSince;
         }
         
+        // [#27627] The 304 is admitted by the transport; without it `fetch` threw on the
+        // non-ok status and the branch below was unreachable.
         const res = await this.fetch(`${this.baseUrl}${route}/object/${name}`, {
           headers
-        });
+        }, { admitNotModified: true });
         
         // Check for 304 Not Modified
         if (res.status === 304) {
