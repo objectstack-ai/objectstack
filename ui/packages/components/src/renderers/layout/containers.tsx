@@ -2566,15 +2566,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
         </TooltipProvider>
       );
     };
-    return (
-      <div
-        className={barFace
-          ? 'flex w-full min-w-0 items-center gap-2'
-          : 'flex flex-wrap items-center gap-2 shrink-0 max-w-full'}
-        role="toolbar"
-        aria-label={tt('detail.pageHeaderActions', 'Page header actions')}
-        data-page-header-actions-face={face}
-      >
+    const toolbarItems = (
+      <>
         {inlineActions.map(renderButton)}
         {useOverflow && (
           <DropdownMenu>
@@ -2653,6 +2646,33 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           </DropdownMenu>
         )}
         {trailingSegment}
+      </>
+    );
+    const toolbarLabel = tt('detail.pageHeaderActions', 'Page header actions');
+    // Each face keeps its own class literal, the row's first: the record-header
+    // width e2e (`ui/e2e/record-header-title-width.spec.ts`) reads the row's
+    // tail, `shrink-0` included, as the last class literal before the first
+    // toolbar role in this file, and throws when that literal drifts.
+    if (!barFace) {
+      return (
+        <div
+          className="flex flex-wrap items-center gap-2 shrink-0 max-w-full"
+          role="toolbar"
+          aria-label={toolbarLabel}
+          data-page-header-actions-face={face}
+        >
+          {toolbarItems}
+        </div>
+      );
+    }
+    return (
+      <div
+        className="flex w-full min-w-0 items-center gap-2"
+        role="toolbar"
+        aria-label={toolbarLabel}
+        data-page-header-actions-face={face}
+      >
+        {toolbarItems}
       </div>
     );
   };
