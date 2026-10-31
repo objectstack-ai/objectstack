@@ -122,6 +122,28 @@ as an explicit value. A `defaultValue` you declare on the code field yourself is
 ordinary field default: the engine applies it before the check, so it satisfies the
 rule, because you wrote it.
 
+### Switching a field that already holds rows
+
+An existing `dynamic` or `fixed` amount can be switched to `currencyMode: 'record'`,
+but every row already stored then holds an amount beside a blank code. Such a row is
+not refused for resting, but it shows as a plain number, falls into the `null` group of
+a grouped aggregate, and sits outside every filter on the pair until it holds a code.
+
+1. **The save answers 409 `destructive_change`.** Saving the switched object reports
+   the finding `currency_mode_to_record` on the amount field, and the message names the
+   command to run. Re-submit the save with `force` (`?force=true` on
+   `PUT /api/v1/meta/:type/:name`) to make the switch.
+2. **Dry run.** `os migrate record-currency-codes --object opportunity --field amount --code USD`
+   counts the rows holding an amount and no code, and writes nothing.
+3. **`--apply`.** The same command with `--apply` writes the code into those rows. It
+   is idempotent: re-run it until the report says zero.
+
+The code is the one you give with `--code`, and it is never derived: not from the
+`defaultCurrency` the field had under `fixed`, not from the organization's currency.
+One run writes one code, so if the stored amounts are in more than one currency, split
+those rows with your own writes first. See
+[`os migrate record-currency-codes`](/docs/deployment/cli#os-migrate-record-currency-codes).
+
 ### Aggregating a record-mode amount
 
 Amounts in different currencies do not add. A `sum`, `avg`, `min` or `max` over a
