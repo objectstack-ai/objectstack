@@ -1035,13 +1035,20 @@ function annotateRetiredFormulaKeyIssues(issues: ZodLikeIssue[], draft: unknown)
 }
 
 /**
+ * The issue codes `translateSchemaIssue` picks a reader's-locale text by. Only
+ * these carry a `detail`: every other issue keeps the plain `{ path, message }`
+ * it had, so a code that no rendering reads adds nothing to the door's answer.
+ */
+const LOCALIZED_ISSUE_CODES: ReadonlySet<string> = new Set(['too_small', 'invalid_format']);
+
+/**
  * The issue's code and parameters, so the page renders it in the reader's
  * locale by WHAT it is (`translateSchemaIssue`) instead of by its English.
  * PRESENTATION ONLY, like the two passes above: the message stays the spec's,
  * and the verdict is already decided.
  */
 function issueDetail(issue: ZodLikeIssue): SchemaIssueDetail | undefined {
-  if (typeof issue.code !== 'string') return undefined;
+  if (typeof issue.code !== 'string' || !LOCALIZED_ISSUE_CODES.has(issue.code)) return undefined;
   const minimum = typeof issue.minimum === 'bigint' ? Number(issue.minimum) : issue.minimum;
   return {
     code: issue.code,
