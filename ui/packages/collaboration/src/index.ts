@@ -29,7 +29,6 @@ export {
 
 export {
   usePresence,
-  createPresenceUpdater,
   type PresenceUser,
   type PresenceConfig,
   type PresenceResult,
@@ -68,12 +67,6 @@ export {
   type MentionNotificationsConfig,
   type MentionNotificationsResult,
 } from './useMentionNotifications.js';
-
-export {
-  useCommentSearch,
-  type CommentSearchConfig,
-  type CommentSearchReturn,
-} from './useCommentSearch.js';
 
 export {
   PresenceAvatars,

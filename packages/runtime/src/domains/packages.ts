@@ -630,9 +630,8 @@ function requireWritablePackage(
  * ⛔ A reading at the disable door, never a change to {@link isWritablePackage}:
  * `writable` keeps meaning "may author into", and stays `false` for a module,
  * so edit, publish, revert, delete and overwrite still refuse it
- * (`WRITABLE_PACKAGE_REQUIRED`, ADR-0070 D2). The served row does not carry
- * this verdict yet: it needs a key in `package-api-assembled.zod.ts`'s
- * `SERVED_ROW_VERDICTS`, a spec-lane edit.
+ * (`WRITABLE_PACKAGE_REQUIRED`, ADR-0070 D2). The door asks it through
+ * {@link isDisableablePackage}, which the read doors serve as `disableable`.
  */
 function isDisableableAppModule(engine: unknown, id: string): boolean {
     const registry = (engine as PackageRowRegistryHost | null | undefined)?.registry;
@@ -650,6 +649,23 @@ interface PackageRowRegistryHost {
     registry?: {
         getPackage?(id: string): { manifest?: { type?: unknown; scope?: unknown; dependencies?: unknown } } | undefined;
     };
+}
+
+/**
+ * [#28318] The disable door's verdict on `id`: `PATCH /packages/:id/disable`
+ * accepts the package (as far as the PACKAGE goes) exactly when this answers
+ * `true` — a writable base ({@link isWritablePackage}) or a module of an
+ * installed app ({@link isDisableableAppModule}).
+ *
+ * ONE predicate, asked by both readers: the door, before it switches the
+ * package off, and {@link withDisableableVerdict}, which serves the same answer
+ * as the row's `disableable` so a client offers Disable only where the door
+ * will accept it (#8146: one answer, served by the server). ⛔ Never re-spell
+ * the rule at either site. The caller's own permission and a catalog wall are
+ * not package facts: the door still asks them, and the verdict does not.
+ */
+function isDisableablePackage(engine: unknown, id: string | undefined): boolean {
+    return (id !== undefined && isDisableableAppModule(engine, id)) || isWritablePackage(engine, id);
 }
 
 /**
@@ -830,6 +846,24 @@ function withWritableVerdict<T extends { manifest?: { id?: unknown }; id?: unkno
     const manifestId = row?.manifest?.id;
     const id = typeof manifestId === 'string' ? manifestId : (typeof row?.id === 'string' ? row.id : undefined);
     return { ...row, writable: isWritablePackage(engine, id) };
+}
+
+/**
+ * [#28318] Decorate one registry row with the disable door's verdict,
+ * `disableable` ({@link isDisableablePackage}). A separate key, never folded
+ * into `writable`: a module of an installed app is `disableable` and not
+ * `writable` — it may be switched off, never authored into — and the Console
+ * offers Disable / Enable from this key alone. Same shape as
+ * {@link withWritableVerdict}: a spread copy, keyed the way the registry keys
+ * the row, recomputed per read and never stored.
+ */
+function withDisableableVerdict<T extends { manifest?: { id?: unknown }; id?: unknown }>(
+    engine: unknown,
+    row: T,
+): T & { disableable: boolean } {
+    const manifestId = row?.manifest?.id;
+    const id = typeof manifestId === 'string' ? manifestId : (typeof row?.id === 'string' ? row.id : undefined);
+    return { ...row, disableable: isDisableablePackage(engine, id) };
 }
 
 /**
@@ -1315,8 +1349,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // `manifest.id`, which the projection keeps, so it is indifferent to
             // running second. Pinned in `packages-serializable-response.test.ts`
             // so a future reorder is a red test rather than a missing field.
+            // [#28318] `disableable` (see `withDisableableVerdict`) is stamped
+            // the same way, after the projection, for the same reason.
             const rows = packages.map(
-                (p: any) => withWritableVerdict(qlService, toPackageResponse(p) as any),
+                (p: any) => withDisableableVerdict(qlService, withWritableVerdict(qlService, toPackageResponse(p) as any)),
             );
             // [#16781] `hasMore` is REQUIRED by
             // `ListInstalledPackagesResponseSchema` and this door did not send
@@ -1785,8 +1821,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // installed app is the customer admin's to switch off
             // ({@link isDisableableAppModule}). Every other door below still
             // asks `requireWritablePackage` alone, so the module stays
-            // read-only for authoring.
-            const readOnly = isDisableableAppModule(qlService, id)
+            // read-only for authoring. [#28318] Asked through
+            // `isDisableablePackage`, the predicate the read doors serve as
+            // `disableable`, so the row's verdict and this door cannot differ.
+            const readOnly = isDisableablePackage(qlService, id)
                 ? null
                 : requireWritablePackage(deps, qlService, id, 'disable');
             if (readOnly) return readOnly;
@@ -2472,9 +2510,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             // [#14375] Same verdict, same predicate as the list door — and
             // [#14309] the same project-then-stamp order, for the same reason.
+            // [#28318] `disableable` likewise, beside `writable`.
             return {
                 handled: true,
-                response: deps.success(withWritableVerdict(qlService, toPackageResponse(pkg) as any)),
+                response: deps.success(withDisableableVerdict(qlService, withWritableVerdict(qlService, toPackageResponse(pkg) as any))),
             };
         }
 
