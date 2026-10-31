@@ -87,7 +87,7 @@ function expectAllSystem(calls: Call[]): void {
 const NOW = 1_800_000_000_000;
 
 describe('[#21913] the dispatcher claim path carries the explicit system opt-in', () => {
-    it('SqlNotificationOutbox: claim, claimDigest and reap — candidate read, claiming UPDATE and read-back', async () => {
+    it('SqlNotificationOutbox: claim, claimDigest, reap and hasDueWork — candidate read, claiming UPDATE and read-back', async () => {
         const { engine, calls } = recordingEngine((verb, _object, query) => {
             if (verb !== 'find') return null;
             // The candidate read projects `id` alone; the read-back asks for whole rows.
@@ -103,16 +103,18 @@ describe('[#21913] the dispatcher claim path carries the explicit system opt-in'
         expect(await outbox.claim({ nodeId: 'node-a', limit: 5, claimTtlMs: 60_000, now: NOW })).toHaveLength(1);
         expect(await outbox.claimDigest({ nodeId: 'node-a', limit: 5, claimTtlMs: 60_000, now: NOW })).toHaveLength(1);
         await outbox.reap({ claimTtlMs: 60_000, now: NOW });
+        expect(await outbox.hasDueWork({ now: NOW })).toBe(true);
 
-        // The population first: each claim ran reap + candidate read + UPDATE +
-        // read-back, and the standalone reap ran once more.
-        expect(calls.filter((c) => c.verb === 'find')).toHaveLength(4);
+        // The population first: each claim ran the reap (its expired-claim read
+        // hits here, so its UPDATE ran too, #28383) + candidate read + UPDATE +
+        // read-back, the standalone reap ran once more, and the due-work read once.
+        expect(calls.filter((c) => c.verb === 'find')).toHaveLength(8);
         expect(calls.filter((c) => c.verb === 'update')).toHaveLength(5);
         expect(calls.every((c) => c.object === 'sys_notification_delivery')).toBe(true);
         expectAllSystem(calls);
     });
 
-    it('SqlHttpOutbox: claim and reap — candidate read, claiming UPDATE and read-back', async () => {
+    it('SqlHttpOutbox: claim, reap and hasDueWork — candidate read, claiming UPDATE and read-back', async () => {
         const { engine, calls } = recordingEngine((verb, _object, query) => {
             if (verb !== 'find') return null;
             if (Array.isArray(query?.fields) && query.fields.length === 1) return [{ id: 'h1' }];
@@ -126,8 +128,10 @@ describe('[#21913] the dispatcher claim path carries the explicit system opt-in'
 
         expect(await outbox.claim({ nodeId: 'node-a', limit: 5, claimTtlMs: 60_000, now: NOW })).toHaveLength(1);
         await outbox.reap({ claimTtlMs: 60_000, now: NOW });
+        expect(await outbox.hasDueWork({ now: NOW })).toBe(true);
 
-        expect(calls.filter((c) => c.verb === 'find')).toHaveLength(2);
+        // Each reap's expired-claim read hits here, so its UPDATE ran (#28383).
+        expect(calls.filter((c) => c.verb === 'find')).toHaveLength(5);
         expect(calls.filter((c) => c.verb === 'update')).toHaveLength(3);
         expect(calls.every((c) => c.object === 'sys_http_delivery')).toBe(true);
         expectAllSystem(calls);

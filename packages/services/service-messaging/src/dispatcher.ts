@@ -107,11 +107,16 @@ export interface NotificationDispatcherOptions {
  * reverts to pending after the claim TTL and is re-sent — the inbox channel's
  * receipt write is idempotent-friendly, and downstream channels should be too.
  *
- * ## What an idle tick costs (#17610)
+ * ## What an idle tick costs (#17610, #28383)
  *
- * Against an empty outbox one tick is `1 + 2 × partitionCount` store round
- * trips: ONE visibility-timeout reap for the whole environment, then a claim
- * probe and a digest probe per partition. The reap used to run inside both
+ * Against an empty outbox one tick is TWO reads, whatever `partitionCount`
+ * is: the visibility-timeout reap's "anything expired?" read, and one "anything
+ * due?" read across every partition ({@link INotificationOutbox.hasDueWork}).
+ * Neither finds a row, so neither the reap's UPDATE nor any partition's claim
+ * and digest probe runs. Before #28383 it was `2 + 2 × partitionCount` on a
+ * kernel — the reap's predicate UPDATE (a matched-row read plus the write,
+ * unconditionally), then a claim probe and a digest probe per partition: 18
+ * with the default 8. Before #17610 the reap ran inside both
  * claims of every partition — `2 × partitionCount` identical environment-wide
  * UPDATEs a tick, 16 of the 32 statements a tick issued with the default 8
  * partitions — on a fixed 500 ms interval that never let up, one loop per warm
@@ -216,6 +221,22 @@ export class NotificationDispatcher {
             await outbox.reap({ claimTtlMs: this.opts.claimTtlMs });
             reapedForTick = true;
         }
+
+        // [#28383] One read across every partition before any partition's two
+        // probes. Most ticks find nothing — an idle kernel's every tick — and
+        // they used to pay a claim probe and a digest probe per partition to
+        // learn it (16 statements with the default 8). `false` ends the tick
+        // here: no partition lock is taken and no claim or digest probe runs.
+        // `true` runs the full pass below exactly as before, so a tick that has
+        // work claims, batches and collapses digests unchanged, for one read
+        // more. Asked AFTER the reap, so a row the reap just returned to
+        // `pending` counts as due. The read is environment-wide and takes no
+        // lock, like the reap: it moves nothing, and the claims it lets through
+        // still run under their partition locks.
+        //
+        // Optional on the outbox contract: a store without it probes every
+        // partition, as before.
+        if (outbox.hasDueWork && !(await outbox.hasDueWork({}))) return 0;
 
         const count = this.opts.partitionCount;
         const offset = stableNodeOffset(this.opts.nodeId, count);

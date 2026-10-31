@@ -6,14 +6,18 @@
  * ObjectQL's builtin `sys_stamp_audit_update` hook owns that column on every
  * update, and the column is `readonly`, so a caller-supplied value is stripped
  * by `stripReadonlyFields` (#2948) — which WARNs once per call. `claim()` and
- * `claimDigest()` open with an unconditional "reap stale in_flight" UPDATE that
- * runs on every dispatcher tick whether or not a row is stale, so the write was
+ * `claimDigest()` opened with an unconditional "reap stale in_flight" UPDATE that
+ * ran on every dispatcher tick whether or not a row was stale, so the write was
  * both a no-op (stripped, then re-stamped) and, at 3 claim paths × 8 partitions
  * × a 500 ms tick, 48 identical warnings a second on an idle `pnpm dev`.
  *
  * INSERT is a different path (no strip, and `created_at` IS caller-owned): it
  * keeps writing both audit columns, as `Date`s — a native TIMESTAMP column
  * rejects a bare epoch-ms number on Postgres (see `audit-timestamp.ts`).
+ *
+ * [#28383] The reap now reads one expired id first and writes only on a hit, so
+ * every claim below scripts that read to FIND a stale row: the reap's UPDATE is
+ * a payload this file must still see.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -95,13 +99,14 @@ function expectNoPlatformAuditColumns(updates: RecordedUpdate[]) {
 
 describe('SqlNotificationOutbox — audit columns on UPDATE (#4765)', () => {
     it('claim() writes no updated_at (reap + atomic claim)', async () => {
-        // find #1 → candidate ids; find #2 → read-back of the rows we own.
-        const { engine, updates } = makeEngine([[{ id: 'd1' }], []]);
+        // find #1 → the reap's expired-claim read (a hit); find #2 → candidate
+        // ids; find #3 → read-back of the rows we own.
+        const { engine, updates } = makeEngine([[{ id: 'stale' }], [{ id: 'd1' }], []]);
         const outbox = new SqlNotificationOutbox(engine, { partitionCount: 8 });
 
         await outbox.claim({ nodeId: 'n1', limit: 10, claimTtlMs: 1000 });
 
-        // Both the unconditional reap and the atomic claim ran.
+        // Both the reap (it found a stale row) and the atomic claim ran.
         expect(updates).toHaveLength(2);
         expectNoPlatformAuditColumns(updates);
         // The claim still stamps its OWN columns — this is not a blanket strip.
@@ -110,8 +115,8 @@ describe('SqlNotificationOutbox — audit columns on UPDATE (#4765)', () => {
     });
 
     it('claim() writes no updated_at even when nothing is claimable', async () => {
-        // The reap UPDATE fires on every tick regardless — that is the firehose.
-        const { engine, updates } = makeEngine([[]]);
+        // The reap UPDATE fires whenever a claim has expired, claimable rows or not.
+        const { engine, updates } = makeEngine([[{ id: 'stale' }], []]);
         const outbox = new SqlNotificationOutbox(engine, { partitionCount: 8 });
 
         await outbox.claim({ nodeId: 'n1', limit: 10, claimTtlMs: 1000 });
@@ -121,7 +126,7 @@ describe('SqlNotificationOutbox — audit columns on UPDATE (#4765)', () => {
     });
 
     it('claimDigest() writes no updated_at', async () => {
-        const { engine, updates } = makeEngine([[{ id: 'd1' }], []]);
+        const { engine, updates } = makeEngine([[{ id: 'stale' }], [{ id: 'd1' }], []]);
         const outbox = new SqlNotificationOutbox(engine, { partitionCount: 8 });
 
         await outbox.claimDigest({ nodeId: 'n1', limit: 10, claimTtlMs: 1000 });
@@ -173,7 +178,7 @@ describe('SqlHttpOutbox — audit columns on UPDATE (#4765)', () => {
     };
 
     it('claim() writes no updated_at (reap + atomic claim)', async () => {
-        const { engine, updates } = makeEngine([[{ id: 'h1' }], []]);
+        const { engine, updates } = makeEngine([[{ id: 'stale' }], [{ id: 'h1' }], []]);
         const outbox = new SqlHttpOutbox(engine, { partitionCount: 8 });
 
         await outbox.claim({ nodeId: 'n1', limit: 10, claimTtlMs: 1000 });
@@ -184,7 +189,7 @@ describe('SqlHttpOutbox — audit columns on UPDATE (#4765)', () => {
     });
 
     it('claim() writes no updated_at even when nothing is claimable', async () => {
-        const { engine, updates } = makeEngine([[]]);
+        const { engine, updates } = makeEngine([[{ id: 'stale' }], []]);
         const outbox = new SqlHttpOutbox(engine, { partitionCount: 8 });
 
         await outbox.claim({ nodeId: 'n1', limit: 10, claimTtlMs: 1000 });

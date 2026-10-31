@@ -63,6 +63,11 @@ export default defineConfig({
         find: /^@objectstack\/service-automation$/,
         replacement: path.resolve(__dirname, '../../services/service-automation/src/index.ts'),
       },
+      {
+        // `src/openapi-connector.ts` reads `callWithBorrowedCredential` from it (ADR-0143 D4, #26702).
+        find: /^@objectstack\/types$/,
+        replacement: path.resolve(__dirname, '../../types/src/index.ts'),
+      },
     ],
   },
 });

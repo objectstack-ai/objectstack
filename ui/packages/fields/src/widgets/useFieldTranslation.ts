@@ -260,6 +260,7 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'capability.label.manage_sharing': 'Manage Sharing',
   'capability.label.view_all_audit_log': 'View All Audit Log',
   'capability.label.manage_mailboxes': 'Manage Mailboxes',
+  'capability.label.manage_connector_connections': 'Manage Connector Connections',
 };
 
 export const useFieldTranslation = createSafeTranslation(

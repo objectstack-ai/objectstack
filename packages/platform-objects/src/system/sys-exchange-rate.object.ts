@@ -72,6 +72,14 @@ export const SysExchangeRate = ObjectSchema.create({
   isSystem: true,
   // Platform-defined schema, organization-administered data.
   managedBy: 'system-data',
+  // CSV import is opt-in on `system-data`; rates opt in (multi-currency M1-2):
+  // a finance team loads a year of rates for every currency in one file through
+  // the generic import door (`sys_import_job`), which serves this object as is —
+  // a line repeating a (currency, effective_date) on file is refused for that
+  // row alone by the unique key below. Who may import is the same write grant
+  // that guards New / Edit; a file marks its rows imported with a `source`
+  // column (an omitted one takes the default, `manual`).
+  userActions: { import: true },
   description:
     "Exchange rates from the organization's home currency to a foreign currency, by effective date — " +
     'the rates foreign-currency amounts are converted to the home currency with.',
