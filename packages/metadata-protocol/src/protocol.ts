@@ -447,6 +447,8 @@ import { deletePackage } from './protocol-package-uninstall.js';
 import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-unmanaged-import.js';
 // [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
+// [#28355] The `denied` row the four single-item doors leave for a refusal that writes none of its own.
+import { withRefusalAudit } from './protocol-refusal-audit.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -20194,7 +20196,16 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient }) {
+    async saveMetaItem(request: Parameters<ObjectStackProtocolImplementation['saveMetaItemUnaudited']>[0]) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'save', type: request.type, name: request.name, actor: request.actor,
+            source: request.source ?? 'protocol.saveMetaItem',
+        }, () => this.saveMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link saveMetaItem} before its refusal audit; that method's docblock is the contract. */
+    protected async saveMetaItemUnaudited(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface, client?: MetadataAuthoringClient }) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -22506,7 +22517,16 @@ export class ObjectStackProtocolImplementation implements
      * Records a history event with `op='publish'`. 404 (`NO_DRAFT`)
      * when there is nothing to publish.
      */
-    async publishMetaItem(request: {
+    async publishMetaItem(request: Parameters<ObjectStackProtocolImplementation['publishMetaItemUnaudited']>[0]) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'publish', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.publishMetaItem',
+        }, () => this.publishMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link publishMetaItem} before its refusal audit; that method's docblock is the contract. */
+    protected async publishMetaItemUnaudited(request: {
         type: string;
         name: string;
         actor?: string;
@@ -26931,7 +26951,16 @@ export class ObjectStackProtocolImplementation implements
      * 409 (`VERSION_NOT_RESTORABLE`) when the target is a delete
      * tombstone (no body to bring back).
      */
-    async rollbackMetaItem(request: {
+    async rollbackMetaItem(request: Parameters<ObjectStackProtocolImplementation['rollbackMetaItemUnaudited']>[0]) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'rollback', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.rollbackMetaItem',
+        }, () => this.rollbackMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
+    protected async rollbackMetaItemUnaudited(request: {
         type: string;
         name: string;
         toVersion: number;
@@ -27542,7 +27571,16 @@ export class ObjectStackProtocolImplementation implements
      * "Reset to factory default" semantic from ADR-0005. Whitelist is shared
      * with {@link saveMetaItem}.
      */
-    async deleteMetaItem(request: {
+    async deleteMetaItem(request: Parameters<ObjectStackProtocolImplementation['deleteMetaItemUnaudited']>[0]) {
+        // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
+        return withRefusalAudit((entry) => this.recordMetadataAudit(entry), {
+            operation: 'delete', type: request.type, name: request.name, actor: request.actor,
+            source: 'protocol.deleteMetaItem',
+        }, () => this.deleteMetaItemUnaudited(request));
+    }
+
+    /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */
+    protected async deleteMetaItemUnaudited(request: {
         type: string;
         name: string;
         parentVersion?: string | null;
