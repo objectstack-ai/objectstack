@@ -3303,6 +3303,7 @@ const de = {
     bulkDeleteConfirmTitle_one: "{{count}} {{label}}-Datensatz löschen?",
     bulkDeleteConfirmTitle_other: "{{count}} {{label}}-Datensätze löschen?",
     deleteConfirmButton: "Löschen",
+    deleteCascade: "Dabei werden auch die zugehörigen Datensätze gelöscht in: {{objects}}.",
     bulkDeleteSuccess: "{{count}} {{label}}-Datensätze gelöscht",
     bulkDeleteSuccess_one: "{{count}} {{label}}-Datensatz gelöscht",
     bulkDeleteSuccess_other: "{{count}} {{label}}-Datensätze gelöscht",
