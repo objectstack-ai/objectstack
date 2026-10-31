@@ -87,11 +87,16 @@ function renderFormIn(language: string) {
   );
 }
 
+/**
+ * The refusal as the form says it: its banner, the one message a refused
+ * submit raises (objectstack-ai/objectstack#27520 retired the toast copy).
+ */
 async function toastTextAfterSubmit(language: string): Promise<string> {
   renderFormIn(language);
   fireEvent.click(screen.getByRole('button', { name: /create/i }));
-  await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
-  return String(toastErrorSpy.mock.calls[0][0]);
+  const banner = await screen.findByRole('alert');
+  expect(toastErrorSpy).not.toHaveBeenCalled();
+  return banner.textContent ?? '';
 }
 
 describe('form renderer — refused-submit field list joiner (objectstack#5407)', () => {
