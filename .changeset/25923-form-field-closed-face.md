@@ -10,7 +10,7 @@ fix(types,core,components,plugin-form)!: `FormField` drops its open index signat
 Clause-②: yes (narrowing)
 Metadata-protocol: none
 
-<!-- adr-0087: not-required (type-surface-only ui/packages/types/src/form.ts#FormField) A TypeScript annotation narrowing on a published type: no metadata key, accepted value, export or error code is removed or renamed, the zod mirrors and the strict authoring face are unchanged, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler. -->
+<!-- adr-0087: not-required (runtime-interface-only ui/packages/types/src/form.ts#FormField, ui/packages/core/src/validation/server-owned-value.ts#FieldWithDeclaredDefault) Two published TypeScript interfaces each lose their open index signature and nothing else: no member is removed or renamed, no metadata key, accepted value, export or error code moves, the zod mirror `FormFieldSchema` and the strict authoring face are unchanged, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler (excess-property error naming the undeclared key). -->
 
 **BREAKING** type-surface narrowing, compile-time only.
 
