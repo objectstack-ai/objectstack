@@ -4,11 +4,13 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note.
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
-> database. An **API-backed** datasource (a plugin-contributed driver over a vendor API, such as
+> database *(amended 2026-10-31, #28208: a database datasource defined in code has a third route,
+> the environment variable derived from its name — see the note under §10)*. An **API-backed**
+> datasource (a plugin-contributed driver over a vendor API, such as
 > OData) may instead name a declared connector instance in `external.connector` and borrow that
 > instance's credential — whichever kind its `auth` declares (`ConnectorInstanceAuthSchema`:
 > `bearer`, `api-key` and `basic` today; ADR-0143 D2 adds the grant-bearing `oauth2`,
@@ -766,7 +768,9 @@ managed Postgres for low-latency joins.
   component that resolves the actual connection string. *(Amended by
   D7, see the note at the top: an API-backed datasource may instead
   borrow a declared connector instance's credential through
-  `external.connector`.)*
+  `external.connector`.)* *(Amended 2026-10-31, #28208, see the note below: a datasource
+  defined in code, which has no handle to point at, reads its credential at connect from the
+  environment variable derived from its name.)*
 - **Connection pools** default conservatively for external mode
   (`max: 5`) to protect the remote system; `pool` may be overridden.
 - **Timeouts** are enforced at the driver. AI tool calls additionally
@@ -786,6 +790,66 @@ managed Postgres for low-latency joins.
   Postgres logical decoding), the `realtime` service may opt-in;
   otherwise federated objects fall back to poll-based change feeds.
   This is out of scope for v1.
+
+> **Amendment note (2026-10-31, #28208 — ruling 6525963988 on #27687, option 5; the failure text and
+> the collision claim as PR #28325 left them) — a third credential route, for a datasource defined
+> in code.** A datasource declared in code (`defineDatasource`, a package's `*.datasource.ts`) has
+> no `sys_secret:` handle to point `credentialsRef` at: the Setup → Datasources form refuses a
+> code-origin datasource, and nothing else mints one. Its route is the runtime environment. At
+> connect, `DatasourceConnectionService` reads `OS_DATASOURCE_<NAME>_PASSWORD`, `<NAME>` being the
+> datasource name upper-cased with every character outside `[A-Z0-9]` replaced by `_` (`warehouse`
+> → `OS_DATASOURCE_WAREHOUSE_PASSWORD`;
+> `packages/services/service-datasource/src/datasource-env-credential.ts#datasourceEnvCredentialVar`),
+> and hands a non-empty value to the driver factory as the connection's `secret` — the password for
+> `postgres`, `mysql` and `mongodb`, the `authToken` for `turso`. The value is never logged, stored
+> or answered; every message names the variable only. The guards, each a ruled condition:
+>
+> - **A host switch, off unless the host opts in.** The slot is read only while
+>   `OS_DATASOURCE_ENV_CREDENTIALS` reads `on` (`resolveDatasourceEnvCredentialsSwitch`, same file:
+>   unset or empty is off; `on` / `off` in any letter case; any other value throws, and the
+>   datasource-admin plugin reads it at `init()`, so the boot is refused). `os serve` stamps `on`
+>   into its own environment when the operator left it unset or empty, just before it builds the
+>   admin plugin (`packages/cli/src/commands/serve.ts`, the `adminMod` block, through
+>   `packages/cli/src/utils/datasource-env-credentials-default.ts`); `os start` and `os dev` run
+>   `serve`, so they get it too. Every other composition — a host that builds its own kernel, a cloud
+>   runtime — never runs that line and stays off.
+> - **Code origin only, by provenance.** The slot serves a name in the host's code-datasource set
+>   (the `code-datasource-names` service, filled by `@objectstack/runtime` from the boot artifact,
+>   from `default`, and from a package installed into the running kernel) on the boot's
+>   `declared-auto` connect — never a record's `origin`. A datasource created through Setup or the
+>   API under the same name connects through `registerPool` and never reads it; `default` keeps
+>   `OS_DATABASE_URL` (an `asDefault` connect never reads the slot).
+> - **A declared channel wins and stays fail-closed.** The slot sits in `connect()` after the
+>   `credentialsRef` resolution (ADR-0062 D3) and the D7 connector borrow, and before the driver
+>   factory; it is consulted only when neither is declared, so a declared reference that does not
+>   resolve never falls back to the environment.
+> - **An unset variable changes nothing about the connect.** The driver is built without a secret;
+>   when the database refuses, the verdict is the driver's own (`failed-degraded`) and its reason is
+>   the driver's error followed by `(note: datasource 'NAME' is defined in code and reads its
+>   credential from OS_DATASOURCE_NAME_PASSWORD at connect, which is not set on this host)`. A bound
+>   datasource still fails the boot (ADR-0062 D5), and the thrown message carries that note.
+> - **Two live datasources that derive one variable are refused.** Valid names
+>   (`^[a-z_][a-z0-9_]*$`) cannot collide, so the guard covers names a host hands `connect()`
+>   directly: the second connect is refused `failed-credentials`, naming both datasources and the
+>   variable, and its variable is never read. A connect that failed releases its claim, so it never
+>   counts as the owner.
+> - **A plugin driver that resolves its credential per request** (the OData driver resolves
+>   `credentialsRef` that way) does not read the slot: the slot feeds only the `secret` a driver
+>   receives when its connection is built.
+>
+> **The trust consequence, stated for operators.** The derived name is the only key, so any code
+> datasource the host registers under that name reads it. Under `os serve` the code set includes
+> every package installed into the environment, so an installed package can declare a datasource of
+> any free name and so read the matching `OS_DATASOURCE_<NAME>_PASSWORD`. Install only packages you
+> trust with the credentials in that process's environment. On a host where several tenants'
+> artifacts share one process, a process-wide variable would be readable by every tenant artifact
+> that declares the name — which is why the switch is off outside the CLI host. The spec's five
+> credential refusals, the refused-key description and its two `password` guidance entries end
+> with one shared sentence
+> (`packages/spec/src/data/driver/common.zod.ts#CODE_DEFINED_CREDENTIAL_ROUTE`) that names this
+> route. Not taken: a variable named in metadata (authored metadata could then point the runtime at
+> an arbitrary host variable); an environment fallback behind a declared `credentialsRef`; a
+> per-driver table of authentication error codes to decide when the note applies.
 
 ---
 
