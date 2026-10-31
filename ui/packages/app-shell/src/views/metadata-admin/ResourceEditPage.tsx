@@ -639,6 +639,11 @@ function MetadataResourceEditPageImpl({
   React.useEffect(() => {
     inlineIssueFieldsRef.current = inlineIssueFields;
   });
+  // objectstack#28179 — the rows the form on screen offers whose served layout
+  // says `required: true` (`onRequiredRowFieldsChange`). The flag is a layout
+  // override the Zod need not share, so neither the live pass nor the server
+  // judges it: this page does, below (`requiredRowIssues`).
+  const [requiredRowFields, setRequiredRowFields] = React.useState<ReadonlySet<string>>(() => new Set());
 
   // Wrap setDraft so that editing a field clears any *server-side*
   // diagnostic issues whose path begins with that field. The user
@@ -838,11 +843,32 @@ function MetadataResourceEditPageImpl({
       window.clearTimeout(handle);
     };
   }, [type, draft, entry?.schema, draftMode, createMode]);
+  // objectstack#28179 — an offered row whose served layout says `required:
+  // true`, left unset, is a located "required" issue on that field, for every
+  // type. Only where the override is STRICTER than the schema: a field the
+  // schema requires already has its own verdict (the live pass's message, the
+  // server's refusal) and keeps it, and a value the schema defaults is never
+  // unset. Computed from the draft, never from the debounced live pass, so it
+  // holds the same Save it is shown beside (`doSave`).
+  const requiredRowIssues = React.useMemo<SchemaFormIssue[]>(() => {
+    const props = (schema?.properties ?? {}) as Record<string, { default?: unknown } | undefined>;
+    const schemaRequired = Array.isArray(schema?.required) ? (schema.required as unknown[]).map(String) : [];
+    const unset = (v: unknown) =>
+      v === undefined || v === null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0);
+    const out: SchemaFormIssue[] = [];
+    for (const field of requiredRowFields) {
+      if (schemaRequired.includes(field) || props[field]?.default !== undefined) continue;
+      if (unset((draft as Record<string, unknown>)[field])) {
+        out.push({ path: field, message: t('engine.validation.fieldRequired', locale) });
+      }
+    }
+    return out;
+  }, [requiredRowFields, draft, schema, locale]);
   // Issues to DISPLAY (banner + inline). Suppressed on a pristine create form
   // so a blank new item doesn't open covered in required-field errors.
   const displayIssues = React.useMemo(
-    () => (createMode && !createDirty ? [] : issues),
-    [createMode, createDirty, issues],
+    () => (createMode && !createDirty ? [] : requiredRowIssues.length > 0 ? [...issues, ...requiredRowIssues] : issues),
+    [createMode, createDirty, issues, requiredRowIssues],
   );
   // Per-item draft pending publish (mode=draft saves land here).
   // When non-null, the editor is "viewing the draft" and we surface
@@ -1893,6 +1919,17 @@ function MetadataResourceEditPageImpl({
           setSaving(false);
           return;
         }
+      }
+      // objectstack#28179 — an unset row the served form marks `required:
+      // true` holds the save, create or edit: no request, and the refusal is
+      // the inline error `displayIssues` already draws on that field. The
+      // server accepts the body (the override is stricter than its Zod), so
+      // nothing else would refuse it. Bounded like the Name hold above: only
+      // rows the form on screen offers and the author can edit report, so the
+      // author can always fill what holds the save.
+      if (requiredRowIssues.length > 0) {
+        setSaving(false);
+        return;
       }
       // objectui#12810 — a create never saves the seed's placeholder identity
       // (`buildCreateModeBody` leaves it out). One the author left unset that
@@ -3460,6 +3497,7 @@ function MetadataResourceEditPageImpl({
                             widgetContext={widgetContext}
                             revealIssues={revealIssues}
                             onInlineIssueFieldsChange={setInlineIssueFields}
+                            onRequiredRowFieldsChange={setRequiredRowFields}
                           />
                         )}
                       </div>
@@ -3486,6 +3524,7 @@ function MetadataResourceEditPageImpl({
                 widgetContext={widgetContext}
                 revealIssues={revealIssues}
                 onInlineIssueFieldsChange={setInlineIssueFields}
+                onRequiredRowFieldsChange={setRequiredRowFields}
               />
             )}
             {/* objectui#7611 — under the designer, too: `position` renders
