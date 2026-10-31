@@ -69,7 +69,7 @@ describe('SettingsService write predicate', () => {
     const { svc, spy } = rig(({ current }) => (current ? { message: 'Locked.' } : undefined));
     await svc.set('localization', 'currency', 'USD', ctx);
     await expect(svc.set('localization', 'currency', null, ctx)).rejects.toBeInstanceOf(SettingsValidationError);
-    expect(spy.mock.calls.at(-1)![0]).toMatchObject({ current: 'USD', next: null });
+    expect(spy.mock.calls[spy.mock.calls.length - 1][0]).toMatchObject({ current: 'USD', next: null });
     expect((await svc.get('localization', 'currency', ctx)).value).toBe('USD');
   });
 

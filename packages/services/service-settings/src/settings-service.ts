@@ -23,6 +23,7 @@ import {
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
   type SettingsWritePredicate,
+  type SettingsDisplayOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,
@@ -1619,6 +1620,7 @@ export class SettingsService {
   async liveStatusOf(
     namespace: string,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<SettingsManifest['specifiers'][number] | undefined> {
     const provider = this.liveStatusProviders.get(namespace);
     if (!provider) return undefined;
@@ -1628,6 +1630,7 @@ export class SettingsService {
         namespace,
         ctx,
         organizationId: async () => organizationReachRowOwner(await this.organizationReachOf(ctx)),
+        locale: display.locale,
       });
     } catch (err: any) {
       this.logger?.warn?.(
@@ -2277,11 +2280,15 @@ export class SettingsService {
    * naming each such key (`invalid_value`, `constraint: { scope: 'user' }`):
    * the row it would store names no owner, and the user rung answers only its
    * owner, so no reader would ever see it while the write reported success.
+   *
+   * `display` picks the language of a write predicate's refusal, and nothing
+   * else (see {@link refuseByWritePredicates}).
    */
   async setMany(
     namespace: string,
     patch: Record<string, unknown>,
     ctx: SettingsContext = {},
+    display: SettingsDisplayOptions = {},
   ): Promise<Record<string, ResolvedSettingValue>> {
     // The pre-bind window: refuse rather than resolve against a store nothing
     // will ever read. See `assertEngineBound`.
@@ -2365,7 +2372,7 @@ export class SettingsService {
     // may refuse a change the declarations above accept. After them, so a
     // malformed value is told about its own fault first; before the crypto
     // pass and every write, so a refused batch writes nothing.
-    await this.refuseByWritePredicates(reg, namespace, patch, ctx, reach);
+    await this.refuseByWritePredicates(reg, namespace, patch, ctx, reach, display);
 
     // #8026 — a declared-encrypted key with nothing able to encrypt it fails
     // the WHOLE batch, here, rather than part-way down the write loop below.
@@ -2579,6 +2586,7 @@ export class SettingsService {
     patch: Record<string, unknown>,
     ctx: SettingsContext,
     reach: OrganizationReach | undefined,
+    display: SettingsDisplayOptions,
   ): Promise<void> {
     const byKey = this.writePredicates.get(namespace);
     if (!byKey) return;
@@ -2591,7 +2599,7 @@ export class SettingsService {
       if (stableStringify(next) === stableStringify(current)) continue;
       const scope = reg.scopes.get(key)!;
       const organizationId = scope === 'global' || !reach ? undefined : organizationReachRowOwner(reach) ?? null;
-      const refusal = await predicate({ namespace, key, next, current, organizationId, ctx });
+      const refusal = await predicate({ namespace, key, next, current, organizationId, ctx, locale: display.locale });
       if (!refusal) continue;
       const spec = ((reg.manifest.specifiers ?? []) as Array<Record<string, unknown>>)
         .find((s) => s.key === key);

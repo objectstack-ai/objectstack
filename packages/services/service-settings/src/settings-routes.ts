@@ -205,7 +205,8 @@ function refuseHeldSession(res: IHttpResponse, ctx: SettingsContext | undefined)
  * The caller's display language, read the way REST's metadata door reads it:
  * the top `Accept-Language` tag, else `?locale`. It only picks the language of
  * prose a write predicate or a live-status provider composes
- * (`SettingsContext.locale`); it authorizes nothing.
+ * (`SettingsDisplayOptions`); it authorizes nothing, and it never enters the
+ * caller's context.
  */
 function requestLocaleOf(req: IHttpRequest): string | undefined {
   const header = req.headers?.['accept-language'] ?? req.headers?.['Accept-Language'];
@@ -295,7 +296,7 @@ export function registerSettingsRoutes(
       // `getNamespace`, which in-process consumers call to read values: the
       // mail plugin reads `getNamespace('mail')` while rebuilding the very
       // transport its statement waits on.
-      const liveStatus = await service.liveStatusOf(ns, { ...ctx, locale: requestLocaleOf(req) });
+      const liveStatus = await service.liveStatusOf(ns, ctx, { locale: requestLocaleOf(req) });
       const manifest = liveStatus
         ? { ...payload.manifest, specifiers: [liveStatus, ...payload.manifest.specifiers] }
         : payload.manifest;
@@ -353,8 +354,9 @@ export function registerSettingsRoutes(
       const result = await service.setMany(
         ns,
         dropEchoedSecretMasks(body, secretKeys),
+        ctx,
         // The language a write predicate's refusal is written in.
-        { ...ctx, locale: requestLocaleOf(req) },
+        { locale: requestLocaleOf(req) },
       );
       // The write response carries resolved values too — including cascade
       // entries the caller never submitted (an upper-scope secret it may not

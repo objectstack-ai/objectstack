@@ -41,6 +41,7 @@ export {
   type SettingsWritePredicate,
   type SettingsWritePredicateInput,
   type SettingsWriteRefusal,
+  type SettingsDisplayOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,

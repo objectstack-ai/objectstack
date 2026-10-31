@@ -235,7 +235,7 @@ describe('the copy — every locale the settings bundle ships', () => {
     await svc.set('localization', 'currency', 'USD', ctx);
     objects.push(INVOICE);
     rates.push({ organization_id: ORG, currency: 'EUR' }, { organization_id: ORG, currency: 'JPY' });
-    const err = await refusalOf(svc.set('localization', 'currency', 'EUR', { ...ctx, locale }));
+    const err = await refusalOf(svc.setMany('localization', { currency: 'EUR' }, ctx, { locale }));
     expect(err.fields[0].message.startsWith(opening)).toBe(true);
   });
 });

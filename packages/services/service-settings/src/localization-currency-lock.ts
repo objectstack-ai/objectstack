@@ -233,11 +233,11 @@ function usageConstraint(usage: CurrencyUsage): Record<string, unknown> {
  * refused while the currency is used. Setting it while unset passes.
  */
 export function localizationCurrencyWritePredicate(engine: CurrencyUsageEngine): SettingsWritePredicate {
-  return async ({ current, organizationId, ctx }) => {
+  return async ({ current, organizationId, locale }) => {
     if (isUnset(current)) return undefined;
     const usage = await readCurrencyUsage(engine, organizationId ?? null);
     if (!isUsed(usage)) return undefined;
-    const copy = currencyLockCopy(ctx.locale);
+    const copy = currencyLockCopy(locale);
     return {
       message: copy.refusal(String(current), describeCurrencyUsage(copy, usage)),
       constraint: usageConstraint(usage),
@@ -257,12 +257,12 @@ export function localizationCurrencyLiveStatus(
   engine: CurrencyUsageEngine,
   currentCurrency: (ctx: Parameters<SettingsLiveStatusProvider>[0]['ctx']) => Promise<unknown>,
 ): SettingsLiveStatusProvider {
-  return async ({ ctx, organizationId }): Promise<SettingsLiveStatus | undefined> => {
+  return async ({ ctx, organizationId, locale }): Promise<SettingsLiveStatus | undefined> => {
     const organization = await organizationId();
     if (organization === undefined) return undefined;
     const usage = await readCurrencyUsage(engine, organization);
     if (!isUsed(usage)) return undefined;
-    const copy = currencyLockCopy(ctx.locale);
+    const copy = currencyLockCopy(locale);
     const described = describeCurrencyUsage(copy, usage);
     const current = await currentCurrency(ctx);
     if (isUnset(current)) {

@@ -82,12 +82,19 @@ export interface SettingsContext {
    * resolver sets it to have its held sessions refused too.
    */
   authGate?: AuthGate;
+}
+
+/**
+ * How a settings call's computed prose is written — never who calls or what
+ * they may do, which is {@link SettingsContext}'s alone.
+ */
+export interface SettingsDisplayOptions {
   /**
    * The caller's display language (BCP-47), for prose a
    * {@link SettingsWritePredicate} refusal or a {@link SettingsLiveStatusProvider}
-   * statement composes. The settings routes set it from the request
-   * (`Accept-Language`, else `?locale`). Never an authorization input and never
-   * read by the resolver; absent, such prose is written in English.
+   * statement composes. The settings routes pass it from the request
+   * (`Accept-Language`, else `?locale`). Absent, such prose is written in
+   * English.
    */
   locale?: string;
 }
@@ -348,11 +355,13 @@ export interface SettingsWritePredicateInput {
    */
   organizationId: string | null | undefined;
   ctx: SettingsContext;
+  /** The language the refusal is written in — {@link SettingsDisplayOptions.locale}. */
+  locale?: string;
 }
 
 /**
  * A predicate's refusal. `message` is the sentence the caller reads under the
- * field, written in `ctx.locale`; `constraint` carries its discrete values
+ * field, written in the input's `locale`; `constraint` carries its discrete values
  * (`FieldError.constraint`, ADR-0114), so a client can compose its own text.
  */
 export interface SettingsWriteRefusal {
@@ -412,7 +421,9 @@ export type SettingsLiveStatusProvider = (input: {
    * Resolved only when called.
    */
   organizationId: () => Promise<string | null | undefined>;
-}) =>Promise<SettingsLiveStatus | undefined> | SettingsLiveStatus | undefined;
+  /** The language the statement is written in — {@link SettingsDisplayOptions.locale}. */
+  locale?: string;
+}) => Promise<SettingsLiveStatus | undefined> | SettingsLiveStatus | undefined;
 
 /**
  * The `info_banner` id that carries a namespace's live status. Reserved: a
