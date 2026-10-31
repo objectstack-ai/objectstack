@@ -45,8 +45,8 @@ const APP = 'com.acme.suite';
 const SUITE_MODULE = 'com.acme.suite.orders';
 /** The same tie, installed from the marketplace with no scope key on the row. */
 const SUITE_MODULE_SCOPELESS = 'com.acme.suite.billing';
-const SYSTEM_MODULE = 'com.acme.suite.platform_bits';
-const CLOUD_MODULE = 'com.acme.suite.cloud_bits';
+const SYSTEM_MODULE = 'com.acme.suite.platform-bits';
+const CLOUD_MODULE = 'com.acme.suite.cloud-bits';
 /** A module that declares no dependency at all. */
 const ORPHAN_MODULE = 'com.acme.orphan';
 /** A module whose declared app is not installed here. */
