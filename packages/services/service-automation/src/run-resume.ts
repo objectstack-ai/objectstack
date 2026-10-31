@@ -108,6 +108,10 @@ export interface RunResumeHost {
     readonly bubbleToParent: AutomationEngine['bubbleToParent'];
     readonly finishRefusedRun: AutomationEngine['finishRefusedRun'];
     readonly failAncestors: AutomationEngine['failAncestors'];
+    readonly flowChecksumOf: AutomationEngine['flowChecksumOf'];
+    readonly recoverStoredFlow: AutomationEngine['recoverStoredFlow'];
+    readonly heldFlowVersion: AutomationEngine['heldFlowVersion'];
+    readonly resolveResumeTarget: AutomationEngine['resolveResumeTarget'];
 }
 
 /** The body of {@link AutomationEngine.resolveRunContext}; that method's docblock is its contract. */
@@ -754,17 +758,53 @@ export async function failSuspendedRun(
  * caller that is about to write a decision of its own can refuse first. One
  * function for both, so the pre-flight and the resume it guards classify the
  * same suspension the same way.
+ *
+ * [#28405, ADR-0146 D9 item 4] The flow it answers is the body the run
+ * started on, not the one registered under its name now: a run that recorded
+ * an identity ({@link SuspendedRun.flowChecksum}) resumes on the body with
+ * that identity, found in this order —
+ *  1. the armed definition, when its identity matches;
+ *  2. the metadata history (`getByHash`, through the engine's
+ *     `setFlowHistorySource`), for a stored version;
+ *  3. a body this process registered under the name, for a code-loaded one.
+ * New runs keep starting on the armed definition; only the resume is pinned.
+ *
+ * Unchanged, on purpose:
+ *  - a flow no longer registered at all is still the `Flow '…' not found`
+ *    cause, pinned or not: the flow was withdrawn, not republished;
+ *  - a run with no recorded identity (a row written before this field) reads
+ *    the armed definition, node checked, as every resume did before;
+ *  - a pinned body that cannot be recovered anywhere — a code package
+ *    upgraded under the run — reads the armed definition the same way, and
+ *    the answer says so in `unrecovered` so the resume can `warn` naming the
+ *    version it lost. ⛔ Never a silent resume on the armed definition while
+ *    the pinned body exists.
+ *
+ * REJECTS when the metadata history cannot be read, as the pre-flight's own
+ * store read does: an outage means "unknown", never "not stored".
  */
-export function resolveResumeTarget(
-    flows: AutomationEngine['flows'],
+export async function resolveResumeTarget(
+    this: Pick<RunResumeHost, 'flows' | 'flowChecksumOf' | 'recoverStoredFlow' | 'heldFlowVersion'>,
     runId: string,
-    run: Pick<SuspendedRun, 'flowName' | 'nodeId'>,
-): { flow: FlowParsed; node: FlowParsed['nodes'][number] } | { cause: string } {
-    const flow = flows.get(run.flowName);
-    if (!flow) return { cause: `Flow '${run.flowName}' not found for run '${runId}'` };
+    run: Pick<SuspendedRun, 'flowName' | 'nodeId' | 'flowChecksum'>,
+): Promise<
+    | { flow: FlowParsed; node: FlowParsed['nodes'][number]; unrecovered?: string }
+    | { cause: string }
+> {
+    const armed = this.flows.get(run.flowName);
+    if (!armed) return { cause: `Flow '${run.flowName}' not found for run '${runId}'` };
+    const pinned = run.flowChecksum;
+    let flow = armed;
+    let unrecovered: string | undefined;
+    if (pinned !== undefined && this.flowChecksumOf(armed) !== pinned) {
+        const recovered =
+            (await this.recoverStoredFlow(run.flowName, pinned)) ?? this.heldFlowVersion(run.flowName, pinned);
+        if (recovered) flow = recovered;
+        else unrecovered = pinned;
+    }
     const node = flow.nodes.find(n => n.id === run.nodeId);
     if (!node) return { cause: `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'` };
-    return { flow, node };
+    return unrecovered === undefined ? { flow, node } : { flow, node, unrecovered };
 }
 
 /** The body of {@link AutomationEngine.settleUnresumableSuspension}, moved unedited; that method's docblock is its contract. */
@@ -1128,7 +1168,7 @@ export function takeSubflowParentStrand(this: Pick<RunResumeHost, 'subflowParent
 
 /** The body of {@link AutomationEngine.resumeInternal}, moved unedited; that method's docblock is its contract. */
 export async function resumeInternal(
-    this: Pick<RunResumeHost, 'resuming' | 'loadSuspendedRunStrict' | 'logger' | 'flows' | 'settleUnresumableSuspension' | 'creditChildRun' | 'loadSuspendedRun' | 'resumeInternal' | 'persistSuspendedRun' | 'failSuspendedRun' | 'consumedSuspensions' | 'buildSubflowResumeSignal' | 'refuseInvalidScreenInput' | 'cloneVariablesAtPause' | 'resolveDecisionSegmentContext' | 'claimAdvance' | 'evictConsumedSuspension' | 'forgetSuspendedRun' | 'executeNode' | 'traverseNext' | 'recordLog' | 'bubbleToParent' | 'finishRefusedRun' | 'journalConsumedSuspension' | 'failAncestors'>,
+    this: Pick<RunResumeHost, 'resuming' | 'loadSuspendedRunStrict' | 'logger' | 'resolveResumeTarget' | 'flowChecksumOf' | 'settleUnresumableSuspension' | 'creditChildRun' | 'loadSuspendedRun' | 'resumeInternal' | 'persistSuspendedRun' | 'failSuspendedRun' | 'consumedSuspensions' | 'buildSubflowResumeSignal' | 'refuseInvalidScreenInput' | 'cloneVariablesAtPause' | 'resolveDecisionSegmentContext' | 'claimAdvance' | 'evictConsumedSuspension' | 'forgetSuspendedRun' | 'executeNode' | 'traverseNext' | 'recordLog' | 'bubbleToParent' | 'finishRefusedRun' | 'journalConsumedSuspension' | 'failAncestors'>,
     runId: string,
     // Never `undefined` past the public door: `resume` normalises an
     // absent caller signal to `{}` (commit 7307191db), and the engine's own
@@ -1234,9 +1274,49 @@ export async function resumeInternal(
         // [#26477] The classification itself is {@link resolveResumeTarget},
         // shared with the read-only probe a caller asks BEFORE it writes
         // anything of its own, so the two cannot disagree.
-        const target = resolveResumeTarget(this.flows, runId, run);
+        //
+        // [#28405] …and it answers the body the run STARTED on, so a flow
+        // republished while the run waited — its parked node renamed or not —
+        // no longer moves the run onto the new definition or ends it. Reading
+        // that body back can touch the metadata history, and a history that
+        // cannot be read answers what an unreadable suspended-run store
+        // answers above: the run stays parked and the caller may retry. An
+        // outage is "unknown", never "not stored", so it must not fall
+        // through to the armed definition.
+        let target: Awaited<ReturnType<RunResumeHost['resolveResumeTarget']>>;
+        try {
+            target = await this.resolveResumeTarget(runId, run);
+        } catch (err) {
+            this.logger.error(
+                `[automation] the metadata history was unreachable while recovering the definition run '${runId}' ` +
+                    `started on — the suspension was NOT consumed, so the run stays parked and this resume can be ` +
+                    `retried verbatim once the store is reachable. The store's own failure is in this record's meta.`,
+                undefined,
+                describeThrownForLog(err),
+            );
+            return {
+                success: false,
+                code: 'STORE_UNAVAILABLE',
+                error:
+                    `The definition run '${runId}' started on could not be read from the metadata history — retry ` +
+                    `once the store is available: ${(err as Error)?.message ?? String(err)}`,
+            };
+        }
         if ('cause' in target) return this.settleUnresumableSuspension(run, target.cause);
         const { flow, node } = target;
+        if (target.unrecovered !== undefined) {
+            // [#28405, ADR-0146 D9 item 4 as decided on the card] The pinned
+            // body is gone everywhere — not armed, not in the metadata history,
+            // not registered by this process (a code package upgraded under the
+            // run). The run continues on the armed definition, whose node still
+            // exists, and says so: never silently.
+            this.logger.warn(
+                `[automation] run '${runId}' started on flow '${run.flowName}' version ${run.flowVersion ?? '(none)'} ` +
+                    `(checksum ${target.unrecovered}), which can no longer be recovered — it is not the armed ` +
+                    `definition, not in the metadata history and not registered by this process. The run resumes on ` +
+                    `the armed definition (version ${flow.version}), where its node '${run.nodeId}' still exists.`,
+            );
+        }
 
         // #4354 — up-bubble: the child that just finished did work this run
         // is accountable for. Credit it to the step that suspended awaiting
@@ -1855,6 +1935,10 @@ export async function resumeInternal(
                 const variablesSnapshot = Object.fromEntries(variables);
                 await this.persistSuspendedRun({
                     ...run,
+                    // [#28405] The body this segment ran on: the pinned one,
+                    // or — for a run with none recorded, or one whose pinned
+                    // body was lost — the armed definition it continued on.
+                    flowChecksum: this.flowChecksumOf(flow),
                     // The segment's identity, not the one the run parked
                     // with last time: after a decision switch (ruling A on
                     // `FlowSchema.runAs`) the next pause must continue as

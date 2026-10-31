@@ -139,6 +139,7 @@ export interface DagTraversalHost {
     readonly recordLog: AutomationEngine['recordLog'];
     readonly finishRefusedRun: AutomationEngine['finishRefusedRun'];
     readonly persistSuspendedRun: AutomationEngine['persistSuspendedRun'];
+    readonly flowChecksumOf: AutomationEngine['flowChecksumOf'];
 }
 
 /** The body of {@link AutomationEngine.executeNode}, moved unedited; that method's docblock is its contract. */
@@ -1122,7 +1123,7 @@ export function seedRunVariables(
 
 /** The body of {@link AutomationEngine.executeWithoutRetry}, moved unedited; that method's docblock is its contract. */
 export async function executeWithoutRetry(
-    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun'>,
+    this: Pick<DagTraversalHost, 'flows' | 'isFlowEnabled' | 'describeDisabledFlow' | 'nextRunId' | 'seedRunVariables' | 'resolveRunContext' | 'validateNodeInputSchemas' | 'executeNode' | 'recordLog' | 'logger' | 'finishRefusedRun' | 'persistSuspendedRun' | 'flowChecksumOf'>,
     flowName: string,
     context?: AutomationContext,
 ): Promise<AutomationResult> {
@@ -1358,6 +1359,7 @@ export async function executeWithoutRetry(
                 runId,
                 flowName,
                 flowVersion: flow.version,
+                flowChecksum: this.flowChecksumOf(flow),
                 nodeId: err.nodeId,
                 nodeType: err.nodeType,
                 variables: variablesSnapshot,

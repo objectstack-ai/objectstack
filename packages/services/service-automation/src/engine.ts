@@ -64,6 +64,7 @@ import { ConnectorSchema } from '@objectstack/spec/integration';
 export const DEFAULT_BRANCH_LABEL = 'default';
 
 import { runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
+import { flowContentChecksum } from './flow-identity.js';
 import { carriedRefusalOfResult, readCarriedRefusal, type CarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
@@ -1654,7 +1655,21 @@ export function applyResumeSignal(
 export interface SuspendedRun {
     runId: string;
     flowName: string;
+    /** The author's `FlowSchema.version` integer, for display only: two bodies can carry one number. */
     flowVersion?: number;
+    /**
+     * [#28405, ADR-0146 D9 item 4] The content identity of the definition this
+     * run is executing: `hashSpec(body, 'flow')` of the body that was handed
+     * to {@link AutomationEngine.registerFlow}, the checksum
+     * `sys_metadata_history` keys a stored flow's versions by. A resume
+     * continues on the body with this identity, not on whatever is registered
+     * under {@link flowName} now (see `resolveResumeTarget`).
+     *
+     * Absent on a row written before this field existed, and for a definition
+     * that could not be hashed: such a run resumes on the registered flow, as
+     * every run did before.
+     */
+    flowChecksum?: string;
     /** The node the run paused at; resume continues from its out-edges. */
     nodeId: string;
     /**
@@ -2543,6 +2558,18 @@ export interface FlowContender {
 export type PackagedFlowSource = (name: string) => string | undefined;
 
 /**
+ * [#28405] The stored body of flow `name` whose content identity is
+ * `checksum` ({@link SuspendedRun.flowChecksum}), as the metadata history
+ * keeps it — `null` when no version with that identity is stored. A host
+ * wires the metadata repository's `getByHash` here
+ * ({@link AutomationEngine.setFlowHistorySource}).
+ *
+ * REJECTS when the history cannot be read: an outage means "unknown", and a
+ * resume must not read it as "not stored" and continue on another body.
+ */
+export type FlowHistorySource = (name: string, checksum: string) => Promise<unknown | null>;
+
+/**
  * [#20790] Where a flow's credentials live once they are out of its
  * definition: the write-only flow credential channel (the automation plugin's
  * `FlowCredentialChannel`, on the #7799 secret seam). Positions are
@@ -2772,6 +2799,17 @@ export class AutomationEngine implements IAutomationService {
      *  re-enables on the next (re)register even if the flow had been turned off. */
     private flowStatusDisabled = new Map<string, boolean>();
     private flowVersionHistory = new Map<string, Array<{ version: number; definition: FlowParsed; createdAt: string }>>();
+    /**
+     * [#28405] Each registered body's content identity — see
+     * {@link SuspendedRun.flowChecksum}. Keyed by the parsed object the
+     * engine executes, so the identity a run records is the one of the body
+     * it is actually running, whichever way that body was reached: the armed
+     * definition, a version this process still holds in
+     * {@link flowVersionHistory}, or a pinned body read back on resume.
+     */
+    private readonly flowChecksums = new WeakMap<FlowParsed, string>();
+    /** [#28405] Where a pinned body is read back by its identity — see {@link setFlowHistorySource}. */
+    private flowHistorySource?: FlowHistorySource;
     private nodeExecutors = new Map<string, NodeExecutor>();
     private actionDescriptors = new Map<string, ActionDescriptor>();
     /**
@@ -4455,6 +4493,11 @@ export class AutomationEngine implements IAutomationService {
         });
         this.flowVersionHistory.set(name, history);
 
+        // [#28405] The identity of the body as handed over — the stored body,
+        // for a flow the protocol serves — so it is the checksum the metadata
+        // history keys this version by. See {@link SuspendedRun.flowChecksum}.
+        const checksum = flowContentChecksum(definition);
+        if (checksum !== undefined) this.flowChecksums.set(parsed, checksum);
         this.flows.set(name, parsed);
         // [#23316] Held now, so no longer refused — see {@link flowRefusals}.
         this.flowRefusals.delete(name);
@@ -4796,6 +4839,25 @@ export class AutomationEngine implements IAutomationService {
      */
     setPackagedFlowSource(source: PackagedFlowSource | undefined): void {
         this.packagedFlowSource = source;
+    }
+
+    /**
+     * [#28405] Attach the reader a resume recovers a pinned body through when
+     * neither the armed definition nor anything this process registered has
+     * the run's identity — after a restart, typically. With none attached,
+     * only what this process registered can be recovered.
+     */
+    setFlowHistorySource(source: FlowHistorySource | undefined): void {
+        this.flowHistorySource = source;
+    }
+
+    /**
+     * [#28405] The content identity of a body this engine executes, or
+     * `undefined` for one whose source could not be hashed. See
+     * {@link SuspendedRun.flowChecksum}.
+     */
+    private flowChecksumOf(flow: FlowParsed): string | undefined {
+        return this.flowChecksums.get(flow);
     }
 
     /**
@@ -6254,6 +6316,7 @@ export class AutomationEngine implements IAutomationService {
                     runId,
                     flowName,
                     flowVersion: flow.version,
+                    flowChecksum: this.flowChecksumOf(flow),
                     nodeId: err.nodeId,
                     nodeType: err.nodeType,
                     variables: variablesSnapshot,
@@ -6948,8 +7011,73 @@ export class AutomationEngine implements IAutomationService {
     async unresumableSuspensionCause(runId: string): Promise<string | undefined> {
         const run = await this.loadSuspendedRunStrict(runId);
         if (!run) return undefined;
-        const target = resolveResumeTarget(this.flows, runId, run);
+        const target = await this.resolveResumeTarget(runId, run);
         return 'cause' in target ? target.cause : undefined;
+    }
+
+    /**
+     * [#26477, #28405] The one classification the resume and its pre-flight
+     * share — the body the run resumes on and its parked node, or the cause it
+     * can never continue. The body lives in ./run-resume.ts; its docblock is
+     * the contract.
+     */
+    private resolveResumeTarget(
+        runId: string,
+        run: Pick<SuspendedRun, 'flowName' | 'nodeId' | 'flowChecksum'>,
+    ): ReturnType<typeof resolveResumeTarget> {
+        const host: ThisParameterType<typeof resolveResumeTarget> = {
+            flows: this.flows,
+            flowChecksumOf: (...a) => this.flowChecksumOf(...a),
+            recoverStoredFlow: (...a) => this.recoverStoredFlow(...a),
+            heldFlowVersion: (...a) => this.heldFlowVersion(...a),
+        };
+        return resolveResumeTarget.call(host, runId, run);
+    }
+
+    /**
+     * [#28405] The stored version of flow `name` whose identity is `checksum`,
+     * read back through {@link setFlowHistorySource} and parsed the way
+     * {@link registerFlow} parses (the shared canonicalization, no arming and
+     * no registration checks: it executes one waiting run, it is not armed).
+     * `undefined` when no source is attached, nothing is stored under that
+     * identity, or the stored body no longer parses. REJECTS when the source
+     * does — see {@link FlowHistorySource}.
+     */
+    private async recoverStoredFlow(name: string, checksum: string): Promise<FlowParsed | undefined> {
+        const source = this.flowHistorySource;
+        if (!source) return undefined;
+        const body = await source(name, checksum);
+        if (body === null || body === undefined) return undefined;
+        let parsed: FlowParsed;
+        try {
+            parsed = this.canonicalizeFlow(name, body).parsed;
+        } catch (err) {
+            this.logger.warn(
+                `[automation] the stored version of flow '${name}' with checksum ${checksum} no longer parses, so a ` +
+                    `run that started on it cannot resume on it.`,
+                describeThrownForLog(err),
+            );
+            return undefined;
+        }
+        // The identity it was found by, so a run resumed on it and paused
+        // again stays pinned to it.
+        this.flowChecksums.set(parsed, checksum);
+        return parsed;
+    }
+
+    /**
+     * [#28405] A body this process registered under `name` whose identity is
+     * `checksum` — a code-loaded version, which has no history row (ADR-0009
+     * §2.4) — or `undefined`. Read from {@link flowVersionHistory}, so it is
+     * lost on restart and on {@link withdrawFlow}.
+     */
+    private heldFlowVersion(name: string, checksum: string): FlowParsed | undefined {
+        const versions = this.flowVersionHistory.get(name) ?? [];
+        for (let i = versions.length - 1; i >= 0; i--) {
+            const definition = versions[i].definition;
+            if (this.flowChecksums.get(definition) === checksum) return definition;
+        }
+        return undefined;
     }
 
     /**
@@ -7060,7 +7188,8 @@ export class AutomationEngine implements IAutomationService {
             resuming: this.resuming,
             loadSuspendedRunStrict: (...a) => this.loadSuspendedRunStrict(...a),
             logger: this.logger,
-            flows: this.flows,
+            resolveResumeTarget: (...a) => this.resolveResumeTarget(...a),
+            flowChecksumOf: (...a) => this.flowChecksumOf(...a),
             settleUnresumableSuspension: (...a) => this.settleUnresumableSuspension(...a),
             creditChildRun: (...a) => this.creditChildRun(...a),
             loadSuspendedRun: (...a) => this.loadSuspendedRun(...a),
@@ -9564,6 +9693,7 @@ export class AutomationEngine implements IAutomationService {
             logger: this.logger,
             finishRefusedRun: (...a) => this.finishRefusedRun(...a),
             persistSuspendedRun: (...a) => this.persistSuspendedRun(...a),
+            flowChecksumOf: (...a) => this.flowChecksumOf(...a),
         };
         return executeWithoutRetry.call(host, flowName, context);
     }
