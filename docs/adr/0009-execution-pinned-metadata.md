@@ -1,6 +1,6 @@
 # ADR-0009: Execution-Pinned Metadata
 
-**Status**: Accepted · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — the resume reading of `executionPinned` for `flow`: a suspended run resumes on the version it started on, not on HEAD by name, which is what §2.1 promised and the engine never delivered (ADR-0146 D9, card N-12); the flag, the triple and `getByHash` are unchanged.
+**Status**: Accepted · **Amended by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — the resume reading of `executionPinned` for `flow` is made real: a suspended run resumes on the version it started on, not on HEAD by name, which is what §2.1 promised and the engine never delivered (ADR-0146 D9, card N-12). Nothing in this record is reversed; the flag, the triple and `getByHash` are unchanged.
 **Date:** 2026-05-22
 **Supersedes:** —
 **Builds on:** ADR-0008 (Metadata Repository & Change Log)
