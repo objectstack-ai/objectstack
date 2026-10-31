@@ -400,6 +400,20 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
   const previewRows = rows.slice(0, 5);
   const restCount = Math.max(0, rows.length - previewRows.length);
 
+  // The result names the records the run wrote, as the confirm step named
+  // them. Only when every failure is attributed to a record of the run: then
+  // the rows left over are exactly the ones that succeeded. A failure the
+  // server answered with a count only leaves the successes unknown, and the
+  // result keeps to its count rather than name a record that may have failed.
+  const succeededRows = (() => {
+    if (!result || result.succeeded === 0) return [];
+    const failedIds = new Set(result.errors.map(e => e.id));
+    const landed = rows.filter(r => r.id != null && !failedIds.has(String(r.id)));
+    return landed.length === result.succeeded ? landed : [];
+  })();
+  const succeededPreview = succeededRows.slice(0, 5);
+  const succeededRest = succeededRows.length - succeededPreview.length;
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(result); }}>
       <DialogContent
@@ -566,6 +580,26 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                 {result.failed > 0 && t('grid.bulk.resultFailed', { count: result.failed, defaultValue: ` · Failed ${result.failed}` })}
               </span>
             </div>
+            {succeededPreview.length > 0 && (
+              <ScrollArea className="max-h-32 rounded border bg-muted/30 p-2">
+                <ul
+                  className="text-xs space-y-1"
+                  aria-label={t('grid.bulk.succeededRecords', { defaultValue: 'Records that succeeded' })}
+                  data-testid="bulk-succeeded-records"
+                >
+                  {succeededPreview.map(r => (
+                    <li key={String(r.id)} className="break-words">
+                      • {affectedRecordName(objectDef, r, String(r.id))}
+                    </li>
+                  ))}
+                  {succeededRest > 0 && (
+                    <li className="text-muted-foreground">
+                      {t('grid.bulk.andMore', { count: succeededRest, defaultValue: `… and ${succeededRest} more` })}
+                    </li>
+                  )}
+                </ul>
+              </ScrollArea>
+            )}
             {result.errors.length > 0 && (
               <>
                 <ScrollArea className="max-h-48 rounded border bg-destructive/5 p-2" data-testid="bulk-error-inspector">

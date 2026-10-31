@@ -470,13 +470,110 @@ What the publish door checks, each refusal located at its key under `auth`:
 - **`app-credential`** takes `vendor` (`feishu`, `dingtalk` or `wecom`), `appId`
   and a required `credentialRef`. An inline `appSecret` is refused by name.
 
-A server that does not yet run the per-dispatch token resolution holds such an
-instance **degraded**, with a reason that names the grant-bearing kind, and
-never calls the upstream without its credential. A datasource that borrows
-from it (`external.connector`) is refused with `422`. Until the server serves
-them, declare a static kind (`bearer`, `api-key` or `basic`) to dispatch now;
-don't emulate a grant by putting a short-lived access token behind a `bearer`
-ref.
+**How the server serves them.** Both kinds are served through a
+**credential handle** the provider asks on every request. The built-in `rest`
+and `openapi` providers ask it; a provider says it does by registering with
+`registerConnectorProvider(…, { credentialHandle: true })`. For an `openapi`
+instance the document's `security` decides only where the token is *not*
+sent: an operation whose effective `security` is `[]` is anonymous and never
+carries it, and a header or query parameter an `apiKey` scheme names is the
+platform's to fill, so it is left out of the action's input schema, as
+`Authorization` is.
+
+An **`app-credential`** instance runs its vendor's exchange from the `appId`
+and the app secret its `credentialRef` names. The exchange is fixed per
+`vendor`, and nothing about it is authored:
+
+| `vendor` | Token request | Where the token rides on a call |
+|:---|:---|:---|
+| `feishu` | `POST https://accounts.feishu.cn/oauth/v3/token` (`client_credentials`) | `Authorization: Bearer` |
+| `dingtalk` | `POST https://api.dingtalk.com/v1.0/oauth2/accessToken` | header `x-acs-dingtalk-access-token` |
+| `wecom` | `GET https://qyapi.weixin.qq.com/cgi-bin/gettoken` | query parameter `access_token` |
+
+The token belongs to the app, so a run's organization selects nothing, and
+there is nothing to connect. It is kept in memory only, never stored (the app
+secret re-derives it at any time), and obtained afresh when it is within 30
+seconds of its expiry, or once when the upstream answers `401`. Concurrent
+requests share one exchange. WeCom can invalidate a token before it expires
+and says so inside an ordinary answer (`errcode` `40014` or `42001`) rather
+than with a `401`: such an answer obtains the token afresh once and repeats
+the call once, and a second such answer fails the call. No exchange follows a
+redirect. An exchange that gets no answer, a `429` or a `5xx` fails the
+dispatch `CONNECTOR_UPSTREAM_UNAVAILABLE`, retried on the existing backoff; a
+vendor that refuses the app id or secret fails it with `503`, naming the
+instance and at most the vendor's error code, never the vendor's text.
+
+An **`oauth2`** instance's access token is
+obtained from `tokenUrl` (the client authenticating with HTTP Basic, or by
+`client_id` alone as a public client), cached in memory only, refreshed when
+it is within 30 seconds of its expiry, and refreshed once more, with one
+retry, when the upstream answers `401`. Concurrent requests share one token
+request, and with a cluster service a refresh runs under the cluster lock, so
+a rotating refresh token is never spent twice.
+
+- **`client_credentials`** needs nothing more: the client secret its
+  `credentialRef` names re-derives the token at any time.
+- **`authorization_code`** needs an administrator to **connect** it, once per
+  organization. Until then the instance is **degraded** "not connected" (never
+  a failed boot). The connect is three calls, each needing the
+  organization-scoped `manage_connector_connections` capability (platform
+  administrators hold it by default; grant it to anyone else, an organization
+  administrator included, through a permission set):
+
+  ```http
+  POST /api/v1/automation/connectors/:name/connection     → { authorizationUrl, expiresAt }
+  GET  /api/v1/automation/connectors/oauth/callback?code=…&state=…   (the vendor redirects here)
+  DELETE /api/v1/automation/connectors/:name/connection   → revoke
+  ```
+
+  `GET …/:name/connection` answers the organization's status
+  (`not_connected`, `connected`, `reconnect_required`), never a token. The
+  `state` and the PKCE verifier are bound to the user and organization that
+  began the connect and are used once; a callback from anyone else is refused
+  before its code is exchanged. While the connect waits (ten minutes at most)
+  it is held in the cluster KV, or in process on a single node, **sealed**
+  under a key derived from the `state` itself, which the server never stores:
+  the KV holds only the state's digest and an AES-256-GCM envelope, so a party
+  that can read the KV learns no verifier, user or organization, and a value
+  edited or moved there opens as nothing and its code is never exchanged.
+  Write access to the cluster KV stays inside the platform's trust boundary,
+  as it is for the cluster lock: such a writer can still delete a waiting
+  connect. The redirect URI is the deployment's
+  (`OS_BASE_URL` or `OS_AUTH_URL` plus `/api/v1/automation/connectors/oauth/callback`,
+  or the automation plugin's `connectorOAuthRedirectUri`), never the
+  request's; register that URI with the vendor. The refresh token is kept
+  encrypted in `sys_connector_connection`, one row per organization; it is
+  not a sign-in account, and signing in never touches it. A run dispatches
+  with its own organization's connection; a run with no organization uses the
+  instance's only connection, and is refused when there are several. When the
+  vendor refuses the grant (`invalid_grant`), the connection is marked
+  **reconnect required** and the instance degraded until an administrator
+  connects it again. A refresh, and the mark "reconnect required", are each
+  written only over the revision they read, in one conditional write, so a
+  stale one never overwrites a newer connect on any replica. A revoke deletes
+  the stored connection only: the server does not revoke the refresh token at
+  the vendor (RFC 7009), because no revocation endpoint is known for the
+  instance yet — the auth declares none, and the discovery that would supply
+  one is ADR-0143 S2. The refresh token stays valid at the vendor until it
+  expires or is revoked in the vendor's console; revoke it there too when the
+  disconnect is a response to a leak.
+
+What is not served yet is held **degraded** with a reason that names it, and
+never called without its credential: an `oauth2` or `app-credential`
+instance on a provider that does not ask the credential handle (the built-in
+`mcp` provider does not yet, nor does a plugin's provider registered without
+`{ credentialHandle: true }`), an `mcp` instance that left its endpoints to
+discovery, and an `oauth2`
+instance whose `tokenUrl` or `authorizationUrl` is not `https://` (plain
+`http://` is accepted only to `localhost`, a `127.0.0.0/8` address or
+`[::1]` — not a `*.localhost` name, which the system resolver sends to DNS —
+so the client secret and the refresh token never cross a network in the
+clear; a token endpoint that answers with a redirect is refused rather than
+followed). A datasource
+that borrows from a grant-bearing instance (`external.connector`) is refused
+with `422`. Until then, declare a static kind (`bearer`, `api-key` or `basic`)
+to dispatch now; don't emulate a grant by putting a short-lived access token
+behind a `bearer` ref.
 
 ### Request signing: `signed`
 
@@ -625,7 +722,9 @@ retry):
 |:---|:---|
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
-| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a server that does not yet run its per-dispatch resolution | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
+| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a provider that does not ask the credential handle (the built-in `mcp` provider, for now) | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
+| An `authorization_code` instance nobody connected, or whose grant the vendor refused | **Not fatal**: the instance registers **degraded**, "not connected" or "reconnect required" — connect it (`POST …/connectors/:name/connection`), and it materializes without a restart |
+| The token endpoint is unreachable or answers `5xx` / `429` | **Not fatal**: the dispatch fails `CONNECTOR_UPSTREAM_UNAVAILABLE` and is retried on the existing backoff; the connection stays connected |
 | `auth` is `signed` on a provider that does not say it applies the request signer | **Hard boot error** naming the instance, the scheme and the provider: its calls would go out unsigned — declare it through `rest` or `openapi` |
 | `credentialRef` (or a `signed` instance's `vendorPublicKeyRef`) resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
 | A `signed` reference resolves to something that is not a key of the scheme's kind (an `alipay-v3` key that is not RSA) | **Hard boot error** naming the instance and which reference cannot sign or verify, never the value |

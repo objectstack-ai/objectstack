@@ -7,9 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // `page-slots-details-beside-tabs-refused` (#22568): with no `tabs` slot there
 // is no pair to refuse, and that entry's prescription (move the details body
 // INTO the `tabs` items) pointed at the key this one retires.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'page-slots-tabs-retired',
   surface:

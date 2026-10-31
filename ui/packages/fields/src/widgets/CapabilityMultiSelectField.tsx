@@ -167,6 +167,8 @@ const CURATED_CAPABILITY_LABELS = new Set([
   'view_all_audit_log',
   // `@objectstack/spec` 18 added it to `PLATFORM_CAPABILITIES` (objectui#12030).
   'manage_mailboxes',
+  // ADR-0143 D5: the organization-scoped connector connection capability.
+  'manage_connector_connections',
 ]);
 
 export function CapabilityMultiSelectField({

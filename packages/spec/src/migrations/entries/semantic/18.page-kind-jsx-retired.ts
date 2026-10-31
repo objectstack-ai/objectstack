@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // this entry as the hand edit it is.
 export const entry: SemanticMigration = {
   id: 'page-kind-jsx-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface: "page kind authored as 'jsx' (PageSchema.kind, ui/page.zod.ts)",
   replacement:
     "`kind: 'html'` — the constrained-JSX page tier's name since ADR-0081; the page's `source` and "

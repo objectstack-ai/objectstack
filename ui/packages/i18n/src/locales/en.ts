@@ -31,6 +31,7 @@ const en = {
       manage_org_users: 'Manage Organization Users',
       manage_metadata: 'Manage Metadata',
       manage_mailboxes: 'Manage Mailboxes',
+      manage_connector_connections: 'Manage Connector Connections',
       manage_platform_settings: 'Manage Platform Settings',
       setup_access: 'Setup Access',
       setup_write: 'Write Settings',
@@ -956,6 +957,7 @@ const en = {
       undonePrefix: 'Undone \u2014 ',
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
+      succeededRecords: 'Records that succeeded',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
@@ -1531,9 +1533,12 @@ const en = {
     new: 'New',
     add: 'Add',
     activity: 'Activity',
-    timeline: 'Timeline',
-    timelineFolded: 'Activity',
-    relatedColumn: 'Related column',
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: 'Activity',
+    relatedColumn: 'Right column',
+    timelineComposer: 'Write a note… @ to mention',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} empty sections',
     emptySections_one: '{{count}} empty section',
@@ -1778,6 +1783,7 @@ const en = {
   report: {
     total: 'Total',
     totals: 'Totals',
+    subtotal: 'Subtotal',
     loading: 'Loading…',
     // objectui#12330 — the report's no-access state; its title is `dashboard.widgetForbiddenTitle`.
     forbiddenMessage: 'You don’t have permission to view the data behind this report.',
@@ -2322,6 +2328,10 @@ const en = {
       // The `newTabUrl` fast path's refusal when no record id resolves
       // (`createConsoleServerActionHandler`, objectui#13397).
       noRecordId: 'This action runs on a single record — no record id available.',
+      // A refused action whose answer named required fields: what to do next,
+      // after the server's own sentence (`createConsoleServerActionHandler`).
+      fillRequiredThenRetry: 'Fill in {{fields}}, then run “{{action}}” again.',
+      fillRequiredFirst: 'Fill in {{fields}} first.',
     },
     shortcuts: {
       title: 'Keyboard Shortcuts',
@@ -2338,8 +2348,7 @@ const en = {
       newChat: 'New chat',
       toggleChatsList: 'Toggle conversations list',
       goHome: 'Back to home',
-      toggleTimeline: 'Show / hide timeline',
-      toggleRelated: 'Show / hide related',
+      toggleRelated: 'Show / hide the right column',
     },
     reportIndex: {
       title: 'Reports',
@@ -3216,9 +3225,11 @@ const en = {
       // Same pair as `auth.login.socialButton` / `orText`, for sign-up.
       socialButton: 'Sign up with {provider}',
       orText: 'or continue with email',
+      captchaRetry: 'Retry',
       errors: {
         userExists: 'An account with this email already exists. Try signing in instead.',
         selfRegistrationClosed: 'Self-registration is not open on this system. Ask an administrator for an invitation.',
+        captchaFailed: 'The security check did not complete. Please try it again.',
         emailDomainNotAllowed: "This email's domain is not allowed to register here. Use your organization email, or ask an administrator for an invitation.",
         // #27509 — `selfRegistrationClosed` for a visitor holding an invitation
         // link; `{{email}}` is the MASKED address the preview returns.
@@ -3885,6 +3896,8 @@ const en = {
       confirmNoteSeparate_one: 'Publishing releases the {{count}} pending draft on its own: if it fails, it stays pending.',
       confirmNoteSeparate_other: 'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
       publishConfirm: 'Publish all',
+      noteLabel: 'Change note (optional)',
+      notePlaceholder: 'What changed and why. It is shown in each item’s history.',
       // objectui#12517 — the confirm posture's summary line above the list:
       // the item count, then one `{{n}} {{type}}` per type group.
       summaryItems: '{{count}} items',
@@ -5031,6 +5044,7 @@ const en = {
     approveOneTitle: 'Approve "{{title}}"?',
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
+    submittedByYou: 'You submitted this',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',

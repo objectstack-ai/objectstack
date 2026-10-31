@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // into one the runtime runs.
 export const entry: SemanticMigration = {
   id: 'flow-write-node-stored-metadata-target-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span and a table cell.
   surface:
     'a create_record, update_record or delete_record flow node whose config.objectName is the string '
     + 'sys_metadata or sys_metadata_history, at any depth including an ADR-0031 region body',

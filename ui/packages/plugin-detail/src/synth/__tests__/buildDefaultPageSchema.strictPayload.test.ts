@@ -229,10 +229,10 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
       related: [{ objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' }],
     });
     const parsed = PageTabsProps.parse(tabs.properties) as any;
-    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Related', 'Timeline']);
-    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
+    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Activity stream', 'Related']);
+    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'timeline', 'related']);
     expect(parsed.items[0].children[0].type).toBe('record:details');
-    expect(parsed.items[1].children[0].properties.objectName).toBe('task');
+    expect(parsed.items[2].children[0].properties.objectName).toBe('task');
   });
 
   it('the tab items survive the whole-page parse the server runs', () => {
@@ -241,7 +241,7 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
     });
     const page = PageSchema.parse(body) as any;
     const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
-    expect(tabs.properties.items[1].children[0].properties.relationshipField).toBe('lead_id');
+    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'timeline', 'related']);
+    expect(tabs.properties.items[2].children[0].properties.relationshipField).toBe('lead_id');
   });
 });

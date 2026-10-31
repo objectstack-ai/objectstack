@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // the move is an authoring choice no rewrite can make for the author.
 export const entry: SemanticMigration = {
   id: 'flow-run-as-system-identity-assignment-write-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span and a table cell.
   surface:
     'a flow declaring runAs system whose data nodes, or the writes they set off under the same context, '
     + 'insert, update, delete, transfer, restore or purge a row of sys_user_position, '

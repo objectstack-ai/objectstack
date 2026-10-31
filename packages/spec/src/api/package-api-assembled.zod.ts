@@ -157,13 +157,24 @@ export type AssembledInstalledPackageParsed = z.infer<typeof AssembledInstalledP
  *   the same predicate the authoring and lifecycle gates use. `true` is a
  *   writable base; `false` is read-only (booted by code or installed from the
  *   marketplace, or a `system` / `cloud` scope).
+ * - `disableable` — the disable door's verdict on this package (#28318): the
+ *   same predicate `PATCH /packages/:id/disable` asks before it switches the
+ *   package off. `true` for a writable base and for a module of an installed
+ *   app (a `type: 'module'` package that directly depends on an installed
+ *   `type: 'app'` package, outside a `system` / `cloud` scope); `false` for
+ *   every other read-only package. It answers about the PACKAGE only: the
+ *   caller's own permission and a catalog wall are still asked at the door.
  *
  * ⛔ `writable` and the row's `source` are two statements, neither derived from
  * the other: `source` says where the package came from, `writable` what this
- * server lets an org do to it.
+ * server lets an org do to it. ⛔ Nor is `disableable` derived from `writable`
+ * or the other way round: a module of an installed app is `disableable` and
+ * not `writable` (it may be switched off, never authored into), so a client
+ * offers Disable / Enable from `disableable` and authoring from `writable`.
  */
 const SERVED_ROW_VERDICTS = {
   writable: z.boolean().describe('Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server\'s own predicate, never stored'),
+  disableable: z.boolean().describe('Whether this server lets an org disable this package: the disable door\'s own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server\'s own predicate, never stored'),
 };
 
 /**

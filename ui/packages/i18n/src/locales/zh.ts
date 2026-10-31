@@ -30,6 +30,7 @@ const zh = {
       manage_org_users: '管理组织用户',
       manage_metadata: '管理元数据',
       manage_mailboxes: '管理邮箱',
+      manage_connector_connections: '管理连接器连接',
       manage_platform_settings: '管理平台设置',
       setup_access: '访问 Setup',
       setup_write: '保存设置',
@@ -720,6 +721,7 @@ const zh = {
       undonePrefix: '已撤销 — ',
       succeeded: '成功 {{count}} / {{total}}',
       resultFailed: ' · 失败 {{count}}',
+      succeededRecords: '成功的记录',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',
       cancel: '取消',
@@ -1263,9 +1265,12 @@ const zh = {
     new: '新建',
     add: '添加',
     activity: '活动',
-    timeline: '时间线',
-    timelineFolded: '动态',
-    relatedColumn: '关联',
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: '动态',
+    relatedColumn: '右栏',
+    timelineComposer: '写一条备注… @ 提到同事',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} 个空分区',
     emptySections_one: '{{count}} 个空分区',
@@ -1476,6 +1481,7 @@ const zh = {
   report: {
     total: '总计',
     totals: '汇总',
+    subtotal: '小计',
     loading: '加载中…',
     forbiddenMessage: '你没有查看该报表数据的权限。',
     dateRange: {
@@ -1939,6 +1945,8 @@ const zh = {
       popupBlockedDescription: '浏览器阻止了新标签页的打开。',
       popupBlockedAction: '在新标签页打开',
       noRecordId: '此操作针对单条记录，但没有可用的记录 ID。',
+      fillRequiredThenRetry: '请先填写{{fields}}，然后重新执行“{{action}}”。',
+      fillRequiredFirst: '请先填写{{fields}}。',
     },
     shortcuts: {
       title: '键盘快捷键',
@@ -1955,8 +1963,7 @@ const zh = {
       newChat: '新建对话',
       toggleChatsList: '切换对话列表',
       goHome: '返回首页',
-      toggleTimeline: '显示 / 隐藏时间线',
-      toggleRelated: '显示 / 隐藏相关',
+      toggleRelated: '显示 / 隐藏右栏',
     },
     reportIndex: {
       title: '报表',
@@ -2749,9 +2756,11 @@ const zh = {
       signInText: '登录',
       socialButton: '使用 {provider} 注册',
       orText: '或使用邮箱继续',
+      captchaRetry: '重试',
       errors: {
         userExists: '该邮箱已被注册，请直接登录或更换邮箱。',
         selfRegistrationClosed: '本系统未开放自助注册，请联系管理员获取邀请。',
+        captchaFailed: '安全验证未完成，请重试。',
         emailDomainNotAllowed: '该邮箱的域名不允许在此注册，请使用组织邮箱，或联系管理员获取邀请。',
         invitationSentTo: '此邀请发送至 {{email}}，请使用该邮箱注册以接受邀请。',
         invitationAddressOnly: '此邀请只能由收到邀请的邮箱接受，请使用该邮箱注册。',
@@ -3364,6 +3373,8 @@ const zh = {
       confirmNoteSeparate_one: '发布会逐个单独发布这 {{count}} 个待发布草稿：发布失败的草稿仍保持待发布，其余草稿照常发布。',
       confirmNoteSeparate_other: '发布会逐个单独发布这 {{count}} 个待发布草稿：发布失败的草稿仍保持待发布，其余草稿照常发布。',
       publishConfirm: '全部发布',
+      noteLabel: '变更说明（可选）',
+      notePlaceholder: '改了什么、为什么改。会显示在每一项的历史记录里。',
       summaryItems: '{{count}} 项',
       summaryItems_one: '{{count}} 项',
       summaryItems_other: '{{count}} 项',
@@ -4430,6 +4441,7 @@ const zh = {
     approveOneTitle: '通过“{{title}}”？',
     approveOneBody: '将以你的身份通过该请求。如需填写审批意见或附件，请打开该请求处理。',
     flowOrigin: '流程发起',
+    submittedByYou: '由你提交',
     sortBy: '排序',
     sortRecent: '最新优先',
     sortOldest: '最早优先',

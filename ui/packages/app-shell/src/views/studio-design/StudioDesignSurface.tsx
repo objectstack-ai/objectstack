@@ -80,6 +80,9 @@ import {
 } from './studioItemDraftStatus.js';
 import { packagedAutomationPath } from './BuilderLanding.js';
 import { FlowItemMoreMenu } from './FlowItemMoreMenu.js';
+import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
+import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
+import { activationReading } from '../setup/packagedFlows.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
@@ -8406,22 +8409,27 @@ type FlowRuntimeState = Partial<SpecFlowRuntimeState>;
  * The shape is `flow-problems`' `FlowRuntimeRow` (objectui#11779): the rail,
  * the flow header and the Problems panel derive one run status from it
  * (`deriveFlowRunStatus`), so it is declared once, where that derivation is.
+ *
+ * `unboundCause` is the one member kept beside it, for the ledger switch on a
+ * read-only package's flow (ADR-0146 D4): `activationReading` reads it for its
+ * presence, the same reading Setup › Packaged automation shows.
  */
-type FlowRailState = FlowRuntimeRow;
+type FlowRailState = FlowRuntimeRow & { unboundCause?: string };
 
 /**
- * Narrow one unvalidated runtime row into the rail's state. `triggerType` and
- * `reason` are kept only as non-empty strings and are otherwise absent, the way
- * the engine omits them, so a row without them, and every older backend, reads
- * exactly as it did before they existed.
+ * Narrow one unvalidated runtime row into the rail's state. `triggerType`,
+ * `reason` and `unboundCause` are kept only as non-empty strings and are
+ * otherwise absent, the way the engine omits them, so a row without them, and
+ * every older backend, reads exactly as it did before they existed.
  */
 function flowRailState(s: FlowRuntimeState): FlowRailState {
-  const { triggerType, reason } = s;
+  const { triggerType, reason, unboundCause } = s;
   return {
     enabled: s.enabled !== false,
     bound: !!s.bound,
     ...(typeof triggerType === 'string' && triggerType.length > 0 ? { triggerType } : {}),
     ...(typeof reason === 'string' && reason.length > 0 ? { reason } : {}),
+    ...(typeof unboundCause === 'string' && unboundCause.length > 0 ? { unboundCause } : {}),
   };
 }
 
@@ -8848,6 +8856,9 @@ export function AutomationsPillar({
   // and the problem tally its Problems tab carries (reported by the preview).
   const [flowSection, setFlowSection] = React.useState<FlowPreviewSection>('canvas');
   const [problemTally, setProblemTally] = React.useState<FlowProblemTally>({ count: 0, errors: 0 });
+  // ADR-0146 D4 — bumped after a ledger toggle the server accepted: its answer
+  // carries the flag alone, and the flip can move what the engine armed.
+  const [statusNonce, setStatusNonce] = React.useState(0);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -8868,7 +8879,7 @@ export function AutomationsPillar({
     return () => {
       cancelled = true;
     };
-  }, [publishNonce]);
+  }, [publishNonce, statusNonce]);
 
   // #27356 row 19 — a delete re-reads the rail (`flowListNonce`) and leaves
   // the pillar on its empty state: that one re-read opens no other flow.
@@ -9199,6 +9210,45 @@ export function AutomationsPillar({
     onDraftSaved?.({ type: 'flow', name: flow.name });
     toast.success(tFormat('engine.studio.auto.flowDeleted', locale, { item: flow.label || flow.name }));
   }, [client, current, packageId, hasDraft, onDraftSaved, locale]);
+  // ADR-0146 D4 — a read-only package's open flow offers the activation-ledger
+  // switch (`FlowLedgerSwitch`). It reads the engine's `_status` row for the
+  // flow, never the draft's `status`, in `activationReading`'s three readings,
+  // the ones Setup › Packaged automation shows. With no row served there is
+  // nothing to bind and the read-only definition switch stays as it was. The
+  // door is pre-judged from the served posture facts; after any attempt the
+  // server's refusal is shown as sent.
+  const ledgerRow =
+    readOnly && packageId !== null && current && flowStatusRead ? flowStatus[current.name] : undefined;
+  const ledgerOn = ledgerRow?.enabled;
+  const ledgerWalled = useFlowLedgerWalledReadOnly();
+  const ledgerWalledReason = ledgerWalled ? t('engine.studio.auto.ledger.walled', locale) : undefined;
+  const [ledgerBusy, setLedgerBusy] = React.useState(false);
+  const toggleLedger = React.useCallback(async () => {
+    if (!current || ledgerOn === undefined || ledgerWalled) return;
+    const flow = current;
+    setError(null);
+    setLedgerBusy(true);
+    // Never throws: a failed request comes back as an outcome.
+    const outcome = await requestFlowToggle(flow.name, !ledgerOn, {
+      http: (status) => tFormat('engine.studio.auto.ledger.toggleFailedHttp', locale, { status }),
+      network: t('engine.studio.auto.ledger.toggleFailed', locale),
+    });
+    setLedgerBusy(false);
+    // VERBATIM: the posture gate's 403 names the sanctioned path, the subflow
+    // guard's 409 names the callers that would break.
+    if (!outcome.ok) {
+      setError({ message: outcome.message });
+      return;
+    }
+    const enabled = outcome.enabled;
+    setFlowStatus((m) => (m[flow.name] ? { ...m, [flow.name]: { ...m[flow.name], enabled } } : m));
+    setStatusNonce((n) => n + 1);
+    toast.success(
+      tFormat(enabled ? 'engine.studio.auto.ledger.switchedOn' : 'engine.studio.auto.ledger.switchedOff', locale, {
+        label: flow.label || flow.name,
+      }),
+    );
+  }, [current, ledgerOn, ledgerWalled, locale]);
   // objectstack#26917 — the refusal's way out: the flow holding the identifier
   // is on this rail, so it opens instead of a second one being made. The New
   // button already asked about a held step (objectstack#26845).
@@ -9291,7 +9341,17 @@ export function AutomationsPillar({
   // objectui#11272 — the switch reads and saves the open flow's own
   // document, so it waits for it: not offered over another's.
   const flowSwitchEl =
-    current && flowLoaded
+    current && flowLoaded && ledgerRow ? (
+      <FlowLedgerSwitch
+        checked={ledgerRow.enabled}
+        reading={activationReading(ledgerRow)}
+        notRunningReason={ledgerRow.reason}
+        busy={ledgerBusy}
+        walledReason={ledgerWalledReason}
+        locale={locale}
+        onToggle={() => void toggleLedger()}
+      />
+    ) : current && flowLoaded
       ? (() => {
           const defaultOff = t('engine.studio.auto.defaultOff', locale);
           // objectstack#27356 — a read-only package's switch cannot be flipped,

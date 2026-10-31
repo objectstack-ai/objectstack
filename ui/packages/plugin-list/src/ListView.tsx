@@ -4341,6 +4341,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // fold would re-create the dialect this closes.
         const colorField = schema.calendar?.colorField;
         const allDayField = schema.calendar?.allDayField;
+        // The date the calendar opens on: a block key, not a field binding,
+        // forwarded with the five so `ObjectCalendar` can seed its date from it.
+        const initialDate = schema.calendar?.initialDate;
         // ⭐ objectstack#25923 — the five go out NESTED, as the node's own
         // `calendar` block: the spec's `ComponentPropsMap['object-calendar']`
         // refuses them flat, so the published `ObjectCalendarSchema` no longer
@@ -4360,6 +4363,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               ...(titleField ? { titleField } : {}),
               ...(colorField ? { colorField } : {}),
               ...(allDayField ? { allDayField } : {}),
+              ...(initialDate ? { initialDate } : {}),
             }
           : undefined;
         return {

@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // refused now, and an operator must be told who keeps that authority.
 export const entry: SemanticMigration = {
   id: 'walled-catalog-package-writes-retired',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'on a group or isolated deployment, by a caller below the platform operator: '
     + 'POST /api/v1/marketplace/install-local of a package whose incoming version, or whose installed '

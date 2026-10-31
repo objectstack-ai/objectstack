@@ -16,23 +16,36 @@
 // file `install-local-declared-datasources.dogfood.test.ts`.
 
 import { describe, it, expect, vi } from 'vitest';
-import { connectPackageDatasources } from './declared-datasources.js';
-import { CODE_DATASOURCE_NAMES_SERVICE, CodeDatasourceNames } from './code-datasource-names.js';
+import { connectPackageDatasources, datasourceNameHolder } from './declared-datasources.js';
+import { CODE_DATASOURCE_NAMES_SERVICE, CodeDatasourceNames, contributeCodeDatasourceNames } from './code-datasource-names.js';
 
 type Verdict = { name: string; status: string; reason?: string };
 
 /** A kernel's service registry with a metadata service, a connection service and a protocol. */
-function kernel(opts: { failFast?: string; withConnection?: boolean } = {}) {
+function kernel(opts: {
+    failFast?: string;
+    withConnection?: boolean;
+    /** A data engine whose driver registry the connect fills, as the real one does. */
+    withEngine?: boolean;
+    /** A `metadata.get` of this datasource name throws — a loader outage. */
+    metadataFault?: string;
+    /** Force the connect's verdict for a name. */
+    answer?: Record<string, string>;
+} = {}) {
     const services = new Map<string, unknown>();
     const items = new Map<string, any>();
     const states = new Map<string, Verdict>();
     const cleanups = new Map<string, (args: { packageId: string }) => Promise<{ success: boolean; removed: number; error?: string }>>();
     const connectCalls: Array<{ datasources: any[]; objects?: unknown }> = [];
     const disconnected: string[] = [];
+    const drivers = new Set<string>();
 
     services.set('metadata', {
         registerInMemory: (type: string, name: string, data: unknown) => items.set(`${type}/${name}`, data),
-        get: async (type: string, name: string) => items.get(`${type}/${name}`),
+        get: async (type: string, name: string) => {
+            if (name === opts.metadataFault) throw new Error('metadata loader unavailable');
+            return items.get(`${type}/${name}`);
+        },
         unregister: async (type: string, name: string) => { items.delete(`${type}/${name}`); },
     });
     if (opts.withConnection !== false) {
@@ -43,7 +56,12 @@ function kernel(opts: { failFast?: string; withConnection?: boolean } = {}) {
                 for (const ds of input.datasources) {
                     const v: Verdict = ds.name === opts.failFast
                         ? { name: ds.name, status: 'failed-credentials', reason: `credential '${ds.external?.credentialsRef}' could not be resolved` }
-                        : { name: ds.name, status: 'connected' };
+                        : opts.answer?.[ds.name] !== undefined
+                            ? { name: ds.name, status: opts.answer[ds.name] }
+                            : drivers.has(ds.name)
+                                ? { name: ds.name, status: 'already-registered' }
+                                : { name: ds.name, status: 'connected' };
+                    if (v.status === 'connected') drivers.add(ds.name);
                     states.set(ds.name, v);
                     results.push(v);
                 }
@@ -51,8 +69,11 @@ function kernel(opts: { failFast?: string; withConnection?: boolean } = {}) {
                 return results;
             },
             getConnectionState: (name: string) => states.get(name),
-            disconnect: async (name: string) => { disconnected.push(name); states.delete(name); },
+            disconnect: async (name: string) => { disconnected.push(name); states.delete(name); drivers.delete(name); },
         });
+    }
+    if (opts.withEngine) {
+        services.set('objectql', { getDriverByName: (name: string) => (drivers.has(name) ? { name } : undefined) });
     }
     services.set('protocol', {
         registerUninstallCleanup: (name: string, cleanup: any) => cleanups.set(name, cleanup),
@@ -70,7 +91,7 @@ function kernel(opts: { failFast?: string; withConnection?: boolean } = {}) {
         logger,
     };
     const codeNames = () => (services.get(CODE_DATASOURCE_NAMES_SERVICE) as CodeDatasourceNames | undefined)?.list() ?? [];
-    return { ctx: ctx as never, items, states, cleanups, connectCalls, disconnected, logger, codeNames };
+    return { ctx: ctx as never, items, states, cleanups, connectCalls, disconnected, drivers, logger, codeNames };
 }
 
 const STORE = { name: 'pkg_store', driver: 'sqlite', config: { filename: ':memory:' } };
@@ -176,5 +197,134 @@ describe('connectPackageDatasources — the boot artifact', () => {
         const k = kernel({ withConnection: false });
         expect(await connectPackageDatasources(k.ctx, { appId: 'com.example.app', datasources: [STORE] })).toEqual([]);
         expect(k.items.get('datasource/pkg_store')?.origin).toBe('code');
+    });
+});
+
+describe('datasourceNameHolder — who holds a name an installed package declares', () => {
+    const judge = (k: ReturnType<typeof kernel>, name: string) => datasourceNameHolder(k.ctx, 'com.example.pkg', name);
+
+    it('the host\'s default, a Setup row, another package and an engine-only driver each hold their name', async () => {
+        const k = kernel({ withEngine: true });
+        k.items.set('datasource/setup_ds', { name: 'setup_ds', origin: 'runtime' });
+        k.items.set('datasource/other_ds', { name: 'other_ds', origin: 'code', _packageId: 'com.example.other' });
+        k.drivers.add('bridge_ds');
+        expect(await judge(k, 'default')).toEqual({ status: 'held', holder: "the host's primary datasource" });
+        expect(await judge(k, 'setup_ds')).toEqual({ status: 'held', holder: 'a datasource created in Setup' });
+        expect(await judge(k, 'other_ds')).toEqual({ status: 'held', holder: "the package 'com.example.other'" });
+        expect(await judge(k, 'bridge_ds')).toEqual({ status: 'held', holder: 'a driver registered on the data engine outside Setup' });
+    });
+
+    it('a name in the code-datasource set this package did not record is held by the host\'s code', async () => {
+        const k = kernel();
+        contributeCodeDatasourceNames(k.ctx as never, ['boot_ds']);
+        expect(await judge(k, 'boot_ds')).toEqual({ status: 'held', holder: 'a datasource this host registers from code' });
+    });
+
+    it('a holder that cannot be read is unreadable, never free', async () => {
+        const k = kernel({ metadataFault: 'pkg_store' });
+        const holding = await judge(k, 'pkg_store');
+        expect(holding).toMatchObject({ status: 'unreadable', reading: 'the metadata registry' });
+
+        const e = kernel();
+        (e.ctx as any).getService = ((orig) => (name: string) => {
+            if (name === 'objectql') return { getDriverByName: () => { throw new Error('engine gone'); } };
+            return orig(name);
+        })((e.ctx as any).getService.bind(e.ctx));
+        expect(await datasourceNameHolder(e.ctx, 'com.example.pkg', 'pkg_store')).toMatchObject({
+            status: 'unreadable',
+            reading: 'the data engine',
+        });
+    });
+
+    it('the package\'s own registration and pool are free: a reinstall passes', async () => {
+        const k = kernel({ withEngine: true });
+        await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.pkg',
+            datasources: [STORE],
+            objects: OBJECTS,
+            installed: true,
+        });
+        expect(k.drivers.has('pkg_store')).toBe(true);
+        expect(await judge(k, 'pkg_store')).toEqual({ status: 'free' });
+        // …and with its metadata registration gone, the pool it recorded is still its own.
+        k.items.delete('datasource/pkg_store');
+        expect(await judge(k, 'pkg_store')).toEqual({ status: 'free' });
+        // CONTROL: to another package, the same pool is this one's.
+        expect(await datasourceNameHolder(k.ctx, 'com.example.other', 'pkg_store')).toEqual({
+            status: 'held',
+            holder: "the package 'com.example.pkg'",
+        });
+    });
+
+    it('nothing anywhere: free', async () => {
+        expect(await judge(kernel({ withEngine: true }), 'pkg_store')).toEqual({ status: 'free' });
+    });
+});
+
+describe('connectPackageDatasources — a name another holder already holds (a rehydrate of an older install)', () => {
+    it('a Setup row\'s name is not taken over: not registered as code, not recorded, not connected, and reported', async () => {
+        const k = kernel({ withEngine: true });
+        const setupRow = { name: 'pkg_store', origin: 'runtime', driver: 'postgres' };
+        k.items.set('datasource/pkg_store', setupRow);
+        k.drivers.add('pkg_store'); // the Setup row's pool
+        const verdicts = await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.pkg',
+            source: 'MarketplaceInstallLocal',
+            datasources: [STORE, VAULT],
+            objects: OBJECTS,
+            installed: true,
+        });
+        expect(verdicts).toEqual([{ name: 'pkg_vault', status: 'connected' }]);
+        expect(k.items.get('datasource/pkg_store')).toBe(setupRow);
+        expect(k.codeNames()).toEqual(['pkg_vault']);
+        expect(k.connectCalls.map((c) => c.datasources.map((d) => d.name))).toEqual([['pkg_vault']]);
+        expect(k.logger.error).toHaveBeenCalledTimes(1);
+        const line = String(k.logger.error.mock.calls[0][0]);
+        expect(line).toContain("'pkg_store'");
+        expect(line).toContain('a datasource created in Setup');
+
+        // The uninstall leaves the Setup row's pool and registration alone.
+        expect(await k.cleanups.get('runtime.package-datasources')!({ packageId: 'com.example.pkg' })).toEqual({
+            success: true,
+            removed: 1,
+        });
+        expect(k.disconnected).toEqual(['pkg_vault']);
+        expect(k.drivers.has('pkg_store')).toBe(true);
+        expect(k.items.get('datasource/pkg_store')).toBe(setupRow);
+    });
+
+    it('an engine-only holder (the legacy onEnable bridge) is not taken over either', async () => {
+        const k = kernel({ withEngine: true });
+        k.drivers.add('pkg_store');
+        const verdicts = await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.pkg',
+            datasources: [STORE],
+            objects: OBJECTS,
+            installed: true,
+        });
+        expect(verdicts).toEqual([]);
+        expect(k.items.has('datasource/pkg_store')).toBe(false);
+        expect(k.codeNames()).toEqual([]);
+        expect(k.connectCalls).toEqual([]);
+        expect(String(k.logger.error.mock.calls[0]?.[0])).toContain('a driver registered on the data engine outside Setup');
+    });
+
+    it('a holder that cannot be read is not taken over: the name is left alone and the fault is reported', async () => {
+        const k = kernel({ withEngine: true, metadataFault: 'pkg_store' });
+        await connectPackageDatasources(k.ctx, { appId: 'com.example.pkg', datasources: [STORE], installed: true });
+        expect(k.codeNames()).toEqual([]);
+        expect(k.connectCalls).toEqual([]);
+        expect(String(k.logger.error.mock.calls[0]?.[0])).toContain('metadata loader unavailable');
+    });
+
+    it('a pool the connect only found (already-registered) is not the package\'s to evict on uninstall', async () => {
+        const k = kernel({ answer: { pkg_store: 'already-registered' } });
+        await connectPackageDatasources(k.ctx, { appId: 'com.example.pkg', datasources: [STORE, VAULT], installed: true });
+        expect(await k.cleanups.get('runtime.package-datasources')!({ packageId: 'com.example.pkg' })).toEqual({
+            success: true,
+            removed: 2,
+        });
+        expect(k.disconnected).toEqual(['pkg_vault']);
+        expect(k.codeNames()).toEqual([]);
     });
 });

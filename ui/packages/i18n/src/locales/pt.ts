@@ -20,6 +20,7 @@ const pt = {
       manage_org_users: "Gerenciar usuários da organização",
       manage_metadata: "Gerenciar metadados",
       manage_mailboxes: "Gerenciar caixas de correio",
+      manage_connector_connections: "Gerenciar conexões de conectores",
       manage_platform_settings: "Gerenciar configurações da plataforma",
       setup_access: "Acesso à configuração",
       setup_write: "Gravação de configurações",
@@ -493,6 +494,7 @@ const pt = {
       undonePrefix: "Desfeito — ",
       succeeded: "Concluídos {{count}} / {{total}}",
       resultFailed: " · Falhas {{count}}",
+      succeededRecords: "Registros concluídos",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",
@@ -1380,9 +1382,12 @@ const pt = {
     concurrentUpdateRecordLabel: "este registro",
     openInNewTab: "Abrir em nova aba",
     activity: "Atividade",
-    timeline: "Linha do tempo",
-    timelineFolded: "Atividade",
-    relatedColumn: "Coluna relacionada",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Atividade",
+    relatedColumn: "Coluna direita",
+    timelineComposer: "Escreva uma nota… @ para mencionar",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} seções vazias",
     emptySections_one: "{{count}} seção vazia",
@@ -2204,6 +2209,8 @@ const pt = {
       popupBlockedDescription: "O navegador bloqueou a abertura da nova aba.",
       popupBlockedAction: "Abrir em nova aba",
       noRecordId: "Esta ação é executada em um único registro — nenhum ID de registro disponível.",
+      fillRequiredThenRetry: "Preencha {{fields}} e execute “{{action}}” novamente.",
+      fillRequiredFirst: "Preencha {{fields}} primeiro.",
     },
     shortcuts: {
       title: "Atalhos de teclado",
@@ -2220,8 +2227,7 @@ const pt = {
       newChat: "Nova conversa",
       toggleChatsList: "Alternar lista de conversas",
       goHome: "Voltar ao início",
-      toggleTimeline: "Mostrar / ocultar a linha do tempo",
-      toggleRelated: "Mostrar / ocultar relacionados",
+      toggleRelated: "Mostrar / ocultar a coluna direita",
     },
     reportIndex: {
       title: "Relatórios",
@@ -2742,9 +2748,11 @@ const pt = {
       signInText: "Entrar",
       socialButton: "Cadastre-se com {provider}",
       orText: "ou continue com e-mail",
+      captchaRetry: "Tentar novamente",
       errors: {
         userExists: "Já existe uma conta com esse e-mail. Tente fazer login.",
         selfRegistrationClosed: "O cadastro por conta própria não está aberto neste sistema. Peça um convite a um administrador.",
+        captchaFailed: "A verificação de segurança não foi concluída. Tente novamente.",
         emailDomainNotAllowed: "O domínio deste e-mail não tem permissão para se cadastrar aqui. Use o e-mail da sua organização ou peça um convite a um administrador.",
         invitationSentTo: "Este convite foi enviado para {{email}}. Cadastre-se com esse endereço para aceitá-lo.",
         invitationAddressOnly: "Este convite só pode ser aceito com o endereço para o qual foi enviado. Cadastre-se com esse endereço.",
@@ -3364,6 +3372,7 @@ const pt = {
   report: {
     total: "Total",
     totals: "Totais",
+    subtotal: "Subtotal",
     loading: "Carregando…",
     forbiddenMessage: "Você não tem permissão para ver os dados deste relatório.",
     dateRange: {
@@ -4320,6 +4329,7 @@ const pt = {
     approveOneTitle: 'Aprovar "{{title}}"?',
     approveOneBody: 'Isso aprova a solicitação com a sua identidade. Para adicionar um comentário ou anexo, abra a solicitação.',
     flowOrigin: 'Iniciada por fluxo',
+    submittedByYou: 'Enviado por você',
     sortBy: 'Ordenar',
     sortRecent: 'Mais recentes primeiro',
     sortOldest: 'Mais antigas primeiro',
@@ -4531,6 +4541,8 @@ const pt = {
       confirmNoteSeparate_many: 'Publicar libera os {{count}} de rascunhos pendentes um a um: o que falhar continua pendente e os demais são publicados mesmo assim.',
       confirmNoteSeparate_other: 'Publicar libera os {{count}} rascunhos pendentes um a um: o que falhar continua pendente e os demais são publicados mesmo assim.',
       publishConfirm: 'Publicar tudo',
+      noteLabel: 'Nota da alteração (opcional)',
+      notePlaceholder: 'O que mudou e por quê. Aparece no histórico de cada item.',
       summaryItems: '{{count}} itens',
       summaryItems_one: '{{count}} item',
       summaryItems_many: '{{count}} de itens',

@@ -256,8 +256,9 @@ describe('durable suspended-run wiring (#4420)', () => {
         // degradation — it must not register the run objects nor complain.
         // [#20790] The one object it does register is the write-only flow
         // credential channel's, which every composition needs — [#27237] with
-        // the connector credential store beside it, for the same reason.
-        expect(h.registeredObjects()).toEqual(['sys_flow_credential', 'sys_connector_credential']);
+        // the connector credential store beside it, for the same reason, and
+        // [ADR-0143 D3] the connector connection record beside that.
+        expect(h.registeredObjects()).toEqual(['sys_flow_credential', 'sys_connector_credential', 'sys_connector_connection']);
         expect((h.engine as any).store).toBeUndefined();
         expect(h.errors()).toBe('');
     });

@@ -136,6 +136,17 @@ const FAMILY: Record<string, string[]> = {
   // directory gains nothing.
   'migrate organization-ownership': [],
   'migrate plan': [],
+  // [ADR-0144] `--object`, `--field` and `--code` are all required, so without
+  // them the run stops at flag parsing and never boots; the pair named here is
+  // the fixture's own. A dry run is its DEFAULT and the only form driven here:
+  // without `--apply` it boots read-only (`deferSchemaDdl` + `readOnlyProbe`)
+  // and writes nothing. It reads the app objects from the compiled artifact,
+  // which this fixture deliberately lacks (see the header), so the face driven
+  // here is its REFUSAL face — "No app objects are loaded" — emitted compact
+  // (`emitJson(…, 0, { compact: true })`, then `this.exit(1)`) after the boot
+  // and BEFORE the `finally` shutdown, so the shutdown's diagnostics follow
+  // the document and must stay off stdout.
+  'migrate record-currency-codes': ['--object', 'jp_ticket', '--field', 'title', '--code', 'USD'],
   'migrate recorded-by': [],
   'migrate resume': [],
   // A preview is its DEFAULT and the only form driven here: without `--apply`

@@ -9,9 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. There is
 // no D2 conversion either: the new name of the business field, and the data
 // move behind it, are the author's judgment.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'object-queue-field-reserved',
   surface:

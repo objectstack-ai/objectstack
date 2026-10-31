@@ -212,6 +212,7 @@ const ACTION = {
   name: 'create_environment',
   label: 'Create environment',
   description: 'Provisions a new environment for this org.',
+  submitText: 'Create',
 } as any;
 
 /** The fields `ActionParamDialog.tsx` reads off `state`. Written out rather
@@ -231,6 +232,8 @@ const DIALOG_READS = [
   // the dialog, so a refusal keeps the typed values. Called without one here,
   // so it is written `undefined`; the key is on both runtimes' state.
   'run',
+  // The submit button's verb (`submitText`), resolved by each runtime.
+  'submitText',
   'title',
 ];
 
@@ -566,6 +569,8 @@ describe('app-shell — both param runtimes reset ActionParamDialog the same way
     expect(viewClosed.open).toBe(hookClosed.open);
     expect(viewClosed.title).toBe(hookClosed.title);
     expect(viewClosed.description).toBe(hookClosed.description);
+    expect(viewClosed.submitText).toBe('Create');
+    expect(viewClosed.submitText).toBe(hookClosed.submitText);
     expect(viewClosed.params.map((p: any) => p.name))
       .toEqual(hookClosed.params.map((p: any) => p.name));
     expect(typeof viewClosed.resolve).toBe(typeof hookClosed.resolve);

@@ -20,6 +20,7 @@ const fr = {
       manage_org_users: "Gérer les utilisateurs de l'organisation",
       manage_metadata: "Gérer les métadonnées",
       manage_mailboxes: "Gérer les boîtes aux lettres",
+      manage_connector_connections: "Gérer les connexions des connecteurs",
       manage_platform_settings: "Gérer les paramètres de la plateforme",
       setup_access: "Accès à la configuration",
       setup_write: "Écriture des paramètres",
@@ -493,6 +494,7 @@ const fr = {
       undonePrefix: "Annulé — ",
       succeeded: "Réussis {{count}} / {{total}}",
       resultFailed: " · Échecs {{count}}",
+      succeededRecords: "Enregistrements réussis",
       retry: "Réessayer",
       downloadErrorCsv: "Télécharger le CSV d'erreurs",
       cancel: "Annuler",
@@ -1380,9 +1382,12 @@ const fr = {
     concurrentUpdateRecordLabel: "cet enregistrement",
     openInNewTab: "Ouvrir dans un nouvel onglet",
     activity: "Activité",
-    timeline: "Chronologie",
-    timelineFolded: "Activité",
-    relatedColumn: "Colonne associée",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Activité",
+    relatedColumn: "Colonne de droite",
+    timelineComposer: "Écrire une note… @ pour mentionner",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} sections vides",
     emptySections_one: "{{count}} section vide",
@@ -2205,6 +2210,8 @@ const fr = {
       popupBlockedDescription: "Le navigateur a bloqué l'ouverture du nouvel onglet.",
       popupBlockedAction: "Ouvrir dans un nouvel onglet",
       noRecordId: "Cette action porte sur un seul enregistrement — aucun identifiant d’enregistrement n’est disponible.",
+      fillRequiredThenRetry: "Renseignez {{fields}}, puis relancez « {{action}} ».",
+      fillRequiredFirst: "Renseignez d’abord {{fields}}.",
     },
     shortcuts: {
       title: "Raccourcis clavier",
@@ -2221,8 +2228,7 @@ const fr = {
       newChat: "Nouvelle discussion",
       toggleChatsList: "Basculer la liste des discussions",
       goHome: "Retour à l'accueil",
-      toggleTimeline: "Afficher / masquer la chronologie",
-      toggleRelated: "Afficher / masquer les éléments associés",
+      toggleRelated: "Afficher / masquer la colonne de droite",
     },
     reportIndex: {
       title: "Rapports",
@@ -2743,9 +2749,11 @@ const fr = {
       signInText: "Se connecter",
       socialButton: "S'inscrire avec {provider}",
       orText: "ou continuer avec l'e-mail",
+      captchaRetry: "Réessayer",
       errors: {
         userExists: "Un compte avec cet e-mail existe déjà. Essayez de vous connecter.",
         selfRegistrationClosed: "L'inscription libre n'est pas ouverte sur ce système. Demandez une invitation à un administrateur.",
+        captchaFailed: "La vérification de sécurité n'a pas abouti. Veuillez réessayer.",
         emailDomainNotAllowed: "Le domaine de cet e-mail n'est pas autorisé à s'inscrire ici. Utilisez l'e-mail de votre organisation ou demandez une invitation à un administrateur.",
         invitationSentTo: "Cette invitation a été envoyée à {{email}}. Inscrivez-vous avec cette adresse pour l'accepter.",
         invitationAddressOnly: "Cette invitation ne peut être acceptée qu'avec l'adresse à laquelle elle a été envoyée. Inscrivez-vous avec cette adresse.",
@@ -3365,6 +3373,7 @@ const fr = {
   report: {
     total: "Total",
     totals: "Totaux",
+    subtotal: "Sous-total",
     loading: "Chargement…",
     forbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce rapport.",
     dateRange: {
@@ -4321,6 +4330,7 @@ const fr = {
     approveOneTitle: 'Approuver « {{title}} » ?',
     approveOneBody: 'Cette action approuve la demande en votre nom. Pour ajouter un commentaire ou une pièce jointe, ouvrez la demande.',
     flowOrigin: 'Initiée par un flux',
+    submittedByYou: 'Soumis par vous',
     sortBy: 'Trier',
     sortRecent: 'Plus récentes d’abord',
     sortOldest: 'Plus anciennes d’abord',
@@ -4532,6 +4542,8 @@ const fr = {
       confirmNoteSeparate_many: 'La publication libère les {{count}} de brouillons en attente un par un : celui qui échoue reste en attente, les autres sont publiés quand même.',
       confirmNoteSeparate_other: 'La publication libère les {{count}} brouillons en attente un par un : celui qui échoue reste en attente, les autres sont publiés quand même.',
       publishConfirm: 'Tout publier',
+      noteLabel: 'Note de modification (facultative)',
+      notePlaceholder: 'Ce qui a changé et pourquoi. Elle apparaît dans l’historique de chaque élément.',
       summaryItems: '{{count}} éléments',
       summaryItems_one: '{{count}} élément',
       summaryItems_many: '{{count}} d’éléments',

@@ -8,9 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // route), while an absent predicate made no run to keep — the executor refused
 // it at the branch — so the two carry different prescriptions, and only the
 // decision branch is in this one (an absent screen `visibleWhen` stays legal).
-//
-// No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-// span already, and a nested backtick would close it.
 export const entry: SemanticMigration = {
   id: 'flow-decision-branch-expression-absent-refused',
   surface:

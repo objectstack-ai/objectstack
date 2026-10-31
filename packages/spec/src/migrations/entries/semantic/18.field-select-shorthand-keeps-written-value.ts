@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // artifact records.
 export const entry: SemanticMigration = {
   id: 'field-select-shorthand-keeps-written-value',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.Field.select string shorthand (Field.select([...]) and Field.select({ options: [...] }) with '
     + 'string options) — a string holding a character outside letters, digits, whitespace, _ and . '

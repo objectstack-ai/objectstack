@@ -20,6 +20,7 @@ const de = {
       manage_org_users: "Organisationsbenutzer verwalten",
       manage_metadata: "Metadaten verwalten",
       manage_mailboxes: "Postfächer verwalten",
+      manage_connector_connections: "Konnektor-Verbindungen verwalten",
       manage_platform_settings: "Plattformeinstellungen verwalten",
       setup_access: "Zugriff auf die Einrichtung",
       setup_write: "Einstellungen schreiben",
@@ -483,6 +484,7 @@ const de = {
       undonePrefix: "Rückgängig gemacht — ",
       succeeded: "Erfolgreich {{count}} / {{total}}",
       resultFailed: " · Fehlgeschlagen {{count}}",
+      succeededRecords: "Erfolgreiche Datensätze",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",
       cancel: "Abbrechen",
@@ -1342,9 +1344,12 @@ const de = {
     concurrentUpdateRecordLabel: "diesem Datensatz",
     openInNewTab: "In neuem Tab öffnen",
     activity: "Aktivität",
-    timeline: "Zeitleiste",
-    timelineFolded: "Aktivität",
-    relatedColumn: "Verknüpfte Spalte",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Aktivität",
+    relatedColumn: "Rechte Spalte",
+    timelineComposer: "Notiz schreiben… @ zum Erwähnen",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} leere Abschnitte",
     emptySections_one: "{{count}} leerer Abschnitt",
@@ -2151,6 +2156,8 @@ const de = {
       popupBlockedDescription: "Der Browser hat das Öffnen des neuen Tabs blockiert.",
       popupBlockedAction: "In neuem Tab öffnen",
       noRecordId: "Diese Aktion gilt für einen einzelnen Datensatz – keine Datensatz-ID verfügbar.",
+      fillRequiredThenRetry: "Füllen Sie {{fields}} aus und führen Sie dann „{{action}}“ erneut aus.",
+      fillRequiredFirst: "Füllen Sie zuerst {{fields}} aus.",
     },
     shortcuts: {
       title: "Tastenkürzel",
@@ -2167,8 +2174,7 @@ const de = {
       newChat: "Neuer Chat",
       toggleChatsList: "Chatliste umschalten",
       goHome: "Zurück zur Startseite",
-      toggleTimeline: "Zeitleiste ein- / ausblenden",
-      toggleRelated: "Verknüpfte ein- / ausblenden",
+      toggleRelated: "Rechte Spalte ein- / ausblenden",
     },
     reportIndex: {
       title: "Berichte",
@@ -2686,9 +2692,11 @@ const de = {
       signInText: "Anmelden",
       socialButton: "Mit {provider} registrieren",
       orText: "oder mit E-Mail fortfahren",
+      captchaRetry: "Erneut versuchen",
       errors: {
         userExists: "Ein Konto mit dieser E-Mail existiert bereits. Versuchen Sie sich anzumelden.",
         selfRegistrationClosed: "Die Selbstregistrierung ist in diesem System nicht möglich. Bitten Sie einen Administrator um eine Einladung.",
+        captchaFailed: "Die Sicherheitsprüfung wurde nicht abgeschlossen. Bitte versuchen Sie es erneut.",
         emailDomainNotAllowed: "Die Domain dieser E-Mail-Adresse ist für die Registrierung hier nicht zugelassen. Verwenden Sie die E-Mail-Adresse Ihrer Organisation oder bitten Sie einen Administrator um eine Einladung.",
         invitationSentTo: "Diese Einladung wurde an {{email}} gesendet. Registrieren Sie sich mit dieser Adresse, um sie anzunehmen.",
         invitationAddressOnly: "Diese Einladung kann nur mit der Adresse angenommen werden, an die sie gesendet wurde. Registrieren Sie sich mit dieser Adresse.",
@@ -3302,6 +3310,7 @@ const de = {
   report: {
     total: "Gesamt",
     totals: "Summen",
+    subtotal: "Zwischensumme",
     loading: "Wird geladen…",
     forbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Berichts anzuzeigen.",
     dateRange: {
@@ -4237,6 +4246,7 @@ const de = {
     approveOneTitle: '„{{title}}“ genehmigen?',
     approveOneBody: 'Die Anfrage wird mit Ihrer Identität genehmigt. Um einen Kommentar oder Anhang hinzuzufügen, öffnen Sie die Anfrage.',
     flowOrigin: 'Vom Flow gestartet',
+    submittedByYou: 'Von Ihnen eingereicht',
     sortBy: 'Sortieren',
     sortRecent: 'Neueste zuerst',
     sortOldest: 'Älteste zuerst',
@@ -4436,6 +4446,8 @@ const de = {
       confirmNoteSeparate_one: 'Beim Veröffentlichen wird der {{count}} ausstehende Entwurf für sich allein freigegeben: Scheitert er, bleibt er ausstehend.',
       confirmNoteSeparate_other: 'Beim Veröffentlichen werden die {{count}} ausstehenden Entwürfe einzeln freigegeben: Ein Entwurf, der dabei scheitert, bleibt ausstehend, die übrigen werden trotzdem freigegeben.',
       publishConfirm: 'Alle veröffentlichen',
+      noteLabel: 'Änderungsnotiz (optional)',
+      notePlaceholder: 'Was sich geändert hat und warum. Sie erscheint im Verlauf jedes Elements.',
       summaryItems: '{{count}} Elemente',
       summaryItems_one: '{{count}} Element',
       summaryItems_other: '{{count}} Elemente',

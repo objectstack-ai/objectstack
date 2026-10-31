@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // `@objectstack/service-storage` exports (`backfill-sys-file-public-scope.ts`).
 export const entry: SemanticMigration = {
   id: 'storage-scope-public-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'the storage scope public — the scope of an upload request, presigned or chunked, and '
     + 'ObjectStorageConfig.scope (StorageScope)',

@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // view that never declared a page size was relying on 25.
 export const entry: SemanticMigration = {
   id: 'view-pagination-page-size-default-50',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'ui.PaginationConfig.pageSize — an OMITTED page size on a view',
   replacement: 'nothing, to take the platform display page size of 50. To keep the old 25 rows '
     + 'per page on a view, write it: `pagination: { pageSize: 25 }`',

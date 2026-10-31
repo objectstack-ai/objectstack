@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: each row asks explain and the real enforcement path of a real SecurityPlugin over a real ObjectQL engine and SQL driver, a row that can write on its own rig and the read-only and on-behalf-of rows on one shared rig per posture; slowest CI reading 16.46 s (scheduled full-battery run 41183072927, Test Core suite-ceiling report) x 1.25, rounded up
 
 /**
  * `security.explain` answers what enforcement does — every verdict position,
@@ -1421,6 +1422,20 @@ const TABLE: Row[] = [
     ),
   }),
 ];
+
+// [#23181] The first rig's first loads (the driver's, the plugin's and the
+// explain engine's cold paths) are paid here, at module scope, outside every
+// row's clock: clocked windows measure behaviour, never loading. A throwaway
+// RLS rig answers one explain and one find; nothing it answers is read.
+{
+  const warm = await bootRls(SAME_CLASS);
+  try {
+    await warm.explain('read', 'r1');
+    await warm.find();
+  } finally {
+    await warm.teardown();
+  }
+}
 
 describe('security.explain answers what enforcement does — the enumeration', () => {
   for (const row of TABLE) {

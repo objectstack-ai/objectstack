@@ -199,6 +199,13 @@ function renderRecordPage() {
 }
 
 const attr = (probe: HTMLElement, name: string) => probe.getAttribute(`data-${name}`);
+/**
+ * The probe. The page draws its blocks through several renderers since
+ * objectstack#27524 (the header, the details, each right-column panel), all
+ * inside the one `<InlineEditProvider>`, so every probe prints the same
+ * values: the first is read.
+ */
+const pageProbe = async () => (await screen.findAllByTestId('inline-probe'))[0];
 
 beforeEach(() => {
   cleanup();
@@ -213,7 +220,7 @@ describe('record page approval lock follows the answered read (objectui#12220)',
   it('a `pending` record whose approvals read answers 200 empty opens editable, with no band to thread', async () => {
     stubApprovalsApi({ row: null });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
 
     // Waiting on the flag the read flips is what makes the values below a
     // measurement of the answered state, not of the pre-read render.
@@ -227,7 +234,7 @@ describe('record page approval lock follows the answered read (objectui#12220)',
   it('a record with an open locking request stays locked', async () => {
     stubApprovalsApi({ row: pendingRequest() });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
 
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
     await waitFor(() => expect(attr(probe, 'locked')).toBe('true'));
@@ -239,7 +246,7 @@ describe('record page approval lock follows the answered read (objectui#12220)',
     it(`with the approvals route absent (${status}), the column fallback still locks`, async () => {
       stubApprovalsApi({ absent: status });
       renderRecordPage();
-      const probe = await screen.findByTestId('inline-probe');
+      const probe = await pageProbe();
 
       await waitFor(() => expect(listGets.length).toBeGreaterThan(0));
       // Let the refused read settle before reading what it left behind.
@@ -256,7 +263,7 @@ describe('record page approval lock follows the answered read (objectui#12220)',
   it('control (objectui#2902): an open `lockRecord: false` request reads pending and editable over a `pending` column', async () => {
     stubApprovalsApi({ row: pendingRequest({ lock_record: false }) });
     renderRecordPage();
-    const probe = await screen.findByTestId('inline-probe');
+    const probe = await pageProbe();
 
     await waitFor(() => expect(attr(probe, 'approval-read-answered')).toBe('true'));
     await waitFor(() => expect(attr(probe, 'approval-pending')).toBe('true'));

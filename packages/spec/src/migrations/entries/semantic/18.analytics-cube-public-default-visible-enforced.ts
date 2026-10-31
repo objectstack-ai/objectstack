@@ -7,8 +7,7 @@ import type { SemanticMigration } from '../../types.js';
 // conversion: no spelling moves, and a written `public: false` is a legitimate
 // value that the chain cannot tell from a materialized old default, so the
 // judgement is the author's. The `data/Cube:public` row of
-// `DEFAULT_CHANGES_BY_MAJOR` records the default move itself. No backticks in
-// `surface`: the upgrade guide renders it inside a code span and a table cell.
+// `DEFAULT_CHANGES_BY_MAJOR` records the default move itself.
 export const entry: SemanticMigration = {
   id: 'analytics-cube-public-default-visible-enforced',
   surface:

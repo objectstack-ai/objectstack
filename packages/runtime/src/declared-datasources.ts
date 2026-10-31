@@ -37,6 +37,16 @@
  * connection service resolves `external.credentialsRef` the one way it does
  * for every datasource, and a credential it cannot resolve is its
  * `failed-credentials` verdict.
+ *
+ * [#28143] An installed package never takes over a name another holder owns.
+ * {@link datasourceNameHolder} is the ONE judge of "who holds this name": the
+ * install door refuses on it before any write (`409` held, `503` when a holder
+ * cannot be read), and an installed call — the rehydrate above all, which
+ * replays packages installed before the door judged names at all — leaves a
+ * held name alone and reports it, rather than registering it as code over the
+ * holder's registration, recording it in the code-datasource set and answering
+ * the holder's pool as its own. The uninstall then withdraws only what the
+ * package's own call recorded, and closes only the pools that call opened.
  */
 
 import type { PluginContext } from '@objectstack/core';
@@ -108,11 +118,22 @@ interface ConnectionServiceLike {
 const PACKAGE_DATASOURCES_UNINSTALL_CLEANUP = 'runtime.package-datasources';
 
 /**
- * Per kernel (keyed by its code-datasource set), the datasource names an
- * installed package's call registered — what its reinstall and its uninstall
- * withdraw. A boot artifact's are never recorded: the boot owns them.
+ * What one installed package's call registered: the datasource names its
+ * reinstall and its uninstall withdraw, and of those the ones whose pool the
+ * connect found already registered rather than opened (`already-registered`) —
+ * a pool somebody else opened, which the withdrawal never closes.
  */
-const INSTALLED_BY_APP = new WeakMap<object, Map<string, string[]>>();
+interface InstalledDatasources {
+    names: string[];
+    found: Set<string>;
+}
+
+/**
+ * Per kernel (keyed by its code-datasource set), what each installed package's
+ * call registered ({@link InstalledDatasources}). A boot artifact's are never
+ * recorded: the boot owns them.
+ */
+const INSTALLED_BY_APP = new WeakMap<object, Map<string, InstalledDatasources>>();
 
 /** The kernel's code-datasource set, which keys {@link INSTALLED_BY_APP}; `undefined` before any producer contributed. */
 function kernelKey(ctx: PluginContext): object | undefined {
@@ -153,15 +174,28 @@ export async function connectPackageDatasources(
     if (installed) await withdrawPackageDatasources(ctx, appId);
     if (datasources.length === 0) return [];
 
+    // [#28143] An installed package's names are judged after its own earlier
+    // registrations are withdrawn, so whatever still holds one is another
+    // holder's. A held name — or one whose holder cannot be read — is left out
+    // of all three steps below, and reported.
+    let left: ReadonlySet<string> = new Set();
+    let key: object | undefined;
     if (installed) {
+        left = await leaveHeldNames(ctx, appId, tag, ownedOf().map(({ datasource }) => datasource?.name));
         const names = ownedOf()
             .map(({ datasource }) => datasource?.name)
-            .filter((name): name is string => typeof name === 'string' && name.length > 0);
+            .filter((name): name is string => typeof name === 'string' && name.length > 0 && !left.has(name));
         contributeCodeDatasourceNames(ctx, names);
-        const key = kernelKey(ctx);
+        key = kernelKey(ctx);
         if (key) recordInstalled(key, appId, names);
         ensureDatasourceUninstallCleanup(ctx);
     }
+    const taken = left.size === 0
+        // By reference when nothing is left out: the boot hands the connect the
+        // very list its one forward conversion produced (#23029 pins the identity).
+        ? datasources
+        : datasources.filter((ds) => !left.has(ds?.name));
+    if (taken.length === 0) return [];
 
     // 1. The metadata registration — lenient: a registry that refuses leaves
     //    the datasource unlisted, never the package unloaded.
@@ -171,12 +205,12 @@ export async function connectPackageDatasources(
             | undefined;
         if (typeof metadata?.registerInMemory === 'function') {
             for (const { datasource: ds, owner } of ownedOf()) {
-                if (!ds?.name) continue;
+                if (!ds?.name || left.has(ds.name)) continue;
                 metadata.registerInMemory('datasource', ds.name, applyProtection({ ...ds, origin: 'code' }, owner));
             }
             ctx.logger.info('Registered code-defined datasources in metadata registry', {
                 appId,
-                count: datasources.length,
+                count: taken.length,
             });
         }
     } catch (err) {
@@ -202,12 +236,11 @@ export async function connectPackageDatasources(
     }
     try {
         const results = await connection.connectDeclared({
-            // By reference: the boot hands the connect the very list its one
-            // forward conversion produced (#23029 pins the identity).
-            datasources: datasources as any[],
+            datasources: taken as any[],
             objects: options.objects ?? [],
             mappedObjects: options.mappedObjects ?? {},
         });
+        if (key) recordFound(key, appId, results);
         const connected = results.filter((r) => r.status === 'connected');
         if (connected.length > 0) {
             ctx.logger.info('Auto-connected declared datasources', {
@@ -235,10 +268,11 @@ export async function connectPackageDatasources(
         // object answers `ERR_DATASOURCE_UNAVAILABLE` naming it — never a
         // silent driver gap.
         const verdicts: PackageDatasourceVerdict[] = [];
-        for (const ds of datasources) {
+        for (const ds of taken) {
             const state = typeof ds?.name === 'string' ? connection.getConnectionState?.(ds.name) : undefined;
             if (state) verdicts.push({ name: state.name, status: state.status });
         }
+        if (key) recordFound(key, appId, verdicts);
         return verdicts;
     }
 }
@@ -250,14 +284,179 @@ function recordInstalled(key: object, appId: string, names: string[]): void {
         byApp = new Map();
         INSTALLED_BY_APP.set(key, byApp);
     }
-    if (names.length > 0) byApp.set(appId, [...names]);
+    if (names.length > 0) byApp.set(appId, { names: [...names], found: new Set() });
     else byApp.delete(appId);
+}
+
+/**
+ * [#28143] Record which of the package's datasources the connect found already
+ * registered (`already-registered`): a driver it did not open, and that the
+ * package's withdrawal therefore never closes.
+ */
+function recordFound(key: object, appId: string, verdicts: ReadonlyArray<{ name: string; status: string }>): void {
+    const record = INSTALLED_BY_APP.get(key)?.get(appId);
+    if (!record) return;
+    for (const { name, status } of verdicts) {
+        if (status === 'already-registered') record.found.add(name);
+    }
+}
+
+/** The app id whose installed call recorded `name`, other than `appId`; `undefined` when none did. */
+function recordedByAnother(key: object | undefined, appId: string, name: string): string | undefined {
+    if (!key) return undefined;
+    for (const [other, record] of INSTALLED_BY_APP.get(key) ?? []) {
+        if (other !== appId && record.names.includes(name)) return other;
+    }
+    return undefined;
+}
+
+/** A service the kernel may not have: `undefined` when it is absent. */
+function optionalService<T>(ctx: PluginContext, name: string): T | undefined {
+    try {
+        return ctx.getService<T>(name);
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * [#28143] Who holds a datasource name, as an installed package declaring it
+ * must see it — {@link datasourceNameHolder}'s answer.
+ *
+ *  - `free`: nobody but the package itself (its own earlier registration or
+ *    pool) holds the name.
+ *  - `held`: another holder does, named in words for the refusal and the log.
+ *  - `unreadable`: a place a holder lives could not be read. ⛔ Never read as
+ *    `free`: a check that did not run is not "no holder".
+ */
+export type DatasourceNameHolding =
+    | { status: 'free' }
+    | { status: 'held'; holder: string }
+    | { status: 'unreadable'; reading: string; cause: unknown };
+
+/**
+ * [#28143] The ONE judge of who holds a datasource name a package installed
+ * into the running kernel declares. The install door refuses on it before any
+ * write; {@link connectPackageDatasources} leaves a held name alone on every
+ * installed call, the rehydrate included.
+ *
+ * Every place a holder lives is read, in this order, and the first holder
+ * found answers:
+ *
+ *  1. the host's `default` — always held;
+ *  2. the metadata registry: a datasource item stamped with another package, a
+ *     datasource created in Setup (`origin: 'runtime'`), or any other item. An
+ *     item stamped with this package is its own earlier registration: `free`;
+ *  3. the code-datasource set: a name another installed package recorded, or
+ *     one the host registers from code (the boot artifact's, whose metadata
+ *     registration is lenient and may be missing);
+ *  4. the data engine: a driver registered under the name with no metadata
+ *     item — the legacy `onEnable` bridge (ADR-0062 D8). A pool this package's
+ *     own earlier call recorded is its own.
+ *
+ * A service the kernel does not have holds nothing; a read that throws is
+ * `unreadable`.
+ */
+export async function datasourceNameHolder(
+    ctx: PluginContext,
+    appId: string,
+    name: string,
+): Promise<DatasourceNameHolding> {
+    if (name === 'default') return { status: 'held', holder: "the host's primary datasource" };
+
+    const metadata = optionalService<{ get?: (type: string, name: string) => Promise<unknown> }>(ctx, 'metadata');
+    if (typeof metadata?.get === 'function') {
+        let item: unknown;
+        try {
+            item = await metadata.get('datasource', name);
+        } catch (cause) {
+            return { status: 'unreadable', reading: 'the metadata registry', cause };
+        }
+        if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+            const { _packageId: owner, origin } = item as { _packageId?: unknown; origin?: unknown };
+            if (owner === appId) return { status: 'free' };
+            return {
+                status: 'held',
+                holder: typeof owner === 'string' && owner.length > 0
+                    ? `the package '${owner}'`
+                    : origin === 'runtime' ? 'a datasource created in Setup' : 'a datasource',
+            };
+        }
+    }
+
+    const key = kernelKey(ctx);
+    const ownNames = (key && INSTALLED_BY_APP.get(key)?.get(appId)?.names) ?? [];
+    const other = recordedByAnother(key, appId, name);
+    if (other !== undefined) return { status: 'held', holder: `the package '${other}'` };
+    if (key && !ownNames.includes(name)) {
+        let coded: boolean;
+        try {
+            coded = typeof (key as { has?: unknown }).has === 'function' && (key as { has(n: string): boolean }).has(name);
+        } catch (cause) {
+            return { status: 'unreadable', reading: "the host's code-datasource set", cause };
+        }
+        if (coded) return { status: 'held', holder: 'a datasource this host registers from code' };
+    }
+
+    const engine = optionalService<{ getDriverByName?: (name: string) => unknown }>(ctx, 'objectql');
+    if (typeof engine?.getDriverByName === 'function') {
+        let driver: unknown;
+        try {
+            driver = engine.getDriverByName(name);
+        } catch (cause) {
+            return { status: 'unreadable', reading: 'the data engine', cause };
+        }
+        if (driver && !ownNames.includes(name)) {
+            return { status: 'held', holder: 'a driver registered on the data engine outside Setup' };
+        }
+    }
+    return { status: 'free' };
+}
+
+/**
+ * [#28143] Judge each name an installed call declares and answer the ones it
+ * leaves alone — held by another holder, or with a holder that cannot be read
+ * — after one `error` line naming each and what it means.
+ *
+ * `error`, not `warn`: the ledger says the package is installed with these
+ * datasources while the running kernel registers none of them as the
+ * package's, and nothing else looks wrong. On a rehydrate this is a package
+ * installed before the install door judged names; the install door itself
+ * refuses before it gets here.
+ */
+async function leaveHeldNames(
+    ctx: PluginContext,
+    appId: string,
+    tag: string,
+    declared: ReadonlyArray<unknown>,
+): Promise<Set<string>> {
+    const left = new Set<string>();
+    const lines: string[] = [];
+    for (const name of declared) {
+        if (typeof name !== 'string' || name.length === 0 || left.has(name)) continue;
+        const holding = await datasourceNameHolder(ctx, appId, name);
+        if (holding.status === 'free') continue;
+        left.add(name);
+        lines.push(holding.status === 'held'
+            ? `'${name}' is held by ${holding.holder}`
+            : `'${name}' could not be judged: ${holding.reading} could not be read (${(holding.cause as Error)?.message ?? String(holding.cause)})`);
+    }
+    if (lines.length > 0) {
+        ctx.logger.error(
+            `${tag} the package '${appId}' declares datasource name(s) it does not hold, and they are NOT registered, `
+            + `recorded or connected for it: ${lines.join('; ')}. The package's objects bound to them are served by `
+            + "whatever holds the name, and the package's uninstall leaves that holder alone. Rename the package's "
+            + 'datasource and install it again, or remove the datasource holding the name and restart.',
+        );
+    }
+    return left;
 }
 
 /**
  * Withdraw every datasource an installed package's earlier call registered:
  * its pool disconnected (the connection service's own teardown, which evicts
- * the driver and drops the retained verdict), its metadata registration
+ * the driver and drops the retained verdict) unless that call found the pool
+ * already registered by another holder, its metadata registration
  * removed — only a registration still stamped with this package's id — and its
  * name taken out of the code-datasource set. Answers the names withdrawn and
  * the names whose metadata registration could not be removed.
@@ -267,7 +466,8 @@ async function withdrawPackageDatasources(
     appId: string,
 ): Promise<{ removed: string[]; kept: string[]; cause?: unknown }> {
     const key = kernelKey(ctx);
-    const names = (key && INSTALLED_BY_APP.get(key)?.get(appId)) ?? [];
+    const record = key ? INSTALLED_BY_APP.get(key)?.get(appId) : undefined;
+    const names = record?.names ?? [];
     if (!key || names.length === 0) return { removed: [], kept: [] };
 
     let metadata: { get?: (t: string, n: string) => Promise<unknown>; unregister?: (t: string, n: string, o?: { notify?: boolean }) => Promise<void> } | undefined;
@@ -287,8 +487,9 @@ async function withdrawPackageDatasources(
     let cause: unknown;
     for (const name of names) {
         // Never throws: a failed close is logged by the service, and the driver
-        // is evicted either way.
-        if (typeof connection?.disconnect === 'function') await connection.disconnect(name);
+        // is evicted either way. [#28143] Only a pool this package's connect
+        // opened: one it found already registered is its holder's to close.
+        if (typeof connection?.disconnect === 'function' && !record?.found.has(name)) await connection.disconnect(name);
         try {
             const item = await metadata?.get?.('datasource', name);
             if ((item as { _packageId?: unknown } | undefined)?._packageId === appId) {

@@ -10,9 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // RETIRED_KEYS_BY_MAJOR row. Semantic-only — no D2 conversion: the bare name may
 // already be bound in the flow, and the reads of the old name sit in every
 // dialect a flow string speaks.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'flow-binding-variable-dollar-name-refused',
   surface:

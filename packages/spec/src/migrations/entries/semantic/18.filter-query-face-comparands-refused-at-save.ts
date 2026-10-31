@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // door, so the two doors cannot drift apart.
 export const entry: SemanticMigration = {
   id: 'filter-query-face-comparands-refused-at-save',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.FilterCondition — every comparand slot the query faces refuse, now refused when the '
     + 'document is PARSED: a $null or $exists flag that is not a boolean (a string such as '

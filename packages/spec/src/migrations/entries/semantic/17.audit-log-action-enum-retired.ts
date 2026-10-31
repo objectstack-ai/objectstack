@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'audit-log-action-enum-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     "sys_audit_log.action — the values 'export' and 'permission_change' left the select "
     + 'enum declared by plugin-audit (packages/plugins/plugin-audit/src/objects/'

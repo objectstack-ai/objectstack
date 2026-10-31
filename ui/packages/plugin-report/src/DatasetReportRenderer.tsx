@@ -14,7 +14,11 @@
  * - `tabular` → the selection as a simple list (`rows` + `values`), no totals.
  * - `summary` → the same table plus a SERVER-computed grand-total footer
  *   (`totals: { groupings: [[]] }`) — the declared type picks the branch
- *   (#2941), the data shape never does.
+ *   (#2941), the data shape never does. With two or more `rows` levels it
+ *   also asks for every proper prefix of `rows` (`[[a], []]` for `[a, b]`)
+ *   and draws each outer group as a header row, its inner rows (the outer
+ *   value not repeated) and a SERVER-computed subtotal row
+ *   (objectstack-ai/objectstack#27975).
  * - `matrix` → a true cross-tab (ADR-0021 D2): `rows` down × `columns`
  *   across, measures in the cells. One dataset query over all dimensions,
  *   pivoted client-side. Totals (per-row subtotals, per-column subtotals,
@@ -511,6 +515,87 @@ function arrangeByDeclaredOptions<T>(
 }
 
 /**
+ * The totals groupings a summary table asks for besides the grand total: every
+ * proper, non-empty prefix of its `rows`, outermost first — `[[a]]` for
+ * `[a, b]`, `[[a], [a, b]]` for `[a, b, c]` (objectstack-ai/objectstack#27975).
+ * Empty for one level, whose only total is the grand total.
+ */
+function summarySubtotalPrefixes(rows: readonly string[]): string[][] {
+  return rows.slice(0, -1).map((_, k) => rows.slice(0, k + 1));
+}
+
+/**
+ * One drawn line of a multi-level summary table. `index` addresses the dataset
+ * row (`state.rows[index]`) the line reads: a detail line's own row, or the
+ * FIRST row of a group, which carries the group's prefix values for the header
+ * label, the subtotal lookup and the drill payload. A subtotal's `members` are
+ * all of its group's rows.
+ */
+type SummaryLine =
+  | { kind: 'header'; level: number; index: number }
+  | { kind: 'detail'; index: number }
+  | { kind: 'subtotal'; level: number; index: number; members: readonly number[] };
+
+/**
+ * Nest the laid-out rows into outer groups, one `rows` level at a time down to
+ * the innermost: each group is a header line, its nested lines, and a subtotal
+ * line. Groups keep the order their first row arrives in `order`, so the
+ * declared-option layout and an authored `order` both survive; rows of one
+ * group that arrive apart are drawn together under it.
+ */
+function nestSummaryLines(order: readonly number[], displayRows: readonly Row[], dims: readonly string[]): SummaryLine[] {
+  const nest = (indices: readonly number[], level: number): SummaryLine[] => {
+    if (level >= dims.length - 1) return indices.map((index) => ({ kind: 'detail' as const, index }));
+    const groups = new Map<string, number[]>();
+    for (const i of indices) {
+      const id = pivotBucketId([pivotDimensionValue(displayRows[i][dims[level]])]);
+      const group = groups.get(id);
+      if (group) group.push(i);
+      else groups.set(id, [i]);
+    }
+    return [...groups.values()].flatMap((group): SummaryLine[] => [
+      { kind: 'header', level, index: group[0] },
+      ...nest(group, level + 1),
+      { kind: 'subtotal', level, index: group[0], members: group },
+    ]);
+  };
+  return nest(order, 0);
+}
+
+/**
+ * The drill ranges of a subtotal row: per range key, the span `[min gte, max lt)`
+ * of its group's rows, kept only when EVERY row carries that key on one field.
+ * A prefix dimension's range is the same on every row, so it passes through; an
+ * inner time bucket widens to cover the group's buckets, which stay inside a
+ * report period the server already narrowed them to; a key some row lacks (the
+ * empty bucket) is dropped, so the drill is the whole group. Bounds compare as
+ * text, the form the server sends them in.
+ */
+function spanDrillRanges(
+  ranges: ReadonlyArray<Record<string, DatasetDrillRange> | undefined>,
+): Record<string, DatasetDrillRange> | undefined {
+  const [first, ...rest] = ranges;
+  if (!first) return undefined;
+  const out: Record<string, DatasetDrillRange> = {};
+  for (const [key, range] of Object.entries(first)) {
+    let gte = range.gte;
+    let lt = range.lt;
+    let everyRow = true;
+    for (const other of rest) {
+      const r = other?.[key];
+      if (!r || r.field !== range.field) {
+        everyRow = false;
+        break;
+      }
+      if (String(r.gte) < String(gte)) gte = r.gte;
+      if (String(r.lt) > String(lt)) lt = r.lt;
+    }
+    if (everyRow) out[key] = { field: range.field, gte, lt };
+  }
+  return out;
+}
+
+/**
  * Shared fetch for one dataset selection.
  *
  * `order` (framework#3916) is scoped to what THIS selection projects before it
@@ -771,6 +856,13 @@ const DRILL_CLASS = 'cursor-pointer hover:bg-accent/40';
  * ADR-0021 governance red line forbids (an `avg` cannot be recombined) — so an
  * older server that returns no `totals` renders the plain table, exactly like
  * the matrix path.
+ *
+ * `withSubtotals` (a `summary`, never a `tabular` or a `matrix` degraded to
+ * this table) also asks for every prefix grouping of a two-or-more-level
+ * `rows` ({@link summarySubtotalPrefixes}) and draws the grouped face
+ * ({@link nestSummaryLines}) — the subtotals server-aggregated by the same
+ * rule. When any prefix grouping is missing from the answer (an older server)
+ * the table is the plain one, with no subtotal rows.
  */
 function DatasetReportTable({
   dataset,
@@ -781,6 +873,7 @@ function DatasetReportTable({
   onDrill,
   order,
   withTotals,
+  withSubtotals,
   timeWindow,
 }: {
   dataset: string;
@@ -791,8 +884,10 @@ function DatasetReportTable({
   onDrill?: (args: DatasetDrillArgs) => void;
   order?: SelectionOrder;
   withTotals?: boolean;
+  withSubtotals?: boolean;
   timeWindow?: ReportTimeWindow;
 }) {
+  const subtotalPrefixes = withTotals && withSubtotals ? summarySubtotalPrefixes(rows) : [];
   // With no grouping dimensions the single result row already IS the grand
   // total — requesting totals would only duplicate it.
   const state = useDatasetRows(
@@ -801,7 +896,7 @@ function DatasetReportTable({
     values,
     runtimeFilter,
     dataSource,
-    withTotals && rows.length > 0 ? [[]] : undefined,
+    withTotals && rows.length > 0 ? [...subtotalPrefixes, []] : undefined,
     order,
     timeWindow,
   );
@@ -835,10 +930,15 @@ function DatasetReportTable({
   // Drilling needs at least one dimension to scope by.
   const canDrill = !!onDrill && rows.length > 0;
   // Dims the server can map to object fields → raw-value (drill-correct) filter.
-  const drillDims = state.dimensionFields ? rows.filter((d) => d in state.dimensionFields!) : [];
-  const drill = (row: Row, index: number) => {
+  const drillDimsAll = state.dimensionFields ? rows.filter((d) => d in state.dimensionFields!) : [];
+  // `dims` is the grouping the clicked line stands for: every `rows` dimension
+  // for a data row, the prefix for a subtotal row, whose drill scopes by the
+  // prefix values alone (read off the group's first row, which carries them)
+  // and by the span of its `members`' ranges (`spanDrillRanges`).
+  const drill = (row: Row, index: number, dims: readonly string[] = rows, members?: readonly number[]) => {
     const groupKey: Record<string, unknown> = {};
-    for (const dim of rows) groupKey[dim] = row[dim];
+    for (const dim of dims) groupKey[dim] = row[dim];
+    const drillDims = drillDimsAll.filter((d) => dims.includes(d));
     // ADR-0021 D2: when the server returned the object + raw grouped values,
     // emit an exact field→raw filter (correct for select/lookup dims, which a
     // display-label groupKey would mis-filter); the host then filters with no
@@ -846,7 +946,9 @@ function DatasetReportTable({
     // objectstack-ai/objectstack#1752: a time-bucketed date dim contributes a RANGE (not an equality dim),
     // so the fast path also fires when the server sent a range for this row —
     // covering a date-ONLY report that has no equality drill dim at all.
-    const rowRanges = state.drillRanges?.[index];
+    const rowRanges = members
+      ? spanDrillRanges(members.map((i) => state.drillRanges?.[i]))
+      : state.drillRanges?.[index];
     const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
     let objectFilter: Record<string, unknown> | undefined;
     if (state.object && (drillDims.length > 0 || hasRange)) {
@@ -894,18 +996,59 @@ function DatasetReportTable({
   // grand total passes none and so draws no symbol on such a column.
   const fmt = (measure: string, value: unknown, row?: Readonly<Record<string, unknown>>) =>
     formatMeasure(value, measureField(measure)?.format, measureCellCurrency(measureField(measure), row), measureField(measure)?.percentScale, displayLocale);
+  // objectstack-ai/objectstack#27975 — the server's subtotals, one map per
+  // prefix grouping, keyed by the prefix's bucket id over RELABELED values: the
+  // display rows take the same relabel, so both sides of the lookup speak one
+  // vocabulary (the matrix's rule). `null` for a grouping the answer lacks.
+  const subtotalMaps = subtotalPrefixes.map((prefix) => {
+    const found = state.totals?.find(
+      (t) => Array.isArray(t.dimensions) && t.dimensions.join(',') === prefix.join(','),
+    )?.rows;
+    if (!found) return null;
+    const byId = new Map<string, Row>();
+    for (const r of relabelDimensions(found, dimensionLabels)) byId.set(bucketId(prefix, r), r);
+    return byId;
+  });
+  // The grouped face only when EVERY prefix grouping was answered; otherwise
+  // (an older server) the plain table, the matrix's degrade rule.
+  const grouped = subtotalPrefixes.length > 0 && subtotalMaps.every((m) => m !== null);
+  const lines: SummaryLine[] = grouped
+    ? nestSummaryLines(layout, displayRows, rows)
+    : layout.map((index) => ({ kind: 'detail' as const, index }));
+  const subtotalOf = (level: number, index: number): Row | undefined =>
+    subtotalMaps[level]?.get(bucketId(subtotalPrefixes[level], displayRows[index]));
+  const subtotalText = tt('report.subtotal', 'Subtotal');
+  // A grouped detail row leaves its outer dimensions blank: the group header
+  // above it names them once.
+  const detailDimension = (c: string, i: number) =>
+    grouped && rows.indexOf(c) < rows.length - 1 ? '' : formatDimensionValue(displayRows[i][c], displayLocale);
   // The cells below, as the export writes them (`ReportExport.tsx`).
   const snapshot: ReportTableSnapshot = {
     object: state.object,
     header: columns.map((c) => headerLabel(c)),
     rows: [
-      ...layout.map((i) =>
-        columns.map((c) =>
+      ...lines.map((line) => {
+        const i = line.index;
+        if (line.kind === 'header') {
+          return columns.map((_, p) =>
+            p === line.level
+              ? exportDimensionCell(formatDimensionValue(displayRows[i][rows[line.level]], displayLocale))
+              : { text: '' },
+          );
+        }
+        if (line.kind === 'subtotal') {
+          const total = subtotalOf(line.level, i);
+          return [
+            ...rows.map((_, p) => ({ text: p === line.level ? subtotalText : '' })),
+            ...values.map((m) => exportMeasureCell(fmt(m, total?.[m]), total?.[m])),
+          ];
+        }
+        return columns.map((c) =>
           values.includes(c)
             ? exportMeasureCell(fmt(c, displayRows[i][c], state.rows[i]), displayRows[i][c])
-            : exportDimensionCell(formatDimensionValue(displayRows[i][c], displayLocale)),
-        ),
-      ),
+            : exportDimensionCell(detailDimension(c, i)),
+        );
+      }),
       ...(grandTotal
         ? [[...rows.map((_, k) => ({ text: k === 0 ? totalText : '' })), ...values.map((m) => exportMeasureCell(fmt(m, grandTotal[m]), grandTotal[m]))]]
         : []),
@@ -925,27 +1068,62 @@ function DatasetReportTable({
           </tr>
         </thead>
         <tbody>
-          {layout.map((i) => (
-            <tr
-              key={i}
-              className={`border-t${canDrill ? ` ${DRILL_CLASS}` : ''}`}
-              data-testid={canDrill ? 'dataset-drill-row' : undefined}
-              // The drill payload is built from the row AS THE SERVER SENT IT
-              // (`state.rows[i]`), never from the displayed one: `groupKey` and
-              // `objectFilter` are identity keys the host filters records with,
-              // and translating those would address nothing (objectui#4263 /
-              // #4273's convention, restated for #4330).
-              onClick={canDrill ? () => drill(state.rows[i], i) : undefined}
-            >
-              {columns.map((c) => (
-                <td key={c} className="px-2 py-1 tabular-nums whitespace-nowrap">
-                  {values.includes(c)
-                    ? fmt(c, displayRows[i][c], state.rows[i])
-                    : formatDimensionValue(displayRows[i][c], displayLocale)}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {lines.map((line) => {
+            const i = line.index;
+            if (line.kind === 'header') {
+              return (
+                <tr key={`h-${line.level}-${i}`} className="border-t bg-muted/10 font-medium" data-testid="dataset-report-group-header">
+                  {line.level > 0 && <td colSpan={line.level} />}
+                  <td colSpan={columns.length - line.level} className="px-2 py-1 whitespace-nowrap">
+                    {formatDimensionValue(displayRows[i][rows[line.level]], displayLocale)}
+                  </td>
+                </tr>
+              );
+            }
+            if (line.kind === 'subtotal') {
+              const total = subtotalOf(line.level, i);
+              const prefix = subtotalPrefixes[line.level];
+              return (
+                <tr
+                  key={`s-${line.level}-${i}`}
+                  className={`border-t bg-muted/20 font-medium${canDrill ? ` ${DRILL_CLASS}` : ''}`}
+                  data-testid="dataset-report-subtotal-row"
+                  // The subtotal stands for its prefix grouping, so its drill
+                  // scopes by the prefix alone, over the whole group.
+                  onClick={canDrill ? () => drill(state.rows[i], i, prefix, line.members) : undefined}
+                >
+                  {line.level > 0 && <td colSpan={line.level} />}
+                  <td colSpan={rows.length - line.level} className="px-2 py-1 whitespace-nowrap">
+                    {subtotalText}
+                  </td>
+                  {values.map((measure) => (
+                    <td key={measure} className="px-2 py-1 tabular-nums whitespace-nowrap">
+                      {fmt(measure, total?.[measure])}
+                    </td>
+                  ))}
+                </tr>
+              );
+            }
+            return (
+              <tr
+                key={i}
+                className={`border-t${canDrill ? ` ${DRILL_CLASS}` : ''}`}
+                data-testid={canDrill ? 'dataset-drill-row' : undefined}
+                // The drill payload is built from the row AS THE SERVER SENT IT
+                // (`state.rows[i]`), never from the displayed one: `groupKey` and
+                // `objectFilter` are identity keys the host filters records with,
+                // and translating those would address nothing (objectui#4263 /
+                // #4273's convention, restated for #4330).
+                onClick={canDrill ? () => drill(state.rows[i], i) : undefined}
+              >
+                {columns.map((c) => (
+                  <td key={c} className="px-2 py-1 tabular-nums whitespace-nowrap">
+                    {values.includes(c) ? fmt(c, displayRows[i][c], state.rows[i]) : detailDimension(c, i)}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
           {grandTotal && (
             <tr className="border-t bg-muted/30 font-medium" data-testid="dataset-report-total-row">
               {rows.length > 0 && (
@@ -1955,6 +2133,7 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
               onDrill={drillSink}
               order={blockOrder}
               withTotals={blockPresentation === 'summary' || blockPresentation === 'matrix'}
+              withSubtotals={blockPresentation === 'summary'}
             />
           );
           return (
@@ -2036,6 +2215,7 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
       onDrill={drillSink}
       order={reportOrder}
       withTotals={presentation === 'summary' || presentation === 'matrix'}
+      withSubtotals={presentation === 'summary'}
       timeWindow={timeWindow}
     />
   );

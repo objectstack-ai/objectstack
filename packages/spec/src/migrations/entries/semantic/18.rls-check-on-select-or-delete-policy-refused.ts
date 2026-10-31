@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // rows the policy admits.
 export const entry: SemanticMigration = {
   id: 'rls-check-on-select-or-delete-policy-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'security.PermissionSet rowLevelSecurity[].check (RowLevelSecurityPolicySchema) on a policy whose '
     + 'operation is select or delete. A blank check (empty or whitespace only) declares nothing and is '

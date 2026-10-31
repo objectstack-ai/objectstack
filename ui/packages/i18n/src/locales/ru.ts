@@ -20,6 +20,7 @@ const ru = {
       manage_org_users: "Управление пользователями организации",
       manage_metadata: "Управление метаданными",
       manage_mailboxes: "Управление почтовыми ящиками",
+      manage_connector_connections: "Управление подключениями коннекторов",
       manage_platform_settings: "Управление настройками платформы",
       setup_access: "Доступ к настройке",
       setup_write: "Запись настроек",
@@ -506,6 +507,7 @@ const ru = {
       undonePrefix: "Отменено — ",
       succeeded: "Успешно {{count}} / {{total}}",
       resultFailed: " · Ошибок {{count}}",
+      succeededRecords: "Успешные записи",
       retry: "Повторить",
       downloadErrorCsv: "Скачать CSV с ошибками",
       cancel: "Отмена",
@@ -1245,9 +1247,12 @@ const ru = {
     new: "Создать",
     add: "Добавить",
     activity: "Активность",
-    timeline: "Хронология",
-    timelineFolded: "Активность",
-    relatedColumn: "Связанная колонка",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "Активность",
+    relatedColumn: "Правая колонка",
+    timelineComposer: "Написать заметку… @ — упомянуть",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} пустых разделов",
     emptySections_one: "{{count}} пустой раздел",
@@ -2269,6 +2274,8 @@ const ru = {
       popupBlockedDescription: "Браузер заблокировал открытие новой вкладки.",
       popupBlockedAction: "Открыть в новой вкладке",
       noRecordId: "Это действие выполняется для одной записи — идентификатор записи недоступен.",
+      fillRequiredThenRetry: "Заполните {{fields}}, затем снова запустите «{{action}}».",
+      fillRequiredFirst: "Сначала заполните {{fields}}.",
     },
     shortcuts: {
       title: "Горячие клавиши",
@@ -2285,8 +2292,7 @@ const ru = {
       newChat: "Новый чат",
       toggleChatsList: "Переключить список чатов",
       goHome: "Вернуться на главную",
-      toggleTimeline: "Показать / скрыть хронологию",
-      toggleRelated: "Показать / скрыть связанные",
+      toggleRelated: "Показать / скрыть правую колонку",
     },
     reportIndex: {
       title: "Отчёты",
@@ -2813,9 +2819,11 @@ const ru = {
       signInText: "Войти",
       socialButton: "Зарегистрироваться через {provider}",
       orText: "или продолжите с электронной почтой",
+      captchaRetry: "Повторить",
       errors: {
         userExists: "Аккаунт с таким email уже существует. Попробуйте войти.",
         selfRegistrationClosed: "Самостоятельная регистрация в этой системе закрыта. Обратитесь к администратору за приглашением.",
+        captchaFailed: "Проверка безопасности не завершена. Попробуйте ещё раз.",
         emailDomainNotAllowed: "Регистрация с адресами этого домена здесь не разрешена. Используйте email вашей организации или обратитесь к администратору за приглашением.",
         invitationSentTo: "Это приглашение было отправлено на {{email}}. Зарегистрируйтесь с этим адресом, чтобы принять его.",
         invitationAddressOnly: "Это приглашение можно принять только с адресом, на который оно было отправлено. Зарегистрируйтесь с этим адресом.",
@@ -3445,6 +3453,7 @@ const ru = {
   report: {
     total: "Итого",
     totals: "Итоги",
+    subtotal: "Промежуточный итог",
     loading: "Загрузка…",
     forbiddenMessage: "У вас нет прав на просмотр данных этого отчёта.",
     dateRange: {
@@ -4422,6 +4431,7 @@ const ru = {
     approveOneTitle: 'Согласовать «{{title}}»?',
     approveOneBody: 'Запрос будет согласован от вашего имени. Чтобы добавить комментарий или вложение, откройте запрос.',
     flowOrigin: 'Инициировано потоком',
+    submittedByYou: 'Отправлено вами',
     sortBy: 'Сортировка',
     sortRecent: 'Сначала новые',
     sortOldest: 'Сначала старые',
@@ -4645,6 +4655,8 @@ const ru = {
       confirmNoteSeparate_many: 'Публикация выпускает {{count}} ожидающих черновиков по отдельности: черновик, который не удастся опубликовать, останется ожидающим, а остальные всё равно будут опубликованы.',
       confirmNoteSeparate_other: 'Публикация выпускает {{count}} ожидающего черновика по отдельности: черновик, который не удастся опубликовать, останется ожидающим, а остальные всё равно будут опубликованы.',
       publishConfirm: 'Опубликовать всё',
+      noteLabel: 'Примечание к изменению (необязательно)',
+      notePlaceholder: 'Что изменилось и почему. Отображается в истории каждого элемента.',
       summaryItems: '{{count}} элементов',
       summaryItems_one: '{{count}} элемент',
       summaryItems_few: '{{count}} элемента',

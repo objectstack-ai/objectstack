@@ -47,8 +47,12 @@ export const Opportunity = ObjectSchema.create({
       min: 0,
       max: 100,
     }),
+    // An amount of money, so it declares the `currency` return type: the
+    // console reads `returnType` and never infers money from the expression,
+    // and an undeclared formula draws the plain number face beside `amount`.
     expected_revenue: Field.formula({
       label: 'Expected Revenue',
+      returnType: 'currency',
       expression: cel`(record.amount == null ? 0 : record.amount) * (record.probability == null ? 0 : record.probability) / 100`,
     }),
     close_date: Field.date({

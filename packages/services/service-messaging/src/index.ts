@@ -136,6 +136,8 @@ export type {
     ClaimOptions,
     // [#17610] The dispatcher's once-per-tick visibility-timeout recovery.
     ReapOptions,
+    // [#28383] The dispatcher's one-read "is anything due?" probe.
+    DueWorkOptions,
     AckResult,
 } from './outbox.js';
 // [commit 1a47a5368] `ack()`'s status precondition refuses with this, so a caller that
@@ -166,6 +168,8 @@ export type {
     HttpClaimOptions,
     // [#17623] The dispatcher's once-per-tick visibility-timeout recovery.
     HttpReapOptions,
+    // [#28383] The dispatcher's one-read "is anything due?" probe.
+    HttpDueWorkOptions,
     HttpAckResult,
     HttpAckSuccess,
     HttpAckFailure,

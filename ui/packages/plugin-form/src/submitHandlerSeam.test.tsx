@@ -181,9 +181,10 @@ describe('a failing child leg leaves NO committed parent, whichever variant rend
 
       // THE PIN — no committed parent survives the failed leg.
       await waitFor(() => expect(del).toHaveBeenCalledWith('po', 'po1'));
-      // …and the failure is surfaced. On the broken path the operator got a
-      // SUCCESS toast over a half-written document.
-      await waitFor(() => expect(toastError).toHaveBeenCalled());
+      // …and the failure is surfaced, by the form's banner
+      // (objectstack-ai/objectstack#27520). On the broken path the operator got
+      // a SUCCESS toast over a half-written document.
+      await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
       expect(toastSuccess).not.toHaveBeenCalled();
     },
   );

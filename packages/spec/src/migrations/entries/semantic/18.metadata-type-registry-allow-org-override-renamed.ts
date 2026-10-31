@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // entry is `kernel/MetadataTypeRegistryEntry:allowOrgOverride`.
 export const entry: SemanticMigration = {
   id: 'metadata-type-registry-allow-org-override-renamed',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'MetadataTypeRegistryEntry.allowOrgOverride (DEFAULT_METADATA_TYPE_REGISTRY, '
     + 'kernel/metadata-plugin.zod.ts) / the allowOrgOverride field of every entries[] item of the '
