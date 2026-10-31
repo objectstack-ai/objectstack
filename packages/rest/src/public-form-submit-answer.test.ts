@@ -268,7 +268,7 @@ describe('[#28005] POST /forms/:slug/submit answers the engine-generated fields 
     expectNoOtherStoredValue(body);
   });
 
-  it('drop rule — stored: a name the answered row does not carry (masked or stripped) is dropped', async () => {
+  it('drop rule — value: a name the answered row does not carry (masked or stripped) is dropped', async () => {
     const { case_number: _omitted, ...withoutCaseNumber } = { ...CREATE_ANSWER.record, case_number: CASE_NUMBER };
     const body = await submitThrough(tokenProtocol({
       message: 'Your case number is {{record.case_number}}.',
