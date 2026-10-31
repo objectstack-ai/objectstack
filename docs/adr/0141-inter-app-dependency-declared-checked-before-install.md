@@ -1,10 +1,6 @@
 # ADR-0141: An app may depend on another installed app — declared in `manifest.dependencies`, checked once before install, and co-owning the namespace it shares
 
-**Status**: Proposed (2026-10-25; first draft 2026-10-24). `docs/adr/**` is Tier H (Prime Directive #14): this record
-becomes **Accepted** by the maintainer's merge, and ⛔ the cards under [Execution plan](#execution-plan-after-acceptance)
-are cut after that merge, never before it. Until the pre-install check ships, a composite product keeps shipping as one
-release artifact under [ADR-0130](./0130-release-artifact-as-co-ownership-boundary.md). **This record declares; it
-implements nothing** — no schema, no code, no changeset.
+**Status**: Proposed (2026-10-25; first draft 2026-10-24). `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by the maintainer's merge, and ⛔ the cards under [Execution plan](#execution-plan-after-acceptance) are cut after that merge, never before it. Until the pre-install check ships, a composite product keeps shipping as one release artifact under [ADR-0130](./0130-release-artifact-as-co-ownership-boundary.md). **This record declares; it implements nothing** — no schema, no code, no changeset. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — D3's deferred uninstall-protection item, for the paired case only: a base is refused uninstall while its `<base>.custom` exists, naming it (ADR-0146 D3, card N-14); the general item keeps its trigger.
 **Decided by**: two maintainer rulings on [#25403](https://github.com/objectstack-ai/objectstack/issues/25403), executed
 here as written and ⛔ not re-opened:
 

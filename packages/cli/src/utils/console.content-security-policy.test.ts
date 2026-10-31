@@ -49,6 +49,8 @@ const ENV = [
   'OS_TELEMETRY_CLIENT_ERROR_REPORTING_DSN',
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY',
+  'OS_TURNSTILE_SITE_KEY',
+  'OS_TURNSTILE_SECRET_KEY',
 ];
 
 let saved: Record<string, string | undefined>;
@@ -515,4 +517,44 @@ describe('connect-src names the host the storage service presigns browser upload
       'https://glyphs.example.com',
     ]);
   });
+});
+
+describe('the opt-in Turnstile challenge on sign-up', () => {
+  const TURNSTILE = 'https://challenges.cloudflare.com';
+
+  it('admits Cloudflare\'s script and frame only while both keys are set', async () => {
+    process.env.OS_TURNSTILE_SITE_KEY = 'site-key-csp';
+    process.env.OS_TURNSTILE_SECRET_KEY = 'secret-key-csp';
+    const request = await mount();
+    const res = await request('/_console/register');
+    const raw = res.headers.get('content-security-policy');
+    const policy = directives(raw);
+
+    expect(policy.get('script-src')).toContain(TURNSTILE);
+    expect(policy.get('frame-src')).toEqual(["'self'", TURNSTILE]);
+    // The nonce boundary is unchanged: no inline allowance rides along.
+    expect(policy.get('script-src')).not.toContain("'unsafe-inline'");
+    // Presence is read, never the values.
+    expect(raw).not.toContain('site-key-csp');
+    expect(raw).not.toContain('secret-key-csp');
+  });
+
+  for (const [label, env] of [
+    ['neither key', {}],
+    ['the site key alone', { OS_TURNSTILE_SITE_KEY: 'site-key-csp' }],
+    ['the secret alone', { OS_TURNSTILE_SECRET_KEY: 'secret-key-csp' }],
+    ['a blank secret', { OS_TURNSTILE_SITE_KEY: 'site-key-csp', OS_TURNSTILE_SECRET_KEY: '  ' }],
+  ] as const) {
+    it(`leaves the policy as it was with ${label}`, async () => {
+      Object.assign(process.env, env);
+      const request = await mount();
+      const raw = res(await request('/_console/register'));
+      expect(raw).not.toContain(TURNSTILE);
+      expect(directives(raw).has('frame-src')).toBe(false);
+    });
+  }
+
+  function res(response: Response): string | null {
+    return response.headers.get('content-security-policy');
+  }
 });

@@ -63,6 +63,7 @@ const result = AuthEndpointSchema.parse(data);
 | **phoneNumber** | `boolean` | optional | Phone-number sign-in enabled (phone + password, V1.5) |
 | **phoneNumberOtp** | `boolean` | optional | Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service |
 | **cloudManaged** | `boolean` | optional | Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed |
+| **turnstileSiteKey** | `string` | optional | Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge |
 
 
 ---
@@ -189,6 +190,7 @@ This schema accepts one of the following structures:
 | **phoneNumber** | `boolean` | optional | Phone-number sign-in enabled (phone + password, V1.5) |
 | **phoneNumberOtp** | `boolean` | optional | Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service |
 | **cloudManaged** | `boolean` | optional | Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed |
+| **turnstileSiteKey** | `string` | optional | Public Cloudflare Turnstile site key, present only while the opt-in sign-up challenge is on: the sign-up form renders the widget and sends its token in the x-captcha-response header; absent means no challenge |
 
 
 ---

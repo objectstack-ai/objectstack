@@ -279,7 +279,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 109 rows.
+ * CENSUS (generated): this list holds 113 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -542,6 +542,17 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: "Store the value for one declared reference, then reconcile: every instance naming it re-materializes without a restart. Body is the closed `{ value }`. Answers the reference's listing entry after the reconcile, never the value. Refused, before anything is written: an undeclared reference 404 `RESOURCE_NOT_FOUND`, one an environment variable of the same name supplies 409 `RESOURCE_CONFLICT` (env wins in the chain, so a stored value would never be read), an empty or oversized value, one starting with `secret:` (the data engine would store it as a handle to another secret) or an unknown body key 400 `VALIDATION_ERROR`, and no crypto provider 503 `SERVICE_UNAVAILABLE`. Writes in one process run one at a time, with their reconcile; a concurrent first write from another replica answers 409 `RESOURCE_CONFLICT`. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-credential-door.test.ts`" },
   { route: 'DELETE /automation/connectors/credential-refs/:ref', domain: '/automation', disposition: 'server-only',
     note: "Remove the stored value for one reference, then reconcile: every instance naming it is torn down and registered degraded, naming the reference. 404 `RESOURCE_NOT_FOUND` when nothing is stored for it. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-credential-door.test.ts`" },
+  // ADR-0143 D5 — the connector connection door: an administrator connects an
+  // `oauth2` `authorization_code` instance for their organization (Q1 = A). The
+  // store is `sys_connector_connection`, whose refresh token is a `Field.secret`.
+  { route: 'GET /automation/connectors/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: "The caller's organization's connection of one declared `oauth2` `authorization_code` instance: `status` (`not_connected` / `connected` / `reconnect_required`), its reason, the granted scopes, the access token's expiry and who connected it. ⛔ Never a token. Refused: an undeclared instance 404 `RESOURCE_NOT_FOUND`; one whose auth is not that grant, or a caller with no organization, 400 `VALIDATION_ERROR`. ⚑ `manage_metadata`, fail-closed, only `isSystem` bypassing; no walled refusal, since a connection belongs to its organization. Closed query set: none. NOT JS-SDK surface on this leg: the driver is the Console's Connect / Reconnect flow (ADR-0143 S4). Pinned in `domains/automation-connector-connection-door.test.ts`" },
+  { route: 'POST /automation/connectors/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: "Begin connecting (or reconnecting) the instance for the caller's organization: answers `{ authorizationUrl, expiresAt }`, the vendor URL carrying a fresh `state` and an `S256` PKCE challenge. Nothing is written to the connection record until the callback completes; the pending authorization (verifier included) waits ten minutes in the cluster KV, or in process on a single node. The redirect URI is the deployment's (`OS_AUTH_URL` / `OS_BASE_URL`, or the plugin option), never the request's — 503 `SERVICE_UNAVAILABLE` when there is none. No body. Same refusals, gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-connection-door.test.ts`" },
+  { route: 'DELETE /automation/connectors/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: "Revoke the caller's organization's connection: the row is removed, the cached access token dropped, and the instance re-judged — its next dispatch there is refused 'not connected'. 404 `RESOURCE_NOT_FOUND` when it was not connected. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-connection-door.test.ts`" },
+  { route: 'GET /automation/connectors/oauth/callback', domain: '/automation', disposition: 'server-only',
+    note: "The authorization server's redirect (ADR-0143 D5). Closed query set: `code`, `state`, `error`, `error_description`, `error_uri`, `iss`; an unknown or repeated one is 400 `VALIDATION_ERROR`. The `state` is taken once and must have been begun by the same user in the same organization, else 400 before any code is exchanged; an `error` answer is 400 naming its registered code only. The code is exchanged with the PKCE verifier and the connection stored; answers the connection's status. 503 when the token endpoint cannot be reached. Same capability gate as the rows above: the browser landing here is the administrator's. Pinned in `domains/automation-connector-connection-door.test.ts`" },
   { route: 'GET /automation/_status', domain: '/automation', disposition: 'sdk', client: 'automation.getRuntimeStatus' },
   { route: 'POST /automation/:name/trigger', domain: '/automation', disposition: 'sdk', client: 'automation.execute' },
   { route: 'POST /automation/:name/toggle', domain: '/automation', disposition: 'sdk', client: 'automation.toggle',

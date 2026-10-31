@@ -768,6 +768,17 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: a declarative connector's stored credential is environment-level, ` +
       'read by the reference its instances name, never by organization',
   },
+  // ADR-0143 D3 — a connector connection is made by an organization's
+  // administrator and dispatched with by that organization's runs (Q1 = A):
+  // every row is written with the organization that connected it, so a NULL
+  // row has no producer.
+  {
+    object: 'sys_connector_connection',
+    census: PMAIN,
+    fate: 'attribution',
+    citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`,
+    anchors: [],
+  },
   // Inbound mail (`@objectstack/service-mailbox`): every row is written by the
   // system with the mailbox's organization stamped (ADR-0131 D9), so a NULL
   // row has no producer today; the parents below are where one would take it.

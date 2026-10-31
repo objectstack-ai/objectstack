@@ -44,7 +44,7 @@ import {
 } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { AuthPageLayout } from './AuthPageLayout.js';
-import { signUpRefusalMessages } from './signUpRefusalMessages.js';
+import { signUpCaptchaFailedMessage, signUpRefusalMessages } from './signUpRefusalMessages.js';
 import { decideSignUpOffer, isInvitationRedirect, needsBootstrapProbe } from './signUpOffer.js';
 import { useBootstrapStatus } from './bootstrapStatus.js';
 import { ServerUnreachable } from './LoginPage.js';
@@ -281,7 +281,12 @@ export function RegisterPage() {
           signInText: t('auth.register.signInText'),
           socialButton: t('auth.register.socialButton'),
           orText: t('auth.register.orText'),
+          captchaFailed: signUpCaptchaFailedMessage(t),
+          captchaRetry: t('auth.register.captchaRetry'),
         }}
+        // The opt-in Turnstile challenge: served only while the server's
+        // sign-up door requires a token; absent, the form is unchanged.
+        turnstileSiteKey={authConfig?.features?.turnstileSiteKey}
       />
     </AuthPageLayout>
   );
