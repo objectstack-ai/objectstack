@@ -1161,6 +1161,18 @@ const ko = {
     maximize: "최대화",
     restoreSize: "원래 크기로",
     recordOf: "{{current}} / {{total}}",
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: "{{scope}}: {{current}} / {{total}}",
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: "{{title}} 필터…",
+    relatedChips: "표시",
+    relatedChipAll: "전체",
+    relatedChipMine: "내 항목",
+    relatedChipOverdue: "기한 초과",
+    relatedExport: "내보내기",
+    relatedRows: "{{count}}건",
+    relatedRows_one: "{{count}}건",
+    relatedRows_other: "{{count}}건",
     recordNotFound: "레코드를 찾을 수 없음",
     recordNotFoundDescription: "찾으시는 레코드가 존재하지 않거나, 삭제되었거나, 접근 권한이 없을 수 있습니다.",
     goBack: "뒤로",

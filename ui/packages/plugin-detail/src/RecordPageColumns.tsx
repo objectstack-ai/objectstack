@@ -17,12 +17,13 @@ import {
   type RecordPageTier,
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
-import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext } from './relatedListCompact';
+import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext, RelatedListEnlargedContext } from './relatedListCompact';
 import { DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
 import { RelatedCardStack } from './RelatedCardStack';
 import { RecordTimelinePanel } from './RecordTimelinePanel';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab } from './RecordTabRow';
 import { RecordTimelineCountContext } from './recordTimelineStream';
+import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
   relatedCardId,
   resolveRelatedArrangement,
@@ -167,8 +168,9 @@ const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; 
 
 /**
  * The enlarged related list (Target 9, the ONE path to a related list's
- * every record): the full `RelatedList` face — every column, paging, sort,
- * inline edit.
+ * every record): every column, paging, sort, inline edit — drawn as the
+ * tab's face (`RelatedListEnlargedContext`): the toolbar over the table,
+ * no card (objectstack#27524).
  */
 function enlargedRelatedList(node: any): React.ReactNode {
   const p = { ...node, ...(node.properties ?? {}) };
@@ -176,7 +178,11 @@ function enlargedRelatedList(node: any): React.ReactNode {
   const enlarged = authoredLimit
     ? node
     : { ...node, properties: { ...(node.properties ?? {}), limit: ENLARGED_PAGE_SIZE } };
-  return <SchemaRenderer schema={toRenderableSchema(enlarged)} />;
+  return (
+    <RelatedListEnlargedContext.Provider value>
+      <SchemaRenderer schema={toRenderableSchema(enlarged)} />
+    </RelatedListEnlargedContext.Provider>
+  );
 }
 
 /** The title an enlarged related list's face names it by. */
@@ -401,6 +407,11 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       </RelatedListCompactContext.Provider>
     </aside>
   ) : null;
+  // A face with neither the 动态 panel nor its tab drawn — another tab open,
+  // or the right column switched off — still names the stream's count on the
+  // 动态 tab (objectstack#27524): counted from the feed the host holds.
+  const probesTimelineCount = hasTimeline && !!tabRow && activeTab !== RECORD_PAGE_TIMELINE_PANEL
+    && (enlarged !== null || !drawsPanels);
   const sideBySide = besideDetails && drawsPanels;
   const template = sideBySide ? (wide ? GRID_TEMPLATE.wide : GRID_TEMPLATE.twoColumn) : GRID_TEMPLATE.oneColumn;
 
@@ -417,6 +428,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         <div className="flex flex-col gap-4">
           {drawNodes(columns.header)}
           {tabRow}
+          {probesTimelineCount && <RecordTimelineCountProbe nodes={columns.timeline} onCount={reportTimelineCount} />}
           {enlarged ?? (
             <div
               className={cn('grid items-start gap-6', template)}

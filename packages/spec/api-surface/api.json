@@ -806,6 +806,8 @@
     "PublishMetaItemRequestSchema (const)",
     "PublishMetaItemResponse (type)",
     "PublishMetaItemResponseSchema (const)",
+    "PublishPackageDraftsRequest (type)",
+    "PublishPackageDraftsRequestSchema (const)",
     "PublishPackageDraftsResponse (type)",
     "PublishPackageDraftsResponseSchema (const)",
     "QueryAdapterConfig (type)",

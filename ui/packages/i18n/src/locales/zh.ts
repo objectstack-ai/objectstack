@@ -1248,6 +1248,18 @@ const zh = {
     maximize: '最大化',
     restoreSize: '还原',
     recordOf: '第 {{current}} 条，共 {{total}} 条',
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: '{{scope}} 中第 {{current}} 条，共 {{total}} 条',
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: '筛选{{title}}…',
+    relatedChips: '显示',
+    relatedChipAll: '全部',
+    relatedChipMine: '我的',
+    relatedChipOverdue: '逾期',
+    relatedExport: '导出',
+    relatedRows: '{{count}} 条',
+    relatedRows_one: '{{count}} 条',
+    relatedRows_other: '{{count}} 条',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在、已被删除，或您没有访问权限。',
     goBack: '返回',

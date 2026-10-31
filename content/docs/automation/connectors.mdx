@@ -210,7 +210,9 @@ Config: **`transport`** (required) and **`include`** (optional tool-name
 allowlist — only the listed tools become actions):
 
 - `{ kind: 'http', url, headers? }` — a remote MCP server over streamable
-  HTTP. Resolved `auth` is folded into the request headers.
+  HTTP. Resolved `auth` is folded into the request headers; a grant-bearing
+  `auth` (`oauth2`, `app-credential`) is asked for on every request instead
+  (see *Grant-bearing kinds* below).
 - `{ kind: 'stdio', command, args?, env? }` — a **local child process**,
   policy-gated (below). Credentials for a stdio server ride `transport.env`,
   not `auth`.
@@ -471,14 +473,28 @@ What the publish door checks, each refusal located at its key under `auth`:
   and a required `credentialRef`. An inline `appSecret` is refused by name.
 
 **How the server serves them.** Both kinds are served through a
-**credential handle** the provider asks on every request. The built-in `rest`
-and `openapi` providers ask it; a provider says it does by registering with
+**credential handle** the provider asks on every request. The built-in `rest`,
+`openapi` and `mcp` providers ask it; a provider says it does by registering with
 `registerConnectorProvider(…, { credentialHandle: true })`. For an `openapi`
 instance the document's `security` decides only where the token is *not*
 sent: an operation whose effective `security` is `[]` is anonymous and never
 carries it, and a header or query parameter an `apiKey` scheme names is the
 platform's to fill, so it is left out of the action's input schema, as
 `Authorization` is.
+
+An **`mcp`** instance carries a grant-bearing credential only over an `http`
+transport (a stdio server takes its credentials in `transport.env`; a handle
+on a stdio transport, or beside a static credential, fails the boot). Every
+HTTP request of its MCP session asks the handle. Each organization a dispatch
+runs for opens its own session with its own token, so organizations never
+share one. The tools are listed at materialization, outside any run, so the
+listing names no organization: on an `authorization_code` instance it uses
+the connection connected **earliest** (`connected_at`, ties by organization
+id), so an instance several organizations connected still lists. When that
+connection is revoked, refused or connected again, the instance materializes
+again and lists with the next one. A dispatch whose run names no organization
+is answered as below: from the only connection, refused when there are
+several.
 
 An **`app-credential`** instance runs its vendor's exchange from the `appId`
 and the app secret its `credentialRef` names. The exchange is fixed per
@@ -516,9 +532,10 @@ a rotating refresh token is never spent twice.
 - **`authorization_code`** needs an administrator to **connect** it, once per
   organization. Until then the instance is **degraded** "not connected" (never
   a failed boot). The connect is three calls, each needing the
-  organization-scoped `manage_connector_connections` capability (platform
-  administrators hold it by default; grant it to anyone else, an organization
-  administrator included, through a permission set):
+  organization-scoped `manage_connector_connections` capability. Platform
+  administrators and organization administrators hold it by default, so an
+  organization's owners and admins can connect its vendors from the start;
+  grant it to anyone else through a permission set:
 
   ```http
   POST /api/v1/automation/connectors/:name/connection     → { authorizationUrl, expiresAt }
@@ -538,7 +555,24 @@ a rotating refresh token is never spent twice.
   edited or moved there opens as nothing and its code is never exchanged.
   Write access to the cluster KV stays inside the platform's trust boundary,
   as it is for the cluster lock: such a writer can still delete a waiting
-  connect. The redirect URI is the deployment's
+  connect. On an `mcp` instance over `http` that leaves its endpoints or its
+  client to discovery, the connect runs the **MCP authorization flow**: the
+  server reads the MCP server's protected-resource metadata (RFC 9728), then
+  its authorization server's metadata (RFC 8414, or OpenID Connect
+  discovery). That metadata's `issuer` must be the one the MCP server named,
+  and `S256` must be listed. A declared `clientId` is used as is; otherwise a
+  public client is registered (RFC 7591) for the deployment's redirect URI, and
+  an authorization server with no registration endpoint is refused, naming the
+  `clientId` to declare. Every authorization and token request carries the MCP
+  server's resource indicator (RFC 8707), and a callback that names another
+  issuer is refused before its code is exchanged (RFC 9207). Every URL on the
+  way must be `https://` (plain `http://` only to a loopback host), and no
+  request follows a redirect. An MCP or authorization server that does not
+  answer (or answers `429` / `5xx`) refuses the connect with `503`; metadata
+  that is missing or fails a check above, with `400`. The discovered endpoints and client, including any
+  client secret the registration issued, are kept encrypted in the
+  connection's `registered_client`; refreshes use them, and a reconnect reuses
+  them instead of registering again. The redirect URI is the deployment's
   (`OS_BASE_URL` or `OS_AUTH_URL` plus `/api/v1/automation/connectors/oauth/callback`,
   or the automation plugin's `connectorOAuthRedirectUri`), never the
   request's; register that URI with the vendor. The refresh token is kept
@@ -553,17 +587,19 @@ a rotating refresh token is never spent twice.
   stale one never overwrites a newer connect on any replica. A revoke deletes
   the stored connection only: the server does not revoke the refresh token at
   the vendor (RFC 7009), because no revocation endpoint is known for the
-  instance yet — the auth declares none, and the discovery that would supply
-  one is ADR-0143 S2. The refresh token stays valid at the vendor until it
+  instance — the auth declares none, and the MCP authorization flow does not
+  read one. The refresh token stays valid at the vendor until it
   expires or is revoked in the vendor's console; revoke it there too when the
   disconnect is a response to a leak.
 
 What is not served yet is held **degraded** with a reason that names it, and
 never called without its credential: an `oauth2` or `app-credential`
-instance on a provider that does not ask the credential handle (the built-in
-`mcp` provider does not yet, nor does a plugin's provider registered without
-`{ credentialHandle: true }`), an `mcp` instance that left its endpoints to
-discovery, and an `oauth2`
+instance on a provider that does not ask the credential handle (a plugin's
+provider registered without `{ credentialHandle: true }`), an `oauth2`
+instance without its endpoints or client that the MCP authorization flow
+cannot discover them for (only an `authorization_code` instance on
+`provider: 'mcp'` over an `http` transport does), an `mcp` instance left to
+discovery whose transport `url` is not `https://`, and an `oauth2`
 instance whose `tokenUrl` or `authorizationUrl` is not `https://` (plain
 `http://` is accepted only to `localhost`, a `127.0.0.0/8` address or
 `[::1]` — not a `*.localhost` name, which the system resolver sends to DNS —
@@ -696,7 +732,7 @@ retry):
 |:---|:---|
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
-| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a provider that does not ask the credential handle (the built-in `mcp` provider, for now) | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
+| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a provider that does not ask the credential handle (a plugin's provider registered without `{ credentialHandle: true }`) | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
 | An `authorization_code` instance nobody connected, or whose grant the vendor refused | **Not fatal**: the instance registers **degraded**, "not connected" or "reconnect required" — connect it (`POST …/connectors/:name/connection`), and it materializes without a restart |
 | The token endpoint is unreachable or answers `5xx` / `429` | **Not fatal**: the dispatch fails `CONNECTOR_UPSTREAM_UNAVAILABLE` and is retried on the existing backoff; the connection stays connected |
 | `auth` is `signed` on a provider that does not say it applies the request signer | **Hard boot error** naming the instance, the scheme and the provider: its calls would go out unsigned — declare it through `rest` or `openapi` |

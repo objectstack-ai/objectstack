@@ -1460,6 +1460,54 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Publish Package Drafts Request — the body of the "publish whole app" door.
+ *
+ * Declares the JSON body `POST /api/v1/packages/:id/publish-drafts` reads
+ * (ADR-0033, ADR-0146 D1), measured at the door
+ * (`packages/runtime/src/domains/packages.ts`) and not assumed. The package
+ * is the `:id` path segment, never a body member. The door reads exactly two
+ * body members and hands them to `publishPackageDrafts`:
+ *
+ * - `message` — forwarded only when it is a string;
+ * - `backfill` — forwarded as sent whenever the key is present; the protocol
+ *   judges its shape before anything is published and refuses the whole
+ *   request `400 VALIDATION_ERROR` with every bad entry in `issues[]`.
+ *
+ * Every other member is ignored, so the object is NOT strict: unknown keys
+ * are stripped, not refused. That keeps an existing caller working —
+ * `@objectstack/client`'s `packages.publishDrafts` still sends its deprecated
+ * `opts.actor`, and the door records the request's authenticated identity
+ * instead (ADR-0146 D1). `actor` is deliberately not declared: the publisher
+ * is never a name the body supplies. `aiModel` and `context`, which the
+ * protocol method also takes, are not declared either: the door never reads
+ * them from the body (the execution context is the caller's own).
+ *
+ * The body is optional on the wire; an absent body reads as `{}`, a publish
+ * with no note and no backfill.
+ */
+export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
+  message: z.string().optional().describe(
+    'The author\'s change note (ADR-0146 D1). The package commit records it, '
+    + 'and so does every item history row this publish writes, as '
+    + '`change_note` (read back as each history event\'s `message`). Absent or '
+    + 'empty, those rows record the sentence naming the package instead.',
+  ),
+  backfill: z.array(z.object({
+    object: z.string().min(1).describe('Name of the object whose existing rows are written.'),
+    field: z.string().min(1).describe('Name of the field this publish adds to that object.'),
+  }).strict()).optional().describe(
+    'Opt-in: fields this publish adds whose literal `defaultValue` '
+    + 'is written into the object\'s existing rows once the drafts are live, as '
+    + 'the signed-in caller. Absent or `[]`, no row is touched. Each entry '
+    + 'names an object and a field and nothing else, and names it once. The '
+    + 'whole request is refused `400 VALIDATION_ERROR` before anything is '
+    + 'published when an entry is malformed, repeated, or names a field that '
+    + 'is not new in this publish or declares no literal default; '
+    + '`backfillApplied` in the response reports the rows written per field.',
+  ),
+}));
+
+/**
  * Publish Package Drafts Response — the "publish whole app" door.
  *
  * Describes the FULL body `POST /api/v1/packages/:id/publish-drafts` answers
@@ -4007,6 +4055,11 @@ export type MetadataConflictError = z.input<typeof MetadataConflictErrorSchema>;
 export type MetadataConflictErrorParsed = z.infer<typeof MetadataConflictErrorSchema>;
 export type PublishMetaItemRequest = z.input<typeof PublishMetaItemRequestSchema>;
 export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;
+/**
+ * The batch publish door's request body — `POST /packages/:id/publish-drafts`
+ * (ADR-0146 D1). Unknown members are stripped, not refused.
+ */
+export type PublishPackageDraftsRequest = z.input<typeof PublishPackageDraftsRequestSchema>;
 /**
  * The batch publish door's response — `POST /packages/:id/publish-drafts`
  * (#9406). `probes` is `unknown` by declaration, not by omission: the #9406

@@ -17,37 +17,106 @@ import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
 
 /**
- * One rich bulk-action button. Extracted into its own component so the def's
- * `visible` CEL predicate can be evaluated with a hook without violating the
- * rules-of-hooks inside a `.map()` — previously `bulkActionDefs` rendered
- * unconditionally, ignoring `visible` entirely.
- *
- * `visible` is evaluated ONCE PER SELECTED RECORD with that record in scope
- * (objectui#3067), fail-closed per record — the same contract the row kebab
- * uses. The button is offered when at least one selected record passes; the
- * run then acts only on those. A record-free predicate (`features.x`) answers
- * identically for every row, so it still behaves as a plain button-level gate.
- * See `partitionBulkRows` for why the previous record-free evaluation was not
+ * Is this rich bulk def offered for this selection? `visible` is evaluated
+ * ONCE PER SELECTED RECORD with that record in scope (objectui#3067),
+ * fail-closed per record — the same contract the row kebab uses. The def is
+ * offered when at least one selected record passes; the run then acts only on
+ * those. A record-free predicate (`features.x`) answers identically for every
+ * row, so it still behaves as a plain button-level gate. See
+ * `partitionBulkRows` for why the previous record-free evaluation was not
  * merely lenient but wrong.
+ *
+ * Only a def that actually declares `visible` can be gated away — an ungated
+ * def is always offered, even against an empty selection (the bar itself is
+ * what decides there is a selection at all). `hasVisibilityGate` rather than
+ * truthiness, so a declared `visible: false` still counts as a gate instead of
+ * falling through to "ungated → always render".
  */
+function isBulkDefOffered(
+  def: BulkActionDef,
+  selectedRows: any[],
+  scope: Record<string, unknown>,
+  objectFields: unknown,
+): boolean {
+  if (!hasVisibilityGate(def)) return true;
+  return partitionBulkRows(def, selectedRows, { scope, fields: objectFields as never }).eligible.length > 0;
+}
+
+/** A legacy string bulk action, with the destructive styling its name implies. */
+export interface LegacyBulkActionItem {
+  name: string;
+  destructive: boolean;
+}
+
+/** What a selection is offered — the bar's buttons, and the selection's context menu. */
+export interface BulkActionItems {
+  /** Rich defs that pass the capability gate, the switch-off and their per-record `visible`, in declared order. */
+  defs: BulkActionDef[];
+  /** Legacy string actions (no declaration to gate on), in declared order. */
+  legacy: LegacyBulkActionItem[];
+}
+
+/**
+ * THE bulk-action resolver (objectstack#28434): what a selection is offered,
+ * read by both of its entry points — {@link BulkActionBar} and the context
+ * menu a right-click on a selected row opens (`./RowContextMenu`). Both call
+ * this hook, so a bulk action shows in both or in neither.
+ *
+ * [ADR-0066 D4 / objectui#3492] Capability gate, applied to the whole def set
+ * before anything renders — the fourth action surface joining the list
+ * toolbar (`action-bar.tsx`), the record header (`containers.tsx`) and the row
+ * kebab (`RowActionMenu.tsx`). Without it, an action that those three hide
+ * from an unentitled user reappeared here the moment they ticked a checkbox.
+ * Same rule as the engine: an empty declaration always passes, several are
+ * AND-ed, and unknown capabilities fail OPEN (see `useCapabilityGate`) — the
+ * server stays the authority. Legacy string `actions` carry no declaration to
+ * gate on, so they are untouched.
+ *
+ * Legacy names are offered ALONGSIDE defs, not only in their absence: after
+ * `resolveBulkActions` folds every resolvable name into `actionDefs`, what's
+ * left is a disjoint set (a handler-registered name the object never
+ * declared). Hiding it whenever any def existed made a view that mixes both
+ * silently lose half its buttons.
+ */
+export function useBulkActionItems(input: {
+  selectedRows: any[];
+  actions: string[] | undefined;
+  actionDefs?: BulkActionDef[];
+  objectFields?: unknown;
+}): BulkActionItems {
+  const { selectedRows, actions, actionDefs, objectFields } = input;
+  const mayInvoke = useCapabilityGate();
+  const scope = usePredicateScope();
+  return React.useMemo(() => {
+    const defs = (actionDefs ?? []).filter(
+      (d) =>
+        mayInvoke(d?.requiredPermissions)
+        && !isActionSwitchedOff(d)
+        && isBulkDefOffered(d, selectedRows, scope, objectFields),
+    );
+    const legacy = (Array.isArray(actions) ? actions : []).map((action) => {
+      const actionStr = String(action).toLowerCase();
+      return {
+        name: action,
+        destructive: actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy'),
+      };
+    });
+    return { defs, legacy };
+  }, [actionDefs, actions, selectedRows, scope, objectFields, mayInvoke]);
+}
+
+/** A rich def reads as destructive by its variant or by the delete operation it runs. */
+export function isDestructiveBulkDef(def: BulkActionDef): boolean {
+  return def.variant === 'danger' || def.operation === 'delete';
+}
+
+/** One rich bulk-action button, offered per {@link useBulkActionItems}. */
 const BulkActionButton: React.FC<{
   def: BulkActionDef;
   selectedRows: any[];
-  objectFields?: unknown;
   onActionDef?: (def: BulkActionDef, selectedRows: any[]) => void;
-}> = ({ def, selectedRows, objectFields, onActionDef }) => {
-  const scope = usePredicateScope();
-  const { eligible } = React.useMemo(
-    () => partitionBulkRows(def, selectedRows, { scope, fields: objectFields as never }),
-    [def, selectedRows, scope, objectFields],
-  );
-  // Only a def that actually declares `visible` can be gated away — an
-  // ungated def always renders, even against an empty selection (the bar
-  // itself is what decides there is a selection at all). `hasVisibilityGate`
-  // rather than truthiness, so a declared `visible: false` still counts as a
-  // gate instead of falling through to "ungated → always render".
-  if (hasVisibilityGate(def) && eligible.length === 0) return null;
-  const isDestructive = def.variant === 'danger' || def.operation === 'delete';
+}> = ({ def, selectedRows, onActionDef }) => {
+  const isDestructive = isDestructiveBulkDef(def);
   const iconName = def.icon ? toKebabIconName(def.icon) : null;
   return (
     <Button
@@ -121,22 +190,8 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   onSelectAllMatching,
 }) => {
   const { t } = useObjectTranslation();
-  // [ADR-0066 D4 / objectui#3492] Capability gate, applied to the whole def set
-  // before anything renders — the fourth action surface joining the list
-  // toolbar (`action-bar.tsx`), the record header (`containers.tsx`) and the row
-  // kebab (`RowActionMenu.tsx`). Without it, an action that those three hide
-  // from an unentitled user reappeared here the moment they ticked a checkbox.
-  // Same rule as the engine: an empty declaration always passes, several are
-  // AND-ed, and unknown capabilities fail OPEN (see `useCapabilityGate`) — the
-  // server stays the authority. Legacy string `actions` carry no declaration to
-  // gate on, so they are untouched.
-  const mayInvoke = useCapabilityGate();
-  const permittedDefs = React.useMemo(
-    () => (actionDefs ?? []).filter(d => mayInvoke(d?.requiredPermissions) && !isActionSwitchedOff(d)),
-    [actionDefs, mayInvoke],
-  );
-  const hasDefs = permittedDefs.length > 0;
-  const hasLegacy = Array.isArray(actions) && actions.length > 0;
+  // The one resolver the selection's context menu reads too (objectstack#28434).
+  const items = useBulkActionItems({ selectedRows, actions, actionDefs, objectFields });
   // Render whenever rows are selected — this bar is the single, canonical
   // selection indicator (count + Clear). Bulk-action buttons are optional: with
   // none configured it still surfaces "N selected / Clear", so the embedded
@@ -217,23 +272,15 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
         </span>
       </span>
       <div className="flex items-center gap-1.5 ml-3">
-        {hasDefs && permittedDefs.map(def => (
+        {items.defs.map(def => (
           <BulkActionButton
             key={def.name}
             def={def}
             selectedRows={selectedRows}
-            objectFields={objectFields}
             onActionDef={onActionDef}
           />
         ))}
-        {/* Legacy names render ALONGSIDE defs, not only in their absence: after
-            `resolveBulkActions` folds every resolvable name into `actionDefs`,
-            what's left here is a disjoint set (a handler-registered name the
-            object never declared). Hiding it whenever any def existed made a
-            view that mixes both silently lose half its buttons. */}
-        {hasLegacy && actions.map(action => {
-          const actionStr = String(action).toLowerCase();
-          const isDestructive = actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy');
+        {items.legacy.map(({ name: action, destructive: isDestructive }) => {
           const Icon = isDestructive ? Trash2 : null;
           return (
             <Button
