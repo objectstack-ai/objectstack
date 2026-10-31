@@ -5793,12 +5793,15 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * - `neutral`: neither; the badge keeps its arrow and percentage, muted.
    *
    * The arrow always shows which way the NUMBER moved; polarity decides only
-   * the colour. Nothing infers a polarity from the aggregated field's name.
+   * the colour. Both read the aggregated value BEFORE `invert`, so polarity is
+   * declared against the raw aggregate: an error rate shown as uptime is
+   * `lower`. Nothing infers a polarity from the aggregated field's name.
    */
   polarity: DatasetMeasurePolarity.optional().describe(
     'Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) '
     + 'or neutral (no good/bad colour). Colours the trend badge, computed (`compareTo`) or static (`trend`); '
-    + 'undeclared keeps rise green, fall red',
+    + 'undeclared keeps rise green, fall red. The badge and polarity read the aggregate before `invert`, so '
+    + 'declare polarity against the raw value: an error rate shown as uptime is lower',
   ),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
