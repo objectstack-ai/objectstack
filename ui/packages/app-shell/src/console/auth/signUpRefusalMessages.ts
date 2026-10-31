@@ -41,6 +41,7 @@ export function signUpRefusalMessages(
   const userExists = t('auth.register.errors.userExists', {
     defaultValue: 'An account with this email already exists. Try signing in instead.',
   });
+  const captchaFailed = signUpCaptchaFailedMessage(t);
   return {
     USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: userExists,
     USER_ALREADY_EXISTS: userExists,
@@ -65,5 +66,21 @@ export function signUpRefusalMessages(
       defaultValue:
         "This email's domain is not allowed to register here. Use your organization email, or ask an administrator for an invitation.",
     }),
+    // The opt-in Turnstile challenge (served `features.turnstileSiteKey`):
+    // the token was missing or Cloudflare rejected it. One retry message,
+    // never the provider's text.
+    MISSING_RESPONSE: captchaFailed,
+    VERIFICATION_FAILED: captchaFailed,
   };
+}
+
+/**
+ * The sign-up form's one message for a Turnstile challenge that failed,
+ * expired, could not load, or whose token the server refused — the
+ * `captchaFailed` label both register pages and the first-run setup page pass.
+ */
+export function signUpCaptchaFailedMessage(t: TranslateFn): string {
+  return t('auth.register.errors.captchaFailed', {
+    defaultValue: 'The security check did not complete. Please try it again.',
+  });
 }

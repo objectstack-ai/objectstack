@@ -483,6 +483,7 @@ const ja = {
       undonePrefix: "取り消し済み — ",
       succeeded: "成功 {{count}} / {{total}}",
       resultFailed: " · 失敗 {{count}}",
+      succeededRecords: "成功したレコード",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
       cancel: "キャンセル",
@@ -2156,6 +2157,8 @@ const ja = {
       popupBlockedDescription: "ブラウザが新しいタブを開くのをブロックしました。",
       popupBlockedAction: "新しいタブで開く",
       noRecordId: "この操作は 1 件のレコードに対して実行されますが、利用できるレコード ID がありません。",
+      fillRequiredThenRetry: "{{fields}} を入力してから、もう一度「{{action}}」を実行してください。",
+      fillRequiredFirst: "先に {{fields}} を入力してください。",
     },
     shortcuts: {
       title: "キーボードショートカット",
@@ -2690,9 +2693,11 @@ const ja = {
       signInText: "サインイン",
       socialButton: "{provider} で新規登録",
       orText: "またはメールアドレスで続行",
+      captchaRetry: "再試行",
       errors: {
         userExists: "このメールアドレスのアカウントはすでに存在します。代わりにサインインしてください。",
         selfRegistrationClosed: "このシステムではセルフ登録を受け付けていません。管理者に招待を依頼してください。",
+        captchaFailed: "セキュリティチェックが完了しませんでした。もう一度お試しください。",
         emailDomainNotAllowed: "このメールアドレスのドメインはここでの登録が許可されていません。組織のメールアドレスを使用するか、管理者に招待を依頼してください。",
         invitationSentTo: "この招待は {{email}} 宛てに送信されました。招待を承諾するには、そのアドレスで登録してください。",
         invitationAddressOnly: "この招待は送信先のアドレスでのみ承諾できます。そのアドレスで登録してください。",
@@ -3306,6 +3311,7 @@ const ja = {
   report: {
     total: "合計",
     totals: "合計",
+    subtotal: "小計",
     loading: "読み込み中…",
     forbiddenMessage: "このレポートのデータを表示する権限がありません。",
     dateRange: {

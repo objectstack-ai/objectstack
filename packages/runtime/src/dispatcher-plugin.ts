@@ -1766,6 +1766,35 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     }
                 });
 
+                // ADR-0143 D5 — the connector connection door, registered
+                // before `/automation/:name` for the reason above. The callback
+                // is a literal path, so it is registered ahead of `/:name/connection`.
+                server!.get(`${base}/automation/connectors/oauth/callback`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/connectors/oauth/callback', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                for (const verb of ['get', 'post', 'delete'] as const) {
+                    server![verb](`${base}/automation/connectors/:name/connection`, async (req: any, res: any) => {
+                        try {
+                            const result = await dispatcher.dispatch(
+                                verb.toUpperCase(),
+                                `/automation/connectors/${encodeURIComponent(req.params.name)}/connection`,
+                                undefined,
+                                req.query,
+                                { request: req },
+                            );
+                            sendResult(result, res);
+                        } catch (err: any) {
+                            errorResponse(err, res);
+                        }
+                    });
+                }
+
                 server!.get(`${base}/automation/_status`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('GET', '/automation/_status', undefined, req.query, { request: req });

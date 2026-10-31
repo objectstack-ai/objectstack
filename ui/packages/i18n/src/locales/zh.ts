@@ -720,6 +720,7 @@ const zh = {
       undonePrefix: '已撤销 — ',
       succeeded: '成功 {{count}} / {{total}}',
       resultFailed: ' · 失败 {{count}}',
+      succeededRecords: '成功的记录',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',
       cancel: '取消',
@@ -1479,6 +1480,7 @@ const zh = {
   report: {
     total: '总计',
     totals: '汇总',
+    subtotal: '小计',
     loading: '加载中…',
     forbiddenMessage: '你没有查看该报表数据的权限。',
     dateRange: {
@@ -1942,6 +1944,8 @@ const zh = {
       popupBlockedDescription: '浏览器阻止了新标签页的打开。',
       popupBlockedAction: '在新标签页打开',
       noRecordId: '此操作针对单条记录，但没有可用的记录 ID。',
+      fillRequiredThenRetry: '请先填写{{fields}}，然后重新执行“{{action}}”。',
+      fillRequiredFirst: '请先填写{{fields}}。',
     },
     shortcuts: {
       title: '键盘快捷键',
@@ -2751,9 +2755,11 @@ const zh = {
       signInText: '登录',
       socialButton: '使用 {provider} 注册',
       orText: '或使用邮箱继续',
+      captchaRetry: '重试',
       errors: {
         userExists: '该邮箱已被注册，请直接登录或更换邮箱。',
         selfRegistrationClosed: '本系统未开放自助注册，请联系管理员获取邀请。',
+        captchaFailed: '安全验证未完成，请重试。',
         emailDomainNotAllowed: '该邮箱的域名不允许在此注册，请使用组织邮箱，或联系管理员获取邀请。',
         invitationSentTo: '此邀请发送至 {{email}}，请使用该邮箱注册以接受邀请。',
         invitationAddressOnly: '此邀请只能由收到邀请的邮箱接受，请使用该邮箱注册。',
