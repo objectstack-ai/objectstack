@@ -324,6 +324,10 @@ export const SPEC_ACTION_KEYS = [
   // question.
   'requiresMembershipReach',
   'resultDialog',
+  // Added to `ActionSchema` by objectstack#27944: the param dialog's submit
+  // button label. Listed for this array's contract alone, like `description`
+  // above; the dialog reading it is the console's own follow-up.
+  'submitText',
   'successMessage',
   'target',
   'type',
