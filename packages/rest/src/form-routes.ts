@@ -136,11 +136,12 @@ function thankYouAnswerFields(
     const fields: Record<string, string | number> = {};
     let kept = 0;
     for (const name of names) {
-        // An OWN declaration only: a name such as `constructor` must not find
-        // the map's prototype.
-        const type = Object.prototype.hasOwnProperty.call(declared, name) ? declared[name]?.type : undefined;
+        // A name that is no declared field (a system column, a prototype key
+        // such as `constructor`) has no string `type` here: dropped.
+        const type = declared[name]?.type;
         if (typeof type !== 'string' || !RUNTIME_OWNED_FIELD_TYPES.has(type)) continue;
-        if (!Object.prototype.hasOwnProperty.call(record, name)) continue;
+        // Absent (masked, stripped, never generated), `null`, or any other
+        // shape: dropped.
         const value = (record as Record<string, unknown>)[name];
         if (typeof value !== 'string' && typeof value !== 'number') continue;
         fields[name] = value;
