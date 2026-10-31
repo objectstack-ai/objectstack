@@ -96,6 +96,7 @@
     "CROSS_FIELD_COMPARISON_CLASSES": "src/data/filter-cross-field-comparison-class.ts#CROSS_FIELD_COMPARISON_CLASSES (const)",
     "CROSS_FIELD_COMPARISON_TYPE_CLASSES": "src/data/filter-cross-field-comparison-class.ts#CROSS_FIELD_COMPARISON_TYPE_CLASSES (const)",
     "CROSS_FIELD_NO_CLASS_REASONS": "src/data/filter-cross-field-comparison-class.ts#CROSS_FIELD_NO_CLASS_REASONS (const)",
+    "CURRENCY_FRACTION_DIGITS": "src/data/currency-fraction-digits.ts#CURRENCY_FRACTION_DIGITS (const)",
     "CalendarDateValue": "src/data/field-value.zod.ts#CalendarDateValue (type)",
     "CalendarDateValueSchema": "src/data/field-value.zod.ts#CalendarDateValueSchema (const)",
     "ClockTimeValue": "src/data/field-value.zod.ts#ClockTimeValue (type)",
