@@ -396,7 +396,8 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/forms/:slug', family: 'forms', source: 'route-manager', disposition: 'public',
     note: 'anonymous public-form spec resolution — browser form runner, not authenticated SDK surface' },
   { route: 'POST /api/v1/forms/:slug/submit', family: 'forms', source: 'route-manager', disposition: 'public',
-    note: 'anonymous public-form submission' },
+    responseSchema: 'PublicFormSubmitResponseSchema',
+    note: 'anonymous public-form submission. Answers BARE (201, no envelope), so the named schema is the whole body: the created id, plus the stored values of the engine-generated fields the form\'s thank-you panel names. Conformance: public-form-submit-answer.test.ts parses the registered handler\'s answer with this schema and pins this row' },
 
   // ── analytics (semantic layer) ────────────────────────────────────────────
   { route: 'POST /api/v1/analytics/dataset/query', family: 'analytics', source: 'route-manager', disposition: 'sdk', client: 'analytics.queryDataset' },
