@@ -216,6 +216,28 @@ function useDeclaredActionShown(action: ActionDef, predicateRecord: ReturnType<t
 }
 
 /**
+ * The reader's own state (`ActionSchema.pressed`, objectstack#27946): does the
+ * action DECLARE a pressed predicate, and does it hold for this record?
+ *
+ * `undefined` = no predicate, so the lever is a plain button and carries no
+ * `aria-pressed`; otherwise the verdict, drawn as `aria-pressed` and the
+ * pressed face. Same entry and record binding as `visible` above, with
+ * `throwOnError` so a predicate that cannot be evaluated answers `false` — the
+ * plain button, never a claim that the reader acted — and is reported once. A
+ * boolean is refused by the spec at parse (a constant is a style, not a
+ * reader's state), so it gets no reading here. Display only: the verdict never
+ * gates, greys or routes the action.
+ */
+function useDeclaredActionPressed(action: ActionDef, predicateRecord: ReturnType<typeof usePredicateRecordContext>): boolean | undefined {
+  const declared = typeof action.pressed !== 'boolean' && hasDeclaredVisibilityGate(action.pressed);
+  const isPressed = useCondition(declared ? toPredicateInput(action.pressed) : undefined, predicateRecord, {
+    throwOnError: true,
+    label: `declared action "${action.name ?? action.label ?? 'action'}" (pressed)`,
+  });
+  return declared ? isPressed : undefined;
+}
+
+/**
  * Report whether a declared action is drawn, and withdraw the report when the
  * reporter unmounts (objectstack#25877). `onDrawn` is the toolbar's stable
  * setter, so the effect re-runs only when the verdict or the name moves.
@@ -327,6 +349,7 @@ const DeclaredActionButton: React.FC<{
   // these two lines carried — which existed only because `ActionDef.disabled`
   // could not describe the envelope arm — have nothing left to reach around.
   const isDisabledPred = useCondition(toPredicateInput(action.disabled), predicateRecord);
+  const pressed = useDeclaredActionPressed(action, predicateRecord);
   // Called up here with the other hooks: the `visible` gate below returns early.
   const reasonId = React.useId();
   const labelId = React.useId();
@@ -651,13 +674,19 @@ const DeclaredActionButton: React.FC<{
       variant={variant as any}
       disabled={disabledByPredicate || loading}
       aria-describedby={disabledReason ? reasonId : undefined}
+      aria-pressed={pressed}
       onClick={handleClick}
       // Amber warning treatment for an override (objectui#5178) — the same
       // palette the approvals surfaces already use for "waiting / attention",
       // via `cn()` over the outline variant rather than a new Button variant
       // (`packages/components/src/ui/**` is a no-touch Shadcn zone).
-      className={cn(isOverride
-        && 'border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300')}
+      // The pressed face is Shadcn's toggle-on colours keyed off the attribute,
+      // the record header's spelling (`PageHeaderActions`).
+      className={cn(
+        isOverride
+          && 'border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
+        pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
+      )}
       data-testid={`declared-action-${action.name}`}
       // Pinnable, and readable by an E2E/QA pass without matching on copy.
       data-override-decision={isOverride ? 'true' : undefined}
