@@ -5304,6 +5304,7 @@ export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
 export * from './widgets/GridField.js';
+export * from './widgets/lookupAutofill.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
 export * from './widgets/SliderField.js';
