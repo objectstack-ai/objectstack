@@ -2,8 +2,8 @@
   "number": 27731,
   "kind": "issue",
   "title": "spec(migrations): 219 semantic entries still carry the \"No backticks in surface\" workaround comment, and one family test still forbids a backtick, after #27532 fixed the renderer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "documentation",
     "domain:spec",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T21:28:42Z",
-  "updated_at": "2026-10-30T02:56:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T07:55:49Z",
+  "closed_at": "2026-10-31T07:54:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27731",
   "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a should-fix that a contract review marked as a follow-up sweep (record 6508719840 on PR #27724, ④). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade yet: triage sets the grade.\nReader: the `domain:spec` seat, next PR a comment-and-test sweep in `packages/spec/src/migrations/entries/semantic/` and `packages/spec/src/system/`.\nDedupe (open AND closed): semantic search \"semantic migration entry No backticks in surface comment stale upgrade guide code span sweep\" → 12 hits; only #27532 (the renderer fix itself, whose PR leaves this residue) is related. **New.**\nreach: no shipped byte is wrong (the comments are source comments; the kept assertion still passes); the cost is governed source text that states something false about the renderer, and a test that refuses a future backtick for a reason that no longer exists.\n\n## Measured (`origin/main` `ef359b95`, with PR #27724's renderer fix in mind)\n\n- `grep -rl \"No backticks\" packages/spec/src/migrations/entries/semantic | wc -l` → **219** files carry the comment \"No backticks in `surface` — build-upgrade-guide renders it inside a code span already, and a nested backtick would close it.\" (#27532's card said only one entry avoided the defect this way; the count is 219.)\n- `packages/spec/src/system/compliance-families-retirement.test.ts` L260–L262 asserts `expect(entry!.surface).not.toMatch(/BACKTICK/)` with the same stale reason (\"the upgrade guide renders it inside a code span AND a table cell\"). PR #27724 dropped the identical assertion from its two siblings (`export-job-family-retirement.test.ts`, `package-upgrade-family-retirement.test.ts`) and missed this one.\n- Once PR #27724 lands, `build-upgrade-guide.ts` fences every `surface` by CommonMark §6.1 (`scripts/lib/markdown-code-span.ts`), so a backtick inside a surface renders correctly and the comment's claim is false.\n\n## Wanted\n\n- Delete the workaround comment from all 219 entry files (mechanical; no `surface`, `replacement`, `reason` or `acceptanceCriteria` byte moves).\n- Drop the one remaining `not.toMatch(/BACKTICK/)` assertion and its stated reason in `compliance-families-retirement.test.ts`.\n- Lands after PR #27724 (`Blocked-by:` it until it merges). No changeset owed if nothing published moves (comments in `src/**` do not ship as schema; confirm against the package's `files[]`).\n\n**Clause-②:** likely `no`. **Metadata-protocol:** likely `none`.\n\ntype: Bug"

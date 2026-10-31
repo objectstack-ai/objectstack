@@ -1,0 +1,34 @@
+{
+  "number": 28359,
+  "kind": "pull_request",
+  "title": "docs(qa): RUNNER.md wave-3 checklist accuracy slice S8",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T06:21:17Z",
+  "updated_at": "2026-10-31T07:13:11Z",
+  "closed_at": "2026-10-31T07:13:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T07:13:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28359",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-zhuang\"} -->\n_Requested by **Sam** · [project thread](https://claude.ai/code/project/chan_01LjZwNRFiG2fkp8SNf6rHNx?thread=cmsg_01LjZwNRFiG2fkp8SNf6rHNxR1z3N3pSCkLgjLSvvp72rM)_\n\nFixes #28342\nPart of #27377\n\n## 维护者速读\n\n- **改了什么**:只改 `docs/qa/platform-checklist/RUNNER.md` 一个文件:三条过时的环境说明按今天的代码改正,另加一条\"共享检出要用 `--no-compile` 启动\"的环境规则。\n- **为什么改**:v18.3.0 第三波测试发现这几处说明和代码对不上,跑测的 agent 会照着错的说明走弯路或误报缺陷。\n- **风险与回滚**:纯文档,不动产品代码、不发布;回滚即 revert 本 PR。\n- **先看**:`RUNNER.md` 新增的 `--no-compile` 条目;地图条目(#25889 之后改为列表);cookie 条目里新增的 Packaged Automation 页面。\n- **两分钟验证**:`node scripts/check-platform-checklist.mjs`,预期打印 `check-platform-checklist: OK`。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\nEach row was re-verified against `origin/main` at `488b3ed0` before editing; all four still held, so none is reported as fixed upstream.\n\n| census row | run record | RUNNER entry | what the code says today |\n|---|---|---|---|\n| 61 | #27409 | the cookie note (\"The cookie is not decorative\") | The Setup app's Packaged Automation page (`automation:packaged`) sends every request as a bare `fetch` with `credentials: 'include'` and no `Authorization` header (`ui/packages/app-shell/src/views/setup/PackagedAutomationPage.tsx`, `fetchRuntimeStates` / `fetchFlowMetadata` / toggle / clone). A token-only session renders a load failure ending `HTTP 401` in the page's alert box. The note now names this page beside storage. |\n| 68 | #27409 | the objectui `automated.ref` entry (jsdom unit suite command) | `pnpm --filter @object-ui/PKG exec vitest run` runs in the package directory, and `ui/scripts/vitest-invocation-guard.mjs` (called by `ui/vitest.config.mts`) refuses any run whose Vitest root is not `ui/`. The entry now gives `cd ui && pnpm exec vitest run --maxWorkers=2 packages/PKG/src/FILE.test.ts` and names the refused form. |\n| 198 | #27438 | the map banner entry | Since #25889 a style-load failure unmounts the map and shows the record list (`data-testid=\"map-style-fallback\"`): the amber alert banner, a \"Try the map again\" button and a \"Locations\" list built from `filteredMarkers`. There is no canvas and no marker element (`ui/packages/plugin-map/src/ObjectMap.tsx`). The entry now describes the list, gives the current banner wording, names `OS_CONSOLE_MAP_STYLE_URL` as the deployment's style rung, and says what to score. |\n| added (comment 6539852711) | #27481 | new environment fact: boot with `--no-compile` on a shared checkout | A default `os dev` compiles `objectstack.config.ts` into `CWD/dist/objectstack.json` before it starts (`devCompilesAtBoot()` in `packages/cli/src/utils/dev-compile-at-boot.ts`), and its watch loop recompiles into the same file (`startWatchRecompile()` in `packages/cli/src/commands/dev.ts`). The path resolves against the working directory, not `OS_HOME`, so `--fresh` does not isolate it. One rule covers every item whose `fixtures.requires` carries `pnpm dev -- --fresh -p PORT --seed-admin`. As the card says, none of the 37 items is edited. |\n\nEach edit makes a clause more precise, and none is weakened. The `--no-compile` rule keeps the caveats the code imposes: a missing artifact is still compiled, a stale artifact draws a warning, and `--no-compile` does not stop the watch loop, so the rule also adds `--no-watch` for trees where someone may be editing sources.\n\n## Tests\n\nDocs only. No test applies, and no ablation is owed because no tested behaviour changed.\n\n## Acceptance notes\n\n- Edit shape: `RUNNER.md` carries no `revision` / `history` (those exist only on the area-file items), so the card's \"revision +1, one history row\" shape has nothing to apply to here. The run records are cited inline in each entry instead.\n- Changeset: none. This is a docs-only change under `docs/qa/` and nothing in it is published. Label `skip-changeset`.\n- No product defect was found on reading. All four findings were stale text.\n\n## Verification\n\nAll gates below ran at head `a18d8106`, with each exit code captured before any pipe.\n\n<details><summary>dispatch-gates --commands (16 derived) and the --ran reconciliation</summary>\n\n```\nnode scripts/check-adr-links.mjs :: exit 0\nnode scripts/check-adr-links.mjs --self-test :: exit 0\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/ci/plan-test-core-shards.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:ci-filter-parity :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:platform-checklist :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:watch-hint-literal :: exit 0\n\n✓ dispatch-gates --ran: 16 derived famil(ies) accounted for — 16 run, 0 NOT-MEASURED (a DERIVED zero — all 16 recorded an exit code and none of them is 3).\n```\n\n`check:platform-checklist`: `check-platform-checklist: OK — 16 areas, 352 items (347 active, 1 planned) …`. The first attempt at `check:doc-formula-expressions` exited 3 (PREREQUISITE NOT MET: `@objectstack/formula` and `@objectstack/lint` were not built). After the build that the gate prescribes, it exited 0, and the exit 0 is the value recorded above.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QUs3BrXjSo6hk7EnLdjcja)_\n"
+}

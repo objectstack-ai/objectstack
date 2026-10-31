@@ -1,0 +1,33 @@
+{
+  "number": 28281,
+  "kind": "issue",
+  "title": "audit: an MCP-started api action that forwards to another action route on this server leaves two action_invocation rows joined by time alone (outer row lacks the target, inner row lacks the forward mark)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T02:44:33Z",
+  "updated_at": "2026-10-31T05:58:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28281",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a should-fix a contract review carried out of scope (contract review 6537892848 on PR #28171, card #27908, S1 and S2). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade and no lane: triage sets both (the code is `packages/runtime` and `packages/plugins/plugin-audit`).\nReader: the lane triage assigns.\nDedupe (open AND closed): search \"action_invocation audit forwarded api target\" → #27908 (the parent card, which this follows), #28178 (OAuth bearer on an api forward, a different fault), #27738, #28217 (closed, other api-forward faults). None covers joining the two audit rows. **New.**\nreach: **read in code, NOT measured through a public door.** It applies after PR #28171 lands.\n\n## What the code says (after PR #28171)\n\n- An action invocation writes one `sys_audit_log` row with `action: action_invocation`, written at the door from its own envelope; `surface` is `rest` or `mcp` (`packages/runtime/src/action-invocation-audit.ts`, `recordActionInvocation`).\n- A `type: api` action whose `target` is another action route on this server forwards through the dispatcher. The inner REST door writes its own `rest` row. The outer `mcp` row exists with the same caller and instant, but its metadata names only `action_name` and `branch: api`, not the target. So an administrator joins the two rows by time alone, and the inner row reads as a person's REST call for an invocation an agent started.\n\n## Wanted\n\n- The outer row's metadata carries the `api` target path.\n- The inner REST door records the forward mark's value (which it already reads for the loop refusal) as `forwarded_from` in its metadata. This is a hint, not a surface: a forged mark mislabels the hint and nothing else, and the inner row's `surface: rest` stays true.\n- A test that pins both fields on an MCP → api → action-route forward.\n\n## Also noted (S2, not blocking)\n\n`recordActionInvocation` is awaited on the answer path of every action call, so one ledger insert sits in front of each response. The auth-event sink does the same, so it is the house pattern. If action latency ever becomes a measured complaint, the row could be written after the answer returns (fire-and-report). There is nothing to do until then; it is recorded here so the option is not lost.\n\nRelated: #27908 / PR #28171 (contract review 6537892848, S1 and S2).\n\nBlocked-by: #28171\n"
+}

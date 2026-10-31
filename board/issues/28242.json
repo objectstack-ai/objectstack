@@ -2,8 +2,8 @@
   "number": 28242,
   "kind": "issue",
   "title": "Header action shows it is already pressed: page:header and DeclaredActionsBar read action.pressed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,15 +16,21 @@
     "enhancement",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T18:33:52Z",
-  "updated_at": "2026-10-30T21:57:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T05:05:46Z",
+  "closed_at": "2026-10-31T05:02:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28242",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the ui half of #27946, whose contract half lands in PR #28235 (claim 6528706898, surface amendment 6528737693; carried to the seat by os-dev-report 6530445276). ⛔ Not a claim. Triage sets the lane and grade.\nReach: any record page header action the reader toggles. HotCRM `mark_article_helpful` / `mark_article_not_helpful` on a knowledge article cannot tell the reader they already voted.\n\n## Observed (once PR #28235 is on `main`)\n\n- `ActionSchema.pressed` is declared: an evaluated expression (no boolean arm) over `record` and `user`, judged by lint in record scope; `action pressed` is a served-row site, so an `attachedOnRead` block reads in it.\n- Liveness `packages/spec/liveness/action.json` `pressed` is `planned` with an author warning; the expression ledger row `cel-action-pressed` is `experimental`; `ui/packages/core/src/actions/actionKeys.ts` lists the key inventory-only, `ActionDef` does not derive it.\n\n## Wanted\n\n- `page:header` buttons and `DeclaredActionsBar` evaluate `action.pressed` per record and draw `aria-pressed` with a pressed face. Test plus ablation.\n- `ActionDef` derives the key (drop the inventory-only comment in `actionKeys.ts`).\n- In the same PR, re-state together: liveness `pressed` `planned` → `live` (drop `authorWarn` / `authorHint`), and the ledger `cel-action-pressed` → enforced with its fail face (contract review should-fix on #28235). Remove the \"not yet drawn\" callout in `actions.mdx`.\n\nDedupe words: action pressed state, aria-pressed header action, toggle action active.\n\nLinks back: #27946, PR #28235.\n\nBlocked-by: #28235\n"

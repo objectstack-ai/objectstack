@@ -2,8 +2,8 @@
   "number": 28252,
   "kind": "issue",
   "title": "Save toast shows the notice a hook or flow attached to the save",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,15 +16,21 @@
     "enhancement",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T19:24:25Z",
-  "updated_at": "2026-10-30T20:58:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T05:06:52Z",
+  "closed_at": "2026-10-31T05:02:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28252",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the console half of #28000, whose contract half lands in PR #28247 (os-dev-report 6531067088; contract review 6531609713 PASS). ⛔ Not a claim. Triage sets the lane and grade.\nReach: any app whose save sets something in motion the user should hear about (HotCRM: a deal sent for approval on save, #27380 row 3).\n\n## Observed (once PR #28247 is on `main`)\n\n- The single-record create / update answer carries an optional `notice` string (info severity, distinct from `warnings`); `@objectstack/client` mirrors it. No console surface reads it.\n\n## Wanted\n\n- The save toast shows `notice` with, or in place of, the record-named message: AppContent `crud_success`, `RecordFormPage`, and the inline edit save. Test plus ablation.\n- Contract review should-fix (b): decide one toast per write (following #27380 row 2's one-toast rule) and name in the PR which surfaces show it.\n\nDedupe words: save toast message from hook, notice toast, write answer notice console.\n\nLinks back: #28000, PR #28247, #27380.\n\nBlocked-by: #28247\n"

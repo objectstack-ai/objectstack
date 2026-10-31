@@ -1,0 +1,37 @@
+{
+  "number": 28323,
+  "kind": "pull_request",
+  "title": "docs(skills,adr): `homeAmount.rateDate` is `date`/`datetime`, the `currency` row lists all four `currencyConfig` keys, and ADR-0144 Open item 1 records the settled pointer spelling",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T04:38:52Z",
+  "updated_at": "2026-10-31T05:48:33Z",
+  "closed_at": "2026-10-31T05:48:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-31T05:48:31Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28323",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DU2BHFXKvCJE9K2bko2dD6o)_\n\ndomain:skills#2 · os-elon-musk · session_016WV4d156vwPo83g9GQuJSt\n\nFixes #28203\n\nClause-②: no (authoring text and a dated ADR note catch up to what PR #28096 already shipped; no schema, accept set, error code or public surface changes)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`field-types.md` 的 `homeAmount` 段把 `rateDate` 写成 `date`/`datetime`；Numbers 表 `currency` 行列出 `currencyConfig` 的全部四个键；ADR-0144 Open item 1 加 2026-10-31 注记，记下 PR #28096 定下的拼写 `rateDate` / `rateField`。\n- 为什么改：PR #28096 的契约复审 6526217217 should-fix 3–5：spec 接受 `date` 与 `datetime`（`HOME_AMOUNT_RATE_DATE_TYPES`），skill 只教了 `date`；行里只列了两个键，违反本文件「配置列只列真实键」的规则；ADR 写明「每个答案落地后本记录随之修订」。\n- 风险与回滚：只改作者指引文字与 ADR 注记，没有代码、schema 或 changeset。ADR 原文按 Prime Directive #13 保留，注记追加在条目下。回滚即 revert 本 PR。\n- 先看：`docs/adr/0144-*.md` 的 Open item 1 注记，与 `skills/objectstack-data/rules/field-types.md` 的两处单行改动。\n- 两分钟验证：`node scripts/check-skills-token-ratchet.mjs`（field-types.md 3191 / 3207）与 `pnpm check:adr-symbol-anchors`（2852 → 2855 个锚点全部解析）。\n- 需要你做的：契约复审（CONTRACT_REVIEW_TIER）尚欠，由席位安排；本 PR 为 Tier H，需要治理审批人（os-zhuang 或 hotlong）批准，并由维护者手动合并。\n\n## What changes\n\n- `skills/objectstack-data/rules/field-types.md`\n  - The `homeAmount` paragraph says `rateDate` names a `date`/`datetime` field (was `date`), matching `packages/spec/src/data/object.zod.ts#HOME_AMOUNT_RATE_DATE_TYPES` (`new Set(['date', 'datetime'])`) and the `rateDate` describe in `HomeAmountSchema` (\"a `date` or `datetime` field\"). One line re-wrapped to keep the paragraph's width.\n  - The Numbers table `currency` row lists `currencyConfig` as `(currencyMode, defaultCurrency, currencyField, homeAmount)`: the four keys of `CurrencyConfigSchema` at `origin/main` `57f8ca2f`, which is a closed `strictObject` with exactly those keys.\n- `docs/adr/0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md`: Open item 1 gains a `*Note (2026-10-31):*` in the same form as the item 11, 12 and 13 notes: settled as `rateDate` / `rateField` in PR #28096 (`73b72709`), the three pointers required with no default, `rateDate` a `date` or `datetime` field, `rateField` a `number` field, both stored fields `readonly: true`. The recorded item text is kept unchanged. Three new `path#symbol` anchors: `field.zod.ts#HomeAmountSchema`, `object.zod.ts#HOME_AMOUNT_RATE_DATE_TYPES`, `object.zod.ts#refuseDishonestHomeAmount`.\n\n## Why\n\nShould-fixes 3, 4 and 5 of triage contract review [`6526217217`](https://github.com/objectstack-ai/objectstack/pull/28096#issuecomment-6526217217) on PR #28096 (card #27191). They were left out so the reviewed head could land unchanged.\n\n## Verification\n\n- Token ratchet: `field-types.md` 3181 → 3191 tokens against a ceiling of 3207 (headroom 26 → 16). The +10 tokens (+39 bytes) fit the existing headroom, so no ceiling raise and no restatement cut were needed.\n- `check:adr-symbol-anchors` exit 0: base 2852 anchors (604 declaration) → head 2855 (607 declaration), all resolve. `check:adr-links` exit 0, 944 → 944. `adr-index --report` OK, `docs/adr/README.md` current (not regenerated). `check:adr-anchors` exit 0.\n- `check:pm-skill-id-lint` exit 0, `check:pm-skill-ratchet` exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` on the committed head `eb4b9762` derives 39 families. All 39 ran in this worktree after `pnpm install --frozen-lockfile --ignore-scripts` and a packages build, every one exit 0; `--ran` reconciles 39 derived, 39 run, 0 NOT-MEASURED, 0 UNRUN.\n- No changeset: the `skip-changeset` label is added (authoring text and ADR only).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (`skip-changeset`; both lines filled in here)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the lane's maintainer summary).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4d156vwPo83g9GQuJSt\n"
+}

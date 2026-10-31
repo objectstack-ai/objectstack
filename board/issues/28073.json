@@ -2,8 +2,8 @@
   "number": 28073,
   "kind": "issue",
   "title": "ui: the `PackagedAutomationPage` test fixture still carries the old seven-sentence flow clone notice after #27886",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T11:34:45Z",
-  "updated_at": "2026-10-30T12:14:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T04:52:26Z",
+  "closed_at": "2026-10-31T04:51:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28073",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFound by the #27886 card thread (PR #28072) and filed by the `domain:server` seat. Outside that PR's file surface (`ui/` is not server-lane). ⛔ Not a claim.\n\n## What is wrong\n\nPR #28072 rewrites `FLOW_CLONE_NOTICE` (`packages/runtime/src/flow-clone.ts`) to one line: \"The copy runs alongside the original until you switch one of them off, and it still uses the same subflows, actions and objects as the original.\"\n\n`ui/packages/app-shell/src/views/setup/PackagedAutomationPage.test.tsx` keeps its own copy of the notice (`CLONE_NOTICE`, ~L100-101) with the old seven-sentence text. The tests stay green, because the stubbed door returns the fixture and the page renders it verbatim, but the fixture no longer matches what the server sends.\n\n## Expected\n\nThe fixture carries the current notice text once #28072 merges, so the page tests read what the server sends. Test-only.\n\nBlocked-by: #28072"

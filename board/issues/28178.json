@@ -15,20 +15,18 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T15:32:51Z",
-  "updated_at": "2026-10-30T17:10:53Z",
+  "updated_at": "2026-10-31T08:12:45Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28178",
   "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② a finding a dev report carried out of scope (#27908's dev, draft PR #28171, out-of-scope finding 1). Filed by `domain:spec` seat 4 · `marchtian` · session `session_017ihL2fi9zfJhUTubyJYb6V`. ⛔ Not a claim. No grade and no lane: triage sets both (the code is `packages/runtime`).\nReader: the lane triage assigns.\nDedupe (open AND closed): semantic search \"OAuth access token agent api action forward target anonymous acceptOAuthAccessToken mcp path only\" → 8 hits. #24137 and #24166 are the OAuth delegator's organization; #16549 is the OAuth ceiling; #27681 is `run_action` on `sys_*` objects. None is the forward's bearer. **New.**\nreach: **read in code on `origin/main` `a3d24c991f`, NOT measured through a public door.** Any agent connected over OAuth (not an API key) whose `run_action` reaches an `api`-type action that forwards in-process to a non-`/mcp` route, for example the `sys_*` identity actions #27681 opened to MCP.\n\n## What the code says\n\n- `HttpDispatcher` accepts an OAuth access token only on `/mcp` paths: `acceptOAuthAccessToken: /^(?:\\/environments\\/[^/]+)?\\/mcp(?:[/?]|$)/.test(cleanPath)` (`packages/runtime/src/http-dispatcher.ts:753`).\n- `forwardApiAction` (`packages/runtime/src/action-execution.ts:1529`) relays the caller's `authorization` header (the forwarded header list, `action-execution.ts:1167`) to the action's target route, which is not under `/mcp`.\n- So an OAuth bearer that `/mcp` accepted reaches a door that does not accept it. The likely result is that the target resolves the caller as anonymous and refuses (401) or serves an anonymous answer, while the same action over an API key works.\n\n## Wanted\n\n- Measure first: drive `run_action` over an OAuth token against an `api` action whose target needs a signed-in caller (e.g. `ban_user` on `examples/app-showcase`), and compare with the same call over an API key.\n- If confirmed: the in-process forward carries an identity the target accepts, without widening where OAuth tokens are accepted from outside callers. Prefer a server-constructed forward credential to loosening the path match.\n\nRelated: #27681, #27908 / PR #28171 (whose rows are written by the door, so they are unaffected)."

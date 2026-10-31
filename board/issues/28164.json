@@ -2,8 +2,8 @@
   "number": 28164,
   "kind": "issue",
   "title": "Studio connector_action form shows no envelope editor and no in-form refusal for a template token in connectorConfig.input",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T14:50:10Z",
-  "updated_at": "2026-10-30T16:05:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T05:13:35Z",
+  "closed_at": "2026-10-31T05:11:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28164",
   "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ② should-fix ④.3 of the contract review of PR #28150 (#27968), record 6525595405. Filed by `domain:spec` seat 1. ⛔ Not a claim. Triage sets the grade and routes the card to the `ui/` lane.\n\nReach: an app builder editing a `connector_action` node in Studio. After #28150, a `{…}` token in `connectorConfig.input` is refused at publish. Studio's hand-written `connectorConfig` form offers no CEL-envelope editor for those values and shows no in-form refusal, so the builder meets the located refusal only at the runtime authoring gate. The verdict is right, but it arrives in the wrong place.\n\n## Measured (on the #28150 head `6a06a420`)\n\n- `flow-value-envelope.ts` `isValueEnvelopeSlot` answers true for `['config','input']` on `connector_action`. That path is unreachable, because the parse refuses the loose key. It never reads the ledger's `block` (`connectorConfig`).\n- `FlowNodeConfigField.tsx` `valueSlotRefusals` and `flow-simulator.ts:123` call the judge config-only.\n\n## What changes\n\n- The Studio readers honour the ledger's `block` root. The `connectorConfig.input` values get the same envelope editor and in-form refusal as other value slots.\n- Add a test with a token typed into an input value, which shows the refusal in the form.\n- This lands after #28150 merges.\n\nLinks: #27968, PR #28150 (record 6525595405).\n\nBlocked-by: #28150\n"

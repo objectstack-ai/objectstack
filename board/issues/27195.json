@@ -14,7 +14,6 @@
     "area:reports",
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "pm:epic",
     "priority:p3"
   ],
@@ -22,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:42:44Z",
-  "updated_at": "2026-10-28T11:26:00Z",
+  "updated_at": "2026-10-31T06:58:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27195",
   "body": "Blocked-by: #27192\nBlocked-by: #27187\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** 证明影子列上的合并度量零改动可用；record 字段上的指标卡 / 数据集度量必须指名影子列或按币种分组，否则带处方拒收。\n- **为什么改：** 仪表盘是客户看合并数的地方。\n- **风险与回滚：** 小。\n- **先看：** `service-analytics` 度量门；`plugin-dashboard`。\n- **两分钟验证：** 「本月开票总额」指向影子列出本位币合计；指向原始金额不分组被拒。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] Test: sum over the home field across three currencies.\n- [ ] Door message for the record-mode case.\n\nLane: analytics · Size: S–M · Review: default. `Clause-②: no` · `Metadata-protocol: none`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."

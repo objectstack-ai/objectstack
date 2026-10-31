@@ -1,7 +1,7 @@
 {
   "number": 19287,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 2 — 🟢 os-elon-musk · 由 os-elon-musk 账户的项目负责",
+  "title": "[PM seat] domain:skills · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:skills",
     "pm:seat"
   ],
-  "assignees": [
-    "os-elon-musk"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T09:45:20Z",
-  "updated_at": "2026-10-29T21:54:30Z",
+  "updated_at": "2026-10-31T05:56:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 30,
+  "comments": 31,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19287",
-  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 2**. Seat 1 is #7623 (⛔ this post is not it).\n\n<sub>Refreshed 2026-10-29T21:52Z (seated).</sub>\n\n## Current PM\n\n🟢 `os-elon-musk` · `session_016WV4d1QkPVVzNz3FJqb2iS` (project thread \"Skills 车道派发\" in the Claude Code project \"Objectstack server\"; 由 os-elon-musk 账户的项目负责) · seated at the refresh time above.\n- **Summons:** the maintainer's words in that project, verbatim: 「再 开一个 skills 座位」 (2026-10-29T21:49Z). Seat 1 (#7623) is 🟢 `marchtian` (another project), so this seat sits the vacant seat 2, released by the sign-off brief 6493936299 (the newest event on this post before this edit).\n- **Posture:** default batch. No predecessor posture carries over. Concurrency and the landing grant wait on the maintainer's word in this project.\n- **Scope:** unclaimed `domain:skills` `pm:queue` cards in the lane's selection order, outside every `pm:epic` subtree, split with seat 1 by a `split` note on #7623. Claims carry `Seat: domain:skills#2`.\n\n## Inherited ledger\n\nThe posture and the ledger live in the project; this post holds a pointer only. The canonical ledger is labels + assignee + `Claim:` comments carrying `Seat: domain:skills#2` + `head:claude/` PRs. The previous body revision (`os-justin`, ⏳ vacant) is the archive of the last term; its sign-off brief 6493936299 lists the handed-over items (decision box #26940; the four uncarded questions for the maintainer).\n\n## Hot-file serial queue\n\n⛔ Re-derive this from live `Claim:` comments and each open PR's actual file list before every dispatch; read seat 1's queue on #7623 first.\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Contract review: the ceiling tier is scarce in this project; each candidate is marked for whether it owes one before it is claimed.\n- Wake: the project thread. Wall: none.\n"
+  "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 2**. Seat 1 is #7623 (⛔ this post is not it).\n\n<sub>Refreshed 2026-10-31T05:53Z (signed off).</sub>\n\n## Current PM\n\n⏳ vacant. The last term ran from 2026-10-29T21:52Z to 2026-10-31T05:53Z: `os-elon-musk`, `session_016WV4d1QkPVVzNz3FJqb2iS` (project thread \"Skills 车道派发\", project \"Objectstack server\"). It signed off at the maintainer's words, verbatim: 「当前任务处理完，合并后就下班」 (2026-10-31T05:34Z). `check-handover.mjs` exit 0 at sign-off. There is no seat mailbox to close.\n\nResume with `/pm-dispatch 接手`, and read this post first.\n\n## Handover ledger\n\nEvery claim of this term is landed or released. The cards and labels hold the state; this post holds pointers only.\n\n- **Decision box:** #28237 (ADR-0146 rewrite, epic #28236 N-01, the maintainer's top priority). It is released (6539755365) with `needs-user-decision`, and resumes from handoff 6539626819. Draft PR #28295 is at `af70e268`, waiting on the maintainer's ruling on 总监决裁 7 (A: Q1 scope; B: `action` overridable). After that: a delta contract review, the ACCEPT, and the Tier H hand-merge.\n- **Queue snapshot at sign-off** (`domain:skills`, outside epics):\n  - **pm:queue:**\n    - #28209 (p2), the next pick.\n    - #28051 (p2). Its `field-types.md` is free now that PR #28323 has merged, but `currency.mdx` is in draft PR #28302 (another lane). Note: 16 tokens of headroom.\n    - #27890 (needs other accounts).\n    - #27848 (waits on the first real automerge_disable).\n  - **Unblocked but rides another edit:** #28215 (p3). It rides the next edit to the i18n skill.\n  - **pm:blocked:** each Blocked-by was audited at sign-off and is still open.\n    - #28299 → #26702 (the S2 recipe).\n    - #28285.\n    - #28256 → #28255; #28253 → #28251; #28246 → #28245; #28243 → #28242; #28212 → #28211; #28207 → #28206.\n    - #28190 → PR #28188 and #28158.\n    - #26303 → #26138. That block is stale: #26138 closed unmerged, so it needs a ruling.\n    - #26184 → #26303.\n  - **Other:** #27331 is an epic, #26617 is on-hold, #25583 is awaiting-maintainer.\n  - **Untriaged:** #28330, the docs follow-up of PR #28323 (`content/docs`, likely devx).\n- **Serial queue:** `skills/objectstack-data/rules/field-types.md` → #28051 next. `content/docs/data-modeling/currency.mdx` → PR #28302 (another lane) first.\n- **Cross-lane notes:**\n  - A `skills/**` PR owes an `'@objectstack/skills': patch` changeset, never `skip-changeset`. This term missed it on PR #28170 and PR #28290, and the repair landed in PR #28323.\n  - os-zhuang has queued Tier H PRs without a submitted review (#28290, #28323). The landing notes record this as is.\n\n## Hot-file serial queue\n\n⛔ Re-derive this from live `Claim:` comments and each open PR's actual file list before every dispatch; read seat 1's queue on #7623 first.\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Contract review: the ceiling tier is scarce in this project; each candidate is marked for whether it owes one before it is claimed.\n"
 }

@@ -1,0 +1,35 @@
+{
+  "number": 28335,
+  "kind": "pull_request",
+  "title": "refactor(plugin-list): ListView reads its view blocks through ListViewSchema, not a (schema as any) cast",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T05:28:56Z",
+  "updated_at": "2026-10-31T06:08:50Z",
+  "closed_at": "2026-10-31T06:08:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T06:08:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28335",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuRHF1GswWyuFi1iHok1ht8c)_\n\nPart of #25918\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none\n\n## 维护者速读\n\n- 改了什么：`ListView.tsx` 里 26 处 `(schema as any)` 读取（19 行代码；卡上数的 21 行另含 2 行注释）全部去掉。kanban、calendar、gallery、timeline、gantt、tree、chart 和 `bulkActionDefs` 都是 `ListViewSchema` 已声明的键，改成直接的类型读取；唯一未声明的 `rowActionDefs`（宿主拼的键，规范在列表面按名拒收）改走一个窄类型转换 `hostRowActionDefsOf`，类型取自消费它的 `object-grid` 节点。加了一个源码扫描测试，防止 `(schema as any)` 再回来。\n- 为什么改：`any` 转换把类型检查整段关掉了，键名拼错或用法不对都照样编译通过；这些键其实都有类型，转换什么也没挡住，只挡住了类型。\n- 风险与回滚：运行时行为不变，列表渲染和取数都不变（只是读法变了；新增的小函数返回同一个值）。回滚即还原本 PR。\n- 先看：`ui/packages/plugin-list/src/ListView.tsx`（`hostRowActionDefsOf` 与 3360、4210 附近两处 `rowActionDefs` 读取）、`ui/packages/plugin-list/src/__tests__/ListView.noAnySchemaCast.test.ts`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/plugin-list/src/__tests__/ListView.noAnySchemaCast.test.ts packages/plugin-list/src/__tests__/listViewNonAuthorKeys-8653.test.tsx`，预期全绿：扫描找不到 `(schema as any)`，`rowActionDefs` 仍传到表格节点并进入 `$select`。\n- 需要你做的：无，席位落地\n\n## What changes\n\n- `ListView.tsx` reads every key it used to read through `(schema as any)` as a typed member of `ListViewSchema`: `kanban`, `calendar`, `gallery`, `timeline`, `gantt` (the projection and expand collectors and the fetch effect's dependencies), `tree` and `chart` (the capability gate and the tree branch), and `bulkActionDefs` (the predicate harvest and the grid hand-off). Each is a declared member, checked with the TypeScript checker against the built `@object-ui/types` declarations (index signature stripped), not by grep.\n- `rowActionDefs` is the one key declared on no list mirror: the spec refuses it by name on the list surface, and the objectui#8653 ruling keeps the read (the host composes it; it reaches the child `object-grid` node and `$select`). It is now read through one module-level helper, `hostRowActionDefsOf`, that casts to `Pick<DataTableSchema, 'rowActionDefs'>`, the type the consuming grid node declares. The predicate-key site's own `{ rowActionDefs?: readonly unknown[] }` cast uses the same helper, so the file has one spelling for that read.\n- No key is declared in `@object-ui/types` or `@objectstack/spec`; no exported type changes (the helper is module-private).\n- Two comments still quote the old spelling (the `userActions` collision note and the retired `title` arm). They are prose describing reads that must not come back, not reads, and are left as written.\n\n## Tests\n\n- New `ListView.noAnySchemaCast.test.ts`: a TypeScript AST walk of `ListView.tsx` finds no `schema as any` / `props.schema as any` cast. A firing control on a probe shows it catches the plain, double-parenthesised and `props.schema` shapes, and skips comments, typed casts and other objects.\n- Ablation, after committing the fix: `scripts/ablation-replace.mjs` put back one cast (`(schema as any).tree?.parentField`) and the new test went red naming that line; restored blob equals HEAD. With `origin/main`'s `ListView.tsx` written over the file, the scan names 26 casts on 19 lines (the card's 21 grep lines less the 2 comment lines; some lines carry two casts); restored, `git diff --quiet HEAD` clean.\n- The existing pins on these reads stay green unchanged, `listViewNonAuthorKeys-8653` (`rowActionDefs` still relayed to the grid and harvested into `$select`) and `ListView.harvestInputsFetchKey-10689` among them.\n\n## Acceptance notes\n\n- Out of scope and untouched, per triage 6407890835: \"⛔ Out of scope until the maintainer names it: `no-explicit-any: 'error'` on `packages/types/src`.\" No ESLint config change.\n- Noted only: the predicate-key site still reads `bulkActionDefs` through a narrow `{ bulkActionDefs?: readonly unknown[] }` cast. It is not an `any` cast and is outside this card's surface; `schema.bulkActionDefs` would also compile there.\n- The branch is the platform-assigned card-thread branch (`claude/project-thread-epslnx`), the measured exception to `claude/issue-N-slug` named in the claim.\n\n## Verification\n\nHead `0a1ec22650` (main `b33946512c` merged in, which brought the kanban `lanes` change to `ListView.tsx`; the merge was clean and added no cast). Every reading below is on this head unless it says otherwise.\n\n<details><summary>type-check, tests, lint</summary>\n\n- Closure `pnpm --workspace-concurrency=2 --filter '@object-ui/plugin-list^...' build` under os-verify-lock: VERDICT command-exit 0 (also on the two earlier heads).\n- `pnpm --filter @object-ui/plugin-list run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0 (also on the two earlier heads).\n- `pnpm --dir ui exec vitest run --maxWorkers=3 packages/plugin-list/` plus the 27 out-of-package test files that read `ListView.tsx` off disk, under os-verify-lock, VERDICT command-exit 0, `Test Files 202 passed (202)`, `Tests 2337 passed (2337)` (201 / 2335 on `09ae34358a`, before main's new kanban test arrived).\n- `eslint` on `ListView.tsx` and the new test: 0 errors. `ListView.tsx` warnings 190 to 150 (`no-explicit-any` 132 to 106, `react-hooks/exhaustive-deps` 11 to 4, `react-hooks/use-memo` 7 to 0); the new test has none.\n- `node scripts/check-sdui-manifest.mjs`: exit 0, manifest intact.\n</details>\n\n<details><summary>dispatch gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on `0a1ec22650`: 34 commands derived (3 changed paths, 138 changed lines, under the 3000-line threshold); each run with its exit code captured before any pipe: all 34 exit 0.\n- `--ran`: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN (a derived zero: every entry carries an exit code).\n- The same 34 also ran on `e4ac205e62` and `09ae34358a`: all exit 0.\n- `dispatch-gates --tier`: no path-derived mandate (as quoted in the claim).\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTB22iDFvxkkThZWCa)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTB22iDFvxkkThZWCa\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 28311,
+  "kind": "issue",
+  "title": "connector-mcp: a credential whose scopes hide `include`d tools (a server that filters `tools/list` by token scope) fails the whole boot as a declaration fault, instead of degrading the instance as a credential problem",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "pm:epic",
+    "priority:p1"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T04:13:10Z",
+  "updated_at": "2026-10-31T06:13:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28311",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (a) (reproducible). Found by the os-dev on #28276 (the GitHub app, PR #28306) and re-read by this seat. Child of #27293 (E1). The refusal it trips is #27402's (merged as `46943657`). ⛔ Not a claim.\n\n`reach:` public door — boot and `PUT /api/v1/automation/connectors/credential-refs/:ref`. Named real producer: GitHub's remote MCP server hides tools a classic personal access token's scopes do not cover (`github/github-mcp-server` `docs/scope-filtering.md` at `f2a07cd1`, read by the dev). Measured by the dev with `bootStack` against a fake server that lists only `get_me` for an under-scoped token: with the credential in the environment variable, the whole boot is refused (\"Plugin com.objectstack.service-automation failed to start … providerConfig.include names search_issues, issue_read, which the MCP server does not list\"); with the credential in the store, the `PUT` answers 200, the instance is degraded and the log prescribes \"a configuration fault … Fix its declaration\"; a second `PUT` with a well-scoped token recovers it without a restart.\n\n## The defect\n\nAt `origin/main` (read 2026-10-31T04:10Z): `packages/connectors/connector-mcp/src/mcp-provider.ts` ~`:270-282` classifies a credential the server **rejects** (401 / 403) as `ConnectorCredentialRejectedError` — degraded, the stored credential marked `rejected`, boot not failed. But a server that **accepts** the token and lists fewer tools reaches the `include` refusal (~`:303-322`), a plain `Error`: fatal at boot, a skipped entry on reload, with a message and a materializer log (`service-automation/src/plugin.ts:2711`, \"Fix its declaration\") that send the administrator to the app's declaration, which is correct. The cause is the credential, and the administrator is the one who can fix it.\n\n## Work\n\nTell the two apart where they meet: when `include` names tools the server does not list **and** the instance carries credentials, the refusal says the listed tools may be hidden by the credential's scopes and is raised on the credential path (degrade, the stored credential flagged, no boot failure), keeping the declaration-fault path for an instance without credentials or a name that matches no tool for any credential. The dev measures whether the server distinguishes the cases (for example by a scope header) before choosing; the message names both possibilities when it cannot. Tests: the three probes above, made permanent.\n\n## Business reason\n\nAn administrator who pastes a token with too few scopes takes the whole runtime down at the next restart (environment path), or reads \"fix the declaration\" for an app they did not write (store path). GitHub, the first app on the shelf (#28276), does exactly this filtering.\n\n## Reader\n\nThe triage seat grades and routes it (`domain:server`, `connector-mcp`); the epic PM of #27293 dispatches.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-10-31T02:05Z), titles grepped for `scope|PAT|token` together with `mcp`: 1 hit, #28178 (open, the inbound MCP server's agent token forward — a different door); control `mcp` on the same set: 7 hits."
+}

@@ -1,0 +1,38 @@
+{
+  "number": 28290,
+  "kind": "pull_request",
+  "title": "docs(skills,lint): the connector auth union declares oauth2 and app-credential, held degraded until a server runs the grant",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T03:30:01Z",
+  "updated_at": "2026-10-31T04:14:49Z",
+  "closed_at": "2026-10-31T04:14:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-31T04:14:47Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28290",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DUm6yTjeQndAa4UYt8S8y23)_\n\ndomain:skills#2 · os-elon-musk · session_016WV4cwLJsQpaepqfmrTGLL\n\nFixes #28226\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：自动化 skill 的 \"Not yet\" OAuth 条目原说 `auth` 联合类型没有 `oauth2`,PR #28213 合入后这句已错。现改为：联合类型声明了 `oauth2`(`authorization_code` / `client_credentials`)和 `app-credential`(飞书 / 钉钉 / 企业微信),密钥只能写 `credentialRef`;但服务端还没跑授权流程，这类实例被标为降级、不调用上游，所以集成仍标 blocked。评测 1 的期望同步改;`os explain flow-credential-literal` 点名这三种新类型(含 `signed`)并说明修复提示为何不指向它们。\n- 为什么改：#28213 的契约复审 6529303069 应修项 S1,以及该 PR 欠的 `Skills-docs:` 跟进。\n- 风险与回滚：只改文案和一个测试钉，规则逻辑和 `fix:` 提示原样。recipes 文件在 token 天花板下，新增字节全靠同文件删两处重复付清(2229→2230 / 2236),不动 ratchet 脚本。回滚即 revert。\n- 先看:`skills/objectstack-automation/references/integration-recipes.md` 的 \"Not yet\" 第一条，再看 `packages/lint/src/rule-explanations.ts` 新增的那句。\n- 两分钟验证:`pnpm --filter @objectstack/lint exec vitest run src/lint-flow-credential-literals.test.ts` 和 `node scripts/check-skills-token-ratchet.mjs`,预期 exit 0。\n- 需要你做的：欠一次契约复审(CONTRACT_REVIEW_TIER);落地档以登记册为准，本地读为 Tier H(`skills/**`),需 os-zhuang 或 hotlong 批准。\n\n## What changes\n\n- **`skills/objectstack-automation/references/integration-recipes.md`, \"Not yet\" OAuth bullet:** the union now declares `oauth2` (`authorization_code` / `client_credentials`) and `app-credential` (`feishu` / `dingtalk` / `wecom`), the secret a `credentialRef`, but no server runs the grant yet: the instance is held degraded and calls no upstream. The advice stays: no short-lived token behind a `bearer` ref, blocked on the outbound-OAuth card.\n- **`skills/objectstack-automation/evals/integrations-declared.json`, eval 1:** the expectation says the same. Rubric text only; every `must_contain` / `must_not_contain` token is unchanged and still true.\n- **`packages/lint/src/rule-explanations.ts`:** `os explain flow-credential-literal` names `oauth2` (with its grants), `app-credential` (with its vendors) and `signed`, says their secret is also only a `credentialRef`, and says why none is a home a literal moves into by shape. **`lint-flow-credential-literals.ts`:** the header comment no longer lists `none / bearer / api-key / basic` as every variant. The `fix:` hints are unchanged, so they still route to `bearer`, `api-key` or `basic`.\n- **`lint-flow-credential-literals.test.ts`:** the existing \"every auth variant ... the schema accepts\" pin now parses each kind, grant and vendor the explanation names against `ConnectorInstanceAuthSchema`, and asserts the explanation carries them.\n- **Changeset:** `@objectstack/lint` patch, since the explanation text ships in `os explain`.\n\nThe degraded wording was read from the code on `main` `91fa06df8`, not from the card: `grantBearingNotServedReason` in `packages/services/service-automation/src/plugin.ts:415` (\"…the instance is not served and is never called without its credential\") and `lendRefusal` in `connector-credential-source.ts:118` (a datasource borrow refused 422). Grants and vendors come from `ConnectorOAuth2GrantSchema` and `ConnectorAppCredentialVendorSchema` in `packages/spec/src/shared/connector-auth.zod.ts`.\n\n## Paid for in the same file (restatement only, each with a surviving home)\n\nintegration-recipes.md, bullet raise +103 bytes, paid by:\n- Recipe 1's comment \"its path is package-relative\" (the intro says a spec \"ships in the package\").\n- Recipe 2's `include` comment \"tool-name allowlist → the actions\" (recipe 1's paragraph says `include` allowlists as the `mcp` provider's does, and recipe 2's flow comment dispatches `actionId: 'search_issues'`).\n\n2229 → 2230 tokens against the 2236 ceiling. No ceiling moved; `SKILL.md` is untouched.\n\n## Verification\n\n- `pnpm --filter @objectstack/lint test` and `typecheck`: exit 0.\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0 (recipes 2230/2236).\n- Gates: `dispatch-gates --commands` at the committed head derives 72 families. All 72 ran in a fresh worktree after `pnpm install --frozen-lockfile --ignore-scripts` and a whole-tree build, and all exited 0. `--ran` reconciles 72 derived / 72 run / 0 NOT-MEASURED / 0 UNRUN, and the derivation re-run at the head is identical.\n- Landing tier: `check-governed-merges.mjs --test` reads the two `skills/**` paths on the register, so Tier H. The register's reading at PR time is the seat's.\n- Not measured locally: repo-wide `pnpm lint`, and the skill evals as a model run.\n\n## Out of scope (finding for the seat)\n\n- The next bullet in the same \"Not yet\" section, **Signature-authenticated vendor**, says \"no auth kind signs requests today\". `signed` with `scheme: 'aliyun-acs3-hmac-sha256'` is on `main` (#26710 S1), so that sentence is false for Aliyun. It is outside this card's claimed bullet and is left for its own card.\n\n## Human Minimum\n\nEach item is one rule from\n[CONTRIBUTING.md › Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum),\nwhich links the AGENTS.md text that states it.\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; the derived lint families pass.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the one Chinese channel).\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwLJsQpaepqfmrTGLL\n"
+}

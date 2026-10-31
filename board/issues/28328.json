@@ -1,0 +1,34 @@
+{
+  "number": 28328,
+  "kind": "pull_request",
+  "title": "chore(osv): dated exemption for minimatch GHSA-g3hv-75wg-m249 until 2026-11-30",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "osv-exemption",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T04:59:42Z",
+  "updated_at": "2026-10-31T05:46:52Z",
+  "closed_at": "2026-10-31T05:46:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T05:46:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28328",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XQuFgZcNu7SjjmAugk2cHWw)_\nPart of #28292\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：在 `osv-scanner.toml` 台账里加一条 `minimatch` 公告 GHSA-g3hv-75wg-m249 的豁免，到期日 2026-11-30（默认 30 天），不改任何代码或依赖。\n- **为什么改**：这条公告只在 `minimatch` 11 修复，11 是破坏性大版本，所有父包的最新版都还只接受 10；按台账惯例 3，豁免单独开 PR 并打 `osv-exemption` 标签。\n- **风险与回滚**：接受一条已知的中危（只影响可用性）公告 30 天。已读过已发布包的可达路径，结论在席位评审里。到期后扫描自动转红；回滚即还原本 PR。\n- **先看**：`osv-scanner.toml` 末尾新加的那一块（理由句与到期日）。\n- **两分钟验证**：`node scripts/check-osv-exemptions.mjs`，应见 `2 OSV exemption(s) ... all carry an unexpired ignoreUntil within 90 days`。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- One `[[IgnoredVulns]]` entry in `osv-scanner.toml` for `minimatch` GHSA-g3hv-75wg-m249, in the ledger's template shape: `ignoreUntil = 2026-11-30` (a bare TOML date, the 30-day default) and a `reason` in convention 2's format (the advisory URL, then one sentence on what blocks the fix).\n- Nothing else. No dependency moves, no package publishes from this file, so the PR carries `skip-changeset`.\n\n## Why\n\n- The scheduled OSV scan on `main` is red on four advisories (#28292). PR #28324 clears `glob`, `follow-redirects` and `joi`. This PR is the dated exemption for the fourth, as triage routed it: \"`minimatch` 11 moves only where its parents accept it; otherwise it needs its own exemption PR with a reason.\"\n- Every `minimatch` before 11.0.1 is affected, and 11 is a breaking major (its types drop `makeRe`, `AST` and two options).\n- Re-read on the npm registry on 2026-10-31 at this PR's base: no parent's newest release accepts 11.\n\n| Parent (latest) | declares `minimatch` |\n|:--|:--|\n| eslint 10.14.0 | ^10.2.6 |\n| @eslint/config-array 0.23.5 | ^10.2.4 |\n| @typescript-eslint/typescript-estree 8.72.1 | ^10.2.2 |\n| @microsoft/api-extractor 7.60.1 | 10.2.3 (exact) |\n| @oclif/core 5.1.10 | ^10.2.5 |\n| @ts-morph/common 0.29.0 | ^10.0.1 |\n| typedoc 0.28.20 | ^10.2.5 |\n| readdir-glob 3.0.0 | ^10.2.2 |\n\n- The `pnpm-workspace.yaml` override `'minimatch@<11.0.0': '^10.2.3'` already holds every copy on 10.2.6, the newest 10.x (`pnpm why minimatch -r --prod`: one version, 10.2.6). Retargeting it to 11 would force a major outside every parent's range.\n- Shipped reach read; see the seat's review. A request-influenced pattern reaches it: no.\n- Not a blanket exemption: one advisory id, 30 days. When it expires the scanner stops filtering it and the gate turns red on its own.\n\n## Tests\n\nRun at head `469d5358`.\n\n- `node scripts/check-osv-exemptions.mjs --self-test`: exit 0 (`self-test passed: valid ledgers accepted, every convention breach rejected.`).\n- `node scripts/check-osv-exemptions.mjs`: exit 0 (`2 OSV exemption(s) in osv-scanner.toml: all carry an unexpired ignoreUntil within 90 days and a reason with an advisory link.`).\n\n## Acceptance notes\n\n- No new tests and no ablation: the diff is one ledger entry, and the ledger's own checker is the test.\n- `pnpm lint` scoped to touched packages: none, since the diff touches no package (`osv-scanner.toml` is a repo-root file that eslint does not read).\n- Removal condition, for renewal time: drop the entry when those parents accept `minimatch` 11.0.1 or later.\n\n## Verification\n\n<details><summary>OSV scan reproduction: NOT MEASURED</summary>\n\nThe OSV-Scanner binary download and `api.osv.dev` are both refused by this container's egress policy. The affected range (introduced 0, fixed 11.0.1) was read from the osv.dev advisory page. The PR's own base-relative OSV step judges it in CI.\n\n</details>\n\n<details><summary>Derived gates: 14 derived, 14 run green</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 14 commands over the 1 changed path. All 14 exit 0: `check-closing-keyword-parity` (and `--self-test`), `check-comment-mask-corpus`, `check-osv-exemptions` (and `--self-test`), `osv-base-relative --self-test`, `check:changeset-fixed`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:override-consistency`, `check:refd-timer-probe`, `check:vendor-export-contract-resolve`, `check:watch-hint-literal`.\n\n`--ran` reconciliation: `14 derived famil(ies) accounted for — 14 run, 0 NOT-MEASURED`.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5nTvSCGM9p4u9HnrV7)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5nTvSCGM9p4u9HnrV7\n"
+}

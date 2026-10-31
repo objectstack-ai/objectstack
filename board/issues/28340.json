@@ -1,0 +1,37 @@
+{
+  "number": 28340,
+  "kind": "issue",
+  "title": "docs(qa): wave-3 checklist accuracy slice S6 — api-backend.json, ai.json, automation.json (#27377)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T05:41:26Z",
+  "updated_at": "2026-10-31T07:14:34Z",
+  "closed_at": "2026-10-31T07:13:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28340",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYmTYfaPbLQD4BJfomW\n\nSub-issue of #27377, the v18.3.0 release test sweep anchor. This is wave-3 checklist-accuracy **slice S6**, split out on the maintainer's word in seat session `session_01QSeKYmTYfaPbLQD4BJfomW`: 「同意」, to the seat's proposal to split S4–S8 into sub-issues so that both devx seats can work them. ⛔ Not a claim. Any devx seat may claim it. `domain:devx` is inherited from the parent.\n\n## Scope\n**Files:** `docs/qa/platform-checklist/areas/api-backend.json`, `docs/qa/platform-checklist/areas/ai.json`, `docs/qa/platform-checklist/areas/automation.json`. No other file. ⛔ No product code.\n\n**Rows:** 26, from the seat's read-only census of every finding parked on #27377 (census note 6539602007), taken at origin/main `501c864dd5`. Re-verify each row against the current head before editing. A row that no longer holds is reported as fixed upstream.\n\n| census row | record | item | verdict | evidence (census) |\n|---|---|---|---|---|\n| 1 | #27392 | `ai.mcp-run-action-exposure-gate` | GAP | A1 permitted half: verify already says score not-run(fixture). Recipe yes: runtime-author an ai.exposed action with requiredPermissions a persona lacks. |\n| 4 | #27392 | `api-backend.aggregate-contract-matrix` | GAP | knownGaps[0] says \"seeding a few rows … is the honest close\" but names no null annual_revenue or Mon/Sun/ISO-year rows. Recipe yes: 5 POSTs; fold into the slice. |\n| 5 | #27392 | `api-backend.aggregate-contract-matrix` | STALE | steps[5] \"each message ends with the 'os migrate meta --from 16' instruction\" and acc[3] the same. Live AGG_RETIRED_TAIL (query.zod.ts:92) names `os migrate meta` and the protocol-upgrade URL. |\n| 6 | #27392 | `api-backend.aggregate-contract-matrix` | STALE | steps[4](a) \"a query whose where matches nothing, grouped and ungrouped\". |\n| 7 | #27392 | `api-backend.api-methods-verb-gate` | STALE | steps[4] \"the import door with writeMode insert\" gives no body shape. |\n| 8 | #27392 | `api-backend.api-methods-verb-gate` | STALE | steps[5] has no note that registry.ts warns once per object name. Use a distinct name per leg. |\n| 9 | #27392 | `api-backend.error-envelope-ledger` | STALE | fixtures.requires[1] \"POST /api/v1/auth/sign-up/email also works on a stock dev boot\". |\n| 10 | #27392 | `ai.agent-tool-skill-metadata-roundtrip` | STALE | acc[0].verify \"agent.tools error prescribes `skills` + ADR-0064 + 'os migrate meta --from 16'\" and \"triggerPhrases … routes to triggerConditions\". |\n| 13 | #27392 | `automation.packaged-flow-subflow-disable-refusal` | STALE | steps[8] \"NO sys_metadata_activation row for showcase_notify_owner\". |\n| 14 | #27392 | `automation.trigger-status-contract` | STALE | knownGaps[1] \"has no stock trigger … scores that row not-run\". r9 and r10 (10-30) left it unchanged. |\n| 15 | #27392 | `automation.trigger-status-contract` | STALE | steps[7] drives the purge endpoint and has no throwaway-DB warning. |\n| 27 | #27409 | `ai.mcp-oauth-private-host-transport` | GAP | A0 / A2 private leg. Recipe yes, but only if the matching accuracy row (unheld private OS_AUTH_URL) is accepted. |\n| 37 | #27409 | `automation.paused-run-trigger-record-masked` | GAP | Recipe yes, already in requires[1]: an object with an internal:true field. The runner skipped it. No ledger edit. |\n| 44 | #27409 | `ai.mcp-http-surface` | STALE | acc[4] \"the documented principal-bound surface\" (12 tools) names no transport; stdio lists 9. |\n| 46 | #27409 | `ai.mcp-validate-expression` | STALE | negative[0] has no blank-input boundary. Product half #27411 was closed by #27534, so add the clause. |\n| 47 | #27409 | `ai.mcp-oauth-private-host-transport` | STALE | requires[0] \"A host that holds no RFC 1918 … address cannot stage boot (a): record blocked(fixture)\". Light ruling; keep a held address for the e2e client leg. |\n| 48 | #27409 | `ai.mcp-coded-refusals-and-runtime-exposure` | STALE | acc[3]: fixtures name no producer recipe. |\n| 49 | #27409 | `api-backend.query-contract-matrix` | STALE | steps[1] shows only the single-condition AST form [field, op, value]; no prefix-compound note. |\n| 50 | #27409 | `api-backend.query-contract-matrix` | STALE | steps[2] has no case-sensitivity note ($icontains is only variants[16]). |\n| 58 | #27409 | `automation.trigger-type-matrix` | STALE | requires[1] names only OS_AUTOMATION_SCHEDULED_WORK_ENABLED. No daily-08:00 or fast-clone note. |\n| 59 | #27409 | `automation.durable-suspend-restart` | STALE | acc[1] \"post-restart reads return the identical paused rows\". The PT1M timer can complete first. |\n| 60 | #27409 | `automation.flow-authoring-refusals-v18` | STALE | acc[2] endpoint arm has no tenant-name or 403 NOT_OVERRIDABLE note. |\n| 70 | #27441 | `api-backend.formula-stdlib-matrix` | STALE | title, steps[0], acc[0], source[0]/[1] \"exactly 29\". The count is 30 (label()). |\n| 109 | #27441 | `automation.flow-node-type-matrix` | STALE | requires[0] map has no assignment carrier; steps[5] does not say the seed already leaves a paused run. |\n| 110 | #27441 | `automation.packaged-flow-clone-contract` | STALE | acc[0] \"(code 'required')\" for an empty name. It answers invalid_type. |\n| 124 | #27441 | `api-backend.formula-stdlib-matrix` | STALE | requires[1] names sharingModel only; the writable package and namespace prefix are missing. |\n\nGAP rows are listed only where the census found a cheap fixture recipe. The other gaps stay parked on #27377.\n\n## Edit shape (wave 2's slices A–D; #27164 is the precedent)\n- `revision` goes up by 1.\n- main's `history` stays an exact prefix, with ONE appended row citing the run record (#27392, #27409, #27438, #27441 or #27481) and #27377.\n- The text is fixed to what the code says today.\n- An edit may make a clause stronger or more precise. It never weakens a clause to make it pass.\n- A finding that, on reading, is a product defect is NOT edited. It is reported for the seat to file.\n- Keep `pnpm check:platform-checklist` green.\n- Changeset: none (label `skip-changeset`).\n- The PR says `Fixes #<this card>` and `Part of #27377`.\n\n## Not in this slice (held on #27377 until ruled)\n- `studio-authoring.expression-editors`;\n- the SCOPE-negatives sweep, which includes `platform-core.notification-center` negative[3];\n- `ai.mcp-stdio-fail-closed`;\n- the UNCLEAR rows: `settings-organization-isolation-and-platform-rung` and `ux-conventions.write-feedback` acc[1].verify, among others.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

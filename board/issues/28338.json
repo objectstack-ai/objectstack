@@ -1,0 +1,37 @@
+{
+  "number": 28338,
+  "kind": "issue",
+  "title": "docs(qa): wave-3 checklist accuracy slice S4 — platform-core.json (#27377)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T05:40:25Z",
+  "updated_at": "2026-10-31T07:27:37Z",
+  "closed_at": "2026-10-31T07:25:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28338",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYmTYfaPbLQD4BJfomW\n\nSub-issue of #27377, the v18.3.0 release test sweep anchor. This is wave-3 checklist-accuracy **slice S4**, split out on the maintainer's word in seat session `session_01QSeKYmTYfaPbLQD4BJfomW`: 「同意」, to the seat's proposal to split S4–S8 into sub-issues so that both devx seats can work them. ⛔ Not a claim. Any devx seat may claim it. `domain:devx` is inherited from the parent.\n\n## Scope\n**Files:** `docs/qa/platform-checklist/areas/platform-core.json`. No other file. ⛔ No product code.\n\n**Rows:** 19, from the seat's read-only census of every finding parked on #27377 (census note 6539602007), taken at origin/main `501c864dd5`. Re-verify each row against the current head before editing. A row that no longer holds is reported as fixed upstream.\n\n| census row | record | item | verdict | evidence (census) |\n|---|---|---|---|---|\n| 3 | #27392 | `platform-core.docs-audience-gate` | STALE | knownGaps[0] names \"none with audience permissionSet\" but not \"no translated doc\", so the locale leg needs a runtime-authored doc. Add one sentence. |\n| 22 | #27392 | `platform-core.manifest-install-contract` | STALE | acc[1] says the refusal always carries \"a `migrateCommand` of the form `objectstack migrate meta --from`\". Missing the upgrade case (target major above runtime) and its step. |\n| 120 | #27441 | `platform-core.notification-center` | STALE | steps[5] and A3 have no note on the digest race. |\n| 121 | #27441 | `platform-core.package-lifecycle-enable-disable` | STALE | steps[0] \"nav entry\" is unspecified and has no namespace prefix; A5 names one deep-link shape. |\n| 122 | #27441 | `platform-core.settings-hub-roundtrip` | STALE | steps[7] \"provider=log (or no email plugin mounted)\". plugin-email is mounted on stock. |\n| 134 | #27481 | `platform-core.v18-boot-refusals + cli.organization-ownership-ceremony` | STALE | v18-boot-refusals requires[1] already names 17.7.0 and --legacy-peer-deps but says \"created by a 17.x showcase boot\". Say blank scaffold. |\n| 145 | #27481 | `platform-core.v18-boot-refusals (+ org-ownership)` | STALE | acc[1] and verify contain the literal \"`os migrate organization-ownership --out PLAN`\"; add the optional --dev. org-ownership acc[3] names only the command, so no edit there. |\n| 146 | #27481 | `platform-core.boot-health` | STALE | steps[3] and acc[2] have no \"capture the log before the first non-health request\". |\n| 147 | #27481 | `platform-core.builtin-apps-nav-render` | STALE | steps[5] \"42 Setup destinations\". r10 (#27566) did not recount; recount at head. |\n| 175 | #27438 | `platform-core.activation-ledger-row-contract` | STALE | steps[2] \"the six values\"; source[6] \":type closed to those four\". queue and assignment_rule are missing. |\n| 176 | #27438 | `platform-core.metadata-registry-serving` | STALE | steps[2] and acc[2] \"the richer Studio listing … distinct\". |\n| 177 | #27438 | `platform-core.metadata-registry-serving` | STALE | acc[0].verify \"of the entries only dashboard, action and report\" (labelled A1 in the finding). |\n| 181 | #27438 | `platform-core.serve-composition-v18` | STALE | The A4 leg does not say a plugin is needed: a plugin-less production stack boots on SQLite. Confirm that is by design. |\n| 182 | #27438 | `platform-core.v18-boot-refusals` | STALE | requires[1] \"or the guard pin's fixture shape planted into a scratch DB\" gives no recipe. Optional. |\n| 227 | #27438 | `platform-core.metadata-authoring-roundtrip` | STALE | steps[0] and requires[0] have no dependencies:{com.example.showcase}. |\n| 228 | #27438 | `platform-core.lifecycle-retention-sweep` | STALE | steps[3] and acc[2] \"the sweep report lists sys_audit_log skipped archive-pending\". There is no live report. |\n| 229 | #27438 | `platform-core.protocol-18-handshake-and-stored-replay` | STALE | steps[1] GET after plant has no reboot; steps[2] off-tree artifact. The finding line is truncated. |\n| 230 | #27438 | `platform-core.url-overlay-contract` | STALE | steps[5] \"the URL carries from=…\". A plain click opens the peek. |\n| 231 | #27438 | `platform-core.metadata-authoring-roundtrip` | STALE | steps[7] \"set it to 'record'\" has no Kind=full. |\n\nGAP rows are listed only where the census found a cheap fixture recipe. The other gaps stay parked on #27377.\n\n## Edit shape (wave 2's slices A–D; #27164 is the precedent)\n- `revision` goes up by 1.\n- main's `history` stays an exact prefix, with ONE appended row citing the run record (#27392, #27409, #27438, #27441 or #27481) and #27377.\n- The text is fixed to what the code says today.\n- An edit may make a clause stronger or more precise. It never weakens a clause to make it pass.\n- A finding that, on reading, is a product defect is NOT edited. It is reported for the seat to file.\n- Keep `pnpm check:platform-checklist` green.\n- Changeset: none (label `skip-changeset`).\n- The PR says `Fixes #<this card>` and `Part of #27377`.\n\n## Not in this slice (held on #27377 until ruled)\n- `studio-authoring.expression-editors`;\n- the SCOPE-negatives sweep, which includes `platform-core.notification-center` negative[3];\n- `ai.mcp-stdio-fail-closed`;\n- the UNCLEAR rows: `settings-organization-isolation-and-platform-rung` and `ux-conventions.write-feedback` acc[1].verify, among others.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

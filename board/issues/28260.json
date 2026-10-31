@@ -2,8 +2,8 @@
   "number": 28260,
   "kind": "issue",
   "title": "Connector credentials: prove the install-local round trip on a live stack, and pin the Setup Integrations order",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,15 +16,21 @@
     "enhancement",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T20:08:39Z",
-  "updated_at": "2026-10-30T20:56:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T06:49:02Z",
+  "closed_at": "2026-10-31T06:10:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28260",
   "body": "domain:ui#1 · os-tesla · session_01L9qibzC6RxMfB59EsgAoNN\n\nFiling gate: ② should-fixes S1 and S2 from the contract review PASS record 6532419644 on PR #28200 (#27238). The seat files them under os-dev rule 3.\nBusiness reason: the Connector Credentials page and the install-time credential step exist so an administrator can make an installed app's connectors work without server env vars or a restart (ruling A on #27230). jsdom pins the screens, but nothing yet shows the real round trip, where a `missing` ref is filled and the connector becomes ready without a restart. And nothing stops a later contributor from silently re-ordering the Integrations group.\nReader who acts: `domain:ui` (QA probe on a dev stack, plus one test file).\nDuplicate search: open issues with \"connector credentials live round trip\" / \"Integrations group order pin\" found none. **New.**\n\n## S1: live round trip (QA probe)\n\nOn a dev stack with no connector env vars:\n1. Install HotCRM through the Console marketplace (install-local).\n2. The install result's credential step lists the Slack ref as `missing`. Skip it, and see that the result links to Setup → Integrations → Connector Credentials.\n3. On that page, fill the ref. The connector reports ready **without a restart**, and the page never shows the value.\n\nRecord what you ran and what you saw on this card. A failure is a defect against #27238's code, filed with evidence.\n\n## S2: order pin\n\nSetup → Integrations orders by contribution `priority`: Webhooks / Datasources at 100, Connect an Agent at 110, Connector Credentials at 120 (`packages/services/service-automation/src/connector-credentials-ui.ts`), Cloud Connection at 200. Add one merged-order pin, in `packages/cli/test` beside `connect-agent-both-halves-wire.pin.test.ts` or in `check-app-nav-i18n`, so that a later contributor can't reorder the group silently.\n\nSerial: after PR #28200 lands."

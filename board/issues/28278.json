@@ -13,17 +13,18 @@
   "labels": [
     "domain:cloud",
     "enhancement",
-    "repo:cloud"
+    "repo:cloud",
+    "status:parked"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T02:07:32Z",
-  "updated_at": "2026-10-31T02:07:32Z",
+  "updated_at": "2026-10-31T02:55:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28278",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ④ coordination child of #27293 (E4), the cloud-repository half the ruling of #27302 assigns. Ruling-ref: 6486157794 (letter A, phased): \"Ingestion and listing generation stay with the cloud repository as #27293 assigns them … plus the pipeline card in the cloud repository.\" Filed here as the `repo:cloud` carrier because this seat's session cannot reach `objectstack-ai/cloud`; the cloud seat moves it or files its own and closes this one as moved. ⛔ Not a claim.\n\n## What the cloud side receives from objectstack\n\n- Open-edition connector-app packages, one per vendor, built and validated in this repository: batch 1 #28276 (GitHub over MCP, Stripe read over OpenAPI), batch 2 #28277 (DocuSign, after #26702).\n- The offline normalizer `packages/connectors/connector-openapi/scripts/normalize-openapi.mts` (PR #27436, merged): a repository script, **not** shipped in the npm package (`files` is `dist`, `README.md`, `CHANGELOG.md`), so the pipeline runs it from an `objectstack` checkout (`pnpm install`, then `pnpm --filter @objectstack/connector-openapi normalize-openapi`). Whether the pipeline can do that is the first thing to measure here; if it cannot, say so on #27293 and the epic PM brings the \"publish it as a bin\" option to the maintainer (that widens a published surface).\n- The listing file and README conventions: `content/docs/deployment/marketplace-handbook.mdx`.\n\n## What is asked\n\nIngest the packages, publish their listings through the marketplace review flow, and carry provenance (upstream, commit, sha256 the normalizer prints) on each listing — #27293's Done-when.\n\n## Reader\n\nThe cloud seat (`repo:cloud`), first touch in the cloud repository. Not needed before #28276 has a merged package.\n\n## Dedupe\n\nThe 500 most recent issues and PRs in this repository (read 2026-10-31T02:05Z), titles grepped for `connector app|shelf|docusign|stripe|github mcp|E4`: 0 hits; control `connector` 47. The cloud repository was not searched (not reachable from this session)."

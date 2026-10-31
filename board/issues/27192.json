@@ -2,8 +2,8 @@
   "number": 27192,
   "kind": "issue",
   "title": "objectql: write-time home projection — rate lookup by document date, decimal arithmetic, minor-unit rounding, missing rate refuses, computed fields read-only (multi-currency M2-2, epic #8345)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "pm:epic",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:40:59Z",
-  "updated_at": "2026-10-30T16:42:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T06:51:10Z",
+  "closed_at": "2026-10-31T06:08:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27192",
   "body": "Blocked-by: #27191\nBlocked-by: #27185\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** 写入时：金额、币种或单据日期变更 ⇒ 查该币种 ≤ 单据日期的最新汇率，home = round(amount ÷ rate, 本位币小数位)（参数 3：1 本位币 = rate 外币；更正自 ×，见 ADR-0144 D7 与 PR #27239 契约复审 6468858562；rate 为 decimal(24,12)，裁决 6469382727），写影子列与汇率快照；同币种汇率 1 不查表；缺汇率拒写并点名币种与日期；影子列与汇率列只读；批量写同路径。\n- **为什么改：** 这是合并报表的核心。\n- **风险与回滚：** L 级；⛔ 浮点算钱：用整数最小单位或 decimal，不用 `number` 算；SQLite 与 Postgres 各跑一遍舍入 pin；导入路径必须走同一写路径（在本卡实测）。\n- **先看：** 先例 `summary-aggregate.ts`（写入时物化）、`record-validator.ts` L1173–1180（只读计算字段）；`CURRENCY_FRACTION_DIGITS` 第一个读者。\n- **两分钟验证：** USD 10,000 @0.1389 → ¥71,994.24；JPY 0 位、KWD 3 位；缺汇率拒写文案。\n- **需要您做的：** 参数 3、4（方向、精度）已按默认裁定。\n\n## Task\n\n- [ ] Rate lookup (org, currency, latest effective_date ≤ rateDate), cached per write batch.\n- [ ] Decimal arithmetic in minor units; rounding half-up documented in the ADR; `CURRENCY_FRACTION_DIGITS` reader.\n- [ ] Refusal `ERR_EXCHANGE_RATE_MISSING` naming currency and date; same-currency shortcut.\n- [ ] Door: home / rate fields refuse client writes (precedent `summary`).\n- [ ] Import path and REST writes verified to pass through the same engine path (reading recorded on the card).\n- [ ] Tests on memory, SQLite, Postgres: three currencies, three minor-unit classes, update paths (amount / code / date change).\n\nLane: server · Size: L · Review: default; contract review of the refusal envelope. `Clause-②: no` · `Metadata-protocol: none`. Early WIP commits (container death is a known failure mode).\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice.\n"

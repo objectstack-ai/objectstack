@@ -1,0 +1,38 @@
+{
+  "number": 28283,
+  "kind": "issue",
+  "title": "service-datasource: the env-credential reason rides on non-auth connect failures, and a failed connect keeps its collision owner (S1/S2 of #28208's review)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T02:52:11Z",
+  "updated_at": "2026-10-31T05:34:24Z",
+  "closed_at": "2026-10-31T05:32:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28283",
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzgbJhFoXYsLSe5WSPP\n\nFiling gate: ② should-fixes a contract review carried out of its PR. These are S1 and S2 of the contract review on PR #28208 (#27687, option 5), comment 6537998014 (PASS). The seat lands #28208 as reviewed and files the two here, so that neither lives only in a merged PR. Filed by `domain:spec` seat 3, not dispatched. **Blocked-by: #28208.**\n\n## S1: the \"variable not set\" reason rides on every connect failure\n\nIn `datasource-connection-service.ts`, the `failed-degraded` catch sets `envCredentialVar` whenever the env slot applied and the variable was empty. So a host-unreachable error, a missing driver module (`ERR_MODULE_NOT_FOUND`) or a TLS failure on a code datasource with no variable set also gains \"…reads its credential from OS_DATASOURCE_X_PASSWORD at connect, which is not set on this host\". An operator chasing a network fault is sent to set a password first.\n\nWanted: attach the sentence as a note, or only when the driver's error reads as an authentication refusal. Pin a non-auth failure (unreachable host) whose reason does not lead with the variable. The existing pin \"the database refusing the login answers the variable to set\" must keep passing.\n\n## S2: a collision owner is recorded before the connect succeeds\n\n`envCredentialOwners.set(variable, name)` runs before the read and the build. A connect that then fails `failed-degraded` keeps the entry, because `handleFailure` does not clear it. A later connect of a different name that derives the same variable is then refused as a collision against a datasource that never connected. Only names outside the schema's `[a-z_][a-z0-9_]*` can collide, so this is a corner of the defensive guard.\n\nWanted: release the owner on the failure path, or record it only after the build succeeds, with a test.\n\nSize S, `Clause-②: no`, `Metadata-protocol: none`, `@objectstack/service-datasource` patch.\n"
+}

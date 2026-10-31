@@ -1,0 +1,38 @@
+{
+  "number": 28292,
+  "kind": "issue",
+  "title": "deps: the daily OSV scan is red again on 4 newly published advisories (`follow-redirects`, `joi`, `glob`, `minimatch`); `glob` is a shipped dependency of `@objectstack/metadata` and `@object-ui/cli`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "dependencies",
+    "domain:server",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T03:32:46Z",
+  "updated_at": "2026-10-31T05:49:01Z",
+  "closed_at": "2026-10-31T05:48:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28292",
+  "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ① a scheduled gate red, with each failure named. Filed by `domain:server` seat 3 while closing #27921, whose six advisories this run no longer reports. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## Red\n\n`Validate Dependencies` → job `Validate Package Dependencies` → step \"Audit dependencies for known vulnerabilities (OSV-Scanner)\" over `pnpm-lock.yaml`, scheduled run 41162591325 (the 10-31 run), on `main`. All six #27921 advisories are gone. The one exemption in `osv-scanner.toml` (GHSA-xcx6-jx8p-x3h5) still filters as intended. Four advisories are new to the scan:\n\n| Advisory | Package | In tree | Fixed in | Reached through (lockfile) |\n|:--|:--|:--|:--|:--|\n| GHSA-mrwp-f3q8-3g9p (8.2) | `follow-redirects` | 1.16.1 | 1.16.2 | `axios` 1.20.0 ← `wait-on` 9.5.1 (`ui` devDependency); `mongodb-memory-server-core` 11.3.0 (`driver-mongodb` dev) |\n| GHSA-4528-x5fx-h6hg (7.5) | `joi` | 18.3.0 | 18.3.1 | `wait-on` 9.5.1 (`ui` devDependency) |\n| GHSA-3g3m-2fjr-6pw4 (6.3) | `glob` | 13.0.6 | 14.0.2 | **direct, shipped**: `packages/metadata` and `ui/packages/cli` declare `glob: ^13.0.6` in `dependencies`; also `@types/glob` |\n| GHSA-g3hv-75wg-m249 (6.9) | `minimatch` | 10.2.6 | 11.0.1 | transitive: eslint, `@typescript-eslint`, `@microsoft/api-extractor`, `@oclif/core`, `@ts-morph/common` |\n\n## Wanted (route is triage's)\n\n- `follow-redirects` and `joi` are patch-level fixes inside their parents' ranges, so a lockfile refresh should be enough.\n- `glob` 14 and `minimatch` 11 are majors. `glob` is a runtime dependency of two published packages, so the bump needs a read of the call sites. For `minimatch`, see whether the parents accept 11 yet. If a parent does not, an `osv-exemption` PR of its own applies, per the ledger convention, with a reason and an advisory link.\n- The scan goes green on its next scheduled run.\n\n## Dedupe\n\nSearched open issues for `follow-redirects`, `GHSA-mrwp`, `OSV`, `minimatch` and `joi`: no match. #27921 (the previous red, six other advisories) closes with a pointer here. **New.**"
+}

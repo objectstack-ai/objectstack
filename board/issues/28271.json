@@ -2,8 +2,8 @@
   "number": 28271,
   "kind": "issue",
   "title": "plugin-approvals: re-issuing a restored approval continuation reads one 1000-row suspended-run page, so on a busy store it refuses for good",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T22:33:56Z",
-  "updated_at": "2026-10-30T22:55:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T05:27:49Z",
+  "closed_at": "2026-10-31T05:27:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28271",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ② a finding noted in the seat's ACCEPT of PR #28268 (#28230, comment 6534565528) and in the dev's report 6534253119 (\"Out of scope\"), outside that PR's surface. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What the code does (read, not measured)\n\n`packages/plugins/plugin-approvals/src/approval-service.ts`, the restored-continuation re-issue, GUARD 3 (\"The pause must be the one THIS SIGNAL was refused on\"). It proves where the run is parked with:\n\n```ts\nconst parkedAt = (await this.automation.listSuspendedRunsDurable())\n  .find(r => String(r.runId) === String(runId))?.nodeId;\n```\n\nOn a database-backed store, `listSuspendedRunsDurable()` reads one page of 1000 `paused` rows (`ObjectStoreSuspendedRunStore.list()`), plus the runs this process parked itself. When the run was parked by another replica, or by this process before a restart, and more than 1000 runs are parked ahead of it, the run is not on that page. `parkedAt` is then `undefined`, and the guard refuses with `INVALID_STATE` \"parked at no node this engine can see\".\n\nThe guard is fail-closed by design. Its comment says \"A false refusal costs the operator a retry\". Past the first page, though, a retry reads the same page and refuses the same way, so the operator can never re-issue the continuation for that run on a busy deployment. The decision behind it stays recorded and never takes effect.\n\nPR #28268 fixed the same page cap for the revise-window recall's batch lookup, using a keyed read: `AutomationEngine.suspendedMapParentOf`, two loads by id. This guard needs the same kind of read for one run: where is run X parked?\n\nReach: a restored approval suspension whose continuation is re-issued, on a deployment with more than 1000 parked runs, where the run was not parked by the serving process.\n\n## Wanted (route is triage's)\n\nGUARD 3 reads the run's parked node with a keyed lookup by run id, not a listing. It stays fail-closed when the run is truly not parked, or is parked elsewhere.\n\n## Dedupe\n\nChecked against #28230 / PR #28268, which fixed the recall's batch lookup and left this caller as is. I searched open titles for `listSuspendedRunsDurable`, `1000`, `restored continuation`, `parked at no node`: no match other than #28230, which is closed. **New.**"

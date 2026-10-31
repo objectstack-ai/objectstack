@@ -1,0 +1,37 @@
+{
+  "number": 28341,
+  "kind": "issue",
+  "title": "docs(qa): wave-3 checklist accuracy slice S7 — integration-system.json, attachments-storage.json, cli.json (#27377)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "documentation",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T05:42:07Z",
+  "updated_at": "2026-10-31T07:43:12Z",
+  "closed_at": "2026-10-31T07:40:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28341",
+  "body": "domain:devx#2 · os-justin · session_01QSeKYmTYfaPbLQD4BJfomW\n\nSub-issue of #27377, the v18.3.0 release test sweep anchor. This is wave-3 checklist-accuracy **slice S7**, split out on the maintainer's word in seat session `session_01QSeKYmTYfaPbLQD4BJfomW`: 「同意」, to the seat's proposal to split S4–S8 into sub-issues so that both devx seats can work them. ⛔ Not a claim. Any devx seat may claim it. `domain:devx` is inherited from the parent.\n\n## Scope\n**Files:** `docs/qa/platform-checklist/areas/integration-system.json`, `docs/qa/platform-checklist/areas/attachments-storage.json`, `docs/qa/platform-checklist/areas/cli.json`. No other file. ⛔ No product code.\n\n**Rows:** 28, from the seat's read-only census of every finding parked on #27377 (census note 6539602007), taken at origin/main `501c864dd5`. Re-verify each row against the current head before editing. A row that no longer holds is reported as fixed upstream.\n\n| census row | record | item | verdict | evidence (census) |\n|---|---|---|---|---|\n| 19 | #27392 | `cli.fresh-install-migrate-apply-first` | STALE | requires[0] \"`os dev`, `os serve` and `os migrate plan` each create tables\". |\n| 20 | #27392 | `cli.hook-body-extraction-gates` | STALE | steps[2] and acc[3] probe the retired comment only in TS config, where esbuild strips it. No body.source probe. |\n| 21 | #27392 | `cli.qa-suite-execution` | STALE | acc[4] \"it counts as one failed suite\". |\n| 39 | #27409 | `cli.organization-ownership-ceremony` | GAP | A4 needs a v17 DB. Recipe yes: a 17.7.0 blank-scaffold boot (see the C1 v17 row). |\n| 54 | #27409 | `attachments-storage.download-authz-both-sides` | STALE | steps[6] names no viewport (the panel appears at 1600px, not 1280px). |\n| 55 | #27409 | `attachments-storage.orphan-tombstone-reap` | STALE | steps[1] \"trigger the LifecycleService sweep\" names no trigger. |\n| 56 | #27409 | `attachments-storage.upload-session-abort` | STALE | steps[1] \"PUT one chunk\" has no x-resume-token, and the complete parts shape is unnamed. r7 (#27781) left this unchanged. |\n| 57 | #27409 | `attachments-storage.upload-limits-scope-and-ownership` | STALE | acc[5] and steps[4] have no copy-on-write or driver-write note. |\n| 62 | #27409 | `cli.organization-ownership-ceremony` | STALE | acc[3] \"refuses … with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED\". Duplicate of the C1 row. |\n| 63 | #27409 | `cli.organization-ownership-ceremony` | STALE | acc[5] reset token: the cli-18-prerelease-db recipe (cli.json area fixtures) never re-dates sys_verification.expires_at. Recipe yes: one UPDATE after restore. |\n| 64 | #27409 | `cli.organization-ownership-ceremony` | STALE | steps[5] does not say which file the delivery row lands in (primary, not telemetry). |\n| 65 | #27409 | `cli.meta-package-flags-and-explain` | STALE | requires[2] and steps[1] have no dependency or sharingModel guidance. |\n| 66 | #27409 | `cli.validate-v18-authoring-verdicts` | STALE | steps[1] control `record.name == …` (showcase_task has title); the cbp raw-object note is missing. |\n| 67 | #27409 | `cli.scaffold-first-run` | STALE | requires[1] pack recipe has no scripts-off flag and no same-version note. |\n| 76 | #27441 | `cli.scaffold-console-first-paint` | GAP | Candidate console not exercised. Recipe yes: the existing pre-release registry variant (requires[1]), or the post-publish smoke. |\n| 112 | #27441 | `cli.scaffold-console-first-paint` | STALE | steps[0] npx only; no built-scaffolder fallback. |\n| 118 | #27441 | `integration-system.job-scheduled-run` | STALE | acc[5] \"… os migrate meta --from 16\". |\n| 119 | #27441 | `integration-system.notify-inbox-delivery` | STALE | steps[0] does not say assignee is an email text field. |\n| 132 | #27481 | `cli.organization-ownership-ceremony` | GAP | A5 token: duplicate of the C2a recipe row (recipe yes). |\n| 143 | #27481 | `cli.organization-ownership-ceremony` | STALE | acc[1] \"the DB checksum is unchanged\". |\n| 144 | #27481 | `cli.organization-ownership-ceremony` | STALE | acc[3] expects the code literal. Defer it to the pins. |\n| 151 | #27438 | `integration-system.external-schema-drift-gate` | GAP | The sibling half is pin-only, so park it. N5 (federation-free boot) is cheap: recipe yes. |\n| 188 | #27438 | `integration-system.external-schema-introspection` | STALE | acc[1].verify \"?schema=<x> and repeated ?schema both answer 200 with the full set\". |\n| 189 | #27438 | `integration-system.email-template-render` | STALE | acc[7] \"(200 with result.status 'sent')\". r10 (10-29) kept it. |\n| 190 | #27438 | `integration-system.email-template-render` | STALE | steps[5] \"author a template with fromOverride + replyTo\" gives no shape. |\n| 191 | #27438 | `integration-system.email-template-render` | STALE | acc[1]/[2] use oracle \"log\"; the evidence is in sys_notification_delivery. |\n| 192 | #27438 | `integration-system.external-schema-drift-gate` | STALE | acc[0] and steps[2] \"boot aborts with ExternalSchemaMismatchError\". |\n| 193 | #27438 | `integration-system.notification-org-and-redeliver-eligibility` | STALE | requires[2] \"create an ACTIVE webhook … (POST /api/v1/data/sys_webhook)\" lacks method and definition_json. |\n\nGAP rows are listed only where the census found a cheap fixture recipe. The other gaps stay parked on #27377.\n\n## Edit shape (wave 2's slices A–D; #27164 is the precedent)\n- `revision` goes up by 1.\n- main's `history` stays an exact prefix, with ONE appended row citing the run record (#27392, #27409, #27438, #27441 or #27481) and #27377.\n- The text is fixed to what the code says today.\n- An edit may make a clause stronger or more precise. It never weakens a clause to make it pass.\n- A finding that, on reading, is a product defect is NOT edited. It is reported for the seat to file.\n- Keep `pnpm check:platform-checklist` green.\n- Changeset: none (label `skip-changeset`).\n- The PR says `Fixes #<this card>` and `Part of #27377`.\n\n## Not in this slice (held on #27377 until ruled)\n- `studio-authoring.expression-editors`;\n- the SCOPE-negatives sweep, which includes `platform-core.notification-center` negative[3];\n- `ai.mcp-stdio-fail-closed`;\n- the UNCLEAR rows: `settings-organization-isolation-and-platform-rung` and `ux-conventions.write-feedback` acc[1].verify, among others.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

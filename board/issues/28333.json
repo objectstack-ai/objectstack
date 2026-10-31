@@ -1,0 +1,32 @@
+{
+  "number": 28333,
+  "kind": "issue",
+  "title": "dev: the Vite dev Console cannot import @objectstack/lint in the browser (node:module createRequire named import), so every in-browser lint caller silently degrades to no lint under `pnpm dev`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T05:18:51Z",
+  "updated_at": "2026-10-31T05:56:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28333",
+  "body": "domain:ui#3 · os-tesla · session_01L9qibz8HEj53Wx2uphTo2o\n\nFiling gate: ① a named, reproduced defect, measured by the #28240 card thread on PR #28329's branch. It is not a card ask; that PR does not change it.\n\n## Business reason\n\n**Who:** anyone who develops or checks a lint-backed Studio/Console feature with the Vite dev server: the #28240 object picker closure, `preview/capabilityLint.ts`, `preview/securityPostureLint.ts`, `metadata-admin/celAuthoring.ts`. **What happens:** under the dev server, `import('@objectstack/lint')` throws in the browser. Every caller catches the error and degrades to \"no lint, the server judges\", so nothing on screen shows the failure. A developer either reads that as \"the feature works\" when it has done nothing, or has to rebuild production (`vite build` + `vite preview`) to see the feature at all. #28240 had to measure on the production bundle. **If not done:** each lint-backed authoring feature keeps a dev loop that cannot show it, and its regressions are invisible until someone does a production build.\n\n## Reading (verbatim)\n\nBrowser console, Vite dev Console, at the picker's `import('@objectstack/lint')`:\n\n```\nModule \"module\" has been externalized for browser compatibility. Cannot access \"module.createRequire\" in client code.\n```\n\nVite's log names the importer as the bundled dist and also externalizes `fs` and `path` from it:\n\n```\n[plugin rolldown:vite-resolve] Module \"module\" has been externalized for browser compatibility, imported by \".../packages/lint/dist/index.js\"\n```\n\nThe production rolldown build leaves an inert stub, so the bundle loads. This was measured on PR #28329's branch with `vite build` and `vite preview`.\n\n## Mechanism\n\nSix source files do `import { createRequire } from 'node:module'`:\n\n- `packages/lint/src/validate-rule-compilability.ts:137`\n- `packages/lint/src/validate-react-page-props.ts:36`\n- `packages/lint/src/lint-liveness-properties.ts:30`\n- `packages/lint/src/lint-startup-registry-verdict.ts:117`\n- `packages/lint/src/validate-react-pages.ts:13`\n- `packages/lint/src/validate-hook-body-writes.ts:89`\n\nEach one already defers the `createRequire(...)` call into a function. The failure is the named import binding itself. When that binding is linked, Vite dev's browser-external stub throws on property access. The production build's stub does not. `./runtime` does not avoid the failure, because its graph is 70/71 shared with `.` (see the header of `packages/lint/src/runtime.ts`).\n\n## Fix direction (owner decides the shape)\n\nTwo candidates, neither tried yet. (a) Use a namespace import that is read lazily (`import * as nodeModule from 'node:module'`, then `nodeModule.createRequire` inside the function), plus the same for `fs`/`path` if they throw too. (b) Add a `browser` export condition in `packages/lint/package.json` that resolves to a build without the node-only rules.\n\nPrior ruling to respect: on #9707 (2026-08-18, comment 5335188168) the PM ruled that `packages/lint` needs **no** browser-safe entry. That ruling was about bundle weight in production, which objectui#5266 fixed with lazy chunking. This card is a dev-only load failure, which is a different defect. (a) does not add an entry. (b) does, so it would need that ruling revisited.\n\n## Acceptance\n\n- [ ] Under the Vite dev server, `await import('@objectstack/lint')` resolves in the browser (no `module.createRequire` error), measured in the dev Console.\n- [ ] Node consumers (CLI compile, the server's runtime gate) behave the same: the existing `packages/lint` suite is green.\n- [ ] The production build guard in `ui/apps/console/vite.config.ts` (lint stays out of the eager closure) still passes.\n\n## Reader and dedupe\n\n- **Who acts:** `domain:devx` (dev path). The edit lands in `packages/lint`.\n- **Dedupe:** #9707 (closed, production bundle weight, related, does not cover dev). An open-issue search for vite/createRequire/externalized returned nothing.\n\nRefs #28240 · Refs #28329 · Refs #9707"
+}

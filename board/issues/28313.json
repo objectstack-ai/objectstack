@@ -1,0 +1,31 @@
+{
+  "number": 28313,
+  "kind": "issue",
+  "title": "[Decision] Official connector-app listing identity before the first publish: `app.objectstack.connector-<vendor>` as the package id, `<vendor>` as the namespace, `@objectstack/connector-app-<vendor>` as the private npm name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "needs-user-decision",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T04:14:20Z",
+  "updated_at": "2026-10-31T04:54:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28313",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ② a decision only the maintainer takes — a public identifier that can never change once published. Raised by the #28276 dev (`open_questions[1]`, PR #28306). Child of #27293 (E4). ⛔ Not a claim. Nothing is published until the cloud pipeline (#28278) runs, so this card blocks no merge; it must be ruled before the first `os package publish`.\n\n## 维护者速读\n\n- 改了什么：不改代码。首个官方连接器应用（GitHub，PR #28306）上架前，要定下官方连接器应用的「身份」命名规则：包 id、命名空间、npm 包名。\n- 为什么改：包 id（`manifestId`）一旦发布就永远不能改（上架手册：`content/docs/deployment/marketplace-handbook.mdx:34`「reverse-domain, immutable once published」），每个后续官方连接器都会照这个规则起名；这是对外的品牌与标识，席位不代定。\n- 风险与回滚：发布之前改名零成本；发布之后改不了。\n- 先看：下面「选项」表。\n- 两分钟验证：看 PR #28306 里 `packages/apps/connector-github/objectstack.manifest.json` 与 `package.json` 的前几行。\n- 需要你做的：选 A 或 B（B 请直接写出规则）。\n\n## Options\n\n| | Package id | Namespace | npm name (private) | Basis |\n|:--|:--|:--|:--|:--|\n| **A** | `app.objectstack.connector-<vendor>` (e.g. `app.objectstack.connector-github`) | `<vendor>` (`github`) | `@objectstack/connector-app-<vendor>` | follows the one official listing (`app.objectstack.hotcrm`); `@objectstack/connector-*` already names the executor packages (`connector-mcp`, `connector-openapi`), so the app takes `connector-app-` |\n| **B** | another rule you name | | | |\n\n## 四维分析\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① 项目长远合理性：20–30 个官方连接器会沿用同一规则；A 与已有官方应用 `app.objectstack.hotcrm` 同前缀，并把「执行器包」（`connector-mcp`）和「连接器应用」（`connector-app-github`）分开命名，避免一个名字指两种东西。\n- ② 实际业务拉动：首个应用已写好，等的就是这条规则；发布前改名零成本。\n- ③ 防 AI 犯错：规则写死在一处，写下一个应用的 agent 照抄即可；A 的 npm 名与执行器包不冲突，agent 不会把应用当执行器依赖。\n- ④ 创业阶段不扩散：两选项都不加代码或门禁。\nPrior rulings read: manifestId, listing id, package id, namespace → handbook `:34` (immutable once published); no ruling on official-app naming; thread: #28276 report; repo: objectstack-ai/objectstack\n\n## Recommendation\n\n**A**, because it matches the one existing official listing and keeps the executor and app names apart. Confidence gap: whether \"official\" listings should carry a distinct prefix from future partner listings (for example `app.objectstack.` vs `app.<partner>.`) is a marketplace policy this repository does not record.\n\nSelf-check: 只看①选 A；②③④ 是否翻转：否。\n\n## After the ruling\n\n- A: PR #28306 lands as is; every later connector app follows the rule; the handbook's listing section gains one line naming it.\n- B: the epic PM rewrites the three identifiers on PR #28306 before it lands (nothing is published yet)."
+}

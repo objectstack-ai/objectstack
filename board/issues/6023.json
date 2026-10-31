@@ -1,7 +1,7 @@
 {
   "number": 6023,
   "kind": "issue",
-  "title": "[PM seat] domain:devx @ objectstack — ⏳ vacant",
+  "title": "[PM seat] domain:devx @ objectstack — 🟢 os-zhuang · held by the os-zhuang account's project",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-zhuang"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-10-29T21:47:45Z",
+  "updated_at": "2026-10-31T05:46:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 450,
+  "comments": 451,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
-  "body": "domain:devx#1 · os-elon-musk · session_01LKHDniRQSWjRJyDtacwpEd\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-elon-musk` · `session_01LKHDniRQSWjRJyDtacwpEd` (project thread \"Devx 车道派发\"; 由 os-elon-musk 账户的项目负责). Seated 2026-10-29 14:2xZ and signed off 2026-10-29T21:46Z on the maintainer's word 「devx 车道可以下班了」 (2026-10-29 21:44Z). `check-handover` exited 0 before this body was written. The sign-off brief is the newest comment and the release marker.\n- **Stay-behind:** none.\n- **In flight:** none. Every claim of the term landed.\n\n## Ledger\n\n- **Landed this term:**\n  - #27642: closed #27382 and #27390 (the security-finding no-card rule, effort by card shape).\n  - #27716: closed #27654 (stale History-tab clauses).\n  - #27647: closed #27383 (retest-owed reader, `touched:SHA`, the §6 cadence).\n- **Released to `pm:queue` with readings:**\n  - #27453: needs a ui-lane record-save feedback helper; the A/B shapes are on the card, shared with #27456.\n  - #25913: the declarations already landed in objectui#13495. The remaining gate retirement is under the `ci.yml` constraint (6430916285).\n- **Still blocked:** #25452 waits on the maintainer's two local `gh` reads.\n- **Anchors:** #27377 (18.3.0 sweep) and #25807 (18.2.0 sweep).\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Seat 2 (#20163, `os-justin`) was seated at sign-off. The split was full-order alternation (6499301324), and the maintainer later let seat 1 take anything seat 2 had not dispatched.\n- **Unfiled finding** for whoever holds the lane: `scripts/qa/qa-rollup.mjs` cannot read past 100 qa-run records from a cloud session. The proxy answers its `/repositories/ID` next links with 403, and page numbers past 100 get 422; the corpus is about 160. `retest-owed.mjs` already avoids both by carrying the next link's query onto `/repos`.\n"
+  "body": "domain:devx#1 · os-zhuang · session_01QUs3BvP5Aq9USg5GtmgAAR\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — 🟢 os-zhuang\n\n- **Holder:** `os-zhuang` (`GET /user`) · `session_01QUs3BvP5Aq9USg5GtmgAAR` · held by the os-zhuang account's project (thread \"Dispatch DevX PM seat 1\").\n- **Seated:** 2026-10-31T05:45Z on the maintainer's summons 「pm-dispatch devx seat 1」. Opening mark: 6539693115.\n- **Mailbox:** PR #28344 (subscribed). Hourly patrol routine bound to the seat session.\n- **Posture, ledger and round reports live in the project** (pointer only; claims and records on the cards and PRs).\n\n## Ledger\n\n- Inherited from the previous term (brief 6509093071): no stay-behind, no in-flight claim. Released cards #27453 and #25913 were read at that brief; #25913 is now closed.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Seat 2 (#20163, `os-justin`) is 🟢. Lane cards are taken by the full order in alternation (seat 1 odd positions) unless a `split` notice says otherwise.\n"
 }

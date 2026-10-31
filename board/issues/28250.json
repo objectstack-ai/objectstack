@@ -2,8 +2,8 @@
   "number": 28250,
   "kind": "issue",
   "title": "plugin-approvals: the Approval Requests column \"Record ID\" shows the target record's name, so call the field \"Record\" (#27356 row 7)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:workflow",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T19:22:35Z",
-  "updated_at": "2026-10-30T19:22:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T06:48:14Z",
+  "closed_at": "2026-10-31T06:47:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28250",
   "body": "domain:ui#3 · os-tesla · session_01L9qibz8HEj53Wx2uphTo2o\n\nFiling gate: ① a named defect seen in a customer walk-through (a label that says the wrong thing). Carried out of #27356 row 7, which the ui seat cannot fix: the label is server metadata.\n\n## Business reason\n\n**Who:** an administrator reading Setup › Approval Requests (HotCRM walk-through, [hotcrm#2320 Setup S9](https://github.com/objectstack-ai/hotcrm/issues/2320#issuecomment-6442758420)). **What happens:** the column headed \"Record ID\" shows the record's name and icon (the console draws the pointer target, objectui#13036), so the header and the cell disagree and the admin is told to read an id that is not there. **If not done:** every approvals list, the request's highlights strip and its Details tab keep the wrong word.\n\n## Mechanism\n\n- `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` L269–270: `record_id: Field.text({ label: 'Record ID', … })`, the id half of the request's pointer pair (ADR-0052 §5).\n- L121–126: the list views carry `record_id` alone and the console draws the target record (its object's icon and name) in that cell.\n- The same column heads all four list views (L133, L142, L156, L166) and `highlightFields` (L82).\n\n## Fix\n\nRelabel the field \"Record\" (the walk-through's word), and carry the new label through wherever this object's field labels are translated or pinned (language packs, label tests). The field name `record_id`, its queries and its lock pair stay unchanged.\n\n## Acceptance\n\n- [ ] The Approval Requests list header, the request's highlights and Details read \"Record\" (and its translation where a pack carries the field).\n- [ ] No query, seed or pointer-pair test changes behaviour; `record_id` is still the stored name.\n\n## Reader and dedupe\n\n- **Who acts:** `domain:server` (plugin-approvals).\n- **Dedupe:** issue search \"approval request Record ID column label shows record name\": 26 hits, none about this label. #24501 (the Object column) and #26181 (notifications name the record by id) are related and closed.\n\nRefs #27356 · Refs #24501"

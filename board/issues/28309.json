@@ -1,0 +1,37 @@
+{
+  "number": 28309,
+  "kind": "issue",
+  "title": "connector-openapi normalizer: a trim mode that keeps only the operations `--include-pattern` matches, so a large vendor document packages as the operations an app calls, with the sha256 of those bytes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T04:11:45Z",
+  "updated_at": "2026-10-31T05:55:24Z",
+  "closed_at": "2026-10-31T05:54:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28309",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\ncarries the tooling half of #28276's Stripe app; #28276 keeps the two app packages. An in-flight derivative of #28276 (sub-issue, held by #28276's claimant, priority inherited). Found by the #28276 dev (report comment on #28276, `open_questions[0]`) and re-read by this seat. ⛔ Not a claim.\n\n## The gap, measured\n\n`packages/connectors/connector-openapi/scripts/normalize-openapi.mts` (PR #27436, merged): `--include-pattern` computes the `providerConfig.include` list (lines ~233-250 at `origin/main`) and writes the whole document. Measured by the #28276 dev against `stripe/openapi` `spec3.json` at `51610f5f` (MIT): a 6-operation pattern writes 63,317,655 bytes holding all 612 operations (sha256 `0ea3c37a…`); `--max-depth 0` still writes 6,070,551 bytes with all 612. The published recipe (`skills/objectstack-automation/references/integration-recipes.md`, recipe 1) teaches \"trim the vendor's OpenAPI 3.x document to the operations the app calls\", and #28276 requires the packaged document to be the script's output with its printed sha256 in the README — today both cannot hold.\n\n## Work\n\n- A trim option (for example `--trim`, or trimming whenever `--include-pattern` is given — the dev picks and says why): keep only matched operations, drop now-unreferenced components after inlining, then hash and write. The printed sha256 is of the written bytes; `include` still matches `operationActionKey`.\n- Tests on the existing fixtures: trimmed output carries exactly the matched operations, loads through `createOpenApiProviderFactory` with no `$ref`, and its sha256 equals `sha256sum` of the file.\n- `content/docs/automation/connectors.mdx` (the script's paragraph) and `content/docs/deployment/marketplace-handbook.mdx:117`, whose sentence \"gains an offline spec-normalization tool with #26709\" still reads as future although the script has landed.\n\nMeasured target (dev's reading): the 6 included Stripe operations at `--max-depth 2` are about 1.1 MB.\n\n## Reader\n\nThe epic PM of #27293 dispatches it to the `domain:server` lane; #28276's Stripe package follows it.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-10-31T02:05Z), titles grepped for `connector app|shelf|docusign|stripe|github mcp|E4`: 0 hits before the E4 cards; this is a derivative of #28276, not a new subject."
+}

@@ -14,7 +14,6 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "pm:epic",
     "priority:p2"
   ],
@@ -22,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T09:41:36Z",
-  "updated_at": "2026-10-29T13:38:12Z",
+  "updated_at": "2026-10-31T06:58:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27193",
   "body": "Blocked-by: #27192\n\nFiling gate ③ (maintainer-directed). Ruling 6465431966 on #27119 (batch #421 item 2, Q1 = 乙-现在, maintainer 「同意立专题卡」 2026-10-28): the multi-currency epic resumes on #8345 in shape C′. Part of #8345. Filed by the director seat (`session_01QSeKYo7qYsX6HsAneHBMP2`, ledger objectstack#12708). ⛔ Not a claim. Workload row and precedents: 6464936321; design: 6464438764.\n\nRuling-ref: 6465431966\n\n## 维护者速读\n\n- **改了什么：** 汇率更正后的显式重算：先报告（多少行、哪些会变、哪些缺汇率），再 `--apply`；缺汇率的行列出并跳过（参数 1 默认）；每次留审计。\n- **为什么改：** 历史数据不随汇率漂移，改了要人来跑。\n- **风险与回滚：** 只写影子列与汇率列。\n- **先看：** 先例 `summary-backfill.ts`、`commands/migrate/activity-changed-fields.ts`。\n- **两分钟验证：** 改一条汇率后报告列出受影响行，apply 后影子列更新。\n- **需要您做的：** 参数 1 已按默认裁定。\n\n## Task\n\n- [ ] Command with report / apply modes; scope by object and start date.\n- [ ] Audit entry per run.\n- [ ] Tests with a corrected rate and a missing one.\n\nLane: server · Size: M · Review: default. `Clause-②: no` · `Metadata-protocol: none`.\n\nEpic: #8345 (parent; the epic PM dispatches `pm:epic` children; `domain:spec` children go to the spec seat's queue). Dedupe: #8345 thread, #27119 (ruled), the workload list 6464936321; no open card carries this slice."

@@ -2,8 +2,8 @@
   "number": 28135,
   "kind": "issue",
   "title": "objectql: the 503 ERR_DATASOURCE_UNAVAILABLE text for a failed datasource always blames a startup connect under OS_ALLOW_DRIVER_CONNECT_FAILURE, which is false for an install-time or Setup-created datasource",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T13:36:05Z",
-  "updated_at": "2026-10-30T13:36:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T07:13:11Z",
+  "closed_at": "2026-10-31T07:13:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28135",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\n## Finding\n\n`DatasourceUnavailableError` (`packages/objectql/src/driver-connect-errors.ts`, the non-`remote`, non-`blocked` arm, ~L268-271 on `main` 549203d0) explains every failed datasource the same way:\n\n> it failed to connect at startup and the server was started with `OS_ALLOW_DRIVER_CONNECT_FAILURE`. Nothing re-runs the connect — the server must be restarted once the datasource is reachable.\n\nThat is true only for a code datasource whose boot connect failed under that flag. It is false for:\n\n- a datasource declared by a package installed into a running runtime (`POST /api/v1/marketplace/install-local`), whose connect fails at install time with no flag involved (PR #28132, #28039, measured by its card thread: a bound read answers this 503 for an unresolved credential);\n- a datasource created in Setup whose connect failed.\n\nThe message then tells an operator to restart a server that was never started with the flag, and names a cause that did not happen.\n\n## Expected\n\nThe text names the cause the connection service actually retained for that datasource (or a neutral \"failed to connect; see Setup → Datasources\"), and says \"restart\" only where a restart is what re-runs the connect.\n\n## Scope\n\n`packages/objectql/src/driver-connect-errors.ts` and its pins. No new error code; the 503 and `ERR_DATASOURCE_UNAVAILABLE` stay. Found while reviewing PR #28132; not in that PR's scope."

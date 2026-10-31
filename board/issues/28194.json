@@ -2,8 +2,8 @@
   "number": 28194,
   "kind": "issue",
   "title": "service-analytics: a dataset's currency guard compares a `count` that names an amount field, refusing an amount-per-row ratio as cross-currency (multi-currency, epic #8345)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T16:13:41Z",
-  "updated_at": "2026-10-30T16:13:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T07:09:11Z",
+  "closed_at": "2026-10-31T07:07:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28194",
   "body": "epic:#8345#1 · os-bill · session_01Utp6CbTZrFqRYNgjSaSbN5\n\nFiled by the epic PM from the contract review of PR #28181 (should-fix, routed to the code it cites). Part of #8345. ⛔ Not a claim.\n\n## 维护者速读\n\n- **改了什么：** 数据集编译期的币种一致性检查，把「对金额字段做 `count`」误当成金额，于是像「美元合计 ÷ 有金额的发票数」这样的比率被当成跨币种运算拒绝。修法：解析器只对 sum/avg/min/max 这类金额聚合认币种。\n- **为什么改：** `count` 数的是行，不是钱；ADR-0144 开放项 12 的裁决原文就是「`count` 操作数不参与比较」，现在代码只在 `count` 不带 `field` 时才做到。\n- **风险与回滚：** 只放宽一个误拒，不会让错的数字通过；回滚即撤 PR。\n- **先看：** `packages/services/service-analytics/src/measure-currency-coherence.ts` 的 `measureCurrencyResolver.resolvedOf` 非派生分支。\n- **两分钟验证：** 数据集里 `ratio(usd_total, priced_invoices)`（后者为 `{ aggregate: 'count', field: 'amount' }`）编译通过；两个不同 `fixed` 币种的金额求和仍被拒。\n- **需要您做的：** 无。\n\n## Defect\n\n`measureCurrencyResolver.resolvedOf` (`measure-currency-coherence.ts`, the non-derived branch) resolves a measure's currency from `fieldOf(m)` without reading `m.aggregate`. `DatasetMeasureSchema.field` is allowed on a `count` (a count of non-null values; the guard's own test dataset declares `priced_invoices: { aggregate: 'count', field: 'amount' }`). Such a count therefore resolves to the amount's currency (`record`, or a `fixed` code), and guard 2 compares it with the other operand. A `ratio` of `usd_total` (fixed USD) over `priced_invoices` (a count over a record-mode or a differently-coded amount) is refused with `DATASET_INVALID` \"amounts in different currencies\", although one operand counts rows.\n\nThe other two readers already gate on `AMOUNT_AGGREGATES` and get the same count right: `enrichResultColumns` and the analytics cube door. Ruling 6486427200 on #8345 and ADR-0144 Open item 12's note both say \"a `count` operand is not compared\".\n\nResponsibility: PR #27991 (#27579), which wrote the resolver.\n\n## Task\n\n- [ ] In `resolvedOf`'s non-derived branch, resolve a currency only for an amount aggregate (the same `AMOUNT_AGGREGATES` set the cube door and `enrichResultColumns` use); a `count` with a `field` resolves to none.\n- [ ] Pin it: a `ratio` and a `sum` derived measure over an amount and a `count` with `field` compile; the existing refusals (two different `fixed` codes, a record amount against a fixed one) stay red. Ablate the new test.\n\nLane: server (`@objectstack/service-analytics`) · Size: S · Review: default. Declarations, for the card to confirm: `Clause-②: yes (widening)` (a refusal shrinks) · `Metadata-protocol: none`; patch changeset.\n\nEpic: #8345. Dedupe: PR #28181 review record; no open card carries this.\n"

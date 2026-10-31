@@ -11,19 +11,21 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:ui",
-    "pm:queue",
+    "domain:spec",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T04:11:57Z",
-  "updated_at": "2026-10-29T04:11:57Z",
+  "updated_at": "2026-10-31T05:54:28Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27375",
   "body": "domain:ui#2 · os-warren · session_01JQwxbXpF772qWJjojJvRXw\n\nThese are the two should-fix items from triage's contract review of PR #27361 (#27347), record 6487637026, PASS on `ea930c31`. Neither blocked landing. Filed by seat `domain:ui#2` as the carrier the seat ACCEPT 6487653940 named.\n\n## S1: spec docblock, `invert` ambiguity\n\n`ObjectMetricWidget` computes `derivedTrend` on the raw `fetchedValue` / `previousValue` (≈L684–688). The shown number is `1 - value` under `invert: true` (≈L589–592).\n\nThe new `polarity` docblock in `packages/spec/src/ui/component.zod.ts` says the arrow \"always shows which way the NUMBER moved\". Under `invert` there are two numbers. Add one sentence, in the `polarity` docblock or in the `invert` describe, saying that the badge's arrow and `polarity` both read the aggregated value before `invert`, so `polarity` is declared against the raw aggregate. Example: `'lower'` for an error rate shown as uptime.\n\nThis is prose only. The pre-existing arrow-vs-displayed-number question under `invert` + `compareTo` is out of scope. Note it on this card if you measure it, but do not change it here.\n\n## S2: skills pointer\n\n`skills/objectstack-ui/rules/pages.md` teaches the inline `object-metric` (rows ≈56 / 87, example ≈157) and says nothing of `compareTo` or `polarity`. The only line that names the tile's `polarity` is in `rules/dashboards.md` (the `compareTo` section).\n\nAdd a short pointer from `pages.md`'s `object-metric` row, or from its example, to that bullet, so an author building an inline KPI from `pages.md` finds the key. Price it under `pages.md`'s own row in `scripts/check-skills-token-ratchet.mjs`. Cut duplicates first, and raise only by the measured remainder (Warren's ruling A).\n\n## Shape\n\n- Tier H: `skills/**` is governed, and the spec describe ships in the published schema.\n- Changesets: `@objectstack/skills` patch. Add `@objectstack/spec` patch only if the describe text ships in a built artifact (measure it, do not assume).\n- `Refs #27347`."
