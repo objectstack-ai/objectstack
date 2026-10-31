@@ -111,7 +111,7 @@ function makeKernel(seed: Row[] = [], artifacts: Record<string, unknown> = {}) {
             }
             return { id: String(data.id ?? 'r_new') };
         },
-        async update(table: string, data: Record<string, unknown>, opts?: Record<string, unknown>) {
+        async update(_table: string, data: Record<string, unknown>, opts?: Record<string, unknown>) {
             assertEngineUpdateDispatch(data, opts);
             return { id: null };
         },
