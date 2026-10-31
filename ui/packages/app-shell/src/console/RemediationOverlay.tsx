@@ -165,7 +165,16 @@ function ChangePasswordForm({ forcedReset, message }: { forcedReset: boolean; me
       setRemediationRequired(null);
       window.location.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.remediation.password.failed'));
+      // A wrong current (or temporary) password is refused with the code
+      // `INVALID_PASSWORD` and the English sentence "Invalid password", so the
+      // code is what is translated; any other refusal still shows the server's
+      // own message.
+      const code = (err as { code?: unknown } | null)?.code;
+      setError(
+        code === 'INVALID_PASSWORD'
+          ? t('auth.remediation.password.wrongPassword')
+          : err instanceof Error ? err.message : t('auth.remediation.password.failed'),
+      );
       setBusy(false);
     }
   };
