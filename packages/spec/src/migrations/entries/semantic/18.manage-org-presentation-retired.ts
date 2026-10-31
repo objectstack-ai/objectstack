@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // back-derived as a capability the stack declares); only the grant goes inert.
 export const entry: SemanticMigration = {
   id: 'manage-org-presentation-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the manage_org_presentation platform capability (its PLATFORM_CAPABILITIES entry in '
     + '@objectstack/spec security, the ORG_PRESENTATION_AUTHORING_CAPABILITY constant exported '

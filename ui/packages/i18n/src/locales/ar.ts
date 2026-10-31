@@ -529,6 +529,7 @@ const ar = {
       undonePrefix: "تم التراجع — ",
       succeeded: "نجح {{count}} / {{total}}",
       resultFailed: " · فشل {{count}}",
+      succeededRecords: "السجلات الناجحة",
       retry: "إعادة المحاولة",
       downloadErrorCsv: "تنزيل ملف CSV للأخطاء",
       cancel: "إلغاء",
@@ -2377,6 +2378,8 @@ const ar = {
       popupBlockedDescription: "حظر المتصفح فتح علامة التبويب الجديدة.",
       popupBlockedAction: "فتح في علامة تبويب جديدة",
       noRecordId: "يُنفَّذ هذا الإجراء على سجل واحد — لا يتوفر معرّف سجل.",
+      fillRequiredThenRetry: "املأ {{fields}}، ثم شغّل \"{{action}}\" مرة أخرى.",
+      fillRequiredFirst: "املأ {{fields}} أولاً.",
     },
     shortcuts: {
       title: "اختصارات لوحة المفاتيح",
@@ -2926,9 +2929,11 @@ const ar = {
       signInText: "تسجيل الدخول",
       socialButton: "التسجيل باستخدام {provider}",
       orText: "أو تابع باستخدام البريد الإلكتروني",
+      captchaRetry: "إعادة المحاولة",
       errors: {
         userExists: "يوجد حساب بهذا البريد الإلكتروني بالفعل. حاول تسجيل الدخول.",
         selfRegistrationClosed: "التسجيل الذاتي غير متاح في هذا النظام. اطلب دعوة من المسؤول.",
+        captchaFailed: "لم يكتمل التحقق الأمني. يرجى المحاولة مرة أخرى.",
         emailDomainNotAllowed: "نطاق هذا البريد الإلكتروني غير مسموح له بالتسجيل هنا. استخدم البريد الإلكتروني لمؤسستك أو اطلب دعوة من المسؤول.",
         invitationSentTo: "أُرسلت هذه الدعوة إلى {{email}}. سجّل بهذا العنوان لقبولها.",
         invitationAddressOnly: "لا يمكن قبول هذه الدعوة إلا بالعنوان الذي أُرسلت إليه. سجّل بهذا العنوان.",
@@ -3569,6 +3574,7 @@ const ar = {
   report: {
     total: "الإجمالي",
     totals: "الإجماليات",
+    subtotal: "المجموع الفرعي",
     loading: "جارٍ التحميل…",
     forbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بهذا التقرير.",
     dateRange: {

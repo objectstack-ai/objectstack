@@ -1083,6 +1083,11 @@ export function validateListViewFieldRefs(
    * [#28018] `kanban.lanes`, judged once a list view's bound object resolves:
    * every entry must be an inline option of `groupByField`. See the section of
    * that name on this module.
+   *
+   * It reads only the option map above, built from inline `options[].value`.
+   * A future `FieldSchema` key that widens the inline options a `groupByField`
+   * may carry must join that map, or a lane naming a widened option is
+   * reported as unknown.
    */
   const checkKanbanLanes = (listView: AnyRec, object: string, where: string, path: string): void => {
     const kanban = listView.kanban;

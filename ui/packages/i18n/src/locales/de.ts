@@ -483,6 +483,7 @@ const de = {
       undonePrefix: "Rückgängig gemacht — ",
       succeeded: "Erfolgreich {{count}} / {{total}}",
       resultFailed: " · Fehlgeschlagen {{count}}",
+      succeededRecords: "Erfolgreiche Datensätze",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",
       cancel: "Abbrechen",
@@ -2154,6 +2155,8 @@ const de = {
       popupBlockedDescription: "Der Browser hat das Öffnen des neuen Tabs blockiert.",
       popupBlockedAction: "In neuem Tab öffnen",
       noRecordId: "Diese Aktion gilt für einen einzelnen Datensatz – keine Datensatz-ID verfügbar.",
+      fillRequiredThenRetry: "Füllen Sie {{fields}} aus und führen Sie dann „{{action}}“ erneut aus.",
+      fillRequiredFirst: "Füllen Sie zuerst {{fields}} aus.",
     },
     shortcuts: {
       title: "Tastenkürzel",
@@ -2688,9 +2691,11 @@ const de = {
       signInText: "Anmelden",
       socialButton: "Mit {provider} registrieren",
       orText: "oder mit E-Mail fortfahren",
+      captchaRetry: "Erneut versuchen",
       errors: {
         userExists: "Ein Konto mit dieser E-Mail existiert bereits. Versuchen Sie sich anzumelden.",
         selfRegistrationClosed: "Die Selbstregistrierung ist in diesem System nicht möglich. Bitten Sie einen Administrator um eine Einladung.",
+        captchaFailed: "Die Sicherheitsprüfung wurde nicht abgeschlossen. Bitte versuchen Sie es erneut.",
         emailDomainNotAllowed: "Die Domain dieser E-Mail-Adresse ist für die Registrierung hier nicht zugelassen. Verwenden Sie die E-Mail-Adresse Ihrer Organisation oder bitten Sie einen Administrator um eine Einladung.",
         invitationSentTo: "Diese Einladung wurde an {{email}} gesendet. Registrieren Sie sich mit dieser Adresse, um sie anzunehmen.",
         invitationAddressOnly: "Diese Einladung kann nur mit der Adresse angenommen werden, an die sie gesendet wurde. Registrieren Sie sich mit dieser Adresse.",
@@ -3304,6 +3309,7 @@ const de = {
   report: {
     total: "Gesamt",
     totals: "Summen",
+    subtotal: "Zwischensumme",
     loading: "Wird geladen…",
     forbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Berichts anzuzeigen.",
     dateRange: {

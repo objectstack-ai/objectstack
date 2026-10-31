@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // sys-presence-organization-column-retired shape).
 export const entry: SemanticMigration = {
   id: 'sys-metadata-history-organization-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_metadata_history.organization_id — the declared organization column left the metadata event log '
     + '(packages/metadata-core/src/objects/sys-metadata-history.object.ts, which now declares systemFields.tenant false). '

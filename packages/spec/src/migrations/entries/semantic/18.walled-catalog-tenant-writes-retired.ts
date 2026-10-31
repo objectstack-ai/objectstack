@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // keeps that authority and what a tenant does instead.
 export const entry: SemanticMigration = {
   id: 'walled-catalog-tenant-writes-retired',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'on a group or isolated deployment, a write of a position, permission set or capability by a '
     + 'caller below the platform operator (an ADR-0090 D12 delegate whose scope authors environment '

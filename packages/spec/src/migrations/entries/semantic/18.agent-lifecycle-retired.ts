@@ -12,7 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // judgement is what this entry carries.
 export const entry: SemanticMigration = {
   id: 'agent-lifecycle-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     'agent.lifecycle — the agent conversation state machine left the shape; with it the XState '
     + 'StateMachineSchema family left @objectstack/spec/automation (StateMachineSchema, StateNodeSchema, '

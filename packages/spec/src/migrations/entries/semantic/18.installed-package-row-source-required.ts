@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // older row through the published schemas is refused now, so it is registered.
 export const entry: SemanticMigration = {
   id: 'installed-package-row-source-required',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'InstalledPackageSchema.source (kernel) on every installed-package row, now required and closed to '
     + 'code, marketplace or authored; and writable on the served GET /api/v1/packages and '

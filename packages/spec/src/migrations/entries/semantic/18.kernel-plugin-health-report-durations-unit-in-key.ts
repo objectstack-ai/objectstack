@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'kernel-plugin-health-report-durations-unit-in-key',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface: 'the two plugin health-report metrics whose name carried no unit: '
     + 'PluginHealthReport.metrics.uptime and PluginHealthReport.metrics.responseTime '
     + '(kernel/plugin-lifecycle-advanced.zod.ts)',

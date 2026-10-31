@@ -254,7 +254,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record (qa-scratch-authz persona B: the API deny clauses)",
@@ -281,7 +281,7 @@
         "GET the same routes as the uploader/admin and follow the signed URL",
         "compare TTLs: the gated grant uses the short downloadTtl (default 300s), not the 3600s presignedTtl — read expiry material from the minted URL/descriptor where the adapter exposes it",
         "flip one file to acl='public_read' (system write) and GET /files/<fileId> anonymously — the opt-out must restore the stable anonymous capability URL",
-        "in the browser, as persona A (reads qa_shared through its qa_att_reader binding, qa-scratch-authz step 6), open a qa_shared record that carries an attachments-scope file (/_console/apps/showcase_app/qa_shared/record/ID), open its Attachments tab and confirm the file is listed; then, server-side and WITHOUT reloading the page, remove A's read (as admin DELETE /api/v1/data/sys_user_permission_set/BINDING_ID, A's qa_att_reader row), click the listed file's Download, and capture the 403 on GET /api/v1/storage/files/FILE_ID/url plus the panel's surfaced copy; re-bind A afterwards (POST the same row back). Persona B cannot stand in for A here: with no read on the parent the record page itself refuses first ('You don't have access to qa_vault records'), so RecordAttachmentsPanel never mounts and there is no download to attempt. A reload after the revoke re-runs the record and listing gates and refuses before any download, which is not the download denial acceptance[4] scores"
+        "in the browser, as persona A (reads qa_shared through its qa_att_reader binding, qa-scratch-authz step 6), open a qa_shared record that carries an attachments-scope file (/_console/apps/showcase_app/qa_shared/record/ID), find its attachments panel and confirm the file is listed. Where the panel sits depends on the record page's width tier, measured on the page's container, not the viewport (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor): at a 1600px window with the sidebar expanded the page is three-column and the panel closes the resident related column; at 1280px it is two-column, the related column is a rail behind the 'Related' toggle above the columns (data-testid record-related-rail-toggle), closed by default with its panels unmounted, so open the rail first; narrower than the two-column floor, the panel closes the Related tab. There is no separate Attachments tab. Use 1600px, or open the rail, and record which; then, server-side and WITHOUT reloading the page, remove A's read (as admin DELETE /api/v1/data/sys_user_permission_set/BINDING_ID, A's qa_att_reader row), click the listed file's Download, and capture the 403 on GET /api/v1/storage/files/FILE_ID/url plus the panel's surfaced copy; re-bind A afterwards (POST the same row back). Persona B cannot stand in for A here: with no read on the parent the record page itself refuses first ('You don't have access to qa_vault records'), so RecordAttachmentsPanel never mounts and there is no download to attempt. A reload after the revoke re-runs the record and listing gates and refuses before any download, which is not the download denial acceptance[4] scores"
       ],
       "acceptance": [
         {
@@ -371,6 +371,12 @@
           "date": "2026-10-28",
           "change": "automated.ref names the component pin of clause 4. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): RecordAttachmentsPanel.test.tsx asserts the friendly denial copy for both envelope dialects at component layer, so the ref's 'It has NO pin' was stale; it now says the pin lifts clause 4 and negative[1] to partial and the browser leg stays manual. The run's other note (clause 2's admin owner is also the parent owner, so the uploader bypass is never isolated) is already in the ref. Re-read at base fd246c22 (the test file exists). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-31",
+          "change": "steps[6] said to open the record's 'Attachments tab'. QA run #27409 saw no attachments panel at 1280px and found it at 1600px. The synthesized record page lays out by its container's width tier (recordPageTierFor: three-column from 1440px of window with the sidebar expanded; two-column below that, where the related column, attachments last, is a rail behind the 'Related' toggle and unmounted until opened; tabs below the two-column floor, where attachments close the Related tab). The step now names the viewport and the toggle. No clause changed. Read from source at base 22ce3d13fe (ui/packages/plugin-detail). Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27409"
         }
       ]
     },
@@ -726,7 +732,7 @@
       "title": "The platform lifecycle sweep reaps expired tombstones and abandoned pending uploads WITH byte reclaim; sweep-time re-verification vetoes rather than losing data",
       "since": "v15.1",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": ["admin (setup access, drives the sweep)"],
@@ -738,7 +744,7 @@
       },
       "steps": [
         "run the pinned dogfood lifecycle suite first (RUNNER rule 6 — do not hand re-prove what it pins) and capture its output",
-        "for the hand-driven spot check: tombstone a file (last join-row delete), backdate deleted_at past 30d, trigger the LifecycleService sweep, then verify the sys_file row AND its storage bytes are gone",
+        "for the hand-driven spot check (the sweep has no HTTP door: the trigger here and in every later step is a restart after the backdate, then a wait past the first sweep, which runs 60 s after boot (packages/objectql/src/lifecycle/lifecycle-service.ts#DEFAULT_LIFECYCLE_INITIAL_DELAY_MS) and hourly after that (DEFAULT_LIFECYCLE_SWEEP_MS); a boot with lifecycle disabled (OS_LIFECYCLE_DISABLED=1) never sweeps): tombstone a file (last join-row delete), backdate deleted_at past 30d, trigger the LifecycleService sweep, then verify the sys_file row AND its storage bytes are gone",
         "create a pending upload, backdate past the 7d retention, sweep, verify row + best-effort bytes gone",
         "create a tombstone, then re-add a sys_attachment reference BEHIND the hooks (system write), backdate, sweep — verify the row is un-tombstoned (committed, deleted_at null), not reaped",
         "verify fresh tombstones (inside the window), committed rows and NULL-deleted_at rows all survive the sweep untouched"
@@ -800,6 +806,12 @@
           "date": "2026-10-26",
           "change": "One checklist-accuracy finding of Tier 1 record #25815 (release-18.2.0-tier1, at 6679644a) (acceptance[1]), re-read on main f6c61932: the dogfood sweep is lifecycle.sweep() called in-process after HTTP-driven setup (no door exists for it), and the failed-byte-delete-leaves-the-row leg and its warn log are pinned only in attachment-lifecycle.test.ts with a fake engine. acceptance[1].verify now names those layers and scores the failed-delete leg partial unless a run stages it. No clause or oracle changed.",
           "ref": "#25839"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-31",
+          "change": "steps[1] said 'trigger the LifecycleService sweep' without naming a trigger. QA run #27409 found the sweep has no HTTP door, and a restart runs the scheduler's first sweep 60 s after boot. lifecycle-service.ts arms a setTimeout of DEFAULT_LIFECYCLE_INITIAL_DELAY_MS (60_000), then a setInterval of DEFAULT_LIFECYCLE_SWEEP_MS (hourly). No route calls sweep(). The step now names that trigger for every sweep in the item. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27409"
         }
       ]
     },
@@ -808,7 +820,7 @@
       "title": "Chunked uploads are resumable; abandoned sessions are reaped and their backend multipart uploads ABORTED before the row (the only pointer) is deleted",
       "since": "v15.1",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -823,9 +835,9 @@
         ]
       },
       "steps": [
-        "POST /api/v1/storage/upload/chunked { filename, mimeType, totalSize, chunkSize } and capture { uploadId, fileId } — the init route's required trio is filename/mimeType/`totalSize` (a body spelling `size` is refused 400 INVALID_REQUEST), and the body is parsed with InitiateChunkedUploadRequestSchema: a `totalSize` that is not a whole JSON number of at least 1, or a `chunkSize` below 5 MiB (5242880), is refused 400 INVALID_REQUEST naming the field, never clamped; an omitted `chunkSize` takes the declared 5242880 default (storage-routes.ts)",
-        "PUT one chunk, then GET /upload/chunked/<uploadId>/progress and record uploadedChunks/percentComplete/status ('in_progress') — progress is the first step of the SDK's resumeUpload",
-        "complete a full session on a second upload and verify its sys_upload_session row reaches status 'completed'",
+        "POST /api/v1/storage/upload/chunked { filename, mimeType, totalSize, chunkSize } and capture { uploadId, resumeToken, fileId, totalChunks } (every later chunk PUT carries that resumeToken) — the init route's required trio is filename/mimeType/`totalSize` (a body spelling `size` is refused 400 INVALID_REQUEST), and the body is parsed with InitiateChunkedUploadRequestSchema: a `totalSize` that is not a whole JSON number of at least 1, or a `chunkSize` below 5 MiB (5242880), is refused 400 INVALID_REQUEST naming the field, never clamped; an omitted `chunkSize` takes the declared 5242880 default (storage-routes.ts)",
+        "PUT one chunk — PUT /api/v1/storage/upload/chunked/<uploadId>/chunk/0 with the bytes as the body and the init answer's resumeToken in the `x-resume-token` header (a missing or wrong token answers 403 INVALID_RESUME_TOKEN, storage-routes.ts) — and keep the eTag it answers; then GET /upload/chunked/<uploadId>/progress and record uploadedChunks/percentComplete/status ('in_progress') — progress is the first step of the SDK's resumeUpload",
+        "complete a full session on a second upload — every chunk PUT as in steps[1], then POST /api/v1/storage/upload/chunked/<uploadId>/complete with { parts: [{ chunkIndex, eTag }, …] }, chunkIndex zero-based and eTag the string each chunk PUT answered (a malformed entry answers 400 INVALID_REQUEST, an eTag the session does not hold 409 RESOURCE_CONFLICT) — and verify its sys_upload_session row reaches status 'completed'",
         "abandon the first session mid-flight; backdate its expires_at past the 1d TTL (system write) and trigger the lifecycle sweep",
         "verify the abandoned session's row is reaped AND the storage adapter's abortChunkedUpload was invoked for its backend_upload_id (dogfood suite instruments this)",
         "verify the completed session's row is reaped by the 7d terminal-status retention WITHOUT an abort attempt (an abort on a finalized multipart would NoSuchUpload-error and wedge the reap)",
@@ -909,6 +921,12 @@
           "date": "2026-10-29",
           "change": "steps[0] and the storage-routes.ts source line described the 5 MiB chunkSize floor (a smaller requested chunkSize silently clamped up). The init door now parses its body with InitiateChunkedUploadRequestSchema, so a chunkSize below 5242880 and a totalSize that is not a whole number of at least 1 are refused 400 INVALID_REQUEST naming the field; an omitted chunkSize keeps the 5242880 default. Both strings now describe the refusal. No clause, oracle or variant changed",
           "ref": "#27549"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "steps[0] to [2] name the chunk door's resume token and the complete body. QA run #27409 noted that 'PUT one chunk' needs the x-resume-token header and that complete takes parts [{chunkIndex, eTag}]. storage-routes.ts: the init answer carries resumeToken, the chunk PUT refuses a missing or wrong x-resume-token with 403 INVALID_RESUME_TOKEN, and complete parses req.body.parts as {chunkIndex, eTag} entries (listedParts) and judges them against the held chunks. No clause changed. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27409"
         }
       ]
     },
@@ -1125,7 +1143,7 @@
       "title": "Upload contract on v18: a declared size over the limit (100 MiB default, moved live by the max_upload_mb setting) is 413 with nothing written, an unknown scope is 400 naming the allowed values (public is retired), only the uploader may complete or poll an upload, an unclaimed private file is 401 to anonymous, and a file id copied from another record hydrates as {id, metadataRefused:true}",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1144,7 +1162,7 @@
         "POST presigned with scope \"avatars\", \"PUBLIC\", \"public\", null; and with scope omitted",
         "as the admin start an upload; as the member POST /api/v1/storage/upload/complete and GET the chunked progress for it",
         "anonymously GET the download URL of an unclaimed private file",
-        "as the member GET a record whose file field holds an id copied from another record"
+        "plant a file id another record owns into a second record's file field with a DRIVER-LEVEL write (a direct SQL UPDATE of that record's column, the record's own file kept in another file field or on a sibling record for the contrast). A data-API write cannot plant it: the field-reference hooks copy a file another record owns on claim, so the written record gets its own copy and never holds the foreign id (packages/services/service-storage/src/file-reference-lifecycle.ts, copyOwnedFile). Read the column back raw to confirm it holds the foreign id. Then GET that record as a reader REFUSED sys_file read but able to read the record (e.g. a qa-scratch-authz persona with qa_shared read and no sys_file grant, as QA run #27409 drove it). A reader holding sys_file read gets the foreign file's full metadata, because the refused marker is minted only when the caller's sys_file read is refused (packages/objectql/src/engine-file-reference-hydration.ts#serveRefusedFileHydration), so such a reader cannot score this clause"
       ],
       "acceptance": [
         {
@@ -1178,10 +1196,10 @@
           "evidence": "the answer"
         },
         {
-          "clause": "a copied file id hydrates as {id, metadataRefused:true}; the record's own file hydrates fully",
+          "clause": "for a reader refused sys_file read, a file id the record does not own (planted by the steps[4] driver-level write) hydrates as {id, metadataRefused:true}; the record's own file hydrates fully ({id, name, size, mimeType, url})",
           "oracle": "api",
-          "verify": "field value shapes",
-          "evidence": "both excerpts"
+          "verify": "field value shapes as the steps[4] reader, plus the raw column read showing the foreign id was really planted (a copy minted by a data-API write would hydrate fully as the record's own file and prove nothing)",
+          "evidence": "both excerpts and the raw column read"
         }
       ],
       "negative": [
@@ -1220,6 +1238,12 @@
           "date": "2026-10-28",
           "change": "automated.ref names two HTTP pins and rescores acceptance[3]. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): storage-upload-limits.dogfood.test.ts (413 and the restartless save, over HTTP) and storage-upload-door-ownership.wall.test.ts (403 PERMISSION_DENIED on commit, chunked completion and progress, booted wall, over HTTP) were missing from the ref; the second makes acceptance[3] pass at the HTTP layer. Re-read at base fd246c22 (both files exist; the wall file drives stack.api and asserts error.code PERMISSION_DENIED). No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-31",
+          "change": "acceptance[5] and steps[4] say how the copied-id state is reached and for whom. QA run #27409 noted that a data-API write of a copied file id is copy-on-write, so only a driver-level write reaches the state, and that a reader holding sys_file read sees the foreign file in full. file-reference-lifecycle.ts copies a file another record owns on claim (copyOwnedFile). engine-file-reference-hydration.ts mints {id, metadataRefused:true} only on the refused-sys_file-read arm, judged per record. The step plants the id below the hooks and reads the column back. The reader is one refused sys_file read, as the run drove it (reader D: qa_shared read, no sys_file). Stronger, not weaker: the raw read rules out a minted copy passing as the planted id. Read from source at base 22ce3d13fe. Wave anchor #27377, wave-3 accuracy slice S7 (#28341)",
+          "ref": "#27409"
         }
       ]
     },

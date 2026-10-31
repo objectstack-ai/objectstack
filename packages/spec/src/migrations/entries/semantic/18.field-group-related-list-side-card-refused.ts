@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // the relationship, or drop the placement) is not recorded anywhere.
 export const entry: SemanticMigration = {
   id: 'field-group-related-list-side-card-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'objects[].fieldGroups[].relatedList (data.ObjectFieldGroupSchema.relatedList) naming an inbound '
     + 'relationship that is not a body table — a lookup or master_detail FK on the child declaring '

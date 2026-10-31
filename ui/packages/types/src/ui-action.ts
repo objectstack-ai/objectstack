@@ -1110,6 +1110,22 @@ export interface UndoableOperation {
 }
 
 /**
+ * One entry of a refused write's `fields` list, as the action route answers
+ * it: the field the failed rule names, the rule's machine `code` (`required`,
+ * …), the server's sentence and the field's display label.
+ */
+export interface ActionFieldError {
+  /** The field the failed rule names (`_record` for a record-level rule). */
+  field: string;
+  /** The rule's machine code, e.g. `required`. */
+  code?: string;
+  /** The server's sentence for this entry, shown verbatim. */
+  message?: string;
+  /** The field's display label, when the server sent one. */
+  label?: string;
+}
+
+/**
  * Action execution result — the ONE declaration of this name (objectui#6349,
  * batch 4). `@object-ui/core`'s `ActionRunner` module used to declare a second
  * `ActionResult` (the contract its handlers return and its runner reads); it
@@ -1131,6 +1147,14 @@ export interface ActionResult {
 
   /** Error message if failed */
   error?: string;
+
+  /**
+   * The per-field entries of a refused write, as the server answered them
+   * (`error.details.fields`): one per failed rule, located on the field it
+   * names. Set only on a failed result whose refusal carried such a list, so
+   * a host can say what to fix beside `error`, which stays the whole text.
+   */
+  fieldErrors?: ActionFieldError[];
 
   /** Whether the caller should reload its data after the action */
   reload?: boolean;

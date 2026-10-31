@@ -7,8 +7,7 @@ import type { SemanticMigration } from '../../types.js';
 // `18.by-id-write-unreadable-row-not-found` in kind — the entry carries the
 // changed answer to the one reader the ledger serves here, the upgrade guide,
 // because a flow that read a credential off its trigger record has no schema
-// error to find it by. No backticks in `surface`: the upgrade guide renders it
-// inside a code span and a table cell.
+// error to find it by.
 export const entry: SemanticMigration = {
   id: 'flow-trigger-record-credential-masked',
   surface:

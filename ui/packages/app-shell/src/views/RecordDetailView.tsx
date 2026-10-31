@@ -1834,7 +1834,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // Read through the env ref so the spinner-tab / popup-blocked copy
       // follows a language switch without invalidating the handler instance
       // (objectui#3321).
-      t: (key, englishDefault) => String(serverActionEnvRef.current.t(key, englishDefault)),
+      t: (key, englishDefault, values) =>
+        String(serverActionEnvRef.current.t(key, { defaultValue: englishDefault, ...values })),
     }),
     [authFetch],
   );

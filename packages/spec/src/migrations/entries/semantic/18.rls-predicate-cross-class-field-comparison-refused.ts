@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // its own entry because the surface an author rewrites is a CEL predicate string.
 export const entry: SemanticMigration = {
   id: 'rls-predicate-cross-class-field-comparison-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
     + 'CEL predicate comparing a field with another field (==, !=, >, >=, <, <=) where the two '

@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // reader who followed it with no trace of why their metadata now fails.
 export const entry: SemanticMigration = {
   id: 'view-filter-rule-scalar-operator-array-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'ui.ViewFilterRule value on a SCALAR operator — an ARRAY where the operator takes one '
     + 'value (equals, not_equals, contains, not_contains, icontains, starts_with, ends_with, '

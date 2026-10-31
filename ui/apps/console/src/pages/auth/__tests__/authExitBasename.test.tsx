@@ -144,6 +144,9 @@ function setupAuth(overrides: Record<string, unknown> = {}) {
   authState = {
     user: null,
     signUp: vi.fn(async () => undefined),
+    // The wizard reads the auth config for the opt-in Turnstile site key
+    // (objectstack#28100); none is served here.
+    getAuthConfig: vi.fn(async () => null),
     refreshOrganizations: vi.fn(async () => [{ id: 'org_1' }]),
     updateOrganization: vi.fn(async () => undefined),
     createOrganization: vi.fn(async () => ({ id: 'org_1' })),

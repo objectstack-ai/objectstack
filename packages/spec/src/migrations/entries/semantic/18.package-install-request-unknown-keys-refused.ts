@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // TODO lands with whoever builds the request body.
 export const entry: SemanticMigration = {
   id: 'package-install-request-unknown-keys-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'api.installPackage request body, WRAPPED form — an undeclared TOP-LEVEL key beside '
     + 'manifest on POST /api/v1/packages (PackageInstallRequestSchema, the wrapped branch of '

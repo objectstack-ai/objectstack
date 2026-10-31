@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // reader census behind the verdict is cited in the reason.
 export const entry: SemanticMigration = {
   id: 'sys-notification-subscription-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the sys_notification_subscription platform object (NotificationSubscription, exported by '
     + '@objectstack/service-messaging and its objects barrel), its registration and boot '

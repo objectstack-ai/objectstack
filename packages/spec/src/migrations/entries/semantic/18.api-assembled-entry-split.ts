@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'api-assembled-entry-split',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span.
   surface:
     'api.AssembledInstalledPackageSchema / api.InstalledPackageAtEitherStageSchema / '
     + 'api.ListInstalledPackagesResponseSchema / api.GetInstalledPackageResponseSchema / '

@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // channel beside the changeset's FROM → TO table.
 export const entry: SemanticMigration = {
   id: 'driver-read-scope-follows-tenant-wall',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'ObjectQL find, findOne, count, aggregate, and update and delete by id or by predicate, on an '
     + 'object with an organization column, called with an execution context that names an organization: '

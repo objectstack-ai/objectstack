@@ -956,6 +956,7 @@ const en = {
       undonePrefix: 'Undone \u2014 ',
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
+      succeededRecords: 'Records that succeeded',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
@@ -1781,6 +1782,7 @@ const en = {
   report: {
     total: 'Total',
     totals: 'Totals',
+    subtotal: 'Subtotal',
     loading: 'Loading…',
     // objectui#12330 — the report's no-access state; its title is `dashboard.widgetForbiddenTitle`.
     forbiddenMessage: 'You don’t have permission to view the data behind this report.',
@@ -2325,6 +2327,10 @@ const en = {
       // The `newTabUrl` fast path's refusal when no record id resolves
       // (`createConsoleServerActionHandler`, objectui#13397).
       noRecordId: 'This action runs on a single record — no record id available.',
+      // A refused action whose answer named required fields: what to do next,
+      // after the server's own sentence (`createConsoleServerActionHandler`).
+      fillRequiredThenRetry: 'Fill in {{fields}}, then run “{{action}}” again.',
+      fillRequiredFirst: 'Fill in {{fields}} first.',
     },
     shortcuts: {
       title: 'Keyboard Shortcuts',
@@ -3218,9 +3224,11 @@ const en = {
       // Same pair as `auth.login.socialButton` / `orText`, for sign-up.
       socialButton: 'Sign up with {provider}',
       orText: 'or continue with email',
+      captchaRetry: 'Retry',
       errors: {
         userExists: 'An account with this email already exists. Try signing in instead.',
         selfRegistrationClosed: 'Self-registration is not open on this system. Ask an administrator for an invitation.',
+        captchaFailed: 'The security check did not complete. Please try it again.',
         emailDomainNotAllowed: "This email's domain is not allowed to register here. Use your organization email, or ask an administrator for an invitation.",
         // #27509 — `selfRegistrationClosed` for a visitor holding an invitation
         // link; `{{email}}` is the MASKED address the preview returns.
