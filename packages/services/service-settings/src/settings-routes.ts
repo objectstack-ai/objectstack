@@ -44,6 +44,7 @@ import {
   shouldDenyAnonymous,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
+import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // Its `extra` is `ApiError`'s own optional fields, so the undeclared siblings
 // #4224 retired from this module cannot come back through it either.
@@ -200,6 +201,20 @@ function refuseHeldSession(res: IHttpResponse, ctx: SettingsContext | undefined)
   return true;
 }
 
+/**
+ * The caller's display language, read the way REST's metadata door reads it:
+ * the top `Accept-Language` tag, else `?locale`. It only picks the language of
+ * prose a write predicate or a live-status provider composes
+ * (`SettingsContext.locale`); it authorizes nothing.
+ */
+function requestLocaleOf(req: IHttpRequest): string | undefined {
+  const header = req.headers?.['accept-language'] ?? req.headers?.['Accept-Language'];
+  const preferred = preferredLocaleFromHeader(typeof header === 'string' ? header : undefined);
+  if (preferred) return preferred;
+  const query = req.query?.locale;
+  return typeof query === 'string' && query.length > 0 ? query : undefined;
+}
+
 export function registerSettingsRoutes(
   http: IHttpServer,
   service: SettingsService,
@@ -280,7 +295,7 @@ export function registerSettingsRoutes(
       // `getNamespace`, which in-process consumers call to read values: the
       // mail plugin reads `getNamespace('mail')` while rebuilding the very
       // transport its statement waits on.
-      const liveStatus = await service.liveStatusOf(ns, ctx);
+      const liveStatus = await service.liveStatusOf(ns, { ...ctx, locale: requestLocaleOf(req) });
       const manifest = liveStatus
         ? { ...payload.manifest, specifiers: [liveStatus, ...payload.manifest.specifiers] }
         : payload.manifest;
@@ -335,7 +350,12 @@ export function registerSettingsRoutes(
       // namespace — the same 404 `setMany` would have raised one line later, in
       // the same order relative to the 403 authz check.
       const secretKeys = service.secretKeysOf(ns);
-      const result = await service.setMany(ns, dropEchoedSecretMasks(body, secretKeys), ctx);
+      const result = await service.setMany(
+        ns,
+        dropEchoedSecretMasks(body, secretKeys),
+        // The language a write predicate's refusal is written in.
+        { ...ctx, locale: requestLocaleOf(req) },
+      );
       // The write response carries resolved values too — including cascade
       // entries the caller never submitted (an upper-scope secret it may not
       // have set). Same boundary, same redaction.
