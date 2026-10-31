@@ -234,18 +234,43 @@ either form):
 
 - `connect()` - Establish the connection (called lazily by every operation)
 - `getCacheStats()` / `invalidateCache(key?)` / `clearCache()` - Cache control
+- `loadAppBundle(appId)` - Load the app's metadata bundle (`GET /meta/app/{appId}/bundle`), or revalidate the one held with `If-None-Match`; by-name metadata reads of the items it holds are answered from it (see [App metadata bundle](#app-metadata-bundle))
 - `getClient()` - Access the underlying `@objectstack/client` instance
 - `getConnectionState()` / `isConnected()` - Connection introspection
 - `onConnectionStateChange(listener)` - Subscribe to state changes (returns unsubscribe)
 - `onBatchProgress(listener)` - Subscribe to bulk progress (returns unsubscribe)
 
-Those six bullets cover nine members, and they are the documented subset.
+Those seven bullets cover ten members, and they are the documented subset.
 `ObjectStackAdapter` declares more members beyond `DataSource` than these —
 `Exclude<keyof ObjectStackAdapter<unknown>, keyof DataSource<unknown>>` lists
 them all; the rest are lower-level seams — client discovery, cache-key
 invalidation, dataset and dashboard access and advisory subscriptions among
 them — which this page does not document and which carry no compatibility
 promise here.
+
+### App metadata bundle
+
+The console calls `loadAppBundle(appName)` when it enters an app. One request,
+`GET /api/v1/meta/app/{appId}/bundle`, returns the app, the objects its
+navigation reaches with the objects that reference them, and their views,
+pages and dashboards. Each one is the envelope its own
+`GET /meta/{type}/{name}` read would return to this caller.
+
+- A by-name read of an item the bundle holds is answered from the bundle and
+  never sent: `getObjectSchema`, `getView`, `getPage`, `getApp`, `getItems`,
+  and the client's `meta.getItem(type, name)` with no options.
+- An item the bundle does not hold keeps its by-name read. That covers objects
+  outside the app, reads made with options, and an item withheld from the
+  caller, which is absent from the bundle and gets its own read's refusal.
+- Calling `loadAppBundle` again for the same app sends `If-None-Match`, and a
+  `304` keeps the bundle already held.
+- A metadata write through the client, or an `invalidateCache(key)` that names
+  a bundled item, makes the next bundled read revalidate the bundle first. So
+  does an answer older than the cache TTL. `clearCache()` drops every bundle,
+  and the next read downloads it again.
+
+If the bundle is refused, or the server has no such route, every read stays on
+its by-name route.
 
 ### Per-element data binding
 
