@@ -344,6 +344,32 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
 }
 
 /**
+ * [#28414] The identity a package write door records on the history rows and
+ * package commits its protocol call writes: the request's authenticated user
+ * id, read off the execution context the capability gate above admitted, or
+ * nothing for a caller with none (a system context), so the protocol records
+ * the actor-less `null` (#4556) — the rule `RestServer.resolveMetaWriteActor`
+ * states for the single-item door and the `/meta` dispatcher's save door
+ * follows (`meta.ts`).
+ *
+ * ⛔ Never read off the body or a header. The doors used to pass a body
+ * `actor` straight to the protocol, so any caller holding `manage_metadata`
+ * could sign another person's name into the record an administrator reads to
+ * decide what to roll back and whom to ask. A body `actor` is ignored, not
+ * refused: a client still sending one keeps working and is recorded as
+ * itself. No caller acts on behalf of another identity through these doors
+ * (measured: the console and the SDK send none, the CLI calls none); a job
+ * that must is served server-side by calling the protocol with its own
+ * `actor`, never by trusting a body.
+ *
+ * One helper for every door; spread its answer into the protocol request.
+ */
+function packageWriteActor(context: HttpProtocolContext): { actor?: string } {
+    const userId = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
+    return typeof userId === 'string' && userId ? { actor: userId } : {};
+}
+
+/**
  * ADR-0106 D4 READ gate for the `/packages` domain (#7033 / #7023).
  *
  * Package reads disclose authored metadata — the `GET /packages` id
@@ -2071,7 +2097,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                         name: app.name,
                                         item,
                                         packageId: id,
-                                        ...(body?.actor ? { actor: body.actor } : {}),
+                                        ...packageWriteActor(_context),
                                     });
                                     flipped.push(app.name);
                                 }
@@ -2236,7 +2262,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 try {
                     const result = await protocol.discardPackageDrafts({
                         packageId: id,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...packageWriteActor(_context),
                     });
                     // The twin of `publish-drafts`' 404: an empty discard is the
                     // answer for a package that exists — see `packageIsUnknown`.
@@ -2298,7 +2324,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 try {
                     const result = await protocol.revertCommit({
                         commitId,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...packageWriteActor(_context),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2324,7 +2350,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 try {
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...packageWriteActor(_context),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2419,7 +2445,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             try {
                 const result = await protocol.reassignOrphanedMetadata({
                     targetPackageId: id,
-                    ...(body?.actor ? { actor: body.actor } : {}),
+                    ...packageWriteActor(_context),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
@@ -2464,7 +2490,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     targetPackageId,
                     ...(typeof body?.targetName === 'string' ? { targetName: body.targetName } : {}),
                     ...(typeof body?.targetNamespace === 'string' ? { targetNamespace: body.targetNamespace } : {}),
-                    ...(body?.actor ? { actor: body.actor } : {}),
+                    ...packageWriteActor(_context),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
