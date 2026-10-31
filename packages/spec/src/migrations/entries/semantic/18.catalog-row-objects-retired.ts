@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // the security catalog instead.
 export const entry: SemanticMigration = {
   id: 'catalog-row-objects-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the sys_position, sys_permission_set, sys_position_permission_set and sys_capability objects — their '
     + 'data and REST routes, their Setup object pages, object permissions naming them, and seed rows targeting them',

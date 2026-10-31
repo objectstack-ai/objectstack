@@ -9,7 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // blocks. This entry carries what the fold cannot decide.
 export const entry: SemanticMigration = {
   id: 'ui-list-view-options-bag-folded',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     'view.options — the legacy per-kind bag (options.kanban, options.calendar, options.gantt, '
     + 'options.timeline, options.map, options.gallery, options.chart, options.tree) on a flattened list '

@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // sys-presence-organization-column-retired shape).
 export const entry: SemanticMigration = {
   id: 'sys-metadata-audit-organization-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_metadata_audit.organization_id — the declared organization column left the metadata write audit log '
     + '(packages/metadata-core/src/objects/sys-metadata-audit.object.ts, which now declares systemFields.tenant false). '

@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // the way — so the upgrader owes the judgement this entry states.
 export const entry: SemanticMigration = {
   id: 'cube-member-sql-expression-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'analyticsCubes[].measures.<metric>.sql and analyticsCubes[].dimensions.<dimension>.sql '
     + '(data.MetricSchema.sql / data.DimensionSchema.sql) authored as a SQL expression — a CASE '

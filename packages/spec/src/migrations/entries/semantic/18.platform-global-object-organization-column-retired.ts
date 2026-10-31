@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // declarer's own backfill), which this entry does not perform.
 export const entry: SemanticMigration = {
   id: 'platform-global-object-organization-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'OrgScopingEntitlement.platformGlobalObjects — an object a deployment declares platform-global no '
     + 'longer keeps its injected organization_id column with the organization wall stood down over it; on '

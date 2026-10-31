@@ -14,9 +14,6 @@ import type { SemanticMigration } from '../../types.js';
 // count below 1 did run, as the driver's LIMIT as written (`2.5`) or as a
 // single-record `findOne` (`0`, `-1`), so its refusal changes what such a node
 // did rather than how it fails, and still no conversion can know the count.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'flow-builtin-node-config-values-refused',
   surface:

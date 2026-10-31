@@ -20,8 +20,6 @@ import type { SemanticMigration } from '../../types.js';
 // number.
 export const entry: SemanticMigration = {
   id: 'list-view-edit-inline-default-on',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'ui.UserActionsConfig.editInline — an OMITTED editInline inside a list view\'s '
     + 'userActions block, or a page interfaceConfig.userActions block',
   replacement: 'nothing, to take the platform default: the list is editable in place by a user who '

@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // offline step a human runs.
 export const entry: SemanticMigration = {
   id: 'security-permission-set-overlay-discard-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'POST /api/v1/security/permission-sets/:id/discard-overlay, the Discard Overlay action on '
     + 'sys_permission_set, and contracts.ISecurityService.discardPermissionSetOverlay with its '

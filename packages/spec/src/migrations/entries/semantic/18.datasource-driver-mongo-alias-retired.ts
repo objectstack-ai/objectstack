@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // live outside metadata sources.
 export const entry: SemanticMigration = {
   id: 'datasource-driver-mongo-alias-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     "datasource.driver authored as 'mongo' (DriverType, data/datasource.zod.ts), and the same spelling "
     + 'as a boot driver selection (OS_DATABASE_DRIVER, the standalone stack databaseDriver option)',

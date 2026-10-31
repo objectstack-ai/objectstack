@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // one) or a plain local file is intent no artifact records.
 export const entry: SemanticMigration = {
   id: 'turso-config-forced-replica-without-sync-url-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.TursoConfig (a turso / libsql datasource.config) and the TursoDriver constructor of '
     + '@objectstack/driver-turso — mode replica with no syncUrl (or an empty one) is now refused, on '

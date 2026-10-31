@@ -17,8 +17,6 @@ import type { SemanticMigration } from '../../types.js';
 // author's place; and the census found no writer to respell.
 export const entry: SemanticMigration = {
   id: 'ui-action-group-menu-member-params-array-only',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span.
   surface: 'page action:group and action:menu components — a member of properties.actions whose type is not api, '
     + 'and whose params is not an array',
   replacement: 'Write `params` as the list of inputs to collect from the user, an `ActionParam[]` array. To run an '

@@ -11,7 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // four surface ratchets stay byte-identical.
 export const entry: SemanticMigration = {
   id: 'agent-structured-output-refused-members-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     "agent.structuredOutput — the values 'regex', 'grammar' and 'xml' left StructuredOutputFormat "
     + "(at format and fallbackFormat) and 'coerce_types' left TransformPipelineStep (at "

@@ -16,9 +16,6 @@ import type { SemanticMigration } from '../../types.js';
 // layout), so an installed or stored page still spelling it keeps loading; an
 // unregistered name and an unplaced region have no lossless rewrite and stay
 // with the parse.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'page-template-closed-region-unplaced-refused',
   surface:

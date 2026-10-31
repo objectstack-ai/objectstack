@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // no trace of why their metadata now fails.
 export const entry: SemanticMigration = {
   id: 'view-filter-rule-absent-value-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'ui.ViewFilterRule with NO value on an operator that takes one — the value key omitted, '
     + 'or present and undefined, on equals, not_equals, contains, not_contains, icontains, '

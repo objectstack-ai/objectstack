@@ -13,7 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // this entry carries that judgement too, because it is the same model.
 export const entry: SemanticMigration = {
   id: 'ui-record-open-overlay-modes-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code span.
   surface:
     "view.list.navigation.mode — the values 'modal', 'split' and 'popover' left NavigationModeSchema "
     + "(every list view, object listViews entry and page list block), and 'modal' left "

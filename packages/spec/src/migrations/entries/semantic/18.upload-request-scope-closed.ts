@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // no upload naming another scope ever reached a stored file record.
 export const entry: SemanticMigration = {
   id: 'upload-request-scope-closed',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'the scope of an upload request, presigned or chunked (GetPresignedUrlRequest.scope and '
     + 'InitiateChunkedUploadRequest.scope) — an open string, now the UploadScope enum',

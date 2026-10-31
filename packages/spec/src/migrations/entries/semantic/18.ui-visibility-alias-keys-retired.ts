@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // either conversion, and `os migrate meta` lists this entry as the hand edit it is.
 export const entry: SemanticMigration = {
   id: 'ui-visibility-alias-keys-retired',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'view form visibleOn (view.form.sections[].visibleOn, view.form.sections[].fields[].visibleOn) '
     + 'and page component visibility (page.components[].visibility)',

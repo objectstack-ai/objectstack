@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // conversion and no tombstone, and this entry is the declaration.
 export const entry: SemanticMigration = {
   id: 'conversion-conflict-channel-removed',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the ADR-0078 conversion-conflict channel of the ADR-0087 conversion API: the root exports '
     + 'CONVERSION_CONFLICT_CODE, ConversionConflictNotice and ConversionConflictDetail; the '

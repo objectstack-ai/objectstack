@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // is an artifact built before 18, which its load now refuses.
 export const entry: SemanticMigration = {
   id: 'cbp-extension-merged-master-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'objectExtensions[].fields (also packages[].manifest.objectExtensions[].fields) merged into a '
     + 'sharingModel: controlled_by_parent object the same stack or artifact declares',

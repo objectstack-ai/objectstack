@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // shape). The writer census behind the verdict is cited in the reason.
 export const entry: SemanticMigration = {
   id: 'sys-job-run-organization-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_job_run.organization_id — the injected organization column left the platform job run '
     + 'history (packages/platform-objects/src/audit/sys-job-run.object.ts, which now declares '

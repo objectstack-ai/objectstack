@@ -14,9 +14,6 @@ import type { SemanticMigration } from '../../types.js';
 // removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row, and no D2
 // conversion exists: the platform cannot know what an undeclared key was meant
 // to be.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'flow-builtin-node-config-undeclared-keys-refused',
   surface:
