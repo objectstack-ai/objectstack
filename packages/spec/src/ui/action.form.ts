@@ -118,7 +118,7 @@ export const actionForm = defineForm({
         // so it takes the same plain row and the renderer derives the same face.
         // Not gated on `params`: the parse refuses the key beside an empty
         // `params` by name, so a misplaced label is refused, never kept unshown.
-        { field: 'submitText', helpText: 'Label of the submit button in this action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"). Only for an action that collects params. Leave empty to show "Confirm".' },
+        { field: 'submitText', label: 'Submit button label', helpText: 'Label of the submit button in this action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"). Only for an action that collects params. Leave empty to show "Confirm".' },
         { field: 'confirmText', helpText: 'Confirmation message (e.g., "Are you sure?")' },
         { field: 'successMessage', helpText: 'Success message after completion' },
         // `errorMessage` is the twin of the row above: same node (I18nLabel), same

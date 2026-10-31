@@ -1807,6 +1807,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "描述",
         helpText: "显示在此动作参数对话框标题下方的说明文字。对于会收集参数的动作，确认问题应写在这里而不是 confirmText 中——一个对话框，而不是两个。它不是 ai.description，后者是 AI 智能体读取的文字。"
       },
+      submitText: {
+        label: "提交按钮文字",
+        helpText: "此动作参数对话框中提交按钮的文字，即按钮执行的动作（例如“发送”“记录通话”）。仅用于需要收集参数的动作。留空则显示“确认”。"
+      },
       confirmText: {
         label: "确认文本",
         helpText: "执行前的确认提示（如 \"确定要执行吗？\"）"
