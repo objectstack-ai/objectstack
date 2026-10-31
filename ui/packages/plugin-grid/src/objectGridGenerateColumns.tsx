@@ -352,6 +352,10 @@ export function useObjectGridGenerateColumns({
               // `scale`, its heuristic fallback: dropped here, the cell never
               // sees it and a `useGrouping: false` year still reads `2,026`.
               if (objectDefField.useGrouping !== undefined) fieldMeta.useGrouping = objectDefField.useGrouping;
+              // objectstack#28255 — a percent field's read-only face: dropped
+              // here, an authored `percentDisplay: 'plain'` probability still
+              // draws its progress bar in this cell.
+              if ((objectDefField as any).percentDisplay !== undefined) (fieldMeta as any).percentDisplay = (objectDefField as any).percentDisplay;
               // objectui#11475 — a percent field's declared `max` is its STORAGE
               // statement (`percentScaleOf`: a fraction unless `max` is above
               // 1), which the percent cell now reads instead of guessing from
@@ -614,6 +618,8 @@ export function useObjectGridGenerateColumns({
             if ((fieldDef as any).scale !== undefined) fieldMeta.scale = (fieldDef as any).scale;
             // Beside `scale`, as path A copies it (objectui#11026).
             if (fieldDef.useGrouping !== undefined) fieldMeta.useGrouping = fieldDef.useGrouping;
+            // The percent face, as path A copies it (objectstack#28255).
+            if ((fieldDef as any).percentDisplay !== undefined) (fieldMeta as any).percentDisplay = (fieldDef as any).percentDisplay;
             // The percent storage statement, as path A copies it (objectui#11475).
             if (fieldDef.max !== undefined) fieldMeta.max = fieldDef.max;
             if (fieldDef.format) fieldMeta.format = fieldDef.format;
@@ -805,6 +811,8 @@ export function useObjectGridGenerateColumns({
             if ((fieldDef as any).scale !== undefined) fieldMeta.scale = (fieldDef as any).scale;
             // Beside `scale`, as path A copies it (objectui#11026).
             if (fieldDef.useGrouping !== undefined) fieldMeta.useGrouping = fieldDef.useGrouping;
+            // The percent face, as path A copies it (objectstack#28255).
+            if ((fieldDef as any).percentDisplay !== undefined) (fieldMeta as any).percentDisplay = (fieldDef as any).percentDisplay;
             // The percent storage statement, as path A copies it (objectui#11475).
             if (fieldDef.max !== undefined) fieldMeta.max = fieldDef.max;
             if (fieldDef.format) fieldMeta.format = fieldDef.format;

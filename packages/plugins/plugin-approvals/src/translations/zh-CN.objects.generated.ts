@@ -43,7 +43,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "对象"
       },
       record_id: {
-        label: "记录 ID"
+        label: "记录"
       },
       submitter_id: {
         label: "提交人"

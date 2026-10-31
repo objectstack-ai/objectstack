@@ -11,8 +11,8 @@ import * as React from 'react';
 /**
  * `true` while the synthesized default record page draws (objectstack#27055):
  * the page `buildDefaultPageSchema` writes from the object's roles, in every
- * tier — the column tiers (`RecordPageColumns` sets it) and the tab strip (the
- * console's record view sets it around the synthesized page).
+ * tier (`RecordPageColumns` sets it) and, where its strip cannot be laid out,
+ * as its tab strip (the console's record view sets it around the page).
  *
  * The record page v3 face reads it: detail sections drawn frameless (a title,
  * a hairline and the field grid, no card), entirely empty sections folded into
@@ -30,14 +30,22 @@ export function useDefaultRecordPage(): boolean {
 }
 
 /**
+ * The most columns a frameless detail section may take on the page being
+ * drawn (objectstack#27524, Target 6): the record page's layout sets 2 in its
+ * two-column tier, where the details share the row with the 320 px right
+ * column, and leaves 3 in the wide tier and the stack, where the section's
+ * own container width decides. 3 anywhere else.
+ */
+export const DetailsColumnCapContext = React.createContext<2 | 3>(3);
+
+/**
  * How many columns a frameless detail section lays its fields in, by the
  * number of fields it shows (objectstack#27055, the v3 design: 「每段按字段数
  * 1–3 列」): one field takes one column, two to five take two, six and more
- * take three. Never more than three — the details column is the page's widest
- * but shares the row with the timeline and related columns.
+ * take three — never more than `cap` ({@link DetailsColumnCapContext}).
  */
-export function framelessSectionColumns(visibleFieldCount: number): 1 | 2 | 3 {
+export function framelessSectionColumns(visibleFieldCount: number, cap: 2 | 3 = 3): 1 | 2 | 3 {
   if (visibleFieldCount <= 1) return 1;
-  if (visibleFieldCount <= 5) return 2;
+  if (visibleFieldCount <= 5 || cap === 2) return 2;
   return 3;
 }

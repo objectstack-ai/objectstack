@@ -229,7 +229,10 @@ function renderRecordPage() {
  * make the "no approvals API" case pass without ever exercising it.
  */
 async function settledProbe(expectPending: boolean) {
-  const probe = await screen.findByTestId('inline-probe');
+  // The page draws its blocks through several renderers since
+  // objectstack#27524, all inside the one `<InlineEditProvider>`: every probe
+  // prints the same values, so the first is read.
+  const probe = (await screen.findAllByTestId('inline-probe'))[0];
   await waitFor(() =>
     expect(probe.getAttribute('data-approval-pending')).toBe(String(expectPending)),
   );

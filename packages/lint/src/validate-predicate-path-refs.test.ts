@@ -692,7 +692,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `data.type != 'joined'` (`ReportSchema` refuses `dateRange` and
     // `exportOptions` on a joined report). It reaches the literal-comparison
     // census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(89);
+    // It is 90 today, an ADDITION of ONE: #28255 offered the field form's
+    // `percentDisplay` row once the console's percent face reads it, gated on
+    // `data.type == 'percent'`. It reaches the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(90);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -811,7 +814,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // so its two `==` literal comparisons left the census.
     // It is 64 today: #26548's report "Period & export" section is gated on
     // `data.type != 'joined'`, a single-quoted literal comparison.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(64);
+    // It is 65 today: #28255's `field :: percentDisplay` row is gated on
+    // `data.type == 'percent'`, a single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

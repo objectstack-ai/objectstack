@@ -1500,9 +1500,12 @@ const ar = {
     concurrentUpdateRecordLabel: "هذا السجل",
     openInNewTab: "فتح في علامة تبويب جديدة",
     activity: "النشاط",
-    timeline: "الخط الزمني",
-    timelineFolded: "النشاط",
-    relatedColumn: "عمود العناصر ذات الصلة",
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: "النشاط",
+    relatedColumn: "العمود الجانبي",
+    timelineComposer: "اكتب ملاحظة… @ للإشارة",
     // objectstack#27055 — the record page v3.
     emptySections: "أقسام فارغة: {{count}}",
     emptySections_zero: "أقسام فارغة: {{count}}",
@@ -2390,8 +2393,7 @@ const ar = {
       newChat: "محادثة جديدة",
       toggleChatsList: "تبديل قائمة المحادثات",
       goHome: "العودة إلى الرئيسية",
-      toggleTimeline: "إظهار / إخفاء الخط الزمني",
-      toggleRelated: "إظهار / إخفاء العناصر ذات الصلة",
+      toggleRelated: "إظهار / إخفاء العمود الجانبي",
     },
     reportIndex: {
       title: "التقارير",

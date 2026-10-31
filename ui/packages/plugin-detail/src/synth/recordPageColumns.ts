@@ -5,23 +5,30 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * The synthesized record page at two widths (objectstack#26678).
+ * The synthesized record page, laid out by the width it has
+ * (objectstack#26678; one rule since objectstack#27524, Target 6).
  *
  * The maintainer's ruling on the record-page epic: the drawer and the full
  * page are ONE page at two widths. So the default record page keeps a single
  * description — the tabbed page `buildDefaultPageSchema` synthesizes, which is
  * also what Studio's page-create seeds and what a slotted page fills — and the
- * WIDTH decides how its content is laid out:
+ * WIDTH of the container it occupies decides how its content is laid out, by
+ * one rule wherever it is drawn (the page, the split pane, the overlay drawer,
+ * the maximized pane, a phone):
  *
- *  - 1120 px and up: three resident columns, details | timeline | related;
- *  - 760 – 1119 px: details | timeline, the related column folded into a rail
- *    behind a toggle;
- *  - below 760 px, and whenever the page is embedded (drawer / split pane):
- *    the tab strip, exactly as before.
+ *  - 760 px and up: details | the right column (320 px) — the 动态 panel
+ *    first, then the related panels;
+ *  - 1120 px and up: the same, wide — the details field grid takes three
+ *    columns, the right column 380 px, the 动态 panel five entries;
+ *  - below 760 px: ONE column — the details sections, then the right
+ *    column's panels in their order.
  *
- * (Container widths — see the two constants for how they are derived.)
+ * (Container widths — see the two constants for how they are derived.) There
+ * is no tabbed tier: the strip's blocks are always laid out
+ * (objectstack#27524 retired it with the three-column tier and the related
+ * rail), and the 动态 stream is a panel, never a column.
  *
- * ## Why the columns are derived, never authored
+ * ## Why the layout is derived, never authored
  *
  * The tiers are the renderer's. No metadata key, no page template and no node
  * type says "columns": the spec's page vocabulary is closed inside its own
@@ -30,15 +37,15 @@
  * seed carrying it would be refused at save. The layout is therefore read off
  * the synthesized page itself, by the stable semantic `value` every tab item
  * carries (`buildDefaultTabs`, objectui#2257): `details` is the details
- * column, `timeline` (the one stream, objectstack#27055) is the timeline
- * column, and `related`, `approvals` and `attachments` go to the related
- * column. The synthesized page has one region (`main`); a page with
+ * column, `timeline` (the one stream, objectstack#27055) is the right
+ * column's 动态 panel, and `related`, `approvals` and `attachments` are its
+ * panels after it. The synthesized page has one region (`main`); a page with
  * any other region is not the synthesized page (objectstack#27055 removed the
  * opt-in rail and the `rightRail` slot that used to add an `aside`).
  *
  * A page this module cannot read — no synthesized tab strip, or a tab whose
  * value it does not know (an authored strip) — answers `null`,
- * and the host draws the tabs. Tabs are the correct rendering of any strip.
+ * and the host draws the page as written, tabs and all.
  */
 
 /**
@@ -51,184 +58,85 @@
 const EXPANDED_SIDEBAR_WIDTH = 256;
 
 /**
- * A container at least this wide lays the default record page out in three
- * columns.
+ * A container at least this wide lays the default record page out wide:
+ * the details field grid at three columns, the right column 380 px, the 动态
+ * panel showing five entries (objectstack#27524, Target 6).
  *
  * Derived from the window it must serve, not picked (objectstack#27241, the
- * maintainer's ruling 「1440 窗口（含侧栏）即三栏」): a 1440 px window with the
- * sidebar expanded is three columns.
+ * maintainer's ruling 「1440 窗口（含侧栏）」): a 1440 px window with the
+ * sidebar expanded is wide.
  *
  *     1440 (window) − 256 (expanded sidebar) = 1184 px of container
  *     1184 − 64 (headroom: a classic 15–17 px scrollbar, browser zoom
  *                rounding, a sidebar a few px wider) = 1120
  *
- * At 1120 the v3 template (`1.25fr : 1fr : 20rem`, 24 px page padding each
- * side, 24 px gaps) leaves 1120 − 48 − 48 − 320 = 704 px for details +
- * timeline (≈ 391 + 313). It stays container-measured: the same page in a
+ * At 1120 the wide template (`1fr : 380px`, 24 px page padding each side, a
+ * 24 px gap) leaves 1120 − 48 − 24 − 380 = 668 px for the details, three
+ * fields of ≈ 210 px a row. It stays container-measured: the same page in a
  * drawer is narrow on a wide screen.
  */
-export const RECORD_PAGE_THREE_COLUMN_MIN_WIDTH = 1440 - EXPANDED_SIDEBAR_WIDTH - 64;
+export const RECORD_PAGE_WIDE_MIN_WIDTH = 1440 - EXPANDED_SIDEBAR_WIDTH - 64;
 
 /**
- * A container at least this wide (and narrower than the three-column floor)
- * lays it out in two.
+ * A container at least this wide lays it out in two columns, details | the
+ * right column; a narrower one stacks them.
  *
  * Derived the same way (objectstack#27241): a 1024 px window with the sidebar
- * expanded stays two columns, not the tabs.
+ * expanded keeps the right column.
  *
  *     1024 (window) − 256 (expanded sidebar) = 768 px of container
  *     768 − 8 (headroom) = 760
  *
- * At 760 the two-column grid (24 px page padding each side, a 24 px gap)
- * gives each column (760 − 48 − 24) / 2 = 344 px — the narrowest a details
- * section's two-field row stays legible.
+ * At 760 the two-column template (24 px page padding each side, a 24 px gap,
+ * the 320 px right column) leaves 760 − 48 − 24 − 320 = 368 px for the
+ * details — the narrowest a details section's two-field row stays legible.
+ * The default split pane (720 px) is below it, so the pane stacks.
  */
 export const RECORD_PAGE_TWO_COLUMN_MIN_WIDTH = 1024 - EXPANDED_SIDEBAR_WIDTH - 8;
 
-/** How the synthesized default record page is laid out at the width it has. */
-export type RecordPageTier = 'tabs' | 'two-column' | 'three-column';
+/**
+ * How the synthesized default record page is laid out at the width it has:
+ * `stack` is one column (details, then the right column's panels),
+ * `two-column` is details | the right column, `wide` is the same with the
+ * wide measures.
+ */
+export type RecordPageTier = 'stack' | 'two-column' | 'wide';
 
 /**
  * The tier a record page takes in a container `width` CSS pixels wide.
  *
  * Measured on the container the record page occupies, never the viewport: the
- * same page in a drawer is narrow on a wide screen. An embedded page (drawer /
- * split pane) is always tabbed, whatever its width, and an unknown width (zero
- * or not a number — no layout yet, or a test environment) keeps the tabs.
+ * same page in a drawer is narrow on a wide screen. The rule is the same for
+ * an embedded page (the split pane, the overlay drawer, the maximized pane):
+ * only its width counts. An unknown width (zero or not a number — no layout
+ * yet, or a test environment) is the narrowest tier, the stack: it draws every
+ * block in one column and assumes no room it was not measured to have.
  */
-export function recordPageTierFor(width: number, options: { embedded?: boolean } = {}): RecordPageTier {
-  if (options.embedded) return 'tabs';
-  if (!(width > 0)) return 'tabs';
-  if (width >= RECORD_PAGE_THREE_COLUMN_MIN_WIDTH) return 'three-column';
+export function recordPageTierFor(width: number): RecordPageTier {
+  if (!(width > 0)) return 'stack';
+  if (width >= RECORD_PAGE_WIDE_MIN_WIDTH) return 'wide';
   if (width >= RECORD_PAGE_TWO_COLUMN_MIN_WIDTH) return 'two-column';
-  return 'tabs';
+  return 'stack';
 }
 
-/** The three resident columns of the wide record page. */
+/** Whether a tier draws the right column beside the details (`⊟` applies). */
+export function recordPageTierHasRightColumn(tier: RecordPageTier | null | undefined): boolean {
+  return tier === 'two-column' || tier === 'wide';
+}
+
+/**
+ * The 动态 tab's id in the host's `?related=` (objectstack#27524, Target 5):
+ * the 动态 panel's 「查看全部 N 条 →」 opens it, beside the related lists'
+ * `object.field` ids. Never an `object.field`, so it names no related list.
+ */
+export const RECORD_PAGE_TIMELINE_PANEL = 'timeline';
+
+/**
+ * Where a synthesized tab's blocks land: the details column, the 动态 panel
+ * (`timeline`, the first panel of the right column) or the related panels
+ * after it.
+ */
 export type RecordPageColumn = 'details' | 'timeline' | 'related';
-
-/**
- * Which of the two optional columns a reader keeps shown — the reader's own
- * switches (objectstack#27052), kept per object in the console's
- * workspace-preference store; never metadata. Details is always shown.
- */
-export interface RecordPageColumnSwitches {
-  timeline: boolean;
-  related: boolean;
-}
-
-/**
- * How a column tier lays the page out for the reader's switches
- * (objectstack#27052). The tier says how many columns the WIDTH fits; the
- * switches say which columns take part. A column that is off is not drawn:
- *
- *  - timeline off: its blocks fold into a 「动态」 (Activity) card at the foot
- *    of the related column, and the related column takes the timeline's place;
- *  - related off: there is no related column and no rail
- *    (objectstack#27241, 「关联 OFF 就没有栏」) — the switch decides whether
- *    the column exists; the rail toggle only opens or closes a column the
- *    switch allows, when the width cannot fit it resident.
- *
- * So timeline off on a three-column page draws details | related, related off
- * draws details | timeline (no rail), and in the two-column tier related on
- * draws details | timeline with the rail while timeline off draws details |
- * related. With both off the page is the details column alone. Below the
- * column tiers the page is tabbed and the switches are not read; they are
- * kept for when it widens.
- */
-export interface RecordPageArrangement {
-  /** The resident columns, left to right. Always starts with `details`. */
-  columns: RecordPageColumn[];
-  /** The timeline's blocks are drawn as the related column's foot card. */
-  timelineFolded: boolean;
-  /**
-   * The related column is drawn as a rail behind a toggle, not resident: the
-   * switch keeps it (`related` on) and the tier has no room for it. Never set
-   * when the switch is off.
-   */
-  relatedRail: boolean;
-}
-
-/**
- * The arrangement of a column tier for the reader's switches. A pure reading
- * of the two inputs, so the page re-flows by the same rule wherever it is
- * drawn: a column that is off frees its room for the next.
- */
-export function recordPageArrangementFor(
-  tier: 'two-column' | 'three-column',
-  switches: RecordPageColumnSwitches,
-): RecordPageArrangement {
-  const room = tier === 'three-column' ? 3 : 2;
-  const wanted: RecordPageColumn[] = ['details'];
-  if (switches.timeline) wanted.push('timeline');
-  if (switches.related) wanted.push('related');
-  const columns = wanted.slice(0, room);
-  return {
-    columns,
-    timelineFolded: !switches.timeline,
-    relatedRail: switches.related && !columns.includes('related'),
-  };
-}
-
-/** The object-definition shape {@link recordPageColumnDefaults} reads. */
-export interface RecordPageObjectLike {
-  stageField?: unknown;
-  enable?: { files?: unknown } | null;
-  fields?: Record<string, unknown> | unknown[] | null;
-}
-
-function fieldsOf(object: RecordPageObjectLike | null | undefined): Array<Record<string, unknown>> {
-  const fields = object?.fields;
-  const list = Array.isArray(fields) ? fields : fields && typeof fields === 'object' ? Object.values(fields) : [];
-  return list.filter((f): f is Record<string, unknown> => !!f && typeof f === 'object' && !Array.isArray(f));
-}
-
-/** Why {@link recordPageColumnDefaults} turned the timeline on — or `null`, off. */
-export type RecordTimelineDefaultReason = 'stage-field' | 'option-kinds' | 'files' | null;
-
-/**
- * Why an object is "worked" — the reason its record page shows the timeline
- * by default — or `null` when it is not (objectstack#27052, the maintainer's
- * ruling that the timeline suits only some objects and its presence is each
- * reader's switch with an object-derived default). Read off the object as it
- * is declared, with no key of its own, in this order:
- *
- *  1. `stageField` names a field — the object declares a lifecycle;
- *  2. otherwise (and unless `stageField: false` turned the stage role off),
- *     a field whose options declare a lifecycle `kind` (`open` / `won` /
- *     `lost`) — the same declaration a stage path reads;
- *  3. `enable.files: true` — records collect attachments, work products.
- *
- * Only what the object declares of itself counts. Being the `master_detail`
- * parent of another object does not: a parent that merely owns child rows (a
- * price book, a campaign, an event) is a container, not a worked record, and
- * its middle column would be an empty stream.
- */
-export function recordTimelineDefaultReason(
-  object: RecordPageObjectLike | null | undefined,
-): RecordTimelineDefaultReason {
-  if (!object) return null;
-  if (typeof object.stageField === 'string' && object.stageField.length > 0) return 'stage-field';
-  if (object.stageField !== false) {
-    const declaresKinds = fieldsOf(object).some(
-      (field) =>
-        Array.isArray(field.options) &&
-        field.options.some((option) => !!option && typeof option === 'object' && (option as { kind?: unknown }).kind !== undefined),
-    );
-    if (declaresKinds) return 'option-kinds';
-  }
-  if (object.enable?.files === true) return 'files';
-  return null;
-}
-
-/**
- * The column switches a reader who never chose gets for `object`: the
- * timeline on when the object is worked ({@link recordTimelineDefaultReason}),
- * the related column on.
- */
-export function recordPageColumnDefaults(object: RecordPageObjectLike | null | undefined): RecordPageColumnSwitches {
-  return { timeline: recordTimelineDefaultReason(object) !== null, related: true };
-}
 
 /**
  * The column a synthesized tab lands in, by the tab's stable `value`; `null`
@@ -237,7 +145,7 @@ export function recordPageColumnDefaults(object: RecordPageObjectLike | null | u
  * Every value `buildDefaultTabs` can produce has a row here, and the test
  * beside this module enumerates them from a maximal synthesis, so a new tab
  * added to the synthesizer without a column fails there instead of silently
- * keeping the whole page tabbed.
+ * drawing the whole page as its tab strip.
  */
 export function recordPageColumnOfTab(value: unknown): RecordPageColumn | null {
   if (typeof value !== 'string') return null;
@@ -250,26 +158,24 @@ export function recordPageColumnOfTab(value: unknown): RecordPageColumn | null {
   return null;
 }
 
-/** The synthesized record page, partitioned for the column tiers. */
+/** The synthesized record page, partitioned for its layout. */
 export interface DefaultPageColumns {
   /**
    * The record header: every node the page places before its tab strip
    * (`page:header`, the actions / alerts slots, highlights, the stage path).
-   * The same nodes the tabbed page draws — one header for every tier.
+   * The same nodes an authored strip draws above it — one header for every
+   * tier.
    */
   header: any[];
   /** The Details tab's body. */
   details: any[];
-  /** The Timeline tab's stream (objectstack#27055), after any node the page places below its strip. */
+  /**
+   * The Timeline tab's stream (objectstack#27055), after any node the page
+   * places below its strip: the 动态 panel's blocks (objectstack#27524).
+   */
   timeline: any[];
   /** Related lists in the strip's order, then Approvals and Attachments. */
   related: any[];
-  /**
-   * How many related collections the related column shows: one per
-   * `record:related_list`. Labels the
-   * two-column tier's rail toggle.
-   */
-  relatedCount: number;
 }
 
 type PageNode = Record<string, any>;
@@ -279,24 +185,15 @@ const asNode = (value: unknown): PageNode | null =>
 
 const nodeList = (value: unknown): any[] => (Array.isArray(value) ? value.filter((n) => n != null) : []);
 
-/** Count the related collections a related-column node shows. */
-function relatedCollectionsIn(nodes: any[]): number {
-  let count = 0;
-  for (const raw of nodes) {
-    const node = asNode(raw);
-    if (!node) continue;
-    if (node.type === 'record:related_list') count += 1;
-  }
-  return count;
-}
-
 /**
  * Partition a synthesized default record page (`buildDefaultPageSchema`'s
- * output, after any host pruning) into the column tiers' header and columns.
+ * output, after any host pruning) into its header, details, 动态 and related
+ * panels.
  *
  * Reads the page exactly as the synthesizer writes it: one `main` region
  * whose one `page:tabs` node carries its items in the node's `properties`
- * bag (`componentNode`, ADR-0089 D3a). Answers `null` — draw the tabs — for
+ * bag (`componentNode`, ADR-0089 D3a). Answers `null` — draw the page as
+ * written — for
  * anything else: no `main` region or a second region, no tab strip or more
  * than one, a strip carrying its items elsewhere, an item gated by
  * `visibleWhen`, or an item whose value has no column.
@@ -332,13 +229,11 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     else relatedLists.push(...children);
   }
 
-  const related = [...relatedLists, ...relatedPanels];
   return {
     header: components.slice(0, tabIndex),
     details,
     timeline: [...components.slice(tabIndex + 1), ...timelineTabs],
-    related,
-    relatedCount: relatedCollectionsIn(related),
+    related: [...relatedLists, ...relatedPanels],
   };
 }
 
@@ -346,7 +241,7 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
  * The relationship ids (`object.field`) of the body tables a synthesized
  * record page draws (objectstack#27055, Target 8): every `record:related_list`
  * among the Details tab's children. Read off the page itself, so the host and
- * the column tiers agree with what `buildDefaultTabs` placed.
+ * the laid-out page agree with what `buildDefaultTabs` placed.
  */
 export function bodyTableIdsOf(page: unknown): Set<string> {
   const ids = new Set<string>();
