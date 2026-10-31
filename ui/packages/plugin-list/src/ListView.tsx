@@ -3869,7 +3869,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   }, [onSearchChange]);
 
   // objectstack#27520 row 17 — see `toolbarFlags.emptyStateAddRecord`.
-  const emptyStateOffersCreate = toolbarFlags.emptyStateAddRecord && !!props.onAddRecord;
+  // A view that declares the inline block keeps its empty-state Create as
+  // before; a host-supplied create path now offers it too.
+  const emptyStateOffersCreate =
+    toolbarFlags.showAddRecord || (toolbarFlags.emptyStateAddRecord && !!props.onAddRecord);
 
   // --- NavigationConfig support ---
   // No assertion, deliberately. `schema.navigation` is the spec-derived
@@ -6399,7 +6402,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                       variant="ghost"
                       size="sm"
                       className="absolute right-0.5 top-1/2 -translate-y-1/2 h-5 w-5 p-0 hover:bg-muted-foreground/20"
-                      aria-label={t('list.clearSearch')}
                       onClick={() => handleSearchChange('')}
                     >
                       <X className="h-3 w-3" />
