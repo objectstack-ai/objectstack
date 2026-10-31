@@ -147,6 +147,7 @@ const ZH_ONLY_FLOOR: Readonly<Record<string, number>> = Object.freeze({
   'engine.packages.form.help.': 9,
   'engine.flowNode.': 40,
   'engine.enum.': 4,
+  'engine.validation.spec.': 3,
 });
 
 /**
@@ -182,6 +183,15 @@ const ZH_ONLY_REASONS = Object.freeze([
       'text into a second producer, against AGENTS.md #0.1',
     file: '../package-schema.ts',
     anchor: 'en-US deliberately has NO entry',
+  },
+  {
+    prefix: 'engine.validation.spec.',
+    reason:
+      'zh-only on purpose: with no `en` row tOptional returns undefined and translateSchemaIssue shows the ' +
+      'issue message @objectstack/spec wrote — an `en` row would copy that text into a second producer, ' +
+      'against AGENTS.md #0.1',
+    file: '../i18n.ts',
+    anchor: 'family has zh rows only, read through',
   },
 ]);
 

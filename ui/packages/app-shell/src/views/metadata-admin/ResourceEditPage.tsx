@@ -143,7 +143,7 @@ import { readFields } from './previews/object-fields-io.js';
 import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../assistant/assistantBus.js';
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
-import { useMetadataLocale, t, tFormat, translateMetadataType, translateValidationMessage } from './i18n.js';
+import { useMetadataLocale, t, tFormat, translateMetadataType, translateSchemaIssue, translateValidationMessage } from './i18n.js';
 import { JsonSourceEditor } from '../item-tools/JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
 import {
@@ -867,7 +867,7 @@ function MetadataResourceEditPageImpl({
     const errs = (hasClientValidator(type, draftMode)
       ? withServerOnlyErrors(displayIssues, diag?.errors)
       : (diag?.errors ?? [])
-    ).map((i) => ({ path: i.path, message: translateValidationMessage(i.message, locale) }));
+    ).map((i) => ({ path: i.path, message: translateSchemaIssue(i, locale) }));
     const warns = (diag?.warnings ?? []).map((i) => ({
       path: i.path,
       message: translateValidationMessage(i.message, locale),
@@ -3044,7 +3044,7 @@ function MetadataResourceEditPageImpl({
                 : (diag?.errors ?? [])
               ).map((i) => ({
                 path: i.path,
-                message: translateValidationMessage(i.message, locale),
+                message: translateSchemaIssue(i, locale),
               }));
               const liveValid = hasClientValidator(type, draftMode)
                 ? liveErrors.length === 0
@@ -3102,7 +3102,9 @@ function MetadataResourceEditPageImpl({
                       </div>
                       <ul className="mt-1 space-y-0.5 font-mono text-[11px]">
                         {head.map((e, i) => (
-                          <li key={i} className="truncate">
+                          // Wraps: a message is the fix the author needs, so
+                          // it is never cut to the banner's width.
+                          <li key={i} data-testid="metadata-diagnostics-item" className="whitespace-normal break-words">
                             <span className="opacity-70">{e.path ? labelForIssuePath(e.path) : '(root)'}</span>: {e.message}
                           </li>
                         ))}

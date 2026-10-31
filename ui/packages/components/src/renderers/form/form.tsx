@@ -1828,8 +1828,10 @@ ComponentRegistry.register('form',
     /**
      * The sonner id every OUTCOME toast of THIS form is published under.
      *
-     * The in-form banner (`submitError`) and its toast are raised together at
-     * each of the three points below, but only the banner was ever retired
+     * A refusal is no longer toasted at all (`raiseRefusal` below), but the id
+     * still retires whatever outcome toast an earlier attempt left. History:
+     * the in-form banner (`submitError`) and its toast were once raised together
+     * at each refusal point, but only the banner was ever retired
      * together: the toast went out under sonner's auto-generated id, so nothing
      * here held a handle on it and a refused submit's toast outlived the
      * attempt that raised it. A later SUCCESSFUL submit — whose success toast a
@@ -1848,6 +1850,25 @@ ComponentRegistry.register('form',
      */
     const formInstanceId = React.useId();
     const outcomeToastId = `form-outcome:${formInstanceId}`;
+    /**
+     * A refused submit is said ONCE, by the banner above the fields
+     * (objectstack-ai/objectstack#27520). The toast that used to repeat it word
+     * for word was there for the banner a long modal or drawer form had
+     * scrolled out of view; instead the banner is brought into view each time
+     * it is raised, so no second copy of the refusal is needed. The stale
+     * toast of an earlier attempt is still dismissed under the outcome id.
+     */
+    const submitBannerRef = React.useRef<HTMLDivElement>(null);
+    const [refusalRaised, setRefusalRaised] = React.useState(0);
+    const raiseRefusal = (message: string | string[]) => {
+      toast.dismiss(outcomeToastId);
+      setSubmitError(message);
+      setRefusalRaised((n) => n + 1);
+    };
+    React.useEffect(() => {
+      if (refusalRaised === 0) return;
+      submitBannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+    }, [refusalRaised]);
     // Active `fieldTabs` panel. Undefined until something picks one — the
     // effective tab falls back to `defaultFieldTab`, then to the first tab.
     // Which tab of an in-progress form is showing is presentational and dies
@@ -3051,10 +3072,7 @@ ComponentRegistry.register('form',
 
           // Check if submission returned an error
           if (result?.error) {
-            setSubmitError(result.error);
-            // Also surface as a toast so the message is visible even when the
-            // in-form banner has scrolled out of view (long forms in modals/drawers).
-            toast.error(result.error, { id: outcomeToastId });
+            raiseRefusal(result.error);
             return;
           }
         }
@@ -3140,10 +3158,7 @@ ComponentRegistry.register('form',
         if (isPermissionError(error) && typeof console !== 'undefined') {
           console.warn('[form] write denied:', error);
         }
-        setSubmitError(errorMessage);
-        // Also surface as a toast so the message is visible even when the
-        // in-form banner has scrolled out of view (long forms in modals/drawers).
-        toast.error(refusalContent(errorMessage), { id: outcomeToastId });
+        raiseRefusal(errorMessage);
 
         // Log errors for debugging (dev environment only)
         // process may not be defined in all environments
@@ -3209,14 +3224,12 @@ ComponentRegistry.register('form',
     const handleSubmit = (event?: React.BaseSyntheticEvent) => {
       if (faultedVisibleWhenFieldNames.length > 0) {
         event?.preventDefault?.();
-        toast.dismiss(outcomeToastId);
         const message = t('form.visibleWhenFaulted', {
           fields: faultedVisibleWhenFieldNames
             .map((n) => fieldLabelByName[n] || n)
             .join(t('validation.formInvalidJoiner')),
         });
-        setSubmitError(message);
-        toast.error(message, { id: outcomeToastId });
+        raiseRefusal(message);
         // Marks the tabs that hold the fields, as a rejected submit does.
         setRejectedFieldNames(faultedVisibleWhenFieldNames);
         return Promise.resolve();
@@ -4076,7 +4089,7 @@ ComponentRegistry.register('form',
         >
           {/* Form Error Alert */}
           {submitError && (
-            <Alert variant="destructive" className="mb-4">
+            <Alert ref={submitBannerRef} variant="destructive" className="mb-4">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{refusalContent(submitError)}</AlertDescription>
             </Alert>

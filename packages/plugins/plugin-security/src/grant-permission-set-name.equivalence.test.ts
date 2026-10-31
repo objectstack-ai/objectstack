@@ -285,7 +285,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
-        'manage_mailboxes', 'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
+        'manage_connector_connections', 'manage_mailboxes', 'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
         'setup.access', 'setup.write', 'studio.access', 'view_all_audit_log',
       ],
     },
@@ -324,7 +324,7 @@ const GOLDEN: Record<'single' | 'isolated', unknown> = {
       positions: ['everyone', 'platform_admin'],
       posture: 'PLATFORM_ADMIN',
       systemPermissions: [
-        'manage_mailboxes', 'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
+        'manage_connector_connections', 'manage_mailboxes', 'manage_metadata', 'manage_platform_settings', 'manage_sharing', 'manage_users',
         'setup.access', 'setup.write', 'studio.access', 'view_all_audit_log',
       ],
     },

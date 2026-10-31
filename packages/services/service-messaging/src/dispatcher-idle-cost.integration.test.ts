@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #17610 — what an IDLE `NotificationDispatcher` tick costs the store, and that
- * cutting it keeps every delivery guarantee.
+ * #17610, #28383 — what an IDLE `NotificationDispatcher` tick costs the store,
+ * and that cutting it keeps every delivery guarantee.
  *
  * ## The measurement this pins
  *
@@ -10,8 +10,25 @@
  * default 8 partitions: `claim()` and `claimDigest()` each opened with the
  * environment-wide visibility-timeout reap, in every partition — 16 identical
  * UPDATEs — plus one candidate SELECT each (16). On remote Turso every
- * statement is an HTTP round trip, and the loop never stopped. The reap now
- * runs once per tick, so an idle tick is `1 + 2 × partitionCount` = 17.
+ * statement is an HTTP round trip, and the loop never stopped. #17610 ran the
+ * reap once per tick: `1 + 2 × partitionCount` engine calls, which on a kernel
+ * is 18 statements — the reap's predicate UPDATE is two there, because the
+ * engine reads the matched rows for the per-row `afterUpdate` dispatch before
+ * it writes, and it wrote with nothing to reap.
+ *
+ * #28383 makes an idle tick TWO statements, whatever `partitionCount` is: the
+ * reap reads one expired id before it writes and writes only on a hit, and one
+ * "anything due?" read across every partition gates the per-partition claim
+ * and digest probes.
+ *
+ * ## Counted where cloud counted it
+ *
+ * Two tallies, both pinned: engine calls on the delivery table, and SQL
+ * statements on it, read off the driver's knex `query` events — the client
+ * boundary cloud measured 18 at (#28383). The harness registers one global
+ * no-op `afterUpdate` hook, as a kernel's audit plugin does, so a predicate
+ * UPDATE is the read-then-write pair it is in production; on this harness the
+ * pre-#28383 code measured 18 statements a tick, cloud's figure.
  *
  * ## Why a real engine
  *
@@ -31,9 +48,16 @@
  *  - **"Reap once" could be bought by recovering less.** The recovery leg drives
  *    a real expired claim through ONE tick; its negative leg proves a claim
  *    that has not expired is left alone, so the TTL is still a floor.
+ *  - **"Write only on a hit" could be bought by never writing.** The idle pin
+ *    asserts ZERO reap UPDATEs; the recovery leg asserts the UPDATE does run
+ *    when a claim has expired.
+ *  - **One "anything due?" read could be bought by a predicate that misses a
+ *    kind of row.** A due digest-only outbox, and a deferred row that comes
+ *    due, are each driven through it: both are found when due, and a row
+ *    deferred into the future keeps the tick at two reads.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
@@ -52,6 +76,8 @@ let engine: ObjectQL;
 let outbox: SqlNotificationOutbox;
 /** Engine calls against the delivery table, by method. */
 let calls: { update: number; find: number; other: number };
+/** SQL statements the driver sent against the delivery table, in order. */
+let statements: string[];
 /** `recipient` of every send, in order. */
 let sent: string[];
 
@@ -89,7 +115,16 @@ beforeEach(async () => {
     // A real `single` install's Default Organization: the system writes below
     // derive it (ADR-0131 D9), as a fresh NOT NULL tenant column requires (D1).
     await installDefaultOrganization(engine);
+    // A kernel's audit plugin registers a global `afterUpdate`; with one
+    // registered, a predicate UPDATE reads its matched rows before it writes —
+    // the two-statement reap cloud counted.
+    engine.registerHook('afterUpdate', async () => {});
 
+    statements = [];
+    (driver as unknown as { knex: { on(e: 'query', cb: (q: { sql?: unknown }) => void): void } }).knex
+        .on('query', (q) => {
+            if (typeof q.sql === 'string' && q.sql.includes(DELIVERY_OBJECT)) statements.push(q.sql);
+        });
     calls = { update: 0, find: 0, other: 0 };
     sent = [];
     // Count on the engine instance the outbox holds, so the tally is of real
@@ -114,17 +149,58 @@ afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
 });
 
-describe('#17610 NotificationDispatcher — idle tick cost', () => {
-    it('an idle tick is 1 + 2 × partitionCount statements: ONE reap, then a claim and a digest probe per partition', async () => {
+describe('#17610 #28383 NotificationDispatcher — idle tick cost', () => {
+    it('an idle tick is TWO statements: the reap\'s expired-claim read and one due-work read, no UPDATE, no partition probe', async () => {
         const d = dispatcher();
         for (let i = 0; i < TICKS; i++) await d.tick();
 
-        // On an empty outbox the only UPDATE a tick issues is the reap. It is
-        // environment-wide, so once per tick is all it can use — and exactly
-        // once, never zero: it is the only crash recovery there is.
-        expect(calls.update).toBe(TICKS);
-        // Before #17610: 2 × PARTITIONS reaps + 2 × PARTITIONS probes = 32 a tick.
-        expect(calls.update + calls.find + calls.other).toBeLessThanOrEqual(TICKS * (1 + 2 * PARTITIONS));
+        // Nothing expired, so the reap reads and never writes; nothing due, so
+        // no partition's claim or digest probe runs.
+        expect(calls).toEqual({ update: 0, find: 2 * TICKS, other: 0 });
+        // At the client: before #28383, 18 a tick on this harness (cloud's
+        // figure); the card's bar is 6.
+        expect(statements).toHaveLength(2 * TICKS);
+        expect(statements.every((sql) => /^select /i.test(sql))).toBe(true);
+    });
+
+    it('a row deferred into the future keeps the tick at two reads, and goes out on the first tick after it comes due', async () => {
+        const d = dispatcher();
+        const enqueuedAt = Date.now();
+        // A retry's backoff, quiet hours and a digest window all defer a row
+        // through `next_attempt_at`.
+        await outbox.enqueue({
+            notificationId: 'n_later', recipientId: 'u_later', channel: 'inbox', payload: { title: 't' },
+            notBefore: enqueuedAt + 60_000,
+        });
+        statements = [];
+        await d.tick();
+        expect(sent).toEqual([]);
+        expect(statements).toHaveLength(2);
+
+        // The store reads `Date.now()` for the due-work read and the claim alike.
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(enqueuedAt + 60_001);
+        try {
+            await d.tick();
+        } finally {
+            clock.mockRestore();
+        }
+        expect(sent).toEqual(['u_later']);
+    });
+
+    it('a due digest-only outbox is found by the one due-work read and collapsed on that tick', async () => {
+        const d = dispatcher();
+        for (const notificationId of ['nd1', 'nd2', 'nd3']) {
+            await outbox.enqueue({
+                notificationId, recipientId: 'u_digest', channel: 'inbox', payload: { title: notificationId },
+                digestKey: 'u_digest|inbox|w1',
+            });
+        }
+
+        await d.tick();
+
+        expect(sent).toEqual(['u_digest']);
+        const rows = await outbox.list();
+        expect(rows.every((r) => r.status === 'success')).toBe(true);
     });
 
     it('rows enqueued after an idle stretch go out on the very next tick — every partition, digests collapsed', async () => {
@@ -165,6 +241,8 @@ describe('#17610 NotificationDispatcher — idle tick cost', () => {
         });
         expect(abandoned?.status).toBe('in_flight');
 
+        calls = { update: 0, find: 0, other: 0 };
+        statements = [];
         await dispatcher().tick();
 
         // The tick's single reap ran BEFORE its claims, so the same tick took
@@ -172,6 +250,9 @@ describe('#17610 NotificationDispatcher — idle tick cost', () => {
         expect(sent).toEqual(['u1']);
         const [row] = await outbox.list();
         expect(row).toMatchObject({ status: 'success', attempts: 1 });
+        // The reap's read found the expired claim, so its UPDATE ran — once.
+        const reapWrites = statements.filter((sql) => /^update .* where `status` = \? and `claimed_at` < \?$/i.test(sql));
+        expect(reapWrites).toHaveLength(1);
     });
 
     it('leaves a claim that has NOT expired alone — the TTL is still a floor', async () => {

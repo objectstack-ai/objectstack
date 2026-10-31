@@ -20,6 +20,7 @@ const de = {
       manage_org_users: "Organisationsbenutzer verwalten",
       manage_metadata: "Metadaten verwalten",
       manage_mailboxes: "Postfächer verwalten",
+      manage_connector_connections: "Konnektor-Verbindungen verwalten",
       manage_platform_settings: "Plattformeinstellungen verwalten",
       setup_access: "Zugriff auf die Einrichtung",
       setup_write: "Einstellungen schreiben",

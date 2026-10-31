@@ -390,7 +390,9 @@ describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
  * identity object's `Admin` field group, which the `everyone` baseline withholds.
  * And `manage_mailboxes` (ruling 6116489638, Q4 → A on the inbound-mail record —
  * platform and organization administrators hold the mailbox administrator
- * capability by default).
+ * capability by default). And `manage_connector_connections` (ADR-0143 D5 —
+ * platform administrators hold the connector connection capability by default;
+ * the organization administrator's sets withhold it, pinned below).
  *
  * The set's `description` is admin-facing copy, not capability, so it is left
  * out of the comparison (its shape is pinned by
@@ -424,6 +426,8 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
         'view_all_audit_log',
         // added on purpose — see the docblock above.
         'manage_mailboxes',
+        // added on purpose (ADR-0143 D5) — see the docblock above.
+        'manage_connector_connections',
       ],
       // [#21237] added on purpose — see the docblock above. The group is read off
       // the identity object's declaration, never listed here.
@@ -440,6 +444,13 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
   it('[#21260] no other shipped set carries the ledger audit capability: every other position holds it only by explicit grant', () => {
     const holders = (defaultPermissionSets as any[])
       .filter((s) => (s.systemPermissions ?? []).includes('view_all_audit_log'))
+      .map((s) => s.name);
+    expect(holders).toEqual(['admin_full_access']);
+  });
+
+  it('[ADR-0143 D5] no other shipped set carries the connector connection capability: the organization administrator holds it only by explicit grant', () => {
+    const holders = (defaultPermissionSets as any[])
+      .filter((s) => (s.systemPermissions ?? []).includes('manage_connector_connections'))
       .map((s) => s.name);
     expect(holders).toEqual(['admin_full_access']);
   });

@@ -211,6 +211,7 @@ Get installed package response
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `GetInstalledPackageResponse.data[option 2]`
 
@@ -230,6 +231,7 @@ Get installed package response
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 
 ---
@@ -262,6 +264,7 @@ This schema accepts one of the following structures:
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `InstalledPackageAtEitherStage[option 1].manifest`
 
@@ -325,6 +328,7 @@ This schema accepts one of the following structures:
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `InstalledPackageAtEitherStage[option 2].manifest`
 

@@ -4,7 +4,9 @@
 // authentication, the four ways it fails, and the server text it never carries.
 // The values below are obvious dummies.
 
-import { describe, expect, it } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import {
     OAuth2ClientRefusedError,
@@ -124,5 +126,45 @@ describe('ADR-0143 D4 — how a token request fails', () => {
         }
         const upstream = await request(answering(503, echo)).catch((e: Error) => e);
         expect((upstream as Error).message).not.toContain('dummy');
+    });
+});
+
+describe('ADR-0143 D4 — a token endpoint\'s redirect is never followed', () => {
+    const servers: Server[] = [];
+    afterEach(async () => {
+        await Promise.all(servers.splice(0).map((srv) => new Promise((done) => srv.close(done))));
+    });
+    const listen = async (handler: Parameters<typeof createServer>[1]): Promise<string> => {
+        const srv = createServer(handler);
+        servers.push(srv);
+        await new Promise<void>((done) => srv.listen(0, '127.0.0.1', done));
+        return `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    };
+
+    it.each([307, 308, 302])('⛔ a %i is refused, and its Location receives nothing', async (status) => {
+        const reached: string[] = [];
+        const elsewhere = await listen((req, res) => {
+            let body = '';
+            req.on('data', (chunk) => { body += chunk; });
+            req.on('end', () => {
+                reached.push(body);
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ access_token: 'dummy-at', token_type: 'Bearer' }));
+            });
+        });
+        const tokenUrl = await listen((_req, res) => {
+            res.writeHead(status, { location: `${elsewhere}/token` });
+            res.end();
+        });
+        // The real transport: a stub that never follows would prove nothing.
+        const err = await requestOAuth2Token({
+            connector: 'crm',
+            tokenUrl: `${tokenUrl}/token`,
+            client: { clientId: 'client-1', clientSecret: 'dummy-secret' },
+            params: { grant_type: 'refresh_token', refresh_token: 'dummy-rt' },
+        }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(OAuth2TokenResponseError);
+        expect(err).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+        expect(reached).toEqual([]);
     });
 });

@@ -1807,6 +1807,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Description",
         helpText: "Explanatory line under the title of this action's param dialog. On an action that collects params, the confirm question goes here rather than in confirmText — one dialog, not two. Not ai.description, which is the text an AI agent reads."
       },
+      submitText: {
+        label: "Submit button label",
+        helpText: "Label of the submit button in this action's param dialog, the verb the button performs (e.g. \"Send\", \"Log Call\"). Only for an action that collects params. Leave empty to show \"Confirm\"."
+      },
       confirmText: {
         label: "Confirm Text",
         helpText: "Confirmation message (e.g., \"Are you sure?\")"

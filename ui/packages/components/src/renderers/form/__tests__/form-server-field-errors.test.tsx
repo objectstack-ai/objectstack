@@ -150,8 +150,10 @@ describe('form renderer — server-rejected fields', () => {
 
     submit();
 
-    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
-    expect(toastErrorSpy.mock.calls[0][0]).toBe('Owner is required');
+    // The banner is the refusal's one message (objectstack-ai/objectstack#27520).
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toBe('Owner is required');
+    expect(toastErrorSpy).not.toHaveBeenCalled();
   });
 
   it('a later client-side refusal retires the previous refusal`s banner and toast (objectstack#25874)', async () => {
@@ -196,7 +198,7 @@ describe('form renderer — server-rejected fields', () => {
 
     submit();
 
-    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
+    await screen.findByRole('alert');
     // Nothing is attributable to a field, so no input is marked or scrolled to.
     expect(scrollSpy).not.toHaveBeenCalled();
   });
@@ -242,8 +244,9 @@ describe('form renderer — unique-index refusal', () => {
 
     submit();
 
-    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
-    expect(String(toastErrorSpy.mock.calls[0][0])).toMatch(/A record with this value already exists/);
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toMatch(/A record with this value already exists/);
+    expect(toastErrorSpy).not.toHaveBeenCalled();
     expect(container.querySelector('[aria-invalid="true"]')).toBeNull();
   });
 });
