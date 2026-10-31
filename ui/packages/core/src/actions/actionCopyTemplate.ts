@@ -67,6 +67,28 @@ export function hasTemplateHoles(text: string): boolean {
 }
 
 /**
+ * Fill the copy of a slot that is still in transition to the `template`
+ * dialect — the param dialog's `description`, each param's `helpText`, and an
+ * `outcomeMessages` entry (objectstack#27948, ruling A, step 1: the renderer
+ * reads `{{ }}` before the spec closes these slots to it).
+ *
+ * ONE dialect per sentence, the rule `confirmText` / `successMessage` kept
+ * through their own transition: a sentence with a `{{ }}` hole is filled by
+ * `fillTemplate` (the template engine) alone and is never read for `${…}`, so
+ * a `${…}` token in it stays text and a value filled into a hole is never read
+ * a second time; a sentence with none keeps its `${…}` reading through
+ * `fillLegacy`. Step 2 of that ruling (the spec's publish refusal of `${…}`
+ * and the migration of existing copy) retires `fillLegacy`.
+ */
+export function fillTransitionalCopy(
+  text: string,
+  fillTemplate: (source: string) => string,
+  fillLegacy: (source: string) => string,
+): string {
+  return hasTemplateHoles(text) ? fillTemplate(text) : fillLegacy(text);
+}
+
+/**
  * Fill the `{{ path }}` / `{{ path | formatter }}` holes of `source` over
  * `roots`, through `@objectstack/formula`'s `templateEngine` — the engine the
  * flow notifications render with, and the one objectui#13183 names for the
