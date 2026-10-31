@@ -84,6 +84,21 @@ export interface SettingsContext {
   authGate?: AuthGate;
 }
 
+/**
+ * How a settings call's computed prose is written — never who calls or what
+ * they may do, which is {@link SettingsContext}'s alone.
+ */
+export interface SettingsDisplayOptions {
+  /**
+   * The caller's display language (BCP-47), for prose a
+   * {@link SettingsWritePredicate} refusal or a {@link SettingsLiveStatusProvider}
+   * statement composes. The settings routes pass it from the request
+   * (`Accept-Language`, else `?locale`). Absent, such prose is written in
+   * English.
+   */
+  locale?: string;
+}
+
 /** Storage row shape used by both the engine and the in-memory store. */
 export interface SettingsRow {
   namespace: string;
@@ -322,6 +337,58 @@ export type SettingsActionHandler = (input: {
 }) => Promise<SettingsActionResult> | SettingsActionResult;
 
 /**
+ * What a {@link SettingsWritePredicate} is asked about one key of a write.
+ *
+ * Asked only when the write CHANGES the key: `next` differs from `current`.
+ * A write that stores the value already in force is never refused by one.
+ */
+export interface SettingsWritePredicateInput {
+  namespace: string;
+  key: string;
+  /** The value the write would store; `null` clears the key. */
+  next: unknown;
+  /** The value the caller's cascade resolves for the key before the write. */
+  current: unknown;
+  /**
+   * The organization the row lands in: its id, `null` in a composition with no
+   * organization object, `undefined` for a `global` key.
+   */
+  organizationId: string | null | undefined;
+  ctx: SettingsContext;
+  /** The language the refusal is written in — {@link SettingsDisplayOptions.locale}. */
+  locale?: string;
+}
+
+/**
+ * A predicate's refusal. `message` is the sentence the caller reads under the
+ * field, written in the input's `locale`; `constraint` carries its discrete values
+ * (`FieldError.constraint`, ADR-0114), so a client can compose its own text.
+ */
+export interface SettingsWriteRefusal {
+  message: string;
+  constraint?: Record<string, unknown>;
+}
+
+/**
+ * The settings write predicate: a rule over ENGINE STATE that may refuse a
+ * change to one manifest key. The key's declaration (`options`, `pattern`,
+ * `valueDomain`, …) judges the value by itself; a predicate judges whether
+ * the value may change at all, given what the rest of the system already holds
+ * (ADR-0144 D4: `localization.currency` is locked once used).
+ *
+ * Registered by the package that owns the state it reads, with
+ * `SettingsService.registerWritePredicate`. `setMany` asks it after the
+ * batch's declared constraints have passed and before any row is written; a
+ * refusal refuses the WHOLE batch with `SettingsValidationError`
+ * (`invalid_value`, at the key). `undefined` lets the change through. A
+ * predicate that throws fails the write: the state it guards could not be
+ * read, so the change is not made.
+ */
+export type SettingsWritePredicate = (
+  input: SettingsWritePredicateInput,
+) => Promise<SettingsWriteRefusal | undefined> | SettingsWriteRefusal | undefined;
+
+/**
  * What a namespace's page states about the RUNNING system, as opposed to what
  * is stored. The stored values say what an operator chose; they do not say what
  * is live. A `mail` namespace can store provider `smtp` with an empty host while
@@ -348,6 +415,14 @@ export interface SettingsLiveStatus {
 export type SettingsLiveStatusProvider = (input: {
   namespace: string;
   ctx: SettingsContext;
+  /**
+   * The organization the caller's page reads: its id, `null` in a composition
+   * with no organization object, `undefined` when the caller has none.
+   * Resolved only when called.
+   */
+  organizationId: () => Promise<string | null | undefined>;
+  /** The language the statement is written in — {@link SettingsDisplayOptions.locale}. */
+  locale?: string;
 }) => Promise<SettingsLiveStatus | undefined> | SettingsLiveStatus | undefined;
 
 /**
