@@ -470,8 +470,40 @@ What the publish door checks, each refusal located at its key under `auth`:
 - **`app-credential`** takes `vendor` (`feishu`, `dingtalk` or `wecom`), `appId`
   and a required `credentialRef`. An inline `appSecret` is refused by name.
 
-**How the server serves them.** An `oauth2` instance is served through a
-**credential handle** the provider asks on every request: the access token is
+**How the server serves them.** Both kinds are served through a
+**credential handle** the provider asks on every request. The built-in `rest`
+and `openapi` providers ask it; a provider says it does by registering with
+`registerConnectorProvider(…, { credentialHandle: true })`. For an `openapi`
+instance the document's `security` decides only where the token is *not*
+sent: an operation whose effective `security` is `[]` is anonymous and never
+carries it, and a header or query parameter an `apiKey` scheme names is the
+platform's to fill, so it is left out of the action's input schema, as
+`Authorization` is.
+
+An **`app-credential`** instance runs its vendor's exchange from the `appId`
+and the app secret its `credentialRef` names. The exchange is fixed per
+`vendor`, and nothing about it is authored:
+
+| `vendor` | Token request | Where the token rides on a call |
+|:---|:---|:---|
+| `feishu` | `POST https://accounts.feishu.cn/oauth/v3/token` (`client_credentials`) | `Authorization: Bearer` |
+| `dingtalk` | `POST https://api.dingtalk.com/v1.0/oauth2/accessToken` | header `x-acs-dingtalk-access-token` |
+| `wecom` | `GET https://qyapi.weixin.qq.com/cgi-bin/gettoken` | query parameter `access_token` |
+
+The token belongs to the app, so a run's organization selects nothing, and
+there is nothing to connect. It is kept in memory only, never stored (the app
+secret re-derives it at any time), and obtained afresh when it is within 30
+seconds of its expiry, or once when the upstream answers `401`. Concurrent
+requests share one exchange. WeCom can invalidate a token before it expires
+and says so inside an ordinary answer (`errcode` `40014` or `42001`) rather
+than with a `401`: such an answer obtains the token afresh once and repeats
+the call once, and a second such answer fails the call. No exchange follows a
+redirect. An exchange that gets no answer, a `429` or a `5xx` fails the
+dispatch `CONNECTOR_UPSTREAM_UNAVAILABLE`, retried on the existing backoff; a
+vendor that refuses the app id or secret fails it with `503`, naming the
+instance and at most the vendor's error code, never the vendor's text.
+
+An **`oauth2`** instance's access token is
 obtained from `tokenUrl` (the client authenticating with HTTP Basic, or by
 `client_id` alone as a public client), cached in memory only, refreshed when
 it is within 30 seconds of its expiry, and refreshed once more, with one
@@ -527,10 +559,11 @@ a rotating refresh token is never spent twice.
   disconnect is a response to a leak.
 
 What is not served yet is held **degraded** with a reason that names it, and
-never called without its credential: `app-credential` (its vendor exchanges
-are not run yet), an `oauth2` instance on a provider that does not yet ask the
-credential handle (the built-in `rest`, `openapi` and `mcp` providers do not
-yet), an `mcp` instance that left its endpoints to discovery, and an `oauth2`
+never called without its credential: an `oauth2` or `app-credential`
+instance on a provider that does not ask the credential handle (the built-in
+`mcp` provider does not yet, nor does a plugin's provider registered without
+`{ credentialHandle: true }`), an `mcp` instance that left its endpoints to
+discovery, and an `oauth2`
 instance whose `tokenUrl` or `authorizationUrl` is not `https://` (plain
 `http://` is accepted only to `localhost`, a `127.0.0.0/8` address or
 `[::1]` — not a `*.localhost` name, which the system resolver sends to DNS —
@@ -663,7 +696,7 @@ retry):
 |:---|:---|
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
-| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) this server does not serve yet (`app-credential`; `oauth2` on a provider that does not ask the credential handle) | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
+| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a provider that does not ask the credential handle (the built-in `mcp` provider, for now) | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
 | An `authorization_code` instance nobody connected, or whose grant the vendor refused | **Not fatal**: the instance registers **degraded**, "not connected" or "reconnect required" — connect it (`POST …/connectors/:name/connection`), and it materializes without a restart |
 | The token endpoint is unreachable or answers `5xx` / `429` | **Not fatal**: the dispatch fails `CONNECTOR_UPSTREAM_UNAVAILABLE` and is retried on the existing backoff; the connection stays connected |
 | `auth` is `signed` on a provider that does not say it applies the request signer | **Hard boot error** naming the instance, the scheme and the provider: its calls would go out unsigned — declare it through `rest` or `openapi` |
