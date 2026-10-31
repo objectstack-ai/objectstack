@@ -44,14 +44,12 @@ const HOME = {
   type: 'app',
   regions: [{ name: 'main', components: [{ id: 'hello', type: 'element:text', properties: { content: 'Hello' } }] }],
 };
-const DASHBOARD = { name: 'env_position', label: 'Environment Position' };
 
 const DOCS: Record<string, Record<string, unknown>> = {
   'object/showcase_account': OBJECT,
   'flow/approval': FLOW,
   'app/acme_app': APP,
   'page/home': HOME,
-  'dashboard/env_position': DASHBOARD,
 };
 
 const mockClient = vi.hoisted(() => ({
@@ -96,7 +94,7 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => ({
     loading: false,
     error: null,
     entries: [
-      { type: 'dashboard', name: 'dashboard', label: 'Dashboard', allowEnvironmentOverlay: true, allowRuntimeCreate: true, schema: SCHEMA },
+      { type: 'page', name: 'page', label: 'Page', allowEnvironmentOverlay: true, allowRuntimeCreate: true, schema: SCHEMA },
     ],
   }),
 }));
@@ -136,12 +134,14 @@ import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
 import { PagePreview } from '../metadata-admin/previews/PagePreview';
+import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { PageBlockInspector } from '../metadata-admin/inspectors/PageBlockInspector';
 import { PageDefaultInspector } from '../metadata-admin/inspectors/PageDefaultInspector';
 
 const dataSource = createEmptyDataSource();
 
 registerMetadataPreview('page', PagePreview);
+registerMetadataPreview('flow', FlowPreview);
 registerMetadataInspector('page', PageBlockInspector);
 registerMetadataDefaultInspector('page', PageDefaultInspector);
 
@@ -282,8 +282,8 @@ describe('Studio item toolbar — History and Audit follow the trail doors (obje
 describe("CONTROL — Setup's item page still opens the five from the shared directory (objectstack#28239)", () => {
   it('Layers, References, History, Audit and Source open on a Setup item', async () => {
     render(
-      <MemoryRouter initialEntries={['/apps/setup/metadata/dashboard/env_position']}>
-        <MetadataResourceEditPage type="dashboard" name="env_position" />
+      <MemoryRouter initialEntries={['/apps/setup/metadata/page/home']}>
+        <MetadataResourceEditPage type="page" name="home" />
       </MemoryRouter>,
     );
     fireEvent.click(await screen.findByTitle(t('engine.edit.layers', 'en'), undefined, { timeout: 8000 }));
@@ -296,8 +296,11 @@ describe("CONTROL — Setup's item page still opens the five from the shared dir
     expect(await screen.findAllByTitle(ROLLBACK)).toHaveLength(2);
 
     fireEvent.click(screen.getByTestId('audit-button'));
-    await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith('dashboard', 'env_position', { limit: 100 }));
+    await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith('page', 'home', { limit: 100 }));
 
+    // Setup's source is the inspector's Source tab, beside the open sheet.
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     fireEvent.click(screen.getByRole('tab', { name: t('engine.edit.inspector.source', 'en') }));
     expect(await screen.findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 })).toBeInTheDocument();
   });
