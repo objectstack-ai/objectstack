@@ -31,8 +31,9 @@
  *   with no totals row/column. A matrix without `columns` degrades to the
  *   flat grouped table.
  * - `chart` (any non-joined type) → the embedded chart, its own
- *   `chart.xAxis` × `chart.yAxis` dataset query: above the grouped / flat
- *   table, below the matrix cross-tab (objectui#10964).
+ *   `chart.xAxis` × `chart.yAxis` dataset query (`[xAxis, seriesBy]` when a
+ *   `seriesBy` split is authored): above the grouped / flat table, below the
+ *   matrix cross-tab (objectui#10964).
  * - `joined` → a vertical stack of blocks, each its own dataset-bound table,
  *   with the report-level `runtimeFilter` merged into every block.
  *
@@ -386,8 +387,8 @@ function readOrder(value: unknown): SelectionOrder | undefined {
  * (a deliberate 400 — a mistyped sort key that silently returns arbitrary rows
  * is worse than a loud failure). But one report's `order` is validated against
  * its WHOLE selection, while this renderer issues narrower sub-selections from
- * it: the embedded chart queries only `chart.xAxis` × `chart.yAxis`, and the
- * flat table path drops the matrix across-dimensions. Forwarding the full list
+ * it: the embedded chart queries only `chart.xAxis` (with `chart.seriesBy`) ×
+ * `chart.yAxis`, and the flat table path drops the matrix across-dimensions. Forwarding the full list
  * to those would turn a perfectly valid report into a failed query.
  *
  * So keys outside a sub-selection are dropped HERE rather than sent and
@@ -1302,8 +1303,9 @@ function authoredSeriesLabel(series: unknown, measure: string, language: string 
 
 /**
  * Render a report's embedded `chart` (ADR-0021) by running its OWN dataset
- * query — the `xAxis` dimension grouped, the `yAxis` measure aggregated — and
- * feeding the rows to the registered generic chart component (plugin-charts).
+ * query — the `xAxis` dimension grouped (and the `seriesBy` split with it,
+ * when authored), the `yAxis` measure aggregated — and feeding the rows to the
+ * registered generic chart component (plugin-charts).
  *
  * Decoupled via {@link ComponentRegistry} (same approach as the legacy
  * renderer) so plugin-report keeps no hard dependency on plugin-charts: if the
@@ -1370,12 +1372,19 @@ function DatasetReportChart({
 }) {
   const xAxis = typeof chart.xAxis === 'string' ? chart.xAxis : '';
   const yAxis = typeof chart.yAxis === 'string' ? chart.yAxis : '';
+  // `ReportChartSchema.seriesBy` — a SECOND dataset dimension that splits the
+  // one `yAxis` measure into a series per value of it (a bar per owner, split
+  // by stage). It is the report's spelling of a dashboard widget's two-entry
+  // `dimensions` selection, so it is queried and pivoted the way that one is:
+  // `[xAxis, seriesBy]` × `[yAxis]`, through `buildChartSeries`' pivot branch.
+  const seriesBy = typeof chart.seriesBy === 'string' ? chart.seriesBy : '';
   const plan = planReportChart(chart.type);
-  // The chart plots a NARROWER selection than the table beside it (one
-  // dimension × one measure), so `useDatasetRows` scopes the report's order to
-  // those two columns — a "biggest first" on the plotted measure still sorts
-  // the bars; a key naming some other row dimension is simply not applicable
-  // here and is dropped rather than posted and rejected.
+  // The chart plots a NARROWER selection than the table beside it (its x
+  // dimension, plus the `seriesBy` split when one is authored, × one measure),
+  // so `useDatasetRows` scopes the report's order to those columns — a
+  // "biggest first" on the plotted measure still sorts the bars; a key naming
+  // some other row dimension is simply not applicable here and is dropped
+  // rather than posted and rejected.
   //
   // A single-value chart (metric / kpi / gauge…) instead queries the measure
   // with NO dimension: the server hands back its one pre-aggregated grand
@@ -1383,7 +1392,7 @@ function DatasetReportChart({
   // client-side recombination (the ADR-0021 red line). Plans that render no
   // chart at all select no measures, which parks the hook in `idle`.
   const wantsQuery = plan.kind === 'series' || plan.kind === 'single_value';
-  const queryDimensions = plan.kind === 'series' && xAxis ? [xAxis] : [];
+  const queryDimensions = plan.kind === 'series' && xAxis ? (seriesBy ? [xAxis, seriesBy] : [xAxis]) : [];
   const queryMeasures = wantsQuery && yAxis ? [yAxis] : [];
   const state = useDatasetRows(
     dataset,
@@ -1417,32 +1426,45 @@ function DatasetReportChart({
   // objectui#4330 — the embedded chart plots the SAME dimension the table
   // beside it groups by, so it takes the same label map. Leaving it out would
   // put the two spellings of one value on one screen, which is the defect this
-  // family exists to close.
-  const chartDimensions = React.useMemo(() => (xAxis ? [xAxis] : []), [xAxis]);
+  // family exists to close. The `seriesBy` split is a dimension the chart
+  // queries too, so its values (the series the legend lists) take theirs.
+  const chartDimensions = React.useMemo(
+    () => (xAxis ? (seriesBy ? [xAxis, seriesBy] : [xAxis]) : []),
+    [xAxis, seriesBy],
+  );
   // objectui#4906 — `useDatasetDimensionMeta`, NOT the label-only
   // `useDatasetDimensionLabels`: this chart derives more from the resolved
   // field metadata than label maps (see the file-level doc comment above this
   // component). Mirrors `DatasetWidget`'s own call exactly. (Since
   // objectui#12243 the tables above read the same hook, for the declared order.)
   const dimensionMeta = useDatasetDimensionMeta(state.object, state.dimensionFields, chartDimensions);
-  const { categoryColors, dimensionLabels, categoryOrder } = React.useMemo(() => {
-    if (!dimensionMeta) return { categoryColors: null, dimensionLabels: null, categoryOrder: null };
+  const { categoryColors, dimensionLabels, categoryOrder, seriesOrder } = React.useMemo(() => {
+    if (!dimensionMeta) return { categoryColors: null, dimensionLabels: null, categoryOrder: null, seriesOrder: null };
     const { metaByPath, relabel } = dimensionMeta;
     // Colours and declared order read `option.label`, so they are fed the
     // LOCALIZED options — the same "translate the options, then render them"
     // shape `DatasetWidget` uses — which is what keeps them keyed by the
-    // string the relabeled rows below actually carry. `relabel[0]` is the
-    // chart's one x-axis dimension: `chartDimensions` above is at most one
-    // entry, so `relabel` never has a second.
+    // string the relabeled rows below actually carry. `relabel` follows
+    // `chartDimensions` in order, so `relabel[0]` is the x-axis dimension and
+    // `relabel[1]`, present only with a `seriesBy` split, is that split.
     const firstDimPath = relabel[0]?.path;
     const firstDimMeta = firstDimPath ? metaByPath[firstDimPath] : undefined;
     const firstDimOptions = firstDimPath
       ? localizeFieldOptions(firstDimMeta?.options, dimensionOptionTranslator(firstDimMeta, fieldOptionLabel))
       : undefined;
+    // The split's declared order: its values are the pivoted series the legend
+    // lists, and a select there reads in its declared order as the axis does
+    // (`DatasetWidget` derives the same `seriesOrder` for its second dimension).
+    const secondDimPath = relabel[1]?.path;
+    const secondDimMeta = secondDimPath ? metaByPath[secondDimPath] : undefined;
+    const secondDimOptions = secondDimPath
+      ? localizeFieldOptions(secondDimMeta?.options, dimensionOptionTranslator(secondDimMeta, fieldOptionLabel))
+      : undefined;
     return {
       categoryColors: buildOptionColorMap(firstDimOptions),
       dimensionLabels: deriveDimensionLabelMaps(metaByPath, relabel, fieldOptionLabel),
       categoryOrder: buildCategoryOrder(firstDimOptions),
+      seriesOrder: buildCategoryOrder(secondDimOptions),
     };
   }, [dimensionMeta, fieldOptionLabel]);
 
@@ -1567,10 +1589,12 @@ function DatasetReportChart({
   // null group (#4508) — is a property of `buildChartSeries`, so it arrives
   // here by inheritance rather than by a third re-derivation.
   //
-  // The selection is exactly one dimension × one measure, so this takes the
-  // helper's single-dimension branch and returns ONE series; the pivot branch
-  // (2+ dimensions) is unreachable from a report chart, whose schema declares a
-  // single `xAxis`/`yAxis` pair.
+  // Without `seriesBy` the selection is one dimension × one measure, so this
+  // takes the helper's single-dimension branch and returns ONE series. With it,
+  // the selection is `[xAxis, seriesBy]` × `[yAxis]` and the helper's PIVOT
+  // branch runs — one row per x bucket, one series per `seriesBy` value — the
+  // branch the dashboard's two-dimension widget already takes, null groups and
+  // all, so the split inherits that family rather than re-deriving it.
   //
   // `builtinAggregateLabels` (objectui#7258): a measure the server minted as a
   // built-in default (`builtinAggregate: 'count'`, objectstack#14492) reads its
@@ -1596,16 +1620,31 @@ function DatasetReportChart({
     categoryRank ? { [xAxis]: categoryRank } : null,
   );
   const plotRows = plotLayout ? plotLayout.map((i) => displayRows[i]) : displayRows;
-  const { data: chartData, xAxisKey, series: derivedSeries } = buildChartSeries(
+  const nullCategoryLabel = tt('chart.nullCategory', '(None)');
+  const { data: chartData, xAxisKey, series: pivotOrDerivedSeries } = buildChartSeries(
     plotRows,
-    [xAxis],
+    queryDimensions,
     [yAxis],
     state.fields,
     {
-      nullCategoryLabel: tt('chart.nullCategory', '(None)'),
+      nullCategoryLabel,
       builtinAggregateLabels: builtinAggregateLabels(tt),
     },
   );
+  // The split's series in its DECLARED option order, the empty group last —
+  // the pivot lists them in arrival order, which is the dataset's `GROUP BY`
+  // order. The same rank, and the same opt-out, as the categories above: a
+  // report whose `order` reaches this selection keeps the server's order.
+  const seriesRank = seriesBy && !scopeOrder(order, queryDimensions, queryMeasures)
+    ? buildCategoryRank(seriesOrder)
+    : null;
+  const seriesPosition = (label: string, rank: ReadonlyMap<string, number>): number =>
+    !rank.has(label) && label === nullCategoryLabel ? Number.MAX_SAFE_INTEGER : declaredOptionPosition(label, rank);
+  const derivedSeries = seriesRank
+    ? [...pivotOrDerivedSeries].sort(
+        (a, b) => seriesPosition(a.label, seriesRank) - seriesPosition(b.label, seriesRank),
+      )
+    : pivotOrDerivedSeries;
 
   // ── The PRESENTATION half: authored, merged forward (#4229) ──────────────
   //
@@ -1630,8 +1669,17 @@ function DatasetReportChart({
   // holds no provider — the very thing that would paint English on a zh
   // console. `measureLabel` already resolved ① through `pickLocalized` and ②
   // through `headerLabel`, so it wins outright.
-  const chartSeries = authoredSeries.map((s) =>
-    s.dataKey === yAxis ? { ...s, label: measureLabel } : s,
+  //
+  // With a `seriesBy` split every series is a VALUE of that dimension, not the
+  // measure, so `measureLabel` names none of them: a series keeps the value it
+  // plots (already relabeled to its option label above), unless an authored
+  // `series[]` entry names that value — the spec's reading of `series[].name`
+  // when `seriesBy` is set — and then that entry's label resolves through
+  // `pickLocalized`, for the same reason as the measure's.
+  const chartSeries = authoredSeries.map((s, i) =>
+    seriesBy
+      ? { ...s, label: authoredSeriesLabel(chart.series, s.dataKey, language) ?? derivedSeries[i].label }
+      : s.dataKey === yAxis ? { ...s, label: measureLabel } : s,
   );
 
   // The authored CHROME — `showLegend`, `showDataLabels`, `colors`, `subtitle`,
@@ -1662,7 +1710,8 @@ function DatasetReportChart({
           chartType: plan.chartType,
           data: chartData,
           xAxisKey,
-          // One series, carrying its display name. `ChartRenderer` turns a
+          // One series (one per split value with `seriesBy`), each carrying
+          // its display name. `ChartRenderer` turns a
           // series `label` into `config[dataKey].label`, which is the single
           // input the legend, the mark's tooltip name and the single-value
           // caption all read — so legend and tooltip follow this by
@@ -2167,7 +2216,7 @@ export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = ({
   // the chart plots the dataset's yAxis measure across the xAxis dimension;
   // the table always carries the exact numbers). ONE slot for every non-joined
   // presentation, the cross-tab included: `DatasetReportChart` runs its OWN
-  // `chart.xAxis` × `chart.yAxis` dataset query, so it binds the same way
+  // `chart.xAxis` (+ `chart.seriesBy`) × `chart.yAxis` dataset query, so it binds the same way
   // whichever table sits next to it — a matrix's rows and columns are dataset
   // dimensions like a summary's rows, and the chart's axes name them.
   //

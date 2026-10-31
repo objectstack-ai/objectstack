@@ -81,6 +81,7 @@ import { useRecordAriaProps } from './recordComponentAria';
 import { useDefaultRecordPage } from '../defaultRecordPage';
 import {
   RecordFieldChangesContext,
+  RecordTimelineCountContext,
   RecordTimelinePanelContext,
   filterTimelineStream,
   mergeTimelineStream,
@@ -333,13 +334,17 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
     else setExtraPages((n) => n + 1);
   }, [asStream]);
 
-  // The 动态 panel's count chip: the whole stream's size, unknown while the
-  // feed loads or a read was refused (a refused read is not "none").
-  const reportCount = timelinePanel?.onCount;
-  const peekCount = asPeek && !loading && !activityDenied && !commentsDenied ? applied.total : null;
+  // The 动态 panel's count chip, and the 动态 tab's on the record page's tab
+  // row: the whole stream's size, unknown while the feed loads or a read was
+  // refused (a refused read is not "none"). The tab's full face reports it
+  // while its 全部 chip is on; another chip's total is not the stream's.
+  const countReporter = React.useContext(RecordTimelineCountContext);
+  const reportCount = asPeek ? timelinePanel?.onCount : asStream ? (countReporter ?? undefined) : undefined;
+  const reportsWhole = asPeek || streamFilter === 'all';
+  const streamCount = !loading && !activityDenied && !commentsDenied ? applied.total : null;
   React.useEffect(() => {
-    reportCount?.(peekCount);
-  }, [reportCount, peekCount]);
+    if (reportsWhole) reportCount?.(streamCount);
+  }, [reportCount, reportsWhole, streamCount]);
 
   // Write path: whatever the host's DiscussionContext provides, nothing more.
   // `enableMentions: false` withholds the suggestion list, which is what turns

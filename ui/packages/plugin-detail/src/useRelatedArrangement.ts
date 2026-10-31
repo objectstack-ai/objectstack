@@ -46,8 +46,9 @@ export interface RelatedArrangementControls {
  * Targets 7 and 10; objectstack#27524, Targets 1 and 10): the stored value
  * laid over the default order, the edits written back through the host, and
  * each panel's chrome (the ⠿ handle's drag and ⌥↑ / ⌥↓, the ⋯ menu's hide,
- * the way to the whole list). One hook for the column tiers' panel stack and
- * the tabbed tier's 关联 tab, so both read and write the same arrangement.
+ * the way to the whole list), for the right column's panel stack. The record
+ * page's tab row reads the same stored value (`resolveRelatedArrangement`),
+ * so the panels and their tabs stand in one order.
  *
  * A relationship new since the reader's last drag is stamped as seen the
  * first time this reader's page shows it (rule 3's 48 h clock).

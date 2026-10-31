@@ -178,29 +178,6 @@ describe('the related panel header (objectstack#27524, Target 1)', () => {
   });
 });
 
-describe('the arranged full face (the Related tab) has no collapse either (objectstack#27524)', () => {
-  it('draws ⠿ and ⋯, no chevron, and a click on its header leaves the rows drawn', async () => {
-    render(
-      <RelatedCardChromeContext.Provider value={chromeOf()}>
-        <RelatedList
-          title="Tasks"
-          type="table"
-          api="task"
-          objectName="task"
-          data={rows}
-          dataSource={{ find: vi.fn(async () => rows), getObjectSchema: vi.fn(async () => ({ name: 'task', fields })) } as any}
-        />
-      </RelatedCardChromeContext.Provider>,
-    );
-    await waitFor(() => expect(screen.getByText('Call Ada')).toBeInTheDocument());
-    expect(document.querySelector('[data-related-panel-handle]')).not.toBeNull();
-    expect(document.querySelector('[data-related-card-menu]')).not.toBeNull();
-    expect(document.querySelector('.lucide-chevron-down, .lucide-chevron-right')).toBeNull();
-    fireEvent.click(screen.getByText('Tasks'));
-    expect(screen.getByText('Call Ada')).toBeInTheDocument();
-  });
-});
-
 describe('the compact row’s first column (objectstack#27524, Target 11)', () => {
   // A product's line items: the child's name field IS the key back to the product.
   const lineFields = {
