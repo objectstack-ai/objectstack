@@ -10,7 +10,7 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest } from '@objectstack/spec/contracts';
 import type { MetadataActivationWriteOptions } from '@objectstack/core';
 import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
@@ -684,10 +684,15 @@ export interface RegisteredConnector {
  *    upstream refused (#27237);
  *  - `credential`: setting the stored credential `ref` again — a value stored
  *    through the credential door that the upstream refused (#27237).
+ *  - `connection`: an administrator connecting the instance — an
+ *    `authorization_code` instance never authorized, or whose grant the
+ *    authorization server refused (ADR-0143 D4).
  */
 export type ConnectorHold =
     | { readonly kind: 'declaration' }
-    | { readonly kind: 'credential'; readonly ref: string };
+    | { readonly kind: 'credential'; readonly ref: string }
+    // ADR-0143 D4 — an `authorization_code` instance with no working connection.
+    | { readonly kind: 'connection' };
 
 // The connector **provider** contract (ADR-0097) — ConnectorProviderFactory,
 // ConnectorProviderContext, ConnectorMaterialization — lives in
@@ -2577,6 +2582,19 @@ export interface ConnectorCredentialDoor {
 }
 
 /**
+ * ADR-0143 D3 / D5 — the connector connection door the automation plugin
+ * attaches: the four `IAutomationService` connection members, served where the
+ * declared instances, the connection store and the grant handles live. Every
+ * answer carries a status, never a token.
+ */
+export interface ConnectorConnectionDoor {
+    get(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState>;
+    begin(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin>;
+    complete(request: ConnectorConnectionCallbackRequest): Promise<ConnectorConnectionState>;
+    revoke(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState>;
+}
+
+/**
  * [#20790] One credential a registered flow holds, by class: a literal in its
  * definition (a packaged flow's source), or held by the credential channel.
  * What the clone door refuses on — never the value.
@@ -2725,6 +2743,8 @@ export class AutomationEngine implements IAutomationService {
     private connectorPullSource?: (request: ConnectorSourcePullRequest) => Promise<ConnectorSourcePullResult>;
     /** [#27237] The connector credential door — see {@link setConnectorCredentialDoor}. */
     private connectorCredentialDoor?: ConnectorCredentialDoor;
+    /** ADR-0143 D5 — the connector connection door — see {@link setConnectorConnectionDoor}. */
+    private connectorConnectionDoor?: ConnectorConnectionDoor;
     /** [#22450] The lazy `i18n` service reader — see {@link setI18nServiceSource}. */
     private i18nServiceSource?: () => RefusalI18nService | undefined;
     /**
@@ -2844,6 +2864,8 @@ export class AutomationEngine implements IAutomationService {
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
     private connectorProviders = new Map<string, ConnectorProviderFactory>();
+    /** ADR-0143 D4 — provider keys registered with `credentialHandle: true`. */
+    private readonly credentialHandleProviders = new Set<string>();
     /** Bridge to the host function registry for `script`-node calls (#1870), if wired. */
     private functionResolver: FlowFunctionResolver | null = null;
     /** Bridge to the host object registry for schema-aware condition validation at
@@ -4199,14 +4221,32 @@ export class AutomationEngine implements IAutomationService {
      * factory at boot for every declarative `connectors:` entry naming that
      * provider, turning stack metadata into a live connector. Re-registering a
      * key replaces (mirrors {@link registerNodeExecutor}).
+     *
+     * ADR-0143 D4 — `options.credentialHandle: true` says the factory reads
+     * `ConnectorProviderContext.credentialHandle` and asks it on every
+     * upstream request. Only such a provider is handed a grant-bearing
+     * (`oauth2`) instance; any other keeps that instance degraded, naming the
+     * provider, so nothing is called upstream without its credential.
+     * Re-registering a key without it withdraws it.
      */
-    registerConnectorProvider(providerKey: string, factory: ConnectorProviderFactory): void {
+    registerConnectorProvider(
+        providerKey: string,
+        factory: ConnectorProviderFactory,
+        options?: { readonly credentialHandle?: boolean },
+    ): void {
         // The body lives in ./flow-definitions.ts (#25222).
         const host: ThisParameterType<typeof registerConnectorProvider> = {
             connectorProviders: this.connectorProviders,
             logger: this.logger,
         };
         registerConnectorProvider.call(host, providerKey, factory);
+        if (options?.credentialHandle === true) this.credentialHandleProviders.add(providerKey);
+        else this.credentialHandleProviders.delete(providerKey);
+    }
+
+    /** ADR-0143 D4 — whether the provider under `providerKey` was registered as asking the credential handle. */
+    providerAppliesCredentialHandle(providerKey: string): boolean {
+        return this.credentialHandleProviders.has(providerKey);
     }
 
     /** Unregister a connector provider factory (hot-unplug). */
@@ -4217,6 +4257,7 @@ export class AutomationEngine implements IAutomationService {
             logger: this.logger,
         };
         unregisterConnectorProvider.call(host, providerKey);
+        this.credentialHandleProviders.delete(providerKey);
     }
 
     /** Resolve a provider factory by key, or `undefined` when none is installed. */
@@ -4884,6 +4925,43 @@ export class AutomationEngine implements IAutomationService {
     /** [#27237] `IAutomationService.clearConnectorCredential` — remove one value, degrade its instances. */
     async clearConnectorCredential(request: ConnectorCredentialClearRequest): Promise<ConnectorCredentialRef> {
         return this.requireConnectorCredentialDoor(`clearConnectorCredential('${request.ref}')`).clear(request);
+    }
+
+    /** ADR-0143 D5 — attach (or detach) the connector connection door; the automation plugin does it at `init()`. */
+    setConnectorConnectionDoor(door: ConnectorConnectionDoor | undefined): void {
+        this.connectorConnectionDoor = door;
+    }
+
+    /** ADR-0143 D5 — the door, or the refusal a bare engine answers: nothing here can connect an instance. */
+    private requireConnectorConnectionDoor(verb: string): ConnectorConnectionDoor {
+        if (this.connectorConnectionDoor) return this.connectorConnectionDoor;
+        throw Object.assign(
+            new Error(
+                `[Automation] ${verb}: this automation engine has no connector connection door attached — it is attached by `
+                + 'AutomationServicePlugin at init(); a bare engine has no declared connectors and no connection store.',
+            ),
+            { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
+    }
+
+    /** ADR-0143 D3 — `IAutomationService.getConnectorConnection`: a status, never a token. */
+    async getConnectorConnection(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
+        return this.requireConnectorConnectionDoor(`getConnectorConnection('${request.connector}')`).get(request);
+    }
+
+    /** ADR-0143 D5 — `IAutomationService.beginConnectorConnection`: the authorization URL to send the browser to. */
+    async beginConnectorConnection(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin> {
+        return this.requireConnectorConnectionDoor(`beginConnectorConnection('${request.connector}')`).begin(request);
+    }
+
+    /** ADR-0143 D5 — `IAutomationService.completeConnectorConnection`: the redirect's code exchanged and stored. */
+    async completeConnectorConnection(request: ConnectorConnectionCallbackRequest): Promise<ConnectorConnectionState> {
+        return this.requireConnectorConnectionDoor('completeConnectorConnection()').complete(request);
+    }
+
+    /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`: the organization's connection removed. */
+    async revokeConnectorConnection(request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
+        return this.requireConnectorConnectionDoor(`revokeConnectorConnection('${request.connector}')`).revoke(request);
     }
 
     /** [#20790] Does the credential channel hold the LIVE credential at this position? */

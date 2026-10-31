@@ -90,6 +90,8 @@ function makeFakeProvider() {
 interface BootOptions {
     providerKey?: string;
     providerFactory?: ConnectorProviderFactory;
+    /** The registration options of {@link providerFactory} (ADR-0143 D4's credential-handle opt-in). */
+    providerOptions?: { credentialHandle?: boolean };
     /** Names registered as plugin connectors during init() (for the conflict rule). */
     registerLivePlugin?: string[];
     credentialResolver?: CredentialResolver;
@@ -120,7 +122,7 @@ async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKe
             });
             const automation = ctx.getService('automation');
             if (opts.providerFactory) {
-                automation.registerConnectorProvider(opts.providerKey ?? 'fake', opts.providerFactory);
+                automation.registerConnectorProvider(opts.providerKey ?? 'fake', opts.providerFactory, opts.providerOptions);
             }
             for (const name of opts.registerLivePlugin ?? []) {
                 automation.registerConnector(
@@ -1046,31 +1048,87 @@ describe('ADR-0097 — the entry\'s resilience policy on ConnectorProviderContex
     });
 });
 
-// ADR-0143 D4 — the grant-bearing kinds resolve per dispatch, which this server
-// does not run yet (S1 replaces this hold). Until then such an instance is
-// held degraded with a named reason, and its factory is never invoked — so it
-// is never materialized without its credential and never called upstream
-// unauthenticated. A boot does not fail on it: it is not an authoring fault.
-describe('ADR-0143 D4 — a grant-bearing instance is held degraded, never materialized unauthenticated', () => {
-    const grantBearing: Array<[string, ConnectorInstanceAuth]> = [
-        ['oauth2', { type: 'oauth2', grant: 'client_credentials', tokenUrl: 'https://idp.example.com/token', clientId: 'c', credentialRef: 'SECRET' }],
-        ['app-credential', { type: 'app-credential', vendor: 'feishu', appId: 'cli_x', credentialRef: 'SECRET' }],
-    ];
+// ADR-0143 D2.2, D4 — a grant-bearing instance is served only through the
+// per-dispatch credential handle, by a provider registered as asking it on
+// every request. Anything this server cannot serve yet is held degraded with a
+// named reason and its factory is never invoked — never materialized without
+// its credential, never called upstream unauthenticated. A boot does not fail
+// on it: it is not an authoring fault.
+describe('ADR-0143 D4 — a grant-bearing instance is served through its credential handle, or held degraded', () => {
+    const CLIENT_CREDENTIALS: ConnectorInstanceAuth = {
+        type: 'oauth2', grant: 'client_credentials', tokenUrl: 'https://idp.example.com/token', clientId: 'c', credentialRef: 'SECRET',
+    };
+    const AUTHORIZATION_CODE: ConnectorInstanceAuth = {
+        type: 'oauth2',
+        grant: 'authorization_code',
+        authorizationUrl: 'https://idp.example.com/authorize',
+        tokenUrl: 'https://idp.example.com/token',
+        clientId: 'c',
+        credentialRef: 'SECRET',
+    };
 
-    it.each(grantBearing)('holds a `%s` instance degraded with the reason, without calling its factory', async (kind, auth) => {
-        const { factory, calls } = makeFakeProvider();
-        const kernel = await boot([providerConnector('vendor', { auth })], {
-            providerFactory: factory,
-            credentialResolver: () => 'resolved-secret',
-        });
-        const engine = automationOf(kernel);
+    function expectHeld(engine: AutomationEngine, calls: unknown[], ...reason: string[]) {
         expect(calls).toHaveLength(0);
         const desc = engine.getConnectorDescriptors().find((d) => d.name === 'vendor');
         expect(desc?.state).toBe('degraded');
         expect(desc?.actions).toEqual([]);
-        expect(engine.getConnectorDegradedReason('vendor')).toContain(`auth type '${kind}'`);
-        expect(engine.getConnectorDegradedReason('vendor')).toContain('never called without its credential');
+        for (const r of reason) expect(engine.getConnectorDegradedReason('vendor')).toContain(r);
         expect(engine.resolveConnectorAction('vendor', 'ping')).toBeUndefined();
+    }
+
+    it('holds an `app-credential` instance degraded (its vendor exchanges are not run yet), even on an opted-in provider', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_x', credentialRef: 'SECRET' } })],
+            { providerFactory: factory, providerOptions: { credentialHandle: true }, credentialResolver: () => 'resolved-secret' },
+        );
+        expectHeld(automationOf(kernel), calls, "auth type 'app-credential'", 'never called without its credential');
+        await kernel.shutdown();
+    });
+
+    it('holds an `oauth2` instance degraded on a provider that does not ask the credential handle', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: CLIENT_CREDENTIALS })], {
+            providerFactory: factory,
+            credentialResolver: () => 'resolved-secret',
+        });
+        expectHeld(automationOf(kernel), calls, "provider 'fake' does not yet ask the per-dispatch credential handle", 'never called without its credential');
+        await kernel.shutdown();
+    });
+
+    it('holds an `oauth2` instance degraded when it declares no endpoints or client to send a token request with', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot(
+            [providerConnector('vendor', { auth: { type: 'oauth2', grant: 'authorization_code', credentialRef: 'SECRET' } })],
+            { providerFactory: factory, providerOptions: { credentialHandle: true }, credentialResolver: () => 'resolved-secret' },
+        );
+        expectHeld(automationOf(kernel), calls, '`tokenUrl`, `clientId`, `authorizationUrl`', 'not served');
+        await kernel.shutdown();
+    });
+
+    it('serves a `client_credentials` instance on an opted-in provider: a credential handle, and no static auth', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: CLIENT_CREDENTIALS })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expect(calls).toHaveLength(1);
+        expect(calls[0].auth).toBeUndefined();
+        expect(calls[0].credentialHandle).toMatchObject({ connector: 'vendor' });
+        expect(typeof calls[0].credentialHandle?.get).toBe('function');
+        expect(automationOf(kernel).getConnectorDescriptors().find((d) => d.name === 'vendor')?.state).toBe('ready');
+        await kernel.shutdown();
+    });
+
+    it("holds an `authorization_code` instance nobody connected degraded \"not connected\" — the boot does not fail", async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([providerConnector('vendor', { auth: AUTHORIZATION_CODE })], {
+            providerFactory: factory,
+            providerOptions: { credentialHandle: true },
+            credentialResolver: () => 'resolved-secret',
+        });
+        expectHeld(automationOf(kernel), calls, "connector instance 'vendor' is not connected", '/connectors/vendor/connection');
         await kernel.shutdown();
     });
 

@@ -459,13 +459,52 @@ What the publish door checks, each refusal located at its key under `auth`:
 - **`app-credential`** takes `vendor` (`feishu`, `dingtalk` or `wecom`), `appId`
   and a required `credentialRef`. An inline `appSecret` is refused by name.
 
-A server that does not yet run the per-dispatch token resolution holds such an
-instance **degraded**, with a reason that names the grant-bearing kind, and
-never calls the upstream without its credential. A datasource that borrows
-from it (`external.connector`) is refused with `422`. Until the server serves
-them, declare a static kind (`bearer`, `api-key` or `basic`) to dispatch now;
-don't emulate a grant by putting a short-lived access token behind a `bearer`
-ref.
+**How the server serves them.** An `oauth2` instance is served through a
+**credential handle** the provider asks on every request: the access token is
+obtained from `tokenUrl` (the client authenticating with HTTP Basic, or by
+`client_id` alone as a public client), cached in memory only, refreshed when
+it is within 30 seconds of its expiry, and refreshed once more, with one
+retry, when the upstream answers `401`. Concurrent requests share one token
+request, and with a cluster service a refresh runs under the cluster lock, so
+a rotating refresh token is never spent twice.
+
+- **`client_credentials`** needs nothing more: the client secret its
+  `credentialRef` names re-derives the token at any time.
+- **`authorization_code`** needs an administrator to **connect** it, once per
+  organization. Until then the instance is **degraded** "not connected" (never
+  a failed boot). The connect is three calls, each needing `manage_metadata`:
+
+  ```http
+  POST /api/v1/automation/connectors/:name/connection     → { authorizationUrl, expiresAt }
+  GET  /api/v1/automation/connectors/oauth/callback?code=…&state=…   (the vendor redirects here)
+  DELETE /api/v1/automation/connectors/:name/connection   → revoke
+  ```
+
+  `GET …/:name/connection` answers the organization's status
+  (`not_connected`, `connected`, `reconnect_required`), never a token. The
+  `state` and the PKCE verifier are bound to the user and organization that
+  began the connect and are used once; a callback from anyone else is refused
+  before its code is exchanged. The redirect URI is the deployment's
+  (`OS_BASE_URL` or `OS_AUTH_URL` plus `/api/v1/automation/connectors/oauth/callback`,
+  or the automation plugin's `connectorOAuthRedirectUri`), never the
+  request's; register that URI with the vendor. The refresh token is kept
+  encrypted in `sys_connector_connection`, one row per organization; it is
+  not a sign-in account, and signing in never touches it. A run dispatches
+  with its own organization's connection; a run with no organization uses the
+  instance's only connection, and is refused when there are several. When the
+  vendor refuses the grant (`invalid_grant`), the connection is marked
+  **reconnect required** and the instance degraded until an administrator
+  connects it again.
+
+What is not served yet is held **degraded** with a reason that names it, and
+never called without its credential: `app-credential` (its vendor exchanges
+are not run yet), an `oauth2` instance on a provider that does not yet ask the
+credential handle (the built-in `rest`, `openapi` and `mcp` providers do not
+yet), and an `mcp` instance that left its endpoints to discovery. A datasource
+that borrows from a grant-bearing instance (`external.connector`) is refused
+with `422`. Until then, declare a static kind (`bearer`, `api-key` or `basic`)
+to dispatch now; don't emulate a grant by putting a short-lived access token
+behind a `bearer` ref.
 
 ### Request signing: `signed`
 
@@ -570,7 +609,9 @@ retry):
 |:---|:---|
 | `provider` names no installed factory | **Hard boot error** naming the entry, the provider, and the plugin that supplies it — add the executor to `plugins:` |
 | Invalid `providerConfig` (missing `baseUrl` / `spec` / `transport`, wrong shape) | **Hard boot error** from the provider factory |
-| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a server that does not yet run its per-dispatch resolution | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
+| `auth` is a grant-bearing kind (`oauth2`, `app-credential`) this server does not serve yet (`app-credential`; `oauth2` on a provider that does not ask the credential handle) | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
+| An `authorization_code` instance nobody connected, or whose grant the vendor refused | **Not fatal**: the instance registers **degraded**, "not connected" or "reconnect required" — connect it (`POST …/connectors/:name/connection`), and it materializes without a restart |
+| The token endpoint is unreachable or answers `5xx` / `429` | **Not fatal**: the dispatch fails `CONNECTOR_UPSTREAM_UNAVAILABLE` and is retried on the existing backoff; the connection stays connected |
 | `auth` is `signed` on a provider that does not say it applies the request signer | **Hard boot error** naming the instance, the scheme and the provider: its calls would go out unsigned — declare it through `rest` or `openapi` |
 | `credentialRef` resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
 | The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
