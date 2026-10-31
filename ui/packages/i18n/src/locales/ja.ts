@@ -483,6 +483,7 @@ const ja = {
       undonePrefix: "取り消し済み — ",
       succeeded: "成功 {{count}} / {{total}}",
       resultFailed: " · 失敗 {{count}}",
+      succeededRecords: "成功したレコード",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
       cancel: "キャンセル",
@@ -2156,6 +2157,8 @@ const ja = {
       popupBlockedDescription: "ブラウザが新しいタブを開くのをブロックしました。",
       popupBlockedAction: "新しいタブで開く",
       noRecordId: "この操作は 1 件のレコードに対して実行されますが、利用できるレコード ID がありません。",
+      fillRequiredThenRetry: "{{fields}} を入力してから、もう一度「{{action}}」を実行してください。",
+      fillRequiredFirst: "先に {{fields}} を入力してください。",
     },
     shortcuts: {
       title: "キーボードショートカット",

@@ -529,6 +529,7 @@ const ar = {
       undonePrefix: "تم التراجع — ",
       succeeded: "نجح {{count}} / {{total}}",
       resultFailed: " · فشل {{count}}",
+      succeededRecords: "السجلات الناجحة",
       retry: "إعادة المحاولة",
       downloadErrorCsv: "تنزيل ملف CSV للأخطاء",
       cancel: "إلغاء",
@@ -2377,6 +2378,8 @@ const ar = {
       popupBlockedDescription: "حظر المتصفح فتح علامة التبويب الجديدة.",
       popupBlockedAction: "فتح في علامة تبويب جديدة",
       noRecordId: "يُنفَّذ هذا الإجراء على سجل واحد — لا يتوفر معرّف سجل.",
+      fillRequiredThenRetry: "املأ {{fields}}، ثم شغّل \"{{action}}\" مرة أخرى.",
+      fillRequiredFirst: "املأ {{fields}} أولاً.",
     },
     shortcuts: {
       title: "اختصارات لوحة المفاتيح",

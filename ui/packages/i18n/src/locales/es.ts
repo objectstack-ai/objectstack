@@ -498,6 +498,7 @@ const es = {
       undonePrefix: "Deshecho: ",
       succeeded: "Correctos {{count}} / {{total}}",
       resultFailed: " · Fallidos {{count}}",
+      succeededRecords: "Registros correctos",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
       cancel: "Cancelar",
@@ -2212,6 +2213,8 @@ const es = {
       popupBlockedDescription: "El navegador bloqueó la apertura de la nueva pestaña.",
       popupBlockedAction: "Abrir en una pestaña nueva",
       noRecordId: "Esta acción se ejecuta sobre un solo registro: no hay ningún ID de registro disponible.",
+      fillRequiredThenRetry: "Completa {{fields}} y vuelve a ejecutar «{{action}}».",
+      fillRequiredFirst: "Completa primero {{fields}}.",
     },
     shortcuts: {
       title: "Atajos de teclado",

@@ -493,6 +493,7 @@ const pt = {
       undonePrefix: "Desfeito — ",
       succeeded: "Concluídos {{count}} / {{total}}",
       resultFailed: " · Falhas {{count}}",
+      succeededRecords: "Registros concluídos",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",
@@ -2207,6 +2208,8 @@ const pt = {
       popupBlockedDescription: "O navegador bloqueou a abertura da nova aba.",
       popupBlockedAction: "Abrir em nova aba",
       noRecordId: "Esta ação é executada em um único registro — nenhum ID de registro disponível.",
+      fillRequiredThenRetry: "Preencha {{fields}} e execute “{{action}}” novamente.",
+      fillRequiredFirst: "Preencha {{fields}} primeiro.",
     },
     shortcuts: {
       title: "Atalhos de teclado",

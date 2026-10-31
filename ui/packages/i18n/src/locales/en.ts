@@ -956,6 +956,7 @@ const en = {
       undonePrefix: 'Undone \u2014 ',
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
+      succeededRecords: 'Records that succeeded',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
@@ -2325,6 +2326,10 @@ const en = {
       // The `newTabUrl` fast path's refusal when no record id resolves
       // (`createConsoleServerActionHandler`, objectui#13397).
       noRecordId: 'This action runs on a single record — no record id available.',
+      // A refused action whose answer named required fields: what to do next,
+      // after the server's own sentence (`createConsoleServerActionHandler`).
+      fillRequiredThenRetry: 'Fill in {{fields}}, then run “{{action}}” again.',
+      fillRequiredFirst: 'Fill in {{fields}} first.',
     },
     shortcuts: {
       title: 'Keyboard Shortcuts',

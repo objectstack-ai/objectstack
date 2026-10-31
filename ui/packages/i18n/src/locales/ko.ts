@@ -483,6 +483,7 @@ const ko = {
       undonePrefix: "되돌림 — ",
       succeeded: "성공 {{count}} / {{total}}",
       resultFailed: " · 실패 {{count}}",
+      succeededRecords: "성공한 레코드",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
       cancel: "취소",
@@ -2154,6 +2155,8 @@ const ko = {
       popupBlockedDescription: "브라우저가 새 탭 열기를 차단했습니다.",
       popupBlockedAction: "새 탭에서 열기",
       noRecordId: "이 작업은 단일 레코드에서 실행되지만 사용할 수 있는 레코드 ID가 없습니다.",
+      fillRequiredThenRetry: "{{fields}}을(를) 입력한 다음 \"{{action}}\"을(를) 다시 실행하세요.",
+      fillRequiredFirst: "먼저 {{fields}}을(를) 입력하세요.",
     },
     shortcuts: {
       title: "키보드 단축키",
