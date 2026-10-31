@@ -105,7 +105,10 @@ async function install(opts: { metadataFault?: boolean; engineDrivers?: string[]
     await plugin.start(k.ctx as any);
     await k.fire();
     const res = await rawApp.routes.get(ROUTE)!(makeC(BODY));
-    return { res, registered: k.registered, ledger: readdirSync(dir) };
+    // The plugin registers its own Installed Apps UI manifest at start; only
+    // the package's registration is this case's.
+    const registered = k.registered.map((r) => r.manifest.id).filter((id) => id === 'com.example.qah');
+    return { res, registered, ledger: readdirSync(dir) };
 }
 
 describe('install-local 2a — who holds a declared datasource name', () => {
@@ -131,6 +134,6 @@ describe('install-local 2a — who holds a declared datasource name', () => {
         const { res, registered } = await install({ engineDrivers: ['someone_else'] });
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(res.payload?.success).toBe(true);
-        expect(registered.map((r) => r.manifest.id)).toEqual(['com.example.qah']);
+        expect(registered).toEqual(['com.example.qah']);
     });
 });
