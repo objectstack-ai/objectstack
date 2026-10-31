@@ -1203,6 +1203,7 @@ const fr = {
     relatedExport: "Exporter",
     relatedRows: "{{count}} enregistrements",
     relatedRows_one: "{{count}} enregistrement",
+    relatedRows_many: "{{count}} d'enregistrements",
     relatedRows_other: "{{count}} enregistrements",
     recordNotFound: "Enregistrement introuvable",
     recordNotFoundDescription: "L'enregistrement que vous recherchez n'existe pas, a peut-être été supprimé, ou vous n'y avez peut-être pas accès.",

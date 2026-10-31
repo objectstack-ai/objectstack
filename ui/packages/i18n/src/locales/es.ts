@@ -1206,6 +1206,7 @@ const es = {
     relatedExport: "Exportar",
     relatedRows: "{{count}} registros",
     relatedRows_one: "{{count}} registro",
+    relatedRows_many: "{{count}} de registros",
     relatedRows_other: "{{count}} registros",
     recordNotFound: "Registro no encontrado",
     recordNotFoundDescription: "El registro que busca no existe, puede haber sido eliminado o es posible que no tenga acceso a él.",
