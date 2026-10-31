@@ -86,6 +86,7 @@
     "CALENDAR_DATE_TYPES (const)",
     "CANONICAL_CREDENTIAL_KEYS (const)",
     "CLOCK_TIME_TYPES (const)",
+    "CODE_DEFINED_CREDENTIAL_ROUTE (const)",
     "COMPOSED_READABLE_IDS_BRAND (const)",
     "COMPUTED_VALUE_TYPES (const)",
     "CONTEXT_TOKENS (const)",
