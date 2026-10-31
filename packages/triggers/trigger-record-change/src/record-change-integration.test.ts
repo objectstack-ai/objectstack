@@ -916,6 +916,13 @@ describe('[#28117] record-change flows on an object of a disabled package', () =
   const PKG = 'com.qa.trigger.module';
   const OTHER_PKG = 'com.qa.trigger.app';
 
+  /** The registry's package-lifecycle members this block drives — public on the concrete registry, outside the slot's contract. */
+  type PackageLifecycleRegistry = {
+    installPackage(manifest: Record<string, unknown>, source: 'code'): unknown;
+    disablePackage(id: string): unknown;
+    enablePackage(id: string): unknown;
+  };
+
   async function boot() {
     const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
@@ -923,13 +930,14 @@ describe('[#28117] record-change flows on an object of a disabled package', () =
     await kernel.use(new RecordChangeTriggerPlugin());
     await kernel.bootstrap();
 
-    const objectql = kernel.getService('objectql') as any;
-    const data = kernel.getService('data') as any;
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
+    const data = kernel.getService<IDataEngine>('data');
     const automation = kernel.getService<AutomationEngine>('automation');
+    const lifecycle = objectql.registry as unknown as PackageLifecycleRegistry;
 
     await attachSqlite(objectql);
-    objectql.registry.installPackage({ id: PKG, name: PKG, version: '1.0.0', type: 'module', namespace: 'qdm' }, 'code');
-    objectql.registry.installPackage({ id: OTHER_PKG, name: OTHER_PKG, version: '1.0.0', type: 'app', namespace: 'qda' }, 'code');
+    lifecycle.installPackage({ id: PKG, name: PKG, version: '1.0.0', type: 'module', namespace: 'qdm' }, 'code');
+    lifecycle.installPackage({ id: OTHER_PKG, name: OTHER_PKG, version: '1.0.0', type: 'app', namespace: 'qda' }, 'code');
     objectql.registry.registerObject(objectDef('qdm_order'), PKG, 'qdm');
     objectql.registry.registerObject(objectDef('qda_account'), OTHER_PKG, 'qda');
     await objectql.syncSchemas();
@@ -939,14 +947,14 @@ describe('[#28117] record-change flows on an object of a disabled package', () =
 
     /** Insert one record of `object` in-process, as a user, and read back its `stamp` once the flow had time to run. */
     const stampAfterInsert = async (object: string): Promise<unknown> => {
-      const created = await data.insert(object, { status: 'new' }, { context: { userId: 'u_trigger' } });
+      const created: any = await data.insert(object, { status: 'new' }, { context: { userId: 'u_trigger' } });
       const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
       await sleep(200);
-      const row = await data.findOne(object, { where: { id } });
+      const row: any = await data.findOne(object, { where: { id } });
       expect(row, 'the record itself is written: only the flow dispatch is withheld').toBeTruthy();
       return row?.stamp ?? null;
     };
-    return { kernel, objectql, stampAfterInsert };
+    return { kernel, lifecycle, stampAfterInsert };
   }
 
   it('fires while the package is enabled (the control)', async () => {
@@ -955,13 +963,13 @@ describe('[#28117] record-change flows on an object of a disabled package', () =
   }, 15000);
 
   it('does not fire while the package is disabled, and fires again once it is re-enabled', async () => {
-    const { objectql, stampAfterInsert } = await boot();
-    expect(objectql.registry.disablePackage(PKG), 'precondition: disabled').toBeTruthy();
+    const { lifecycle, stampAfterInsert } = await boot();
+    expect(lifecycle.disablePackage(PKG), 'precondition: disabled').toBeTruthy();
     expect(await stampAfterInsert('qdm_order'), 'a flow on a disabled package\'s object fired').toBeNull();
     // Another package's object, written in the same disabled window: its flow still fires.
     expect(await stampAfterInsert('qda_account')).toBe('done');
 
-    expect(objectql.registry.enablePackage(PKG), 'precondition: enabled').toBeTruthy();
+    expect(lifecycle.enablePackage(PKG), 'precondition: enabled').toBeTruthy();
     expect(await stampAfterInsert('qdm_order')).toBe('done');
   }, 15000);
 });
