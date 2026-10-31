@@ -46,6 +46,9 @@ export const StripeGetCustomerFlow = defineFlow({
  * `POST /api/v1/automation/stripe_list_open_invoices/trigger` and a body of
  * `{ "params": { "customer_id": "cus_123" } }`; Stripe's list object is the
  * run's `invoices.body` output (`invoices.body.data` holds the invoices).
+ *
+ * A CEL map's values share one type, so the literals beside the field read
+ * are wrapped in `dyn(…)`.
  */
 export const StripeListOpenInvoicesFlow = defineFlow({
   name: 'stripe_list_open_invoices',
@@ -67,7 +70,7 @@ export const StripeListOpenInvoicesFlow = defineFlow({
         connectorId: 'stripe',
         actionId: 'GetInvoices',
         input: {
-          query: { dialect: 'cel', source: '{"customer": customer_id, "status": "open", "limit": 10}' },
+          query: { dialect: 'cel', source: '{"customer": customer_id, "status": dyn("open"), "limit": dyn(10)}' },
         },
       },
     },

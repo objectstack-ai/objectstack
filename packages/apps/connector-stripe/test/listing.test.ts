@@ -76,7 +76,7 @@ describe('connector-stripe listing', () => {
 describe('connector-stripe packaged OpenAPI document', () => {
   it("is the document the README's provenance names: its sha256 is the one recorded there", () => {
     const provenance = section('Provenance');
-    const recorded = provenance.match(/sha256 `([0-9a-f]{64})`/)?.[1];
+    const recorded = provenance.match(/sha256\s+`([0-9a-f]{64})`/)?.[1];
     expect(recorded, 'README provenance records no sha256').toBeDefined();
     expect(createHash('sha256').update(documentBytes).digest('hex')).toBe(recorded);
   });

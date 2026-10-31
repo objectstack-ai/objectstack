@@ -159,6 +159,16 @@ describe('connector-stripe app — boot against a fake Stripe', () => {
     expect(text).toContain('in_fixture');
   });
 
+  it("a Stripe error answer lands in the step's output (status, ok false, Stripe's error); the step does not fail", async () => {
+    const res = await booted.apiAs(token, 'POST', '/automation/stripe_get_customer/trigger', {
+      params: { customer_id: 'cus_missing' },
+    });
+    const text = await res.text();
+    expect(res.status, text).toBe(200);
+    expect(requests.at(-1)?.url).toBe('https://api.stripe.com/v1/customers/cus_missing');
+    expect(text).toContain('invalid_request_error');
+  });
+
   it('every request the app sent was a GET', () => {
     expect(requests.length).toBeGreaterThan(0);
     expect(requests.every((r) => r.method === 'GET')).toBe(true);
