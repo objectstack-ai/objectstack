@@ -134,6 +134,9 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
       'validateComponentProps',
       'validateComponentTypes',
       'validatePrintPageBlocks',
+      // #28005 — an object-form's thank-you panel naming a field the engine
+      // does not generate.
+      'validateThankYouRecordFields',
       ...FAMILY,
       // #24953 / #25002 — the props-bag CEL slots' bounds refusal, after the family.
       'validatePagePredicateBounds',
@@ -194,6 +197,7 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
       'validatePresetComparands',
       'validateReferenceIntegrity',
       'validatePublicFormFileFields',
+      'validateThankYouRecordFields',
       ...FAMILY,
     ]);
     const view = (visibleWhen: string, data?: unknown) => ({
