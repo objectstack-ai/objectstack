@@ -95,15 +95,3 @@ self.addEventListener('sync', (event) => {
 });
 `;
 }
-
-/**
- * Request a one-shot background sync. The page should call this after
- * enqueuing offline work so the browser will wake the SW when the
- * connection returns. Returns false if Background Sync is unsupported.
- */
-export async function requestBackgroundSync(tag = 'objectui-offline-queue'): Promise<boolean> {
-  if (typeof navigator === 'undefined') return false;
-  const reg: any = await (navigator as any).serviceWorker?.ready;
-  if (!reg || !reg.sync) return false;
-  try { await reg.sync.register(tag); return true; } catch { return false; }
-}
