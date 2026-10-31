@@ -604,8 +604,8 @@ describe('ADR-0143 D3/D6 — what a grant leaves behind', () => {
         }
     });
 
-    it('the refresh token is the one masked field, so the audit copy masks it; the object has no data door', () => {
-        expect(collectMaskedReadFields(SysConnectorConnection as never)).toEqual(['refresh_token']);
+    it('the refresh token and the registered client are the masked fields, so the audit copy masks them; the object has no data door', () => {
+        expect(collectMaskedReadFields(SysConnectorConnection as never)).toEqual(['refresh_token', 'registered_client']);
         expect(SysConnectorConnection.enable).toMatchObject({ apiEnabled: false, apiMethods: [] });
         expect(Object.keys(SysConnectorConnection.fields)).not.toContain('access_token');
     });

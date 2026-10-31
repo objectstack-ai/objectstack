@@ -72,7 +72,11 @@ import {
     createAuthorizationState,
     createOAuth2GrantHandle,
     createPkcePair,
+    discoverMcpAuthorization,
     insecureOAuth2EndpointFields,
+    isSecureOAuth2Endpoint,
+    McpAuthorizationRefusedError,
+    parseMcpAuthorizationClient,
     kvPendingAuthorizationStore,
     memoryPendingAuthorizationStore,
     notConnectedReason,
@@ -81,6 +85,7 @@ import {
     reconnectRequiredReason,
     requestOAuth2Token,
     retryOnVendorTokenRefusal,
+    type McpAuthorizationClient,
     type OAuth2GrantHandle,
     type PendingAuthorizationStore,
 } from './oauth2-grant/index.js';
@@ -456,28 +461,57 @@ function credentialHandleNotAppliedReason(name: string, provider: string, kind: 
 }
 
 /**
+ * ADR-0143 D2.1 — the MCP server URL of an `oauth2` instance whose endpoints or
+ * client the MCP authorization flow discovers: `provider: 'mcp'` over an http
+ * transport, the `authorization_code` grant, and at least one of
+ * `authorizationUrl`, `tokenUrl` and `clientId` left undeclared. `undefined`
+ * for every other instance, which declares what its handle needs.
+ */
+function mcpDiscoveryServerUrl(entry: { provider?: unknown; providerConfig?: Record<string, unknown> }, auth: OAuth2InstanceAuth): string | undefined {
+    if (entry.provider !== 'mcp' || auth.grant !== 'authorization_code') return undefined;
+    if (auth.authorizationUrl !== undefined && auth.tokenUrl !== undefined && auth.clientId !== undefined) return undefined;
+    const transport = entry.providerConfig?.transport as { kind?: unknown; url?: unknown } | undefined;
+    if (transport?.kind !== 'http' || typeof transport.url !== 'string' || transport.url.length === 0) return undefined;
+    return transport.url;
+}
+
+/**
  * ADR-0143 D4 — why an `oauth2` instance cannot be served by this server
  * through `provider`, or `undefined` when it can. Two things are needed: a
  * provider registered as asking the per-dispatch credential handle on every
  * request (`registerConnectorProvider(…, { credentialHandle: true })`), and
- * the endpoints and client the handle sends a token request with — on
- * `provider: 'mcp'` over http they may be omitted for the MCP authorization
- * flow to discover and register, which is not run here yet. An endpoint over
- * plain `http:` off loopback, or any other scheme, is refused by field
- * (`./oauth2-grant/endpoint-transport.ts`): the client secret and the refresh
- * token would cross the network in the clear.
+ * the endpoints and client the handle sends a token request with. On
+ * `provider: 'mcp'` over http with the `authorization_code` grant they may be
+ * omitted: each connect runs the MCP authorization flow
+ * (`./oauth2-grant/mcp-authorization.ts`), and the connection keeps the client
+ * it found. An endpoint over plain `http:` off loopback, or any other scheme,
+ * is refused by field (`./oauth2-grant/endpoint-transport.ts`): the client
+ * secret and the refresh token would cross the network in the clear — and so
+ * is such an MCP server's own URL, which the access token travels to.
  */
-function oauth2NotServableReason(name: string, provider: string, auth: OAuth2InstanceAuth, providerApplies: boolean): string | undefined {
+function oauth2NotServableReason(
+    name: string,
+    entry: { provider: string; providerConfig?: Record<string, unknown> },
+    auth: OAuth2InstanceAuth,
+    providerApplies: boolean,
+): string | undefined {
+    const provider = entry.provider;
     if (!providerApplies) return credentialHandleNotAppliedReason(name, provider, 'oauth2');
-    const missing = [
+    const discoveredAt = mcpDiscoveryServerUrl(entry, auth);
+    if (discoveredAt !== undefined && !isSecureOAuth2Endpoint(discoveredAt)) {
+        return `connector instance '${name}' declares auth type 'oauth2' on an MCP server whose transport \`url\` is not over https: `
+            + 'the access token would cross the network in the clear (ADR-0143 D4), so the instance is not served. Declare an '
+            + 'https:// server; plain http:// is accepted only to a loopback host.';
+    }
+    const missing = discoveredAt !== undefined ? [] : [
         auth.tokenUrl === undefined ? 'tokenUrl' : undefined,
         auth.clientId === undefined ? 'clientId' : undefined,
         auth.grant === 'authorization_code' && auth.authorizationUrl === undefined ? 'authorizationUrl' : undefined,
     ].filter((k): k is string => k !== undefined);
     if (missing.length > 0) {
         return `connector instance '${name}' declares auth type 'oauth2' without ${missing.map((k) => `\`${k}\``).join(', ')}: `
-            + 'discovering the endpoints and registering a client (the MCP authorization flow) is not run by this server yet '
-            + '(ADR-0143 D2.1), so the instance is not served. Declare them to dispatch it now.';
+            + 'only an `authorization_code` instance on `provider: \'mcp\'` over an http transport discovers them (the MCP '
+            + 'authorization flow, ADR-0143 D2.1), so the instance is not served. Declare them to dispatch it.';
     }
     const insecure = insecureOAuth2EndpointFields(auth as Partial<Record<'tokenUrl' | 'authorizationUrl', unknown>>);
     if (insecure.length === 0) return undefined;
@@ -2459,7 +2493,7 @@ export class AutomationServicePlugin implements Plugin {
                     ? undefined
                     : credentialHandleNotAppliedReason(name, provider, 'app-credential')
                 : entry.auth?.type === 'oauth2'
-                    ? oauth2NotServableReason(name, provider, entry.auth, engine.providerAppliesCredentialHandle(provider))
+                    ? oauth2NotServableReason(name, { ...entry, provider }, entry.auth, engine.providerAppliesCredentialHandle(provider))
                     : undefined;
             if (grantRefusal !== undefined) {
                 if (existing) await this.dematerializeConnector(engine, name, existing, ctx, 'no longer servable');
@@ -2975,15 +3009,14 @@ export class AutomationServicePlugin implements Plugin {
         auth: OAuth2InstanceAuth,
         clientSecret: string | undefined,
     ): OAuth2GrantHandle {
-        // `oauth2NotServableReason` passed: both are declared.
-        const tokenUrl = auth.tokenUrl as string;
-        const clientId = auth.clientId as string;
+        // `oauth2NotServableReason` passed: both are declared, or each
+        // connection keeps the client the MCP authorization flow found.
         return createOAuth2GrantHandle({
             connector: name,
             config: {
                 grant: auth.grant,
-                tokenUrl,
-                clientId,
+                ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
+                ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
                 ...(clientSecret === undefined ? {} : { clientSecret }),
                 ...(auth.scopes === undefined ? {} : { scopes: auth.scopes }),
                 ...(auth.resource === undefined ? {} : { resource: auth.resource }),
@@ -3065,6 +3098,69 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * ADR-0143 D2.1 — the client an MCP instance's connect authorizes with,
+     * or `undefined` for an instance that declares its endpoints and client.
+     * The organization's connection keeps the client it was connected with,
+     * reused on a reconnect while the declaration still leaves the same fields
+     * to discovery; otherwise the MCP authorization flow runs, registering a
+     * client when none is declared. Its refusals answer the door: `400` for a
+     * server that does not say what the flow needs, `503` for one that did not
+     * answer.
+     */
+    private async mcpAuthorizationClient(
+        ctx: PluginContext,
+        name: string,
+        entry: DeclaredConnectorItem,
+        auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
+        organizationId: string,
+        redirectUri: string,
+    ): Promise<McpAuthorizationClient | undefined> {
+        const serverUrl = mcpDiscoveryServerUrl(entry, auth);
+        if (serverUrl === undefined) return undefined;
+        const store = this.connectorConnectionStoreOrNone();
+        const existing = await store.readOrRefuse(organizationId, name);
+        if (existing?.hasRegisteredClient) {
+            let kept: McpAuthorizationClient | undefined;
+            try {
+                kept = parseMcpAuthorizationClient(await store.resolveRegisteredClient(existing));
+            } catch {
+                kept = undefined;
+            }
+            if (kept && kept.registered === (auth.clientId === undefined) && (auth.clientId === undefined || kept.clientId === auth.clientId)) {
+                return kept;
+            }
+        }
+        try {
+            const client = await discoverMcpAuthorization({
+                connector: name,
+                serverUrl,
+                declared: {
+                    ...(auth.authorizationUrl === undefined ? {} : { authorizationUrl: auth.authorizationUrl }),
+                    ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
+                    ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
+                    ...(auth.resource === undefined ? {} : { resource: auth.resource }),
+                },
+                redirectUri,
+                ...(auth.scopes === undefined ? {} : { scopes: auth.scopes }),
+                ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
+            });
+            ctx.logger.info(
+                `[Automation] connector instance '${name}': the MCP authorization flow found its authorization server`
+                    + `${client.registered ? ' and registered a client' : ''} for organization '${organizationId}'.`,
+            );
+            return client;
+        } catch (err) {
+            if (err instanceof McpAuthorizationRefusedError) {
+                throw credentialDoorRefusal(`${err.message}. Nothing was connected.`, 'VALIDATION_ERROR', 400);
+            }
+            if (isConnectorUpstreamUnavailable(err)) {
+                throw credentialDoorRefusal(`${(err as Error).message}. Nothing was connected; begin the connect again.`, 'SERVICE_UNAVAILABLE', 503);
+            }
+            throw err;
+        }
+    }
+
+    /**
      * ADR-0143 D5 — the declared `authorization_code` instance a connection
      * door call names, servable, and the caller's organization and user.
      */
@@ -3101,7 +3197,7 @@ export class AutomationServicePlugin implements Plugin {
                 400,
             );
         }
-        const notServable = oauth2NotServableReason(name, entry.provider, auth, true);
+        const notServable = oauth2NotServableReason(name, { ...entry, provider: entry.provider as string }, auth, true);
         if (notServable !== undefined) throw credentialDoorRefusal(`${notServable}.`, 'VALIDATION_ERROR', 400);
         const organizationId = request?.context?.tenantId;
         if (typeof organizationId !== 'string' || organizationId.length === 0) {
@@ -3143,7 +3239,7 @@ export class AutomationServicePlugin implements Plugin {
      * the authorization URL. Nothing is written to the connection record.
      */
     private async beginConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin> {
-        const { name, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const { name, entry, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
         if (userId === undefined) {
             throw credentialDoorRefusal(
                 `Connecting connector instance '${name}' needs a signed-in user: the callback is accepted only from the user `
@@ -3153,22 +3249,26 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const redirectUri = this.connectorOAuthRedirectUri();
+        const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri);
         const state = createAuthorizationState();
         const { verifier, challenge } = createPkcePair();
         const expiresAt = Date.now() + PENDING_AUTHORIZATION_TTL_SECONDS * 1000;
-        await this.pendingAuthorizations(ctx).put(state, { connector: name, organizationId, userId, verifier, redirectUri, expiresAt });
+        await this.pendingAuthorizations(ctx).put(state, {
+            connector: name, organizationId, userId, verifier, redirectUri, expiresAt, ...(client ? { client } : {}),
+        });
         ctx.logger.info(`[Automation] connect of connector instance '${name}' begun for organization '${organizationId}' by user '${userId}'.`);
+        const resource = auth.resource ?? client?.resource;
         return {
             connector: name,
             organizationId,
             authorizationUrl: buildAuthorizationUrl({
-                authorizationUrl: auth.authorizationUrl as string,
-                clientId: auth.clientId as string,
+                authorizationUrl: client?.authorizationUrl ?? (auth.authorizationUrl as string),
+                clientId: client?.clientId ?? (auth.clientId as string),
                 redirectUri,
                 state,
                 challenge,
                 ...(auth.scopes === undefined ? {} : { scopes: auth.scopes }),
-                ...(auth.resource === undefined ? {} : { resource: auth.resource }),
+                ...(resource === undefined ? {} : { resource }),
             }),
             expiresAt: new Date(expiresAt).toISOString(),
         };
@@ -3217,14 +3317,23 @@ export class AutomationServicePlugin implements Plugin {
         if (typeof query.code !== 'string' || query.code.length === 0) {
             throw refuse('The OAuth callback carries no code. Nothing was connected; begin the connect again.');
         }
+        // RFC 9207: a callback naming an issuer must name the one the connect
+        // discovered, or the code may be another server's (a mix-up).
+        if (pending.client && typeof query.iss === 'string' && query.iss !== pending.client.issuer) {
+            throw refuse(
+                `The OAuth callback for connector instance '${pending.connector}' names an issuer other than the authorization `
+                    + 'server this connect was begun with, so its code was not used. Nothing was connected.',
+            );
+        }
         // The declaration is read again: the instance may have changed while
         // the browser was away.
         const { name, auth, organizationId } = await this.connectionDoorSubject(ctx, {
             connector: pending.connector,
             context: request.context,
         });
-        let clientSecret: string | undefined;
-        if (auth.credentialRef !== undefined) {
+        const client = pending.client;
+        let clientSecret: string | undefined = client?.registered ? client.clientSecret : undefined;
+        if (!client?.registered && auth.credentialRef !== undefined) {
             const chain = await this.connectorCredentialChain(ctx);
             const rows = chain.store ? await chain.store.list() : new Map();
             const resolution = await resolveConnectorCredential(chain, auth.credentialRef, rows);
@@ -3244,13 +3353,14 @@ export class AutomationServicePlugin implements Plugin {
             redirect_uri: pending.redirectUri,
             code_verifier: pending.verifier,
         };
-        if (auth.resource) params.resource = auth.resource;
+        const resource = auth.resource ?? client?.resource;
+        if (resource) params.resource = resource;
         let token;
         try {
             token = await requestOAuth2Token({
                 connector: name,
-                tokenUrl: auth.tokenUrl as string,
-                client: { clientId: auth.clientId as string, ...(clientSecret === undefined ? {} : { clientSecret }) },
+                tokenUrl: client?.tokenUrl ?? (auth.tokenUrl as string),
+                client: { clientId: client?.clientId ?? (auth.clientId as string), ...(clientSecret === undefined ? {} : { clientSecret }) },
                 params,
             });
         } catch (err) {
@@ -3271,6 +3381,14 @@ export class AutomationServicePlugin implements Plugin {
                 ...(token.refreshToken === undefined ? {} : { refreshToken: token.refreshToken }),
                 ...(token.scope === undefined ? {} : { scopes: token.scope }),
                 ...(token.expiresAt === undefined ? {} : { expiresAt: new Date(token.expiresAt) }),
+                // A declared client's secret stays behind its credentialRef; only a registered one is kept.
+                ...(client
+                    ? {
+                        registeredClient: JSON.stringify(client.registered
+                            ? client
+                            : { ...client, clientSecret: undefined }),
+                    }
+                    : {}),
             });
             ctx.logger.info(
                 `[Automation] connector instance '${name}' connected for organization '${organizationId}'`

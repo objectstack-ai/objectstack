@@ -29,6 +29,9 @@ export const CONNECTOR_CONNECTION_OBJECT = 'sys_connector_connection';
 /** Its `type: 'secret'` column. */
 export const CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD = 'refresh_token';
 
+/** The encrypted field holding the client an MCP authorization flow discovered or registered (ADR-0143 D2.1). */
+export const CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD = 'registered_client';
+
 /** A connection's status (`not connected` is the absence of a row). */
 export type ConnectorConnectionRowStatus = 'connected' | 'reconnect_required';
 
@@ -49,6 +52,8 @@ export interface ConnectorConnectionRecord {
     revision: number;
     /** Whether a refresh token is stored — never what it is. */
     hasRefreshToken: boolean;
+    /** Whether the row keeps a discovered or registered client (an MCP instance's connection). */
+    hasRegisteredClient: boolean;
     connectedAt?: string;
     connectedBy?: string;
 }
@@ -57,6 +62,7 @@ export interface ConnectorConnectionRecord {
 const RECORD_FIELDS = [
     'id', 'organization_id', 'connector_name', 'status', 'status_reason', 'scopes', 'expires_at',
     'revision', 'connected_at', 'connected_by', CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD,
+    CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD,
 ];
 
 function toRecord(row: Record<string, unknown>): ConnectorConnectionRecord | undefined {
@@ -66,6 +72,7 @@ function toRecord(row: Record<string, unknown>): ConnectorConnectionRecord | und
     // The engine masks a `secret` column on every read; a masked value says a
     // token is stored, and an empty one says none is — the value never comes back.
     const masked = row[CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD];
+    const maskedClient = row[CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD];
     return {
         id: String(row.id),
         organizationId: row.organization_id,
@@ -76,6 +83,7 @@ function toRecord(row: Record<string, unknown>): ConnectorConnectionRecord | und
         expiresAt: optionalText(row.expires_at),
         revision: Number.isFinite(revision) ? revision : 0,
         hasRefreshToken: typeof masked === 'string' && masked.length > 0,
+        hasRegisteredClient: typeof maskedClient === 'string' && maskedClient.length > 0,
         connectedAt: optionalText(row.connected_at),
         connectedBy: optionalText(row.connected_by),
     };
@@ -192,6 +200,20 @@ export class ConnectorConnectionStore {
      */
     async resolveRefreshToken(record: ConnectorConnectionRecord): Promise<string | undefined> {
         if (!record.hasRefreshToken) return undefined;
+        return this.resolveSecret(record, CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD);
+    }
+
+    /**
+     * The discovered or registered client of `record` (ADR-0143 D2.1), read
+     * now as the text it was stored as, or `undefined` when the row keeps none.
+     * Throws as {@link resolveRefreshToken} does.
+     */
+    async resolveRegisteredClient(record: ConnectorConnectionRecord): Promise<string | undefined> {
+        if (!record.hasRegisteredClient) return undefined;
+        return this.resolveSecret(record, CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD);
+    }
+
+    private async resolveSecret(record: ConnectorConnectionRecord, field: string): Promise<string | undefined> {
         const engine = this.engineOrThrow(`The connection of connector instance '${record.connectorName}' cannot be read`);
         if (typeof engine.resolveSecretField !== 'function') {
             throw new ConnectorCredentialUnavailableError(
@@ -201,7 +223,7 @@ export class ConnectorConnectionStore {
         }
         let plain: string | null;
         try {
-            plain = await engine.resolveSecretField(CONNECTOR_CONNECTION_OBJECT, record.id, CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD);
+            plain = await engine.resolveSecretField(CONNECTOR_CONNECTION_OBJECT, record.id, field);
         } catch {
             throw new ConnectorCredentialUnavailableError(
                 `The connection of connector instance '${record.connectorName}' is stored but could not be decrypted. Register the `
@@ -214,15 +236,20 @@ export class ConnectorConnectionStore {
     /**
      * Store what a completed connect produced for `(organizationId,
      * connectorName)`, replacing any earlier connection there (a reconnect),
-     * and raise its revision.
+     * and raise its revision. `registeredClient` is the serialized client an
+     * MCP authorization flow discovered or registered, kept encrypted beside
+     * the refresh token it authorizes.
      */
-    async connect(args: { organizationId: string; connectorName: string; userId?: string } & ConnectorGrantWrite): Promise<ConnectorConnectionRecord> {
+    async connect(
+        args: { organizationId: string; connectorName: string; userId?: string; registeredClient?: string } & ConnectorGrantWrite,
+    ): Promise<ConnectorConnectionRecord> {
         const engine = this.engineOrThrow(`Connector instance '${args.connectorName}' was not connected`);
         const existing = await this.readOrRefuse(args.organizationId, args.connectorName);
         const context = { ...SYSTEM_CONTEXT, ...(args.userId ? { userId: args.userId } : {}) };
         const row = {
             grant: 'authorization_code',
             [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: args.refreshToken ?? null,
+            [CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD]: args.registeredClient ?? null,
             status: 'connected',
             status_reason: null,
             scopes: args.scopes ?? null,
