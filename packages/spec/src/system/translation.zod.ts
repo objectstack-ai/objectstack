@@ -220,7 +220,7 @@ const actionTranslationSchema = (surface: string) => strictObject({
   // `ActionSchema.submitText` (#27944) — the param dialog's submit button
   // label; overlaid by `translateAction` like `description`, the same
   // dialog's line under its title, for an action that declares `params`.
-  submitText: z.string().optional().describe('Translated label of the submit button in the action\'s param dialog (the action must declare `params`; no renderer shows it yet)'),
+  submitText: z.string().optional().describe('Translated label of the submit button in the action\'s param dialog (the action must declare `params`)'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather
