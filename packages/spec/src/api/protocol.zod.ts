@@ -2783,6 +2783,34 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Public Form Submit Response (#28005)
+ *
+ * The WHOLE body of `POST /forms/:slug/submit`, the anonymous public-form
+ * submission: the created record's `id`, plus — only when the form's
+ * `thank-you` panel names fields of the record as `{{record.field_name}}` —
+ * `fields`, holding exactly those fields' stored values.
+ *
+ * The answer echoes nothing else the insert stored, and that is the point of
+ * the shape. The stored row can carry values a `beforeInsert` / `afterInsert`
+ * hook derived, an elevated (`runAs: 'system'`) one included, from records
+ * the anonymous form grant may never read. The panel may therefore name only
+ * fields the ENGINE generates on insert (`RUNTIME_OWNED_FIELD_TYPES`, today
+ * `autonumber`); the authoring rule that judges a form's names refuses any
+ * other, and `thankYouRecordFieldNames` (`ui/view.zod.ts`) is the one reading
+ * of which names a panel holds. Strict, so a key beyond these two is a
+ * conformance failure rather than a silent widening of what an anonymous
+ * caller is shown.
+ */
+export const PublicFormSubmitResponseSchema = lazySchema(() => z.object({
+  id: z.string().describe('The ID of the newly created record.'),
+  fields: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe(
+    'The stored values of exactly the fields the form\'s `thank-you` panel names as `{{record.field_name}}`, '
+    + 'keyed by field name — each one a field the engine generates on insert (an `autonumber` field, e.g. a case '
+    + 'number). Present only when the panel names at least one; never any other field of the record.',
+  ),
+}).strict());
+
+/**
  * Clone Data Response (#11924)
  *
  * The WHOLE body of `POST /data/:object/:id/clone` — the route answers BARE
@@ -4161,6 +4189,8 @@ export type GetDataRequest = z.input<typeof GetDataRequestSchema>;
 export type GetDataResponse = z.input<typeof GetDataResponseSchema>;
 export type CreateDataRequest = z.input<typeof CreateDataRequestSchema>;
 export type CreateDataResponse = z.input<typeof CreateDataResponseSchema>;
+/** The `POST /forms/:slug/submit` body — see {@link PublicFormSubmitResponseSchema} (#28005). */
+export type PublicFormSubmitResponse = z.input<typeof PublicFormSubmitResponseSchema>;
 /** The `POST /data/:object/:id/clone` body — see {@link CloneDataResponseSchema} (#11924). */
 export type CloneDataResponse = z.input<typeof CloneDataResponseSchema>;
 export type ValidateDataIssue = z.input<typeof ValidateDataIssueSchema>;

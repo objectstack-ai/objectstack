@@ -4725,6 +4725,88 @@ function checkSubmitRedirectUrl(raw: string): string | undefined {
 }
 
 /**
+ * ## The `thank-you` panel's record slot
+ *
+ * A public form's visitor often needs a reference once the form is sent — a
+ * web-to-case visitor needs the case number. The panel's `title` and `message`
+ * therefore take the SAME token the `redirect` member takes,
+ * `{{record.field_name}}` ({@link SUBMIT_REDIRECT_URL_TOKEN_RE}): one grammar
+ * for "a field of the record just submitted", never a second dialect.
+ *
+ * What the token may NAME is narrower than for a redirect. The anonymous submit
+ * answer echoes nothing the insert stored, because a `beforeInsert` /
+ * `afterInsert` hook — an elevated one included — can derive a stored value from
+ * records the anonymous form grant may never read. The panel may therefore name
+ * only a field whose value the ENGINE generates on insert: a field whose type is
+ * in `RUNTIME_OWNED_FIELD_TYPES` (`data/field.zod.ts`, today `autonumber`), the
+ * one statement of that set. The submit answer carries `id` plus exactly those
+ * named fields (`PublicFormSubmitResponseSchema`, `api/protocol.zod.ts`).
+ *
+ * Parse time knows the string and not the object, so the schema enforces the
+ * token SHAPE only — a malformed token is refused on its own terms, as the
+ * redirect refine does. Whether the named field is engine-generated is judged
+ * where the form's object is known: `@objectstack/lint`'s
+ * `validateThankYouRecordFields`, a gating authoring rule (`os validate` /
+ * `os build` / `os lint`, and the runtime publish gate on a `view` or `page`
+ * write).
+ */
+// The ruling is #28005 on the tracker, option B, ruled 2026-10-31 (ruling
+// record 6545210989). Internal readers get the id and the date here; the
+// customer-facing sentences carry neither (#22093).
+
+/**
+ * A `thank-you` panel text in which every brace belongs to a well-formed
+ * `{{record.field_name}}` token — the token of {@link SUBMIT_REDIRECT_URL_TOKEN_RE},
+ * spelled again only because a `pattern` must be anchored and repeated. The two
+ * alternatives start on disjoint characters, so matching is linear.
+ */
+const THANK_YOU_TEXT_RE = /^(?:[^{}]|\{\{record\.[a-z_][a-z0-9_]*\}\})*$/;
+
+/**
+ * Word the refusal for one `thank-you` panel text that fails
+ * {@link THANK_YOU_TEXT_RE}. Returns the author-facing refusal, or `undefined`
+ * when every brace in it belongs to a well-formed `{{record.field_name}}` token.
+ */
+function checkThankYouText(raw: string, member: 'title' | 'message'): string | undefined {
+  const withoutTokens = raw.replace(SUBMIT_REDIRECT_URL_TOKEN_RE, '');
+  if (!withoutTokens.includes('{') && !withoutTokens.includes('}')) return undefined;
+  const offender = withoutTokens.match(/\{\{?[^{}]*\}?\}?/)?.[0] ?? '}';
+  return `A \`thank-you\` panel's \`${member}\` names a field of the submitted record ONLY as `
+    + `\`{{record.field_name}}\` — \`${offender}\` is not that shape. Write the field's name in lowercase `
+    + 'snake_case after `record.`, with no spaces inside the braces (`{{record.case_number}}`). Braces '
+    + 'belong to that token alone, so reword text that needs a literal brace. Only a field the engine '
+    + 'generates on insert (an `autonumber` field) may be named.';
+}
+
+/**
+ * The field names a `submitBehavior` block's `thank-you` panel interpolates as
+ * `{{record.field_name}}`, across `title` then `message`, each named once in
+ * order of first appearance. Any other kind, or a panel with no token, answers
+ * `[]`.
+ *
+ * This is the one reading of which fields the panel names: the authoring rule
+ * judges exactly these names, and the anonymous submit answer carries exactly
+ * these fields (`PublicFormSubmitResponseSchema.fields`). A pure function of the
+ * block — no schema, no object — so a server door and a renderer call the same
+ * code instead of each re-reading the token.
+ */
+export function thankYouRecordFieldNames(submitBehavior: unknown): string[] {
+  if (!submitBehavior || typeof submitBehavior !== 'object') return [];
+  const block = submitBehavior as { kind?: unknown; title?: unknown; message?: unknown };
+  if (block.kind !== 'thank-you') return [];
+  const names: string[] = [];
+  for (const text of [block.title, block.message]) {
+    if (typeof text !== 'string') continue;
+    for (const token of text.matchAll(SUBMIT_REDIRECT_URL_TOKEN_RE)) {
+      // `{{record.` is 9 characters and `}}` is 2: the field segment between.
+      const name = token[0].slice(9, -2);
+      if (!names.includes(name)) names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
  * ## Form-view predicates may not name the `features.*` scope root
  *
  * Ruled 2026-08-27 on objectui#6262 (maintainer, decision-inbox batch 2 —
@@ -5185,8 +5267,28 @@ export const FormViewSchema = lazySchema(() => strictObject({
       aliases: { heading: 'title', text: 'message', body: 'message', description: 'message' },
     }, {
       kind: z.literal('thank-you'),
-      title: z.string().optional(),
-      message: z.string().optional(),
+      // [#28005] `z.string()` stays the type, as on the redirect's `url`: the
+      // renderer receives the text the author wrote and fills each token from
+      // the submit answer. The shape is a `.regex()`, not a refine, so the
+      // published JSON Schema carries it as a `pattern` too; `checkThankYouText`
+      // words the refusal, and `thankYouRecordFieldNames` reads which fields a
+      // text names.
+      title: z.string()
+        .regex(THANK_YOU_TEXT_RE, { error: (issue) => checkThankYouText(String(issue.input), 'title') })
+        .optional()
+        .describe(
+          'Heading of the confirmation panel. May name a field of the submitted record as '
+          + '`{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` '
+          + 'field, e.g. a case number): a hook-derived value never reaches an anonymous visitor.',
+        ),
+      message: z.string()
+        .regex(THANK_YOU_TEXT_RE, { error: (issue) => checkThankYouText(String(issue.input), 'message') })
+        .optional()
+        .describe(
+          'Body of the confirmation panel. May name a field of the submitted record as '
+          + '`{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` '
+          + 'field, e.g. a case number): a hook-derived value never reaches an anonymous visitor.',
+        ),
     }),
     strictObject({
       surface: 'this `redirect` submit behavior',
