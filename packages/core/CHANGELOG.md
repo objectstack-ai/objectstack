@@ -1,5 +1,368 @@
 # @objectstack/core
 
+## 18.3.0
+
+### Minor Changes
+
+- 3a054cb: feat(spec,runtime,plugin-audit): an action run through MCP leaves an audit row naming its surface
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The audit trail could not tell an action an agent ran over MCP from one a person clicked. Neither action door wrote a row for the invocation itself: the script branch printed a `[action-audit]` log line, the api, flow and declarative-update branches printed nothing, and the `sys_audit_log` rows for the action's own data writes do not say which door started it.
+  
+  - **`ExecutionContext.surface`** (`@objectstack/spec`): `'rest' | 'mcp'`, optional. The door an action invocation came through. Set only by the two action doors, from the door's own identity, on the envelope of the invocation they record; never client-supplied, never read by authorization. `@objectstack/core` declares it a non-entry field (identity resolution does not produce it).
+  - **One `action_invocation` row per invocation** (`@objectstack/plugin-audit`): the `audit` service slot gains `recordActionInvocation`, and `sys_audit_log.action` gains the value `action_invocation`. The row carries the caller (`user_id`, `actor`, `tenant_id`), the action's object and subject record, and in `metadata` the `surface`, `action_name`, `branch` (`script` / `api` / `flow` / `update`), `outcome`, the status and error code of a refusal, the `run_id` of a `resume_run`, and `performed_by` / `on_behalf_of` when an agent performed the call. No new column.
+  - **Both doors write it on every branch** (`@objectstack/runtime`): REST `POST /actions/:object/:action` (`surface: 'rest'`) and the `/mcp` bridge's `run_action` / `resume_run` (`surface: 'mcp'`), for every call that cleared the door's admission gates, whether the branch then answered or refused. A call refused by an admission gate (not found, `ai.exposed`, the `requiredPermissions` gate, the activation switch, the param contract, the confirmation gate) ran nothing and writes no row. The `api` branch's row is written by the door after the forward answers, so it names the true door although the target re-authenticates the caller.
+  
+  Nothing about which actions a door may run changes. The existing `[action-audit]` log line stays. To read the rows: filter `sys_audit_log` on `action = 'action_invocation'` and read `metadata.surface`.
+
+### Patch Changes
+
+- 2f21b48: fix(core): an import row with several bad cells reports every one of them in `errors` (#25582)
+  
+  Clause-②: yes (widening: a failed import row whose cells did not coerce gains the optional `errors` list, `ImportRowResultSchema.errors`; every existing key keeps its value)
+  Metadata-protocol: none
+  Ruling-ref: #25582 ruling `6377844879` letter A, proposal 4; the spec seat's fill rule `6434667735`
+  
+  A row with several bad cells used to report only the first one, so an operator fixed one cell, imported again, and only then saw the next. The row now carries `errors`, one `{ field, code, message }` element per failed cell, in column order. The first-error keys `field`, `code` and `error` are unchanged and name element 0, so a reader of those keys sees the same answer as before.
+  
+  - It reaches every path that reports rows: the dry run and the commit, on the synchronous `POST /api/v1/data/:object/import` and on the async import job's results.
+  - It is filled only from the import's cell-coercion errors (`invalid_date`, `invalid_number`, `invalid_option` and the rest). A row that failed for another reason omits it: the dry run's validate verdict, a refused write, a duplicate or ambiguous match key.
+  - `ImportRowResult` (`@objectstack/core`) gains the optional `errors?: ValidateDataIssue[]`.
+- 95f818d: fix(spec): `TranslationItemSchema.name` no longer tells authors to name a translation item after its locale tag
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `name` describe said a translation item was "conventionally the locale code (`zh-CN`)", but the metadata save door's item-name grammar refuses `zh-CN` (uppercase and a hyphen), so an author or agent following the describe got a 400 `INVALID_REQUEST` on the first save. The describe now says a translation item is named in snake_case like every metadata item (e.g. `zh_cn`), with the BCP-47 tag in `locale`. The save door and the runtime sync's read-side name fallback for rows stored before `locale` became required are unchanged; the sync's skip warning now points authors at `locale` only.
+  
+  `@objectstack/core`: the authored-translation sync's no-locale skip warning now tells authors to set `locale` to the item's BCP-47 tag (e.g. `zh-CN`), instead of suggesting they name the item after it.
+- a98693d: fix(runtime): switching a packaged action or a security catalog item off now records which administrator did it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The activation ledger (`sys_metadata_activation`) is written by the ADR-0126 activation doors. Until now, its row and that row's audit entry named nobody: `created_by` / `updated_by` on the ledger row and `user_id` / `actor` on the `sys_audit_log` row were null, even when a signed-in administrator made the request. The store wrote every row under a fixed system context that carries no user.
+  
+  The action door (`POST /api/v1/actions/_activation/:object/:action`) and the security catalog door (`POST /api/v1/security/_activation/:type/:name`, for positions, permission sets, sharing rules and webhooks) now write the row for the caller. They pass down the caller's own execution context, elevated (`{ ...callerContext, isSystem: true }`). The elevation keeps the engine-owned ledger writable, and the engine and the audit plugin record the caller's user id on both rows.
+  
+  - `@objectstack/core`: `MetadataActivationStore.setActive(row, options?)` takes an optional `{ context }`. The new `MetadataActivationWriteContext` type requires `isSystem: true`, so a door cannot pass the caller's context down without the elevation. Without a context, the store keeps writing under its system context, so a write that no caller requested still names nobody. `MetadataActivationWriteOptions` is exported too.
+  - `@objectstack/objectql`: `ObjectQL.setActionActive(row, options?)` and `ActionActivationProjection.setActive(row, options?)` pass the options to the store unchanged. `ActionActivationWriteOptions` is exported.
+  - `@objectstack/runtime`: both doors pass the caller's elevated context.
+  
+  The flow toggle (`POST /api/v1/automation/:name/toggle`) is not changed yet. It reaches the ledger through `IAutomationService.toggleFlow(name, enabled)`, and that contract has no way to carry the caller.
+- ef7067f: fix(core)!: the import dry run previews create rows in the commit's batches, so a batch-aware parent-summary rule refuses in the dry run the rows the commit refuses (#26684)
+  
+  Clause-②: no (narrowing) — an import dry run (`POST /api/v1/data/:object/import` and the async import job with `dryRun: true`) answers invalid for a create row that a child rule reading a parent `summary` refuses once the earlier admitted rows of its batch are counted, which it answered valid before; and the insert preview (`validate` / `validateData`, mode `insert`) refuses a row whose caller-supplied reference names no row, which it answered valid before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the dry run now reports the verdicts the import's own write already gives on the same file. The refusals are the rule's own VALIDATION_FAILED, worded by its author, and the write's reference_not_found, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the import dry run (`@objectstack/core`) and the insert preview (`@objectstack/objectql`).
+  
+  - **Before.** The dry run asked the engine about each create row alone, so after #25579 it answered both rows valid when a file held two primary contacts for one new supplier, while the import created one and refused the other. The insert preview judged a row's rules but not the write's reference check, so a row with a dangling reference previewed valid and was counted toward a later row's parent summary.
+  - **Now.** The dry run buffers its create rows as the import does and previews them through one multi-row `validate()` per import batch (200 rows, or a smaller `progressEvery`), in file order, so the engine counts the earlier rows of the batch exactly as on the write. Each row keeps its own verdict, message and position in the report. The insert preview runs the write's reference check after the rules, behind the same write-gate probe as its related reads, and counts a row only after it passes.
+  - **Unchanged.** Update rows are previewed one at a time, as before. A dry run writes nothing.
+  - **Not covered.** A dry run writes nothing between batches, so two rows that only conflict across a batch boundary both preview valid while the import refuses the second.
+  - **Who sees it.** An operator dry-running an import into an object whose child rule reads a parent summary: rows the import would refuse are now reported in the dry run.
+  
+  **The remedy.** None needed: fix the rows the dry run now reports, as the import would have required.
+- 5aad4e0: fix(types): a unique refusal tells the user which field by its label, never by its API key
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A create or update refused by a single-column unique index answered `409 UNIQUE_VIOLATION` with a user-facing `error` that named the field by its API key ("A record with this gsku already exists"), while `developerMessage` named it by its label. The split was inverted: the developer read the label and the end user read `gsku`.
+  
+  - **The user-facing `error` names the field by its label.** For a field labelled `Global SKU`, the body now reads `"error": "A record with this Global SKU already exists"`. `field` still carries the API key (`gsku`) for programs, and `code`, the status and `developerMessage` are unchanged.
+  - **In the writer's locale.** The label is read the same way the record validator and the `DELETE_RESTRICTED` refusal read theirs: the translation bundle for the request's locale, then the declared `label`. That one label feeds both the user-facing sentence and the engine's own `message` (the `developerMessage` on the wire). A request in `zh-CN` against a translated object reads its labels in `zh-CN` in both. The sentence around the label stays English.
+  - **No label, no name.** When the field declares no label and the bundle holds none, the sentence is the generic `"A record with this value already exists"`, and `field` still names the key. The same applies to a raw driver unique error that no engine write door wrapped, since it carries no schema to read a label from, and to `sanitizeRowError` (`@objectstack/core`), the import runner's text cleaner. The composite-index answer is unchanged.
+  - **`DuplicateRecordError` gains `fieldLabel`** (`@objectstack/objectql`): the conflicting field's display name in the writer's locale, set only when the field has one. `envelopeUniqueViolation` takes the write's message context as an optional fourth argument, and every engine write door passes it.
+  
+  If a client matched the old sentence text to find the field, read `field` instead. It has carried the API key on this body all along.
+- d4ff1a0: feat(cli, runtime, core): `os serve` loads the plugins `os plugin install` installed, re-verifying each before any of its code is imported, and dispatches on the declared `runtime` tier; `os plugin disable | enable | uninstall` (#27123)
+  
+  Clause-②: no (narrowing) — `@objectstack/core`'s `PluginLoader` (so every `kernel.use`) refuses a plugin object whose `signature` no host recorded a verdict for, where any well-formed signature passed. Nothing of `@objectstack/spec` changes; the rest (the boot loader, the commands, the new exports) widens
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/plugin-loader.ts#PluginLoader) The one narrowing is a runtime check of a published runtime class: `PluginLoader` refuses a plugin object's `signature` that no host recorded a verdict for. No Zod schema, no spec declaration and no stored representation carries that field or the verdict, so there is nothing for the metadata migration to rewrite and no tombstone; what an out-of-repo host changes is its own code, as the Migration paragraph says. -->
+  
+  **BREAKING** accept-set narrowing at `kernel.use` (`@objectstack/core`): a plugin object carrying a `signature` is refused unless the host that verified its artifact recorded that verdict against the object.
+  
+  The second slice of ADR-0025's local install loop (§3.5 M1). Before this, an installed plugin was unpacked and recorded, and nothing loaded it.
+  
+  **Migration (`@objectstack/core`):** a host outside this repo that passes `kernel.use` a plugin object carrying a `signature` now has that plugin refused (`Plugin X carries a signature … that no host verified against its artifact`), where any well-formed signature used to pass. FROM: setting `plugin.signature` and calling `kernel.use(plugin)`. TO: verify the artifact yourself, then call `recordPluginArtifactVerdict(plugin, { signature, keyId, fingerprint, artifactSha256 })` from `@objectstack/core` before `kernel.use`; or leave `signature` unset. No plugin in this repo sets it.
+  
+  - **The boot-time loader** (`@objectstack/runtime`: `loadInstalledPlugins`, `verifyInstalledPlugins`). `os serve` (and `os dev` / `os start` through it) calls it after the config's own `plugins` are registered and before the kernel bootstraps, then `kernel.use`s each plugin that passed, so dependency order and health checks stay the kernel's. For each installation of this project and environment, in this order, the first failing check refuses that plugin by name, before anything of it is imported:
+    - the record names the directory the store derives for its id and version (`install_dir_unexpected`); nothing is read from or removed under any other;
+    - a disabled id is skipped, before anything of it is read. A disable-state file that is there and cannot be read refuses each plugin instead (`disabled_state_unreadable`): an unreadable disable is not taken for none;
+    - the kept `artifact.osplugin` hashes to the recorded sha256 (`artifact_changed`, `install_dir_missing`); a kept file larger than any artifact an install accepts is refused without being read;
+    - its detached signature, over the raw kept bytes and before anything is inflated, names the recorded key id, the key is `active` in `sys_trusted_key` with the fingerprint the install verified, and it verifies (`signature_missing`, `signature_malformed`, `signature_key_mismatch`, `signature_key_untrusted`, `signature_key_revoked`, `trusted_key_invalid`, `trusted_key_changed`, `signature_invalid`, `trusted_keys_unreadable`). The signature covers the bytes only; what ties them to the record's id and version is the manifest comparison below. So a key revoked since install refuses the plugin at its next boot. An install admitted under `--trust-unsigned` loads with a warning on every boot;
+    - the unpacked tree is byte-for-byte the artifact, with no other file and no symbolic link, and the artifact's manifest is the recorded id and version (`tree_changed`, `manifest_mismatch`, `artifact_unreadable`);
+    - **the tier dispatch point** (`dispatchPluginRuntime`, ADR-0025 §3.6): `runtime: 'node'` imports the entry module in process; `sandbox` and `worker` are refused by name until M3 routes them (`runtime_not_dispatched`), with no in-process fallback; a manifest that declares no tier is refused (`runtime_undeclared`, default-deny);
+    - the entry module is a file of the artifact (`entry_missing`).
+  
+    A check that throws on one installation (a file it cannot read, one that vanished mid-walk) refuses that plugin by name too (`install_unreadable`): one installation never fails the boot. What passed is then imported by the rule a stack's `plugins` entry takes (a plain bundle is wrapped in `AppPlugin`). The refusals from here on come after the entry module's top-level code ran, so the plugin is not registered but its module was evaluated: the import throws (`import_failed`), it exports no plugin or reading its export throws (`not_a_plugin`), it declares a signature other than the verified one (`signature_conflict`), and the host's own `plugin_name_taken` / `kernel_refused`.
+  
+    A bare `@objectstack/*` import inside a verified install directory resolves to the packages the host runs on (a resolve hook, `module.register`): `os plugin build` leaves them external, and an install directory under `OS_HOME` has no `node_modules` holding them. Every other bare specifier resolves as Node resolves it from the install directory, and a file the plugin imports lazily is read when it is imported, after the check.
+  
+    The environment's trusted keys are read once per boot, through the same read-only one-shot boot `os plugin install` reads them through, and only when a signed install needs them; with no installations file nothing is read at all. A refused plugin does not stop the boot: it is printed as one `✗` line naming the refusal, and the banner counts the refusals; a loader that throws outright is one `loader_failed` line, and the boot goes on without installed plugins. An installed plugin never replaces a plugin the boot already registered under the same name (`plugin_name_taken`); a host plugin registered later under the same name replaces the installed one, with the kernel's warning.
+  - **The kernel's signature check is real.** `PluginLoader` used to pass any well-formed `signature` a plugin carried. The host that verified the artifact now records its verdict against the plugin object (`recordPluginArtifactVerdict`, `@objectstack/core`), and the loader refuses a plugin whose signature no host verified. This stops a `signature` field from reading as verified; it is not a boundary against code already running in the process, which can call the public `recordPluginArtifactVerdict` itself.
+  - **`os plugin install`** verifies the signature over the raw bytes before it inflates the archive, refuses an artifact file larger than any artifact may unpack to before reading it, and bounds the inflate (`MAX_UNPACKED_ARTIFACT_BYTES`, 256 MiB; the reader moved to `@objectstack/core` as `readTarGz`, re-exported where the CLI read it). The reader takes regular files and directories only, joins a POSIX `prefix` onto the name, refuses a link, device or extension header and a cut-short entry by name, and copies neither its input nor its files. **`os plugin publish`** reads an artifact through the same reader, so its preflight, beside `install`'s, now refuses an artifact that inflates past 256 MiB or carries a link, device, extension-header or cut-short entry, where the old reader inflated without bound and read every entry as a file; `os plugin build` writes regular files only. The checks, the write and the record now run under the installations lock. An artifact whose tier the boot does not dispatch installs with a warning naming the refusal, and `--json` carries `boot: { loads, error }`.
+  - **`os plugin disable ID` / `os plugin enable ID`** keep an installed plugin from loading, or load it again, at the next boot (the package disable-state store, keyed by the plugin environment id). On a disable-state file they cannot read they refuse (`disable_state_failed`) and write nothing. **`os plugin uninstall ID`** marks the installation; the next boot loads nothing of it and, under the installations lock and only while the record is still the marked one (`record_changed` otherwise: an id installed again since the boot read the records keeps its fresh install), removes its directory unless another project sharing the home and environment still records it, drops the record and forgets its disable. A removal that fails is `uninstall_failed`, and a record still marked is tried again at the next boot. Each command refuses an id this project has not installed by name (`plugin_not_installed`, also when it was removed while the command ran); `--json` on all three.
+  - **The installations file takes a lock** for every read-modify-write: `<file>.lock`, created exclusively with the writer's pid, thread and a fresh token. A writer waits up to 10 s for a live holder, then refuses naming it (`PluginInstallationsLockedError`, which the commands report as `installations_locked`); the commands report any other failure under their own code. A lock a crashed process left is cleared by the next writer: its pid is not a live process, or it is older than 5 minutes, or it names the writer's own pid and thread while the writer holds nothing (another thread of the same process is a live holder), or it cannot be parsed and is older than a second. Clearing holds `<file>.lock.steal` and removes the lock only while it is still the file judged stale, so two writers that judge the same lock stale cannot both take it; a writer releases its lock only while the file is still its own.
+- 10f27b6: docs(spec, core): the plugin manifest's `integrity` map is described as re-verified at unpack by `os plugin install`, and the platform-object registry lists `sys_trusted_key` (#27123)
+  
+  Clause-②: no — no authorable key or accepted value changes. `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` gains the `sys_trusted_key` row its maintenance contract requires for an object `@objectstack/platform-objects` now registers (a list of platform-object names, not an authorable surface); the rest is prose: the TSDoc of `PluginIntegritySchema` and the manifest's `integrity` field, and comments in `@objectstack/core`'s security module, with no `.describe()` text changed
+  Metadata-protocol: none
+  
+  The TSDoc said nothing in the repo re-verified the map after publish and that there was no `os plugin install`. `os plugin install` now re-hashes the unpacked files against the map before it installs anything, and refuses the install on a mismatch, so the text says that. An absent map is still a permissive pass. The liveness ledger's `integrity` row moves from `dead` to `live` on that reader.
+  
+  `sys_trusted_key` joins the `platform-objects` group of `PLATFORM_OBJECTS_BY_PACKAGE`, so `PLATFORM_PROVIDED_OBJECT_NAMES` counts it as platform-provided like its siblings.
+- 7739573: fix(core, service-messaging): a failed settings read no longer dead-letters a templated mail as `TEMPLATE_INVALID`; only a read that finds no default currency is permanent (#27257)
+  
+  Clause-②: yes (widening) — `resolveLocalizationContext`'s result (`@objectstack/core`) gains one optional member, `readFailed?: true`. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **Before.** `resolveLocalizationContext` answered `currency: undefined` both when the organization has no default currency and when its `sys_setting` read failed (the failure is memoized for 30 s). So a messaging delivery whose template has a `{{ amount | currency }}` hole with no argument was refused `TEMPLATE_INVALID` during a transient settings fault, graded permanent and never sent, although a retry would have worked.
+  - **Now.** The answer carries `readFailed: true` when the direct `sys_setting` read threw, on the fresh read and on a hit of the failure memo alike. A settings-service refusal does not count, and the memo is not lengthened. Messaging's tenant-currency read rejects on it; the email and inbox channels then render without a currency. When that render answers `TEMPLATE_INVALID`, they render the template once more without sending, with the no-currency code `XXX` as the default: if that passes, the missing default was the only refusal, and the delivery is recorded without a `TEMPLATE_*` code and retried; if it still refuses, that refusal stands and is graded permanent, as before. Once the read succeeds, an organization with no default currency gets `TEMPLATE_INVALID` with its remedy, graded permanent, as before.
+  - **Unchanged.** A template with no no-argument `currency` hole is sent during a settings fault, as before. Every other template failure keeps its grade. The other callers of `resolveLocalizationContext` see the same values; the new member is optional and absent on every successful read.
+- bc4c963: fix(driver-memory): a preset `dateRange` on a `date` field counts the reference time zone's calendar days on the in-memory analytics face
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An analytics query on the in-memory driver with a preset `dateRange` (`this_quarter`, `this_month`, …) on a dimension whose field is declared `type: 'date'` counted the wrong calendar days from UTC westward. The face compared the preset's resolved instants (the zone's midnight, `2026-07-01T07:00:00.000Z` in `America/Los_Angeles`) against the stored bare day as text, so `this_quarter` (Q3 2026) dropped 2026-07-01 and counted 2026-10-01, in `America/Los_Angeles` and in `UTC` alike.
+  
+  Now a `date` field compares the calendar days the period covers in the reference zone (Q3 is 2026-07-01 through 2026-09-30 in any zone), and a `datetime` field keeps comparing instants: the same rule service-analytics' faces apply. An explicit `[a, b]` window is unchanged, and so is a field whose type the driver was never told through `syncSchema`.
+  
+  The rule now has one home, `@objectstack/core`: `dateRangeWindowBounds` and `inclusiveCalendarDayWindow` are exported from it, and `@objectstack/service-analytics` calls them instead of its own copy (no behaviour change there). `InMemoryDriver` gains `isDeclaredDateField(object, field)`, which answers from the declared schema.
+- f557d90: fix(rest, core)!: an update or upsert import whose match key names a multi-value or structured field is refused with `400 INVALID_REQUEST` naming the field, instead of failing every row on a raw SQL-binding error (#27465)
+  
+  Clause-②: yes (narrowing) — an update / upsert import request whose `matchFields`, or whose named mapping's `upsertKey`, names a field stored as a JSON column was accepted and then failed every row; it is now refused at the door before any row. The one widening is a new root export of `@objectstack/core`, `multiValueMatchKeyRefusal(matchFields, metaMap, keyedBy?)`, the rule both the door and the runner use.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export is removed or retyped: a request the import door accepted and could never serve is now refused up front, with a refusal that names the field and the remedy. A request that worked before works the same, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the import door (`POST /data/:object/import`, `POST /data/:object/import/jobs`), and the same rule in the shared import runner (`runImport`, `@objectstack/core`).
+  
+  - **Before.** In update or upsert mode, a `matchFields` entry naming a `multiple: true` lookup was accepted. Each row's lookup cell coerced to an id array, the matcher queried `{ field: [ids] }` as an implicit equality, and the SQL driver refused to bind it, so every row of the dry run and of the import failed with `Operator "=" … received an array`.
+  - **Now.** The door refuses the request with `400 INVALID_REQUEST`, before any row is read, matched or written, on the dry run and the import alike. The message names each offending field and its kind (`"work_object" (lookup, multiple: true)`) and says to match on single-value fields. A named mapping's `upsertKey` used as the key is judged the same way, and the message names the mapping.
+  - **Which fields.** Every field stored as a JSON column, as the spec defines it: a multi-capable type flagged `multiple: true` (`lookup`, `user`, `select`, `radio`, `file`, `image`), an inherently multi option type (`multiselect`, `checkboxes`, `tags`), and a structured JSON type (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`). A single-value lookup or file field, and any scalar field, stays a legal key.
+  - **The runner.** A caller that reaches `runImport` without the door (the connector pull, which writes a mapping's `upsertKey` straight through) gets every row failed with `VALIDATION_ERROR` and the same message, naming the field, before any row is coerced, read or written. `multiValueMatchKeyRefusal(matchFields, metaMap)` is the one rule both use, exported from `@objectstack/core`.
+  - **Unchanged.** An insert import matches nothing, so a `matchFields` it carries is not judged. Writing a multi-value field as an ordinary column of an update or upsert keyed on scalar fields works as before.
+  
+  **The remedy.** Match on single-value fields (a code, a name, an email). Measured through the SQL driver, a key naming any of these kinds already failed every row (the array kinds on the engine's implicit-equality refusal, a `json` field on a filter-token refusal), so an import that worked there before works the same now.
+- 9cbe507: fix(core, plugin-auth): a failed organization probe says `readFailed` too, and an auth mail no longer reads a failed settings read as "no default currency" (#27733, #27710)
+  
+  Clause-②: no — `resolveLocalizationContext`'s result keeps its shape; the existing `readFailed?: true` member gains one more trigger. Nothing new is exported from a package entry.
+  Metadata-protocol: none
+  
+  - **Before.** For a caller that names no organization where no wall stands, `resolveLocalizationContext` first asks `sys_organization` which organization's rows it may read. A store fault on that probe answered the built-ins with no `readFailed`, so messaging graded a mail whose `{{ amount | currency }}` hole then had no default as permanent (`TEMPLATE_INVALID`) and dead-lettered it. And the auth mails (verification, password reset, invitations, magic link, notices) read every failed settings read as "the organization has no default currency": such a mail failed with `TEMPLATE_INVALID` and its "set localization.currency" remedy during a transient fault.
+  - **Now.** A probe that throws `AuthzStoreUnavailableError` answers `readFailed: true`, the same as a failed `sys_setting` read, so messaging retries the delivery. That answer is cached in neither memo, since no value was read: the next request asks again. A posture that cannot be read is not a store fault and still answers no `readFailed`. The auth mail's currency read rejects on `readFailed`; when the render then refuses for want of a default, the mail is rendered once more without sending with the no-currency code `XXX`: if that renders, the mail fails with an error that names the failed read and carries no `TEMPLATE_*` code, so sending it again once the read succeeds works; if it still refuses, that refusal stands.
+  - **Unchanged.** A read that succeeds and finds no default keeps today's refusal and remedy, on both paths. A template with no no-argument `currency` hole is sent during a read fault. The failure memo for a failed `sys_setting` read is unchanged.
+- d85ff19: fix(core): an import lookup cell also resolves by the target object's unique fields, an autonumber included
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A data import lookup cell is matched against the target object's id, the lookup's `displayField`, the target's title field and the fixed keys `name`, `title`, `label`, `full_name`, `email`, `username`. A cell holding the target's autonumber (`ACC-000012`) or another unique field matched none of them and answered `reference_not_found`, so a title change broke every export file written before it.
+  
+  The matcher now also asks, after those candidates and in the target's declared field order, every field whose `unique` declares a constraint (`true`, `'organization'`, `'global'`) and every `autonumber` field that omits `unique` (unique per organization by the spec's default). An autonumber declared `unique: false` is not asked. The existing rules are unchanged: the first field to match wins, an earlier candidate that matches still wins, a field that matches more than one record answers `reference_ambiguous`, and a cell matching nothing answers `reference_not_found`.
+- 04b1402: harden(data): changing an API key through the data door requires a signed-in session
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` names `sys_api_key` or teaches managing a key with an API key, and the docs teach key revocation and rotation from the API Keys list (`content/docs/ai/connect-mcp.mdx`, `content/docs/api/error-catalog.mdx`), a signed-in surface; every taught use stays true.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: the data doors stop taking writes to `sys_api_key` from a caller an API key authenticated, and the remedy is to make the same change from a signed-in session, never a rewrite of anyone's code or metadata. No exported declaration is removed or narrowed; four names are added to `@objectstack/core`'s entry (the widening this changeset's `yes` declares); all four packages publish; no ADR-0087 id is named or touched. -->
+  
+  **BREAKING** (an accept-set narrowing).
+  
+  Managing API keys is a signed-in-session act on every data door, as minting one through `POST /api/v1/keys` is. An API key keeps acting as its owner for data, automation and MCP.
+  
+  **FROM.** The data doors judged a write to `sys_api_key` by the row and column rules alone, whichever credential authenticated the caller.
+  
+  **TO.** A write to `sys_api_key` from a caller an API key authenticated is refused `403 PERMISSION_DENIED`, and nothing is written, on the REST data routes (`/api/v1/data/sys_api_key`, the bulk routes and the cross-object `POST /api/v1/batch`), on the runtime dispatcher's data faces (`/data`, the `/mcp` HTTP tools, the action doors) and on the stdio MCP transport's `create_record`, `update_record` and `delete_record` tools, whose principal is always the configured `OS_MCP_STDIO_API_KEY`. The message tells the caller to sign in and manage the key from the API Keys page.
+  
+  - **Who is affected.** Only a script, integration or agent that changed `sys_api_key` rows through one of those doors while authenticated with an API key. **Fix:** make the change signed in, from the API Keys list (Account → Developer), or with a session cookie or session bearer token.
+  - **What does not change.** A signed-in session manages its own keys from the list as before, and the existing rule on who restores a key a forced password reset revoked is unchanged. Reading `sys_api_key` is unchanged on every door. System-context writes (the mint, the last-used stamp, the forced reset) are untouched. An operation the object does not expose keeps its `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+  - **Where it is decided.** One rule, `apiKeyManagementCredentialRefusal`, added to `@objectstack/core`'s entry with `API_KEY_MANAGEMENT_READ_OPERATIONS`, `API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE` and the type `ApiKeyManagementCredentialInput`, asked beside each door's exposure gate. The REST and dispatcher doors read which credential authenticated the request from the shared request resolver (`onAdmission`); the stdio transport's credential is its API key by construction. The `ExecutionContext` shape is unchanged.
+  - **Embedders calling `HttpDispatcher` data handlers directly.** The rule is positive on the credential: a context with no `admission` keeps today's answer.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

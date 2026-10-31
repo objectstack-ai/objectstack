@@ -1,5 +1,793 @@
 # @object-ui/components
 
+## 18.3.0
+
+### Minor Changes
+
+- 17b5152: feat(spec,ui)!: a record opens one way per object — `navigation.mode` keeps `drawer` (now the default), `page`, `new_window` and `none`; `modal`, `split` and `popover` are retired, and a list page's `recordAction` drops `modal`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`navigation.mode` refuses `modal`, `split` and `popover`; `interfaceConfig.recordAction` refuses `modal`; an omitted `navigation.mode` defaults to `drawer` instead of `page`)
+  
+  <!-- adr-0087: registered navigation-mode-overlay-values-removed, ui-record-open-overlay-modes-retired -->
+  
+  **BREAKING** accept-set narrowing and default change on the record-open surface (`@objectstack/spec`), with the console following it in the same release.
+  
+  The model, ruled by the maintainer: an object has one default way to open a record — the drawer, which expands to the full page (the same record page at two widths) — and `page` only for an object that declares it. A centred dialog and a popover were extra surfaces for the same record, and the side-by-side pane is each reader's own choice, not something an author fixes for every reader.
+  
+  - **FROM → TO.** `navigation.mode: 'modal'`, `'split'` or `'popover'` (on a list view, an object's `listViews` entry, or a page list block: `list-view`, `object-grid`, `object-kanban`, `object-calendar`, `object-map`, `object-gantt`, `object-tree`, `object-timeline`) → delete the value; the block takes the `drawer` default. `interfaceConfig.recordAction: 'modal'` → delete the value; the default is `drawer`. Declare `page` only for an object whose record should open as a full page.
+  - **The one-line fix.** Delete the retired value. `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` row is converted when it is read (the `navigation-mode-overlay-values-removed` conversion), so a view saved from Studio with one of the three values keeps loading and opens the drawer.
+  - **What the parse says.** Each retired value is refused by name with its prescription, for example "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — …", at `defineStack` as `STACK_SCHEMA_INVALID` / 422. TypeScript rejects each at a `NavigationMode` position. A misspelt mode keeps zod's own message.
+  - **The default.** A navigation block written without `mode` parses to `drawer` (it parsed to `page`). The console never honoured that `page` for a list with no navigation block, because it guessed the surface from the object's field count; that guess is retired too. A list of an object with no authored navigation opens a clicked record in the drawer, whatever its field count, and a mobile viewport still pages. An artifact or stored row that a released toolchain parsed carries the old `page` written out and keeps opening as a full page; delete it to take the drawer.
+  - **The split pane.** It is now a reader's preference, read by the console's object page from the browser (`os:record-open-mode`, `drawer` or `split`, default `drawer`). It applies only to a record that opens in the drawer; an object or view that declares `page` keeps its declaration.
+  
+  The console (`@object-ui/*`): `useNavigationOverlay` defaults a block without `mode` to `drawer` and treats `drawer` as the one overlay mode. `NavigationOverlay` keeps the drawer face and the split face the console's object page draws from the preference; its `modal` and `popover` faces, the `popoverTrigger` / `popoverAnchorRef` props and the `useOverlayAnchor` export are removed, because no caller can reach them. The grid, kanban, calendar, gantt and tree renderers drop their `split` and `popover` plumbing. The registered `object-view` renderer opens records in the drawer (a page on a mobile viewport) instead of paging a field-heavy object. The Studio list-view inspector offers the four live modes, and the list page's `recordAction` the three live values.
+  
+  Migration for code that imported the removed component API: drop `popoverAnchorRef` / `popoverTrigger` from a `NavigationOverlay` call and any `useOverlayAnchor()` call; pass `mode="split"` with `mainContent` for a side-by-side pane.
+- fbe344b: feat(spec)!: the action blocks spell the destructive variant `danger`, the word `ActionSchema.variant` uses
+  
+  An action's variant was spelled in two dialects. `ActionSchema.variant`, the declaration the action runner dispatches, takes `primary | secondary | danger | ghost | link`. The four action blocks (`action:button`, `action:icon`, `action:group`, `action:menu`) and the group/menu members took the Button primitive's `default | destructive | outline | secondary | ghost | link` (plus `primary` on the button, the icon and the members) and refused `danger`. So one destructive action was `danger` as a declaration and `destructive` as a block, and each block renderer translated between the two.
+  
+  The block rows now take `danger` in place of `destructive`: `default | danger | outline | secondary | ghost | link`, plus `primary` where it was accepted before. `danger` draws the destructive button (a red item in a dropdown or `action:menu`) and asks a `confirmText` question through the destructive confirm button. `destructive` is refused at `variant` with the rename. Other components that draw the Button primitive directly (`element:button`, toasts, alerts, badges and the like) keep `destructive`, the primitive's own word, and are not touched.
+  
+  The four block renderers forward `danger` to the runner as it is and draw it as the primitive's `destructive`. They no longer read `destructive`: stored pages are rewritten by the conversion below, so no renderer keeps a bridge for the old word. `UIActionSchema.variant` (`@object-ui/types`) follows the rows by reference. The record detail views' Delete entry in the `⋯` menu is spelled `danger` too.
+  
+  This replaces the variant sentences of the #26665 entry in this release: the action blocks no longer translate `destructive` to `danger` at their forward to the runner, and `danger` is the spelling they accept (`UIActionSchema.variant` included). That entry's confirm-dialog behaviour is unchanged: a destructive block with a `confirmText` asks through the destructive confirm button, now when it is declared `variant: 'danger'`.
+  
+  Stored rows and older built artifacts: the ADR-0087 D2 conversion `page-action-block-variant-destructive-to-danger` rewrites `variant: 'destructive'` to `'danger'` on the four blocks' `properties.variant` and on each `action:group` / `action:menu` member's `variant`, at every position a page nests a component (regions, slots, nested containers). It renames an `action:bar`'s own `variant` and the `variant` of each `actions` / `systemActions` member as well. The bar has no props row, so nothing refuses `destructive` on it, but it draws each member through the block renderers, which no longer read that word. A stored `page` row is rewritten when it is rehydrated, so it keeps drawing the destructive button and confirming through the destructive confirm button. The conversion is retired from the load path, so a source that still writes `destructive` on a block is refused, not rewritten. The D3 entry `ui-page-action-block-variant-destructive-refused` carries the judgment for `os migrate meta`.
+  
+  Clause-②: no (narrowing) — the action block rows refuse `destructive`, a value they used to accept. `danger` takes its place on the same rows.
+  
+  Metadata-protocol: narrowed (`variant: 'destructive'` is refused on the action blocks and their members; write `danger`)
+  
+  <!-- adr-0087: registered page-action-block-variant-destructive-to-danger, ui-page-action-block-variant-destructive-refused -->
+  
+  **BREAKING** for an author who wrote `variant: 'destructive'` on an action block.
+  
+  **`destructive` → `danger`.**
+  
+  - **Before.** `{ type: 'action:button', properties: { label: 'Purge', actionType: 'script', variant: 'destructive' } }` parsed; `variant: 'danger'` was refused.
+  - **Now.** `destructive` is refused at `variant` (or at `actions.N.variant` on a group or menu member) with a message naming the rename.
+  - **Fix.** Write `variant: 'danger'` on the block or member. Nothing else changes: it draws the same destructive button. `os migrate meta --from 17 --write` applies the rename to your sources.
+- 2d05cd4: fix(ui): a form view's `layout: 'horizontal'` draws each label beside its field, a tabbed form keeps it, and the form page draws `type: 'tabbed'` as tabs (#26843)
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A form view's `layout: 'horizontal'` reached every console form but drew nothing different, and the form page ignored `type: 'tabbed'`:
+  
+  - **`layout: 'horizontal'`** now places each field's label in a fixed column beside its control from the `sm` breakpoint up; below `sm` (a phone) the field stays stacked, label above control, as `vertical` draws it. The description and validation message stay under the control. `vertical`, and a form view with no `layout`, draw exactly as before. Before, the form renderer read the key only to align its action row.
+  - **A tabbed form** (`type: 'tabbed'`) now keeps an authored `layout: 'horizontal'` on every tab. It used to draw its fields `vertical` whatever the form view said.
+  - **The form page** (`/forms/:name`, and the public `/f/:slug`) now draws a `type: 'tabbed'` form view as one tab per section: `defaultTab` opens first, `tabPosition` places the strip, and a section hidden by its `visibleWhen` draws no tab. A submit carries every section's fields, the closed tabs' included, and a submit refused for a missing field opens the tab that holds it. A tabbed form view with a single section draws it stacked, as before. The page also draws `layout: 'horizontal'` rows. Before, it drew every section stacked and every label above its field.
+- 0027c4a: feat(console): a record page opens from one request, and the record a drawer step shows next is asked ahead (#27627)
+  
+  Clause-②: yes (widening: optional `DataSource.getRecordPage` / `prefetchRecordPage`, new exports; no existing contract changes)
+  Metadata-protocol: added
+  
+  The record page (full page, split pane and drawer) asks `DataSource.getRecordPage` once when it opens, before any of its readers runs, and hands each part of the answer to the reader that used to ask for it:
+  
+  - the record, with the lookups the page resolves;
+  - each related list's total and first rows: the tab badges, collapsed and compact related cards and reference rail cards take them, so no `top=1` count probe and no separate first-rows read goes out;
+  - the header's `update` / `delete` verdicts and Claim's `transfer` decision, the in-place edit blocks' field projection, and the approval rows and lock.
+  
+  Readers still read for themselves after the open (a refresh, a write, a change on the data-invalidation bus), and a page on an adapter without `getRecordPage` reads as before. Lists the page cannot name in the request stay their own read: a list declared through a list view, a list whose filter carries a context token, and lists past the fiftieth. In the drawer, the record a ↑ / ↓ step shows next is asked ahead (`DataSource.prefetchRecordPage`), so stepping opens from an answer already on its way; on such an adapter that replaces the drawer's warm-up of the next record's related counts.
+  
+  - `@object-ui/types`: `DataSource.getRecordPage?` / `prefetchRecordPage?` and the `RecordPageRequest` / `RecordPagePayload` shapes.
+  - `@object-ui/data-objectstack`: both methods; concurrent identical reads share one request, a prefetched answer is taken once, and a write drops them all.
+  - `@object-ui/components`: `RelatedCountStore.seed` / `takeRows`.
+  - `@object-ui/plugin-detail`: `seedRecordVerdict`, `seedRecordFieldAccess`, `seedQueueClaimDecision`, `normalizeRelatedListSort`, `COMPACT_RELATED_ROWS`; a compact related card takes its first rows from the record page's answer. Its `sideEffects` array now names `queueClaim` and `recordFieldAccess` too: each drops a seeded answer on a data change through a bus subscription made at load.
+
+### Patch Changes
+
+- 3bfb357: refactor(components)!: retire the unused `ViewSkeleton` dispatcher and `ShimmerSkeleton`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/components#ViewSkeleton, @object-ui/components#ViewSkeletonVariant, @object-ui/components#ViewSkeletonDispatchProps, @object-ui/components#ShimmerSkeleton, @object-ui/components#ShimmerSkeletonProps) the retired operands are React components and their prop types in a published ui package's entry that nothing in the workspace imported; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports either component from `@object-ui/components`. Both were published from the package entry and had no importer anywhere in the workspace, so the Console and every `@object-ui/*` package are unaffected. The other skeletons in `view-skeleton.tsx` stay exported unchanged: `GridSkeleton`, `KanbanSkeleton`, `FormSkeleton`, `ListSkeleton`, `ChartSkeleton` and the `ViewSkeletonProps`, `GridSkeletonProps` and `KanbanSkeletonProps` types.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `ViewSkeleton` TO the skeleton for the variant you passed: `variant: "grid"` is `GridSkeleton`, `"kanban"` is `KanbanSkeleton`, `"form"` is `FormSkeleton`, `"list"` is `ListSkeleton`, `"chart"` is `ChartSkeleton`, each taking the same remaining props.
+  - FROM `ViewSkeletonVariant` TO a local union of the variants you render, or no type at all once you call the skeleton components directly.
+  - FROM `ViewSkeletonDispatchProps` TO `GridSkeletonProps` or `KanbanSkeletonProps` (which carry `columns`; `KanbanSkeletonProps` carries `cardsPerColumn`), or `ViewSkeletonProps` for the others.
+  - FROM `ShimmerSkeleton` TO `Skeleton` from `@object-ui/components`, or a `div` carrying the `animate-shimmer` utility that `@object-ui/app-shell/styles.css` still declares.
+  - FROM `ShimmerSkeletonProps` TO `React.HTMLAttributes<HTMLDivElement>`, which it aliased.
+- f486e9c: fix(types,components)!: a renderer's props index signature is `unknown`, not `any`, so a forwarded key must be narrowed before it is used
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (type-surface-only ui/packages/types/src/base.ts#ComponentRendererProps) A TypeScript annotation narrowing on a published renderer-props type: no metadata key, accepted value, export or error code is removed or renamed, nothing at runtime changes, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler. -->
+  
+  **BREAKING** type-surface narrowing, compile-time only. Nothing a renderer receives or renders at runtime changes.
+  
+  - **`@object-ui/types`.** `ComponentRendererProps` keeps its index signature, so every key the host forwards is still admitted, but the signature now maps to `unknown` instead of `any`.
+  - **`@object-ui/components`.** The built-in renderers' own inline props annotations move the same way. The three host keys renderers read by name and pass to their root element (`data-obj-id`, `data-obj-type` and `style`, written or forwarded by `SchemaRenderer`) are declared once in a package-local type instead. The host-supplied callbacks and values a renderer reads by name (`onPageChange` on `pagination`, `onChange` / `value` on `input-otp`, `loading` on `button`, `className` on `text`, react-hook-form's `ref` on the form's built-in controls) are declared on that renderer's props.
+  
+  **Migration.** A renderer typed with `ComponentRendererProps` that reads a forwarded key:
+  
+  ```ts
+  // FROM — compiled, because the key was `any`
+  const Pager = ({ schema, ...props }: ComponentRendererProps<PagerSchema>) =>
+    <Nav onSelect={(n) => props.onPageChange(n)} />;
+  
+  // TO — declare the key you read on your own props, or narrow it before use
+  type PagerProps = ComponentRendererProps<PagerSchema> & { onPageChange?: (page: number) => void };
+  const Pager = ({ schema, onPageChange }: PagerProps) =>
+    <Nav onSelect={(n) => onPageChange?.(n)} />;
+  ```
+  
+  What to do: nothing if your renderers never read a forwarded key off `ComponentRendererProps` without declaring it. Otherwise declare the key on your renderer's props (as above) or narrow the `unknown` value (`typeof x === 'function'`, `typeof x === 'string'`) before using it.
+- a260556: fix(types,core,components,plugin-form)!: `FormField` drops its open index signature, and a form-view field's `immutable` locks the control once the record exists
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/types/src/form.ts#FormField, ui/packages/core/src/validation/server-owned-value.ts#FieldWithDeclaredDefault) Two published TypeScript interfaces each lose their open index signature and nothing else: no member is removed or renamed, no metadata key, accepted value, export or error code moves, the zod mirror `FormFieldSchema` and the strict authoring face are unchanged, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler (excess-property error naming the undeclared key). -->
+  
+  **BREAKING** type-surface narrowing, compile-time only.
+  
+  - **`@object-ui/types`.** `FormField` no longer ends in `[key: string]: any`. A key no member declares — a misspelling included — is now a compile error on a fresh `FormField` literal, as it already was on every node type since `BaseSchema` closed. The declared members are unchanged, and so are the zod mirror `FormFieldSchema` and the strict face `StrictAnyComponentSchema`, which already refused undeclared keys.
+  - **`@object-ui/core`.** `FieldWithDeclaredDefault`, the parameter type of `isServerOwnedValue`, drops its `[key: string]: unknown` signature, so a `FormField` value is assignable to it. It still reads only `field.defaultValue`.
+  - **`@object-ui/components`.** The form renderer types the field's raw metadata carrier as `Record<string, unknown> | FormField` (the stashed object field, else the field config itself), instead of reading the config through the signature.
+  - **`@object-ui/plugin-form`.** The host-written `group` key (copied from the object field for the field-group fallback) and the section-divider disclosure keys (`collapsible`, `collapsed`, `onToggle`) are typed on package-local hand-off types instead of riding the signature.
+  
+  **Fix (`@object-ui/plugin-form`).** A form-view field declaring `immutable: true` (spec `FormField.immutable`, "editable on create, locked once the record exists") is now drawn disabled when the form edits an existing record, and stays editable on a create form. It used to be copied onto the runtime field as `immutable`, which no renderer reads, so an edit form left the control editable.
+  
+  What to do: nothing if your `FormField` literals use only declared keys. Otherwise the compiler names each undeclared key on the literal that carries it (an excess-property error): correct a misspelling to the declared member, or, for a key only your host writes and reads, type it on a local intersection such as `FormField & { group?: string }` where its producer and reader live.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- c8ed4c9: fix(components): the `filter-builder` renderer calls `onChange` with the `FilterGroup` that `FilterBuilderSchema.onChange` declares
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `FilterBuilderSchema.onChange` declares `(filter: FilterGroup) => void`, but the `filter-builder` renderer typed its own `onChange` as `(event: any) => void` and called it with a form-style `{ target: { name, value } }` event. A handler written from the declaration read `.logic` and `.conditions` off that event and got `undefined`, and the `any` kept the compiler from reporting the mismatch. The renderer now takes the schema's own `onChange` type and passes the group it holds, so the declaration is the contract on both sides. No in-repo host bound the event shape. A host that read `event.target.value` reads the argument itself instead.
+  
+  The builder's own rows also admit the opt-in `exists` / `notExists` operators, which a `FilterGroup` cannot carry. The renderer no longer forwards a host's `extraOperators` to the builder, since `FilterBuilderSchema` declares no such key, so the node never offers them. The `FilterGroup` zod mirror refuses them in an authored `value`. If a stored value that skipped that validation still carries one, the renderer does not call `onChange` and logs a console error naming the operator, instead of handing on a group the declared type does not describe.
+- dc9d1ff: feat(plugin-list): a list block on a page caps its rows and ends with a "View all N" link; a tabbed list block caps each tab and badges each tab with its count
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A `list-view` block in a page region half the page or wider used to draw the whole object list: every row of its query, the toolbar, the `#` column, every column of the view and a horizontal scrollbar. It now draws a capped list:
+  
+  - **The rows.** At most `dataSource.limit` of them, the key every page element's data binding already declares, and 5 when the block states none. The cap is the query's own window (`$top`), so a capped block never fetches the rest.
+  - **The columns.** The view's first four visible columns, in a table fixed to the block's width; the rest are dropped, not scrolled. A view that declares no columns draws the object's `highlightFields` led by its name field, else each record's display name.
+  - **No object-list chrome.** No toolbar, view tabs, row-number column, pager or record-count bar. A click on a row opens the record, as a grid row does.
+  - **The link.** Under the rows, 「View all N →」 (`list.viewAllCount`, new in all ten language packs) opens the object list on the block's bound view, the same destination the compact list's "View all" link opens.
+  
+  A region narrower than half the page keeps the compact list, and a list outside any page region (the object list page, a block with no page around it) keeps the full list.
+  
+  `page:tabs` now badges a tab holding `list-view` blocks with the number of records those blocks' own queries matched, summed with the `record:related_list` counts it already derives. Such a tab is mounted while inactive, hidden, so the badge is there before the tab is opened; a tab with an authored `count` keeps mounting on open only. Nothing an author writes changes. The published surface widens in three places, which is what `Clause-②: yes` declares: the i18n key `list.viewAllCount` in all ten packs; `usePageTabCountReporter`, a new export of `@object-ui/components`, the count channel a `page:tabs` panel opens to the blocks inside it; and `ListView`'s two new optional host props that use it, `capped` and `onTotalChange`.
+- eab4bba: feat(console): a greyed action says the reason its author declared
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An action greyed out by its `disabled` predicate now shows its declared `disabledReason` as the button's hover title and accessible description, and as a menu item's second line. The console used to show "Not available for this record" for every such action. That sentence stays the default when the action declares no reason, or a blank one.
+  
+  ```ts
+  defineAction({
+    name: 'submit_for_approval',
+    label: 'Submit for approval',
+    objectName: 'clm_contract',
+    disabled: "record.legal_review_status != 'approved'",
+    disabledReason: 'An approved legal review is required before the contract enters approval.',
+  });
+  ```
+  
+  - **Where it shows.** The record header (inline and in the ⋯ overflow), the record section bar, the declared actions bar, and the four `action:*` renderers (`action:button`, `action:icon`, `action:group`, `action:menu`). On every one, only the declared `disabled` predicate evaluated true earns a reason. A button greyed while its own action runs, or by the host, still gives none.
+  - **Translated like the other action copy.** `useActionTextLocalizer` (`@object-ui/react`) resolves the key when the action declares it, through the new `actionDisabledReason` resolver on `useObjectLabel` (`@object-ui/i18n`). The bundle's sentence at `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an action with no `objectName`) comes first. After it comes the authored inline locale map, collapsed to the active language, then the authored string. A bundle entry never gives a reason to an action whose author wrote none. The four `action:*` renderers read the action as authored, so for them the inline locale map is the translation.
+  - **Typed.** `UIActionSchema` (`@object-ui/types`) declares `disabledReason`, derived from the spec's `ActionSchema`.
+  - **Liveness.** `disabledReason` is now `live` in `@objectstack/spec`'s ledger, with the console readers as evidence. The planned-property warning an author got for declaring it is gone. The key's description no longer says that nothing shows it.
+- a122269: fix(ui): a `destructive` action block confirms through the destructive button (#26665)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The four action blocks (`action:button`, `action:icon`, `action:group`, `action:menu`) now forward their `variant` to the action runner. `@objectstack/spec` spells the value in two dialects, each on its own surface: the blocks' rows take the Button primitive's vocabulary plus `primary`, and `ActionSchema`, which the runner dispatches, takes `primary | secondary | danger | ghost | link`. The forward translates: `destructive` becomes `danger`, `primary` / `secondary` / `ghost` / `link` pass through, and `default` / `outline` forward nothing. So a block declared `variant: 'destructive'` with a `confirmText` now asks its question through the destructive confirm button, where before it asked through a neutral one.
+  
+  `UIActionSchema.variant` (`@object-ui/types`) now takes the block rows' vocabulary by reference (`ActionButtonProps['variant']`), which adds `link`, a value those rows already accept. `danger` stays refused there, as the block rows refuse it.
+- 34c2407: feat(app-shell,components): the record drawer opens a related row or a lookup in place, one level at a time, and its bar names no object
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's record drawer is one drawer (objectstack#26679):
+  
+  - **The bar.** Its left side is empty at the root: no object name and no "n / N" position. Its right side holds `↑` `↓` (previous / next through the level's sibling set, disabled at the ends; `↑` / `↓` and `k` / `j` while no text field, menu or grid has the keyboard), `⤢` (icon only) and `✕`. `NavigationOverlay` gains three optional props for it — `onBack`, `trail` and `stepper` — and keeps its title as the accessible name only, on every host.
+  - **The root steps through the list.** `ListView` reports the rows it shows, in their order, through a new `onRowsChange` host prop (beside `onTotalChange`, answered by a paged grid; a board or a grouped grid reports no rows). The object page hands them to its drawer, so `↑` `↓` at the root move to the previous / next row, disabled at the first and the last.
+  - **In place.** A related row, a lookup value or any record link inside the drawer opens that record in the same drawer and keeps the previous one on a stack. The bar shows `←` and the path (each ancestor returns to its level); `←` or `Esc` goes back one level, `Esc` at the root closes, `✕` closes the whole stack. `↑` `↓` one level down step through the rows the parent's related list showed, never across levels. Each level keeps its own `?tab=`. An object that declares `navigation.mode: 'page'` still opens its page.
+  - **⤢ at any level** opens that record's page with the levels below it as its `?from=` trail, so its back link reads the record it was opened from; the page offers "Collapse to drawer", which returns to the drawer with the stack restored.
+  - **On the record page**, a related row or a lookup opens its record in a drawer over the page, under the same rules.
+  - **`data-table` inside a dialog.** A table drawn inside a dialog now opens its rows: the row click ignored every click with a dialog ancestor, so a related list inside a record drawer drew pointer rows that opened nothing. Only a dialog portalled out of the row (one that does not contain it) still stops the click.
+  - **What a reload keeps.** The root stays `?recordId=` on an object list; the levels above it live in memory, so a reload shows the root record.
+  
+  Published-type additions, all optional: `RelatedRecordHandlers.onView` receives the ids of the rows on show as a third argument, and `RelatedList`'s `onRowClick` receives those rows as its third argument. The i18n packs gain `detail.collapseToDrawer` in all ten languages. In zh, the `⤢` label (`detail.openAsFullPage` and `console.objectView.expandToPage`, kept byte-identical) reads 整页打开.
+- 9dacccf: feat(app-shell,plugin-detail,components,i18n): the record page's timeline and related columns are each reader's switches, per object, toggled from the crumb row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Whether the record page shows its timeline column and its related column is now the reader's own choice, per object, kept in the browser. It is not metadata: no key, no spec change.
+  
+  - **Defaults derived from the object.** A reader who never chose gets the timeline on for a "worked" object and off otherwise, and the related column on. An object is worked when `stageField` names a field, when a field's options declare a lifecycle `kind` (unless `stageField: false`), or when it sets `enable.files: true` — only what the object declares of itself. Being another object's `master_detail` parent does not count: a container that owns child rows (a price book, a campaign) is not a worked record. `recordTimelineDefaultReason` and `recordPageColumnDefaults` in `@object-ui/plugin-detail` say which.
+  - **A switched-off column frees its room.** With the timeline off, a wide page draws details | related, and the timeline's blocks (the composer and History) become an Activity card at the foot of the related column. With the related column off, it stays behind the rail toggle. `recordPageArrangementFor` is the rule, and `RecordPageColumns` takes the reader's `switches`. Below the column widths the page is tabbed as before, the switches are kept for when it widens, and `?tab=` is unchanged.
+  - **Panel toggles.** `PanelToggles` in `@object-ui/components` is a group of icon toggles with `aria-pressed`, a tinted pressed state, and a tooltip naming the shortcut. The record page draws it on its crumb row, right side, only in a column tier. It is not drawn in the drawer or split pane.
+  - **Shortcuts.** `⌘⇧.` / `Ctrl+Shift+.` toggles the timeline and `⌘⇧,` / `Ctrl+Shift+,` the related column, matched by the physical key. Not `⌘⇧T` / `⌘⇧R`: the browser keeps those (reopen closed tab, hard reload) and the page never receives them. They do nothing while a text field has focus, and the keyboard-shortcuts dialog lists them while the record page is open.
+  - **One preference store.** `app-shell`'s `workspacePreference` module keeps every reader preference by preference and scope (`user`, or `object:OBJECT_NAME`). Each value is a small record with a version `v`. It reads live through `useSyncExternalStore`, follows other tabs, and falls back to the default with no storage. The record-open preference (`os:record-open-mode`) is now a thin alias over it and keeps its stored spelling, so a reader's earlier choice reads back unchanged.
+- eef8373: feat(plugin-detail,app-shell,components): the record page v3 — frameless details, one timeline, compact related cards the reader arranges, body tables, enlarge in place
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The synthesized default record page (an object with no assigned page) takes the v3 layout. Nothing an author writes changes: the page is still drawn from the object's semantic roles (ADR-0085), and every change below is the renderer's.
+  
+  What changes for a reader:
+  
+  - **Header.** One filled primary action, two outline actions, the rest in the `⋯` menu. The header's Refresh moved into that menu as its first item. Up to six highlights, drawn as an equal-width grid on the default page.
+  - **Details.** Sections are frameless: a title over a hairline, then the fields in one to three columns by how many fields the section shows. Every titled section collapses from its title. Sections with no value at all fold into one line at the foot, such as 「Address · Conversion · Extra · 3 empty sections · Expand」. The created / updated line closes the details column and also names the owner and the record id.
+  - **Timeline.** One stream: comments, `sys_activity` rows and field changes (`trackHistory`), newest first, with the composer on top and the chips All / Activity / Discussion / Changes. Field changes and system events are one muted line each. 「View all N →」 shows the rest. The separate History tab, the Activity tab and the discussion footer are gone. With `enable.feeds: false` the stream keeps activity and changes and offers no composer.
+  - **Related cards.** In the related column each related list is a compact card: title, count and ＋ in one row, no table header, up to three rows of the record's name and one status or date chip. The column is 320 px, beside details and the timeline at 1.25fr : 1fr. 「查看全部」 is gone from the card.
+  - **The reader arranges the cards.** On desktop the title row drags a card, with a drop line. The card's `⋯` menu has Move up, Move down, Collapse and Hide. A collapsed card shows its title and count and reads no rows. The order, collapsed and hidden state are kept per user and object in the console's workspace preferences, the same store as the column switches, and apply in the tabbed tier's Related tab too. A reader who never dragged sees the default order. A later change to the default does not reorder a dragged column; the column then says 「Default order updated · Restore default」. A relationship added since the reader's last drag lands after its nearest default neighbour and carries a 「New」 badge for 48 hours. Hidden cards are listed at the column's foot (「N hidden · Show」).
+  - **Enlarge in place.** A card's ⤢ or its count opens the list as a full-width table over the page body, with every column, paging, sort and inline edit. The address is `?related=object.field`; Esc or ‹ returns to the columns.
+  - **Body tables.** A related list that is the record's own body is drawn as a table inside the details column, right after the first field section, instead of a side card. A body list is a `master_detail` FK declaring `inlineEdit`, or a list marked `relatedList: 'primary'`. A body table opens on ten rows and has a totals line for its numeric columns over the rows on the page.
+  - **Tabs.** The drawer and narrow widths show Details / Timeline / Related / (Approvals). The Timeline is second for a worked object and last otherwise. Attachments close the Related tab.
+  
+  **BREAKING** (`@object-ui/plugin-detail`, TypeScript only): `BuildPageOptions` no longer accepts `hideHighlights`, `hidePath`, `showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`, `relatedLayout`, `recordChrome`, `showActivity`, `history`, or the `slots.rightRail` slot. No console caller passed any of them. A caller still passing one gets a compile error naming the key, and the page it draws is the same with the key or without it. The `record:reference_rail` renderer stays for authored pages. `buildDefaultHeader` takes `{ actions }` only, and `buildDefaultHighlights` drops its two hide flags.
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#BuildPageOptions) a renderer's options interface: no Zod schema, no spec declaration and no stored representation reads it, so the compiler is the channel that reaches every caller -->
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- 273137d: fix(plugin-detail,app-shell,components): the record page's related switch decides whether the column exists, its panel switches are one segmented control in the header's action row, a 1440 px window with the sidebar is three columns, and the related order and body-table placement read the object's `relatedLists` and field groups
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The synthesized default record page (an object with no assigned page). Nothing an author writes changes meaning: the two read points below are keys the spec already declares.
+  
+  - **The related switch.** With the related column switched off there is no related column and no 「Related」 rail toggle, in every column tier. With it on and no room for it (the two-column tier), the rail toggle opens and closes it. Before, the switch did nothing in the two-column tier and the rail still opened the column.
+  - **One segmented control in the header row.** The two panel switches are now one control with an icon and a label per segment (Timeline, Related column). It is drawn at the right end of the record header's action row, after `⋯`, behind a vertical hairline, in both column tiers. A segment that is on is filled with the accent tint; one that is off is muted text, so the state reads in the dark theme too. The crumb row keeps only the ways back and is not drawn when there is none. The shortcuts are unchanged (`⌘⇧.` / `⌘⇧,`); they now also match a key event that carries the typed character (`.` / `>`, `,` / `<`) but no physical key code.
+  - **Thresholds.** Three columns from a 1120 px container, two from 760 px, the tabs below (were 1280 / 1024). Measured on the console: the expanded sidebar is 256 px, so a 1440 px window is 1184 px of record page (three columns), and a 1024 px window is 768 px (two columns). `RECORD_PAGE_THREE_COLUMN_MIN_WIDTH` and `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` carry the new values and their derivation.
+  - **Related order.** The default order of the related cards, the Related tab and the body tables is the object's `relatedLists` first, then the derived order. That order already reached the page through `deriveRelatedLists`; the stale comment that said it did not is gone, and a mounted pin now holds it.
+  - **Body-table placement.** A field group whose `relatedList` names a body table's relationship (a child object name, or `object.field`) places that table at the group's position among the field groups. Other body tables stay after the first field section.
+  - **Restore default order.** Once a reader has moved or hidden a related card, the foot of the related column (and of the Related tab) offers 「Restore default order」 on the same line as 「N hidden · Show」. It lays the default order back, shows every card, and records the current default as the one the arrangement is based on. The reader's stored arrangement keeps its shape. The hint shown when the author's default changed stays as it was.
+  - **`@object-ui/components`.** `PanelToggles` is the segmented control. `PageHeaderTrailingContext` (new export) is the host slot at the end of `page:header`'s action row, and `PageHeaderActions` takes a `trailing` node for it. No metadata key reaches it.
+  - **`@object-ui/plugin-detail`.** `relatedListEntryNames` (new export) is the one reading of a related-list entry; app-shell's related-list order and the Studio editors import it from here.
+  - **`@object-ui/i18n`.** New `detail.relatedRestoreDefaultOrder` in the ten packs.
+  
+  What to do: nothing.
+- 9c51314: fix(plugin-form): an ObjectForm block's `showReset` draws the Reset button it declares, instead of clearing the form after every save
+  
+  Clause-②: yes (widening)
+  
+  Metadata-protocol: none (the `object-form` block's `showReset` key and its spec text, "Show the reset button", are unchanged; the renderer now does what that text says. The two new keys are on `@object-ui/types`' `FormSchema`, the renderer-internal `form` node that `@objectstack/spec` does not declare)
+  
+  `showReset` on the `object-form` block is declared "Show the reset button", but the renderer passed it to the form's clear-after-save flag. So `showReset: true` drew no button and emptied the form after each successful save, and `showReset: false` did nothing.
+  
+  - **FROM → TO.** `showReset: true` now draws a Reset button beside Cancel and Save. Pressing it puts the form back to the values it opened with (the record being edited, or the create defaults) and saves nothing. A save no longer clears the form because of `showReset`. A form that should clear after a save declares `submitBehavior: { kind: 'continue' }`, or `resetOnSuccess: true` on a create form.
+  - **Where the button is drawn.** The simple form (flat or sectioned), the tabbed form, and the drawer and modal footers. The wizard and the master-detail form have their own action bars and draw no Reset button yet.
+  - **`@object-ui/types`.** `FormSchema` (the `form` node) gains two optional keys: `showReset`, which draws the button in the form's action bar, and `resetLabel`, its label (default: the session language's "Reset"). The `form` node also restores its opening values on a `reset` event, so a footer outside the form can reach it with a `type="reset"` button that names the form's `id`.
+- f0857d2: fix(ui): four KPI tiles sit two across on a phone, a calendar's footer says its count is the loaded dates', and the record not-found page says the record may also be one you cannot read
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three console rows from a full HotCRM browser pass:
+  
+  - **A layout `grid` with a bare `columns` of 4 or more draws two tiles across on a phone** (below `sm`), then the authored count from `md`. A home page's KPI strip (`columns: 4` over `object-metric` tiles) took a row per tile and filled the first screen; it now reads as the dashboard's own phone layout for metric tiles. A bare 2 or 3 still stacks on a phone and pairs from `sm`, and an authored breakpoint object (`columns: { xs: 1, md: 4 }`) is drawn as written.
+  - **A calendar view's footer says `N records loaded for these dates`.** The calendar fetches the window of dates it draws, so the footer's count is that window's records, not the view's total; it read "N records", the words a grid uses for the whole view. A grid, a board and a calendar over rows handed in whole keep "N records". New count family `list.calendarRecordCount` in all ten packs.
+  - **The record not-found page says the record "does not exist, may have been deleted, or you may not have access to it".** The server answers a record the reader may not see the same as a missing one (`404 RECORD_NOT_FOUND`, so existence is never revealed), so the page cannot tell the two apart and now names both. `empty.recordNotFoundDescription` and `detail.recordNotFoundDescription` change in all ten packs.
+- ad2c286: fix(plugin-grid): inline edit opens no cell editor on a row the server's record-grained write verdict refuses
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An editable grid gated its cells on the object-level grant only, while the row kebab on the same rows also read the server's record-grained `update` verdict. A row that sharing, ownership or RLS refuses lost Edit from its kebab but still opened a cell editor, and the save was refused by the server. Now the cells read the same verdict as the kebab:
+  
+  - **A refused row reads as read-only.** No click, double-click or Enter opens an editor on it, and its cells show no edit cursor. A click on such a cell reaches the row as it does on a read-only grid. Selection, navigation and the row menu are unchanged.
+  - **One verdict, fail open.** The cells and the kebab read one batched explain probe for the rows on screen. A row with no answer yet, a failed or absent probe, or a row with no id keeps the object-level behaviour, as before. An editable grid with no kebab Edit now asks the same probe.
+  - **New runtime slot `DataTableSchema.isRowEditable`.** `(row) => boolean`, supplied by the host and read by `data-table` before it opens a cell editor. It only narrows `editable`: absent, every row follows `editable` and the column locks as before. It is a function, not metadata, so the zod mirror refuses an authored value by name.
+- 9462d8a: refactor(ui-types): one source for the filter-builder field-type list, read by the validator, the interface and the renderer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `filter-builder` field types used to be listed three times by hand: in `FilterFieldSchema.type`, in `FilterField['type']`, and in the renderer's behaviour buckets. Each copy could drift from the others, and past fixes repaired exactly that drift. There is now one declaration. The accepted set is unchanged: the same fourteen members, `type` still optional, and `text` still the default when it is absent.
+  
+  - **`@object-ui/types`** exports `FILTER_FIELD_TYPES` and the four behaviour buckets it is built from: `FILTER_NUMBER_LIKE_TYPES`, `FILTER_DATE_LIKE_TYPES`, `FILTER_SELECT_LIKE_TYPES` and `FILTER_LOOKUP_LIKE_TYPES`. It also exports the member type `FilterFieldType`. `FilterFieldSchema.type` builds its enum from the list, and `FilterField['type']` is `FilterFieldType`.
+  - **`@object-ui/components`**: `filter-builder` takes its number-, date-, select- and lookup-like buckets from `@object-ui/types` and no longer declares its own. What it draws for each type is unchanged.
+- efa2915: fix(fields, components): a date typed in a form the picker cannot read is a field error that refuses submit, not a silent drop (#27483)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Typing `13/45/2026` into a record form's date field and pressing Create saved the record with the date empty (or, on edit, with the old date) and a success toast. The picker never writes text that names no date, so the form value stayed what it was and nothing told the form.
+  
+  - **Now.** The text box is marked invalid as soon as the user leaves it, the field shows the picker's message (the typed text and the expected format) as its form error, and submit is refused the way a missing required value is: the dialog stays open and nothing is sent. Correcting or clearing the text withdraws the error. `datetime` fields behave the same.
+  - **`onInvalidInputChange`** is a new optional widget prop on `FieldWidgetComponentProps`, the widget props type `@object-ui/fields` exports. The key is optional, so every existing widget and host compiles and behaves as before; no consumer breaks. It is fired as follows: a widget that parses typed text fires it with a message when the committed text names no value, and with `null` once it is valid, cleared, or unmounted. The `form` renderer (`@object-ui/components`) turns the message into the field's `invalidInput` validation error and passes the callback to the `date` / `datetime` widgets only. A widget given the callback leaves the message text to the form; hosts that pass none (the grid's inline editor, the action-param dialog) keep the picker's own notice, unchanged.
+- 9324232: fix(console): a packaged action switched off for this deployment is no longer offered as a live button
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An administrator can switch a packaged action off in Setup › Packaged automation. The action door then refuses it, but the console kept offering the button on the record header, in action bars and in list rows, so a click could only fail. The object reads now serve the names of the switched-off actions beside the object (#27842), and the console stops offering those actions everywhere it already hides an action whose capability the user lacks: the record header, action bars, record quick actions, list and related-list toolbars, row and bulk actions. Turning the action back on in Setup brings the button back.
+  
+  `@object-ui/core` adds four exports for this: `isActionSwitchedOff(action)`, `markSwitchedOffActions(schema, served)`, `markSwitchedOffActionsByObject(objects, served)` and `ACTION_SWITCHED_OFF_KEY`. The data layer stamps a switched-off action entry under that symbol key, which survives a spread and never reaches JSON, so an action handed back to a metadata write never carries it.
+  
+  What to do: nothing. A backend that does not serve the names hides nothing, as before.
+- 75ecaf4: fix(ui): a refused inline-grid save marks its cells and says every reason; a refused form save is said once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Inline grid edit, Save All.** When the server refused a row, the save bar showed one shortened line, with the rest only in a tooltip, and no cell showed which value was wrong. Now every reason is shown in full on its own line under the toolbar, and each cell the refusal names gets a red outline with its reason on hover. Editing a marked cell removes its outline.
+  - **Field rules before sending.** The grid's built-in saves now check an edited value against the field's own rules (required, min / max, length, email / URL pattern) before sending, and refuse a row that breaks one in the same way the server would. That row is not sent; the other rows still save.
+  - **Save All placement.** The grid toolbar is padded, so the Save All / Cancel All buttons no longer sit against the right edge of the grid.
+  - **Refused form save.** When the server refused a form save, such as one blocked by a validation rule on a Studio-authored object, the form showed a banner and an identical error toast. It now shows the banner only, scrolled into view, and a retry still replaces that banner instead of adding another. This reverses the earlier one-error-toast behaviour.
+- d07e8d1: fix(app-shell): Setup reads clearer — one name for the app, a confirm before Disable and before switching a packaged action off, the reason a package is read-only, and a forced password change in the user's words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Suggestions from the 18.3.0 RC Setup walkthrough, each in the console:
+  
+  - **One name for Setup.** Home's link and the app switcher's entry now carry the Setup app's own label, the name its header shows, instead of "System Settings" and "Settings".
+  - **A forced password change** reads in the console's own words, in the user's language: the body says an administrator set a temporary password, and the first field is "Temporary password". An expired password keeps the server's sentence and "Current password".
+  - **The package sheet** says why a read-only package offers no write action (loaded from code, read-only here, or part of the platform), asks before Disable, and calls its delete action "Delete package". Installed Apps has its own subtitle.
+  - **Packaged automation** asks before switching a packaged action off, says in a toast when a switch was accepted, shows each action's object by its label beside the machine name, and fits a phone screen without a sideways scroll.
+  - **Record tab strips** that hold more tabs than fit scroll sideways and fade at the edge that hides a tab.
+  - **A select value of `info` or `warning`** with no declared colour reads blue or yellow, not a hashed alarm orange.
+  - **Setup's header tags** (Admin config, Platform schema, System-managed, Identity) take keyboard focus, which opens their explanation as hover does.
+  - `@object-ui/i18n` adds `auth.remediation.password.resetBody`, `auth.remediation.password.temporary` and five `packagedAutomation.*` keys in all ten locales, and five `engine.packages.*` keys in the Studio namespace (en, zh); `engine.packages.detail.deleteApp` becomes `engine.packages.detail.deletePackage`.
+- 72b08ee: docs(skills): hand-written inventory counts are deleted; the names and the source of truth stay
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-data` counted its field types ("49") in SKILL.md and in `rules/field-types.md`, and its lifecycle events ("8") in SKILL.md and `references/data-hooks.md`; `objectstack-automation` counted its built-in node types ("20"); `objectui/README.md` counted its plugins ("18"); `objectui/guides/schema-expressions.md` counted the formula registry ("30 functions"); `objectstack-query` counted the aggregate functions ("six"). No gate reads any of those numbers against the tree, so each one goes wrong the moment the inventory moves, and a wrong count misleads the reader more than no count.
+  - **Now.** The numbers are gone; every enumeration that taught something (the node-type tables, the plugin names, the function table, the aggregate names) stays, and each page still points at the file or schema that is the source of truth. Deletion only: every touched file shrinks under its unchanged token ceiling.
+  - The same deletion in shipped READMEs and one shipped source comment: `@objectstack/spec` (a `//` comment in `src/kernel/metadata-plugin.zod.ts`, which ships), `@objectstack/metadata` (README), and the `@object-ui/*` READMEs of i18n, plugin-grid, components, fields, types, plugin-form and console. No schema, key or behaviour changes.
+- 3d2da4f: feat(plugin-detail)!: one record page laid out by its own width — details beside a right column from 760 px, one column below; 动态 is the right column's first panel; ⊟ shows or hides the right column
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-detail#RECORD_PAGE_THREE_COLUMN_MIN_WIDTH, @object-ui/plugin-detail#recordPageArrangementFor, @object-ui/plugin-detail#recordPageColumnDefaults, @object-ui/plugin-detail#recordTimelineDefaultReason, @object-ui/plugin-detail#RecordPageColumnSwitches, @object-ui/plugin-detail#RecordPageArrangement, @object-ui/plugin-detail#RecordPageObjectLike, @object-ui/plugin-detail#RecordTimelineDefaultReason, @object-ui/plugin-detail#DefaultPageColumns.relatedCount, @object-ui/plugin-detail#UseRecordPageTierOptions.embedded, @object-ui/plugin-detail#RecordPageColumnsProps.switches) the retired operands are the synthesized record page's layout helpers, their option and prop members, and the types they took, in a published ui package's entry that only the console's own record view imported; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  The synthesized record page (record page v4) is laid out by one rule, the width of the container it occupies. The page, the split pane, the overlay drawer and the maximized pane all follow it.
+  
+  - **At 760 px and wider**, the details sit beside a right column 320 px wide. **At 1120 px and wider** the right column is 380 px, a details section takes up to three field columns (two otherwise), and the 动态 panel shows five entries (three otherwise).
+  - **Below 760 px** (the split pane at 720 px, a phone) the page is ONE column: the details, then the right column's panels in their order.
+  - The three-column tier, the tabbed tier and the 「相关 N」 rail are gone, and so are the resident timeline column, its ⊞ switch and the per-object default that decided it.
+  - **动态** (formerly the timeline) is the first panel of the right column. It has the same header as a related panel: 「动态」 and the stream's count, and the header row opens the 动态 tab. Its body is a one-line composer (pressed, it opens the full composer, focused), the newest entries one line each, and 「查看全部 N 条」 when the stream holds more. The 动态 tab (`?related=timeline`) is the full stream: the 全部 · 活动 · 讨论 · 变更 chips, threaded replies, and "Load more" for the next page.
+  - **⊟** (「右栏」, `⌘⇧,`) is one icon at the end of the record header's action row, drawn only where the tier has a right column. Off, the details take the row. It keeps the reader's earlier related-column choice: the stored preference `record.columns.related` is unchanged. The record header's `PanelToggles` (`@object-ui/components`) now draws icon-only toggles named by their label.
+  - The 动态 panel is on screen at open in every tier, so a synthesized page reads its feed and its audit history at open. An authored page with tabs still waits for the tab that holds them.
+  - **Tab labels** (`page:tabs`, `@object-ui/components`). A synthesized page that keeps its tab strip (one the layout cannot partition) labels its stream tab `Activity stream`, which the strip reads as 「动态」. An authored `Timeline` tab, such as the served approval page's history, is no longer read as the record stream: it keeps the pack's own word for a timeline (「时间线」, タイムライン, and so on).
+  
+  **BREAKING** (`@object-ui/plugin-detail`, TypeScript only). The only importer is the console's own record view. `RecordPageTier` is now `'stack' | 'two-column' | 'wide'`: there is no tabbed tier, and the widest tier is called `wide`. `recordPageTierFor(width)` takes no second argument. `useRecordPageTier` answers `null` only while the page is not laid out (disabled, or not yet measured). `RecordPageColumnsProps.tier` takes every `RecordPageTier`. A caller still naming a retired symbol gets a compile error that names it.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `RECORD_PAGE_THREE_COLUMN_MIN_WIDTH` TO `RECORD_PAGE_WIDE_MIN_WIDTH`, the same 1120 px floor under its new name.
+  - FROM `recordPageArrangementFor` TO `recordPageTierHasRightColumn(tier)` and the reader's ⊟: every laid-out page is the details and, where the tier has room, the right column.
+  - FROM `recordPageColumnDefaults` TO no call: every object's page opens with its right column, and ⊟ defaults to on.
+  - FROM `recordTimelineDefaultReason` TO no call, for the same reason: no object decides a timeline column any more.
+  - FROM `RecordPageColumnSwitches` TO a `boolean`, the right column's switch.
+  - FROM `RecordPageArrangement` TO the `RecordPageTier` itself, read through `recordPageTierHasRightColumn`.
+  - FROM `RecordPageObjectLike` TO no type: no helper takes an object definition any more.
+  - FROM `RecordTimelineDefaultReason` TO no type, with `recordTimelineDefaultReason`.
+  - FROM `DefaultPageColumns.relatedCount` TO the length of `columns.related`; the rail it labelled is gone.
+  - FROM `UseRecordPageTierOptions.embedded` TO no option: an embedded page follows the same width rule.
+  - FROM `RecordPageColumnsProps.switches` TO `RecordPageColumnsProps.rightColumn`, one `boolean`.
+  
+  `RECORD_PAGE_WIDE_MIN_WIDTH`, `recordPageTierHasRightColumn` and `RECORD_PAGE_TIMELINE_PANEL` (the 动态 tab's `?related=` id) are new.
+- c1b52de: feat(components,plugin-grid,i18n,app-shell): record pane v4 mechanics — the split pane beside the list, the non-modal drawer over it, ⤢ maximize in place, the drag range, and the list's narrowed faces (#27545, part A)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  No metadata key is added, removed or read differently. The console wires these mechanics in a following change; until then it passes none of the new props, and its only change here is the pane's default width.
+  
+  - **`@object-ui/components`**: `NavigationOverlay`.
+    - **Split face.** The pane sits beside the list the host hands over (`mainContent`), at that list's full height. The list is one element in every state, so it is not remounted by the overlay. Below a 1000 px content area (`RECORD_SPLIT_MIN_CONTENT_PX`) the split face falls back to the drawer.
+    - **Drawer.** Over a `mainContent` list, the drawer is non-modal and draws no dimming overlay: an outside click leaves it open, and ✕ and `Esc` close it. A drawer with no list is the modal sheet it was.
+    - **Width.** The divider drags from 360 px to 60vw. A remembered width is drawn inside that range (`min(Npx, 60vw)`). An authored width is no longer floored at `min(60vw, 880px)`.
+    - **New `maximizable` prop.** It draws ⤢ / ⤡ and maximizes the pane in place. The pane's width becomes the viewport less the live sidebar width (`--sidebar-width`, or `--sidebar-width-icon` when collapsed; `SIDEBAR_WIDTH_FALLBACK` / `SIDEBAR_WIDTH_ICON_FALLBACK` where the variable does not reach). The list stays mounted and inert under it. `Esc` restores, and a closed pane forgets it.
+    - **New `activeListRecordId` prop.** A list under the pane reads its narrowed face (`useRecordListFace()`: `columns` at ≥ 440 px, `cards` below, `full` with no pane beside it) and which of its rows is the open record (`ActiveListRow`, `useIsActiveListRecord`, `ActiveListRecordProvider`, `RecordListFaceProvider`). The open row is a per-row subscription, so a change re-renders the row it leaves and the row it reaches, not the list.
+    - **`onExpand`** is drawn as ↗.
+    - **`DataTable`** marks the open record's row (`data-active-record`, `aria-current`) and scrolls it into view.
+  - **`@object-ui/plugin-grid`**: `ObjectGrid` narrowed to `columns` keeps its first three view columns that are not avatars, plus its row actions. Narrowed to `cards`, it draws one card row per record, with the name and two chips. Under no pane nothing changes.
+  - **`@object-ui/i18n`**: `detail.maximize` and `detail.restoreSize` in all ten packs.
+  - **`@object-ui/app-shell`**: the console's record pane defaults to 720 px (`md`, clamped to 92vw) whatever the object's field count. `size: 'auto'` and no size both read as `md`, and an authored `size` or `width` stands. This applies to the object page's drawer and to the record page's related-record drawer.
+  
+  What a console reader sees from this change alone:
+  
+  - The record drawer's page button is drawn as ↗ instead of ⤢. It still opens the full page, under the same name.
+  - The record drawer is 720 px wide (at most 92vw) whatever the object's field count. Before, it took 480 to 1200 px by field count and was widened to at least `min(60vw, 880px)`: 864 px at a 1440 px viewport for an object of up to eight fields.
+  - A reader who chose Split in the Display menu sees the pane as a side panel. It draws no title heading. Its divider drags from 360 px to 60vw. The list beside it narrows to three columns, or to card rows below 440 px. The open row is not tinted yet: the console does not pass `activeListRecordId` until the following change. Below a 1000 px content area, the pane becomes a non-modal drawer over the list.
+- 8a1f467: feat(console): on a narrow window the sidebar is the icon rail, and a click expands it over the content
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a 1280 px laptop window the expanded console sidebar left 1024 px of content, too little for a record's split view beside its list. Now:
+  
+  - **The fold.** Below the width the record split needs beside an expanded sidebar (its 1160 px of content plus the 256 px sidebar, so 1416 px), the console sidebar mounts as the icon rail and the content takes the rest. At that width and above the sidebar behaves as before; below the phone breakpoint the drawer is unchanged. The width is derived in one named constant, `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH`, from the sidebar's own width.
+  - **Expand over the content.** A click on the rail's background, the app bar's sidebar button or ⌘B / Ctrl+B expands the full sidebar over the page without moving it; choosing a navigation entry, a press outside it or Esc folds it again. Hovering does nothing, and a click on a rail icon still opens that entry.
+  - **Keep sidebar open.** While the rail is expanded, its foot offers "Keep sidebar open": pressed, the narrow window keeps the wide-window sidebar in this browser, and pressing it again brings the fold back.
+  - **The wide window keeps its state.** The open or collapsed state the reader chose on a wide window is no longer overwritten by the fold: it comes back when the window widens, and on the next load that opens wide.
+  
+  `@object-ui/components`: new `useIsViewportBelow(breakpoint)` hook, `true` while the window is narrower than `breakpoint` CSS pixels, read synchronously on the first render and live through `matchMedia`. Nothing existing changes.
+  
+  `@object-ui/i18n`: the `sidebar` namespace gains `sidebar.keepOpen` in all ten packs. No key is removed or renamed.
+- fec60e0: fix(components): a grid's select-all draws a dash for a partial selection
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With some but not all rows of the page selected, the data table's header checkbox was already announced as mixed (`aria-checked="mixed"`) but drew the same check mark as "all selected", so a user could read two selected rows as the whole page. It now draws a dash, filled like the checked state; all selected still draws the check and none selected draws nothing. The upstream Shadcn `Checkbox` is unchanged: the header uses a package-internal tri-state wrapper.
+- 9f13ee8: Clause-②: yes (widening: @object-ui/react gains the public export unmarkedRefusalLines; no accept set moves)
+  Metadata-protocol: none
+  
+  A save refused by two or more validation rules now lists each rule's message on its own line in the form's banner and toast, instead of the server's `; `-joined summary. A rule that names a field the form draws keeps its message under that input, and the banner says only the rest. The refusal envelope is unchanged: the console reads the one `fields[]` entry per rule it already carried. `@object-ui/react` adds `unmarkedRefusalLines(err, isShownInline)`, which answers those lines (or `null` when the refusal has no entry list, so the caller keeps the envelope's message).
+- bed8306: feat(console): an action's param dialog names its own submit verb — `submitText` is drawn on the submit button in place of "Confirm"
+  
+  Clause-②: yes (widening) — `@object-ui/types` `UIActionSchema` and `@object-ui/core` `ActionDef` gain the optional member `submitText`, typed by derivation from the spec's `ActionSchema`; `@object-ui/i18n` `useObjectLabel()` gains the resolver `actionSubmitText`. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **The console.** The dialog an action opens to collect its `params` draws the action's `submitText` on its submit button ("Send", "Log Call"). Both param-collection handlers resolve it the way they resolve `description`: the translation bundle's `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action) first, then the authored inline locale map collapsed to the active language, then the authored string. An action that names no verb keeps "Confirm", and the button still says "Uploading…" while a file param uploads. `action:button`, `action:icon`, `action:group` and `action:menu` forward the key to the runner.
+  - **Studio.** The action form offers the key ("Submit button label"), translated in every shipped locale.
+  - **`os i18n extract`.** Scaffolds `objects.OBJECT._actions.ACTION.submitText` (or `globalActions.ACTION.submitText`) for an action with a non-empty `params` — the only action `translateAction` overlays it onto — and no slot for any other action.
+  - **Spec.** The liveness ledger row for `ActionSchema.submitText` is `live`, with its author warning dropped; the key's description no longer says no renderer shows it.
+- 7eda096: The record header and the declared actions bar now draw an action's `pressed` predicate. A button whose action declares `pressed` is a toggle button: `aria-pressed="true"` and Shadcn's toggle-on face while the predicate holds for this reader and record, `aria-pressed="false"` while it does not. A predicate that cannot be evaluated draws the unpressed button and is reported once. Display only: a pressed action stays enabled and still runs. `ActionDef` declares `pressed`, derived from the spec's `ActionSchema.pressed`.
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+- 64bc7fa: Clause-②: no
+  Metadata-protocol: none
+  
+  On a phone, the record header title and the record path's stage labels no longer run off the right edge. Below the `sm` breakpoint, `page:header`'s record title column now takes the header's width, so a long title ellipsises as it does on desktop instead of being cut mid-word. The `record:path` phone row now gives every stage an equal share of the row (with a 2.5rem floor, past which it still scrolls): an ordinary stage label ellipsises and keeps its full text in `title`, and a terminal stage label wraps, as on the desktop rail.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [2302b92]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [f486e9c]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [47b6392]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [fc92c62]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [81b4599]
+- Updated dependencies [d7df639]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [48bffe3]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [b223072]
+- Updated dependencies [7614f8f]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [aa874c8]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [3702be4]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [8a1f467]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [5c083e8]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a5d7098]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [946395d]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [b339465]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [916531a]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [3ba5206]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [91e4652]
+- Updated dependencies [001c04b]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [99a6a78]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [847e424]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @objectstack/spec@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/react-runtime@18.3.0
+  - @objectstack/sdui-parser@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

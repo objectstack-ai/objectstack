@@ -1,5 +1,739 @@
 # @objectstack/service-automation
 
+## 18.3.0
+
+### Minor Changes
+
+- e01edb2: feat(service-automation): `oauth2` connector instances are served per dispatch, and an administrator connects an `authorization_code` one for their organization (ADR-0143 S1, part of #26702)
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0143 S0 (#28137) let a declarative connector instance declare `auth: { type: 'oauth2', ... }`, and this server held every such instance degraded. This slice serves it.
+  
+  - **`@objectstack/service-automation`**: an `oauth2` instance is materialized with a `credentialHandle` and no static `auth` (D4). The handle obtains the access token from `tokenUrl` (a confidential client authenticates with HTTP Basic, a public client sends its `client_id`), keeps it in memory only, refreshes it within the 30-second skew margin and once on a `401`, and shares one token request among concurrent dispatches. With a cluster service a refresh runs under the cluster lock. An unreachable or `5xx` token endpoint is `CONNECTOR_UPSTREAM_UNAVAILABLE`.
+    - `client_credentials` needs nothing more than the client secret its `credentialRef` names.
+    - `authorization_code` keeps its refresh token in a new object, `sys_connector_connection` (D3): one row per organization and instance, the token a `Field.secret`, never an access token, never a sign-in account (D6). An instance nobody connected is degraded "not connected", never a failed boot. A refused grant (`invalid_grant`) marks the row `reconnect_required` and degrades the instance until it is connected again. A dispatch uses its run's organization's connection; a run with no organization uses the only one, or is refused `422` when there are several.
+    - A provider opts in with `registerConnectorProvider(key, factory, { credentialHandle: true })`, saying it asks the handle on every request. An `oauth2` instance on any other provider stays degraded, so it is never called without its token. The built-in `rest`, `openapi` and `mcp` providers do not opt in yet (S2), and `app-credential` stays degraded until S2.
+    - A new plugin option, `connectorOAuthRedirectUri`, fixes the redirect URI; otherwise it is `OS_BASE_URL` (or `OS_AUTH_URL`) plus `/api/v1/automation/connectors/oauth/callback`.
+  - **`@objectstack/spec`**: `IAutomationService` gains four optional members, `getConnectorConnection`, `beginConnectorConnection`, `completeConnectorConnection` and `revokeConnectorConnection`, with their request and result types (`ConnectorConnectionState`, `ConnectorConnectionBegin`, …). `sys_connector_connection` joins the `service-automation` platform object names.
+  - **`@objectstack/runtime`**: the connection door (D5), every route needing `manage_metadata`:
+    - `GET` / `POST` / `DELETE /api/v1/automation/connectors/:name/connection` answer the organization's connection status, begin a connect (a fresh `state` and an `S256` PKCE challenge bound to the caller's user and organization, answered as the vendor's authorization URL), or revoke it. They take no query parameter.
+    - `GET /api/v1/automation/connectors/oauth/callback` is the vendor's redirect. Its query set is closed (`code`, `state`, `error`, `error_description`, `error_uri`, `iss`), each parameter once. The `state` is used once, and a callback from another user or organization is refused before its code is exchanged.
+    - No answer, refusal or log line carries a token, a code, a verifier or a client secret.
+- b358e79: feat(spec): `signed` joins declarative connector-instance auth, with `aliyun-acs3-hmac-sha256` as its first scheme (ADR-0143 D2.3, #26710)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One member is added to the instance-auth union and optional members to the provider context and materialization. Nothing an author or a provider wrote before is refused or re-shaped, so there is nothing for a migration to rewrite. -->
+  
+  An upstream that authenticates every request by a signature over the request itself, rather than by a token it is sent, had no way to be declared on a connector instance. ADR-0143 D2.3 adds that kind, `signed`, with a closed list of schemes. A scheme joins the list only together with its signer and its vendor test vectors. This release ships one scheme: Alibaba Cloud's OpenAPI V3 signature.
+  
+  - **`@objectstack/spec`**
+    - `ConnectorInstanceAuthSchema` gains `{ type: 'signed', scheme, keyId, credentialRef }`, a closed shape for each scheme. `keyId` is the public key identifier. The signing key is only ever a `credentialRef`.
+    - The publish door refuses an unknown or missing `scheme` at `auth.scheme`, naming the value it got and the schemes that ship. It refuses an inline `secret`, `privateKey`, `secretKey` or `accessKeySecret` by name, with the `credentialRef` prescription, and an authored `signature`. It refuses `signed` on `provider: 'mcp'` at `auth.type`.
+    - `@objectstack/spec/integration` gains the request-signer seam: `ConnectorRequestSigner` (`sign`, plus an optional `verifyResponse` for schemes that sign their responses), `ConnectorProviderContext.requestSigner`, and `ConnectorMaterialization.requestSignerApplied`.
+    - `connectorFetchOptions` takes an optional signer and signs every attempt `resilientFetch` makes, retries included. `readConnectorResponse` runs the scheme's response verification before parsing.
+    - With no signer, both behave exactly as before.
+  - **`@objectstack/service-automation`**
+    - A `signed` instance's key resolves through the same credential chain as the static kinds, with the same degrade on an unresolved reference.
+    - The key is bound to the scheme's signer at materialization, and the provider receives only the signer.
+    - The service refuses to serve a `signed` instance on a provider that does not acknowledge the signer, so such an instance never calls its upstream unsigned.
+    - A datasource that borrows a `signed` instance through `external.connector` is refused with `422`.
+  - **`@objectstack/connector-rest`, `@objectstack/connector-openapi`**
+    - Both apply a handed request signer to every request and acknowledge it.
+    - A static credential together with a signer is refused.
+    - `bearer`, `api-key` and `basic` requests are unchanged.
+- 5374967: feat(spec): `tencentcloud-tc3-hmac-sha256` joins the `signed` connector-instance auth schemes (ADR-0143 D2.3, #26710)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One member is added to the closed signing-scheme list and one shape to the `signed` union; the signer seam's `scheme` member is typed as that list instead of any string; that interface is in no release yet (it ships with the pending `26710-signed-connector-auth-aliyun` changeset), so no published surface narrows. Nothing an author wrote before is refused or re-shaped, so there is nothing for a migration to rewrite. -->
+  
+  A declarative connector instance can now declare Tencent Cloud's API 3.0 signature (v3) as its signing scheme. It joins Alibaba Cloud's V3 signature, which shipped with the `signed` kind.
+  
+  - **`@objectstack/spec`**
+    - `ConnectorSigningSchemeSchema` gains `tencentcloud-tc3-hmac-sha256`.
+    - The `signed` union gains its closed shape, `{ type: 'signed', scheme: 'tencentcloud-tc3-hmac-sha256', keyId, credentialRef }`. `keyId` is the SecretId. The SecretKey is only ever a `credentialRef`.
+    - The same publish refusals apply as for the first scheme: an inline key spelling by name, an authored `signature`, and `signed` on `provider: 'mcp'`. `secretId` is answered with `keyId`. An unknown scheme's refusal now lists both shipped schemes.
+    - `ConnectorRequestSigner.scheme` is typed as `ConnectorSigningScheme` rather than `string`. The interface ships for the first time in this release, together with the first scheme.
+  - **`@objectstack/service-automation`**
+    - The signer registry binds a `tencentcloud-tc3-hmac-sha256` instance's key to its TC3-HMAC-SHA256 signer.
+    - Every attempt is signed with a fresh `X-TC-Timestamp`, over `content-type` and `host`. The scope's service is the first label of the endpoint host.
+    - A request without a content type is signed and sent as `application/x-www-form-urlencoded`.
+    - The key never leaves the host.
+- 79ed6f7: feat(formula, plugin-email, messaging, automation, ui)!: a template `currency` hole with no argument formats in the organization's default currency, and with none the render refuses it; nothing formats in US dollars by default any more (#26939)
+  
+  Clause-②: no (narrowing) — a mail send or render (`sendTemplate`, `renderTemplate`, and the messaging email and inbox channels on them), a flow text slot (notify, http, screen, end) and a templated formula evaluation refuse a `{{ amount | currency }}` hole with no argument when no default currency reaches the render, which they formatted in US dollars before. Authoring is unchanged: the hole is still accepted at save and publish. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `content/docs/automation/flows.mdx` and `content/docs/data-modeling/formulas.mdx` state the tenant default and the refusal; no skill under `skills/**` taught the dollar default (the formula skill names the formatter grammar only), so no skill line changes.
+  
+  <!-- adr-0087: registered template-currency-no-argument-tenant-default -->
+  
+  **BREAKING** semantic change of the `currency` formatter's no-argument form (`@objectstack/formula`), served by every template dialect: mail templates, flow text slots, and action / bulk-action confirm and success copy.
+  
+  - **Before.** `{{ amount | currency }}` formatted the amount in US dollars (`$1,234.50`) whatever currency the amount was in and whatever the organization's default currency was.
+  - **Now.** It formats in the organization's default currency, the `localization.currency` setting (Setup → Localization) that a currency field and a dashboard measure already display in: `CN¥1,234.50` for an `en-US` reader and `¥1,234.50` for a `zh-CN` reader when the default is CNY. Every server-side read goes through `resolveLocalizationContext` (`@objectstack/core`); the UI reads `useLocalization().currency`.
+  - **With no default currency.** The render refuses the hole by name and names the remedy: set the default, or write `currency:CODE` (a mail template's refusal also names `currency:@path`). A mail send or render fails with `TEMPLATE_INVALID` and nothing is sent; a messaging delivery records it as a permanent failure. A flow node with such a hole in a text slot fails with the refusal, which no fault edge routes. An action's confirm or success sentence is shown as written, the existing fallback for a sentence the template engine refuses.
+  - **How each host hands the default over.** `SendTemplateInput.currency` / `RenderTemplateInput.currency` (`@objectstack/spec/contracts`), filled by the messaging email and inbox channels from the delivery's organization, and by the auth mails (verification, password reset, invitations, magic link, notices) from the organization the mail names or, for identity mail, the deployment-wide setting (`@objectstack/plugin-auth`, once, on the email service it wires); `AutomationContext.currency`, seeded once at run setup from the run's tenant (`AutomationEngine.setTenantCurrencyResolver`, which the automation plugin wires), persisted with a suspended run and inherited by a subflow; `EvalContext.currency` in `@objectstack/formula`, a reserved channel like `locale`, never bound as a root; `ActionRunner.setTenantCurrency` in `@object-ui/core`, installed by the React action providers.
+  - **Unchanged.** `{{ amount | currency:EUR }}` formats in the code it names, with or without a default. A variable, field or root named `currency` is a value, never the default. Compile, `validateExpression` and the publish gates accept the no-argument form as before. A template with no no-argument currency hole needs no default.
+  - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
+  
+  **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+  
+  **Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` and hole-grammar changes (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`, `26660-mail-hole-grammar`) describe a `currency` hole formatting in US dollars, and the first three say a hole with no argument still does. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
+- 385aa12: fix(spec)!: `QuerySchema.fields` (and so every nested `expand` entry) and the flow `get_record` node's `fields` refuse an empty projection, as every other published projection declaration and the in-process engine do (#27166)
+  
+  Clause-②: no (narrowing) — two published declarations of a read's projection, `QuerySchema.fields` (the QueryAST, which is also the value type of every `expand` entry, `EngineQueryOptionsSchema.expand` included, and the canonical `fields` of the transport-aware query slot) and `GetRecordConfigSchema.fields` (the flow `get_record` node), refuse a list naming no field, which they admitted before. Nothing is widened and no key is added, removed or renamed.
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/**` teaches `fields` and nested `expand` `fields` only as non-empty lists (`skills/objectstack-query/SKILL.md`, the `expand` value row and the nested-expand example), and teaches the `get_record` node without `fields` (`skills/objectstack-automation/SKILL.md`); no file teaches an empty projection, and every taught use stays true.
+  
+  <!-- adr-0087: registered query-and-get-record-empty-projection-refused -->
+  
+  **BREAKING** for a flow `get_record` node, or a query you build, that carries an empty projection. In this same release the in-process engine starts refusing `fields: []` at its `find` / `findOne` entry, top level and at any `expand` depth; without this change the two declarations below would still admit it, so such a `get_record` node would save clean and fail at its first run.
+  
+  - **Before (`@objectstack/spec@18.2.0`, the last release).** `QuerySchema.fields` and `GetRecordConfigSchema.fields` admitted any list of strings: `[]`, and a list with a blank or whitespace-only name. A `get_record` node with `fields: []` passed `os validate`, `defineStack` and `registerFlow`, and its run read every column of the row. A `POST /data/:object/query` body with `fields: []`, top level or on an `expand` entry, answered `200` with every column.
+  - **Now.** A list must hold at least one name, and no name may be blank (JSON Schema `minItems: 1`, and a non-blank pattern on each name). Both read the rule from the declaration `EngineQueryOptionsSchema.fields` and `QueryTransportParamsSchema.$select` read, so the refusal says the same thing: "Name at least one field", or "A field name cannot be blank" for a blank member. A `get_record` node with `fields: []` is refused where a flow is saved or registered, at `flows.N.nodes.M.config.fields` (`STACK_SCHEMA_INVALID` from `defineStack`), and its executor refuses the config before any read. An `expand` entry with `fields: []` is refused at `expand.<field>.fields`. A `POST /data/:object/query` body with `fields: []` is refused by the body schema, `400 VALIDATION_FAILED` at `query.fields`, which is the answer its `$select: []` spelling gets; an `expand` entry's `fields: []` in that body is refused the same way, at `query.expand.<field>.fields`.
+  - **`@objectstack/service-automation`.** The `get_record` node's designer form (`configSchema`) declares `fields` with `minItems: 1`, as its `limit` already mirrors the contract's floor, so the form no longer offers an empty list the save refuses.
+  - **Stored flows.** They are not rewritten, and there is no conversion for `os migrate meta --stored` to apply. A stored flow whose `get_record` node carries `fields: []` is refused by `registerFlow` on every pull of the stored definitions, so it stays unregistered, and its triggers unbound, until the row is edited: name the fields, or remove the key.
+  - **Unchanged.** The inferred types (`string[]`), a named projection, and leaving `fields` out to read every column.
+  
+  **Supersedes, in the same release:** `26954-engine-projection-empty.md` says, under **Unchanged**, that the in-process ObjectQL engine does not parse its options with that schema and that `engine.find(object, { fields: [] })` still reads every column, as before. The engine change in this release (`27008-engine-empty-projection-refused.md`) refuses that call at its `find` / `findOne` entry, so that sentence no longer holds: an empty projection is refused by the declarations and by the engine alike, and leaving `fields` out is the one way to read every column.
+  
+  **The remedy.** Name the fields to read, or remove `fields` to read every field; on an `expand` entry, the same for the related record. There is no mechanical rewrite: dropping the key reads every column, which is the widening the rule refuses, so the choice is the author's.
+- a0cc51f: fix(service-automation): a `connector_action` node evaluates a CEL envelope in `connectorConfig.input`, so a flow can send a per-record value to a connector's action
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  `connectorConfig.input` is now a value-slot map, resolved by the same per-key resolver as a `subflow` or `map` `input`, a `script`'s `inputs`, a `screen`'s `defaults` and a `notify` node's `templateData`:
+  
+  - **An envelope is evaluated.** A top-level value written as `{ dialect: 'cel', source: '…' }` is evaluated in the run's scope, and the action's handler receives the value it computes, its type kept (a string, a number, a list, a record). Before, the handler received the envelope object itself, so a declarative connector that put the value into a request path sent `[object Object]` and the run reported success.
+  - **A constant payload is unchanged.** Every other value, an envelope-shaped object nested inside a literal included, reaches the handler as written. The handler now receives a copy, so a handler that writes into its input no longer writes into the stored flow.
+  - **A fault fails the step.** An envelope that faults on the live variables (an absent key, a type error) fails the node with the slot (`input.<key>`) and its source, and the handler is not called, so nothing is sent upstream.
+  
+  To keep a value an author meant as a literal envelope-shaped object, nest it inside another literal; only a top-level value of the map is evaluated.
+- 3cc45cc: fix(service-automation)!: `registerFlow` refuses a malformed envelope and a `{…}` token in a `connector_action` node's `connectorConfig.input`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered connector-action-input-value-slot-judged -->
+  
+  **BREAKING** accept-set narrowing at `AutomationEngine.registerFlow`.
+  
+  - **Before.** The executor evaluates `connectorConfig.input` as a value-slot map, but registration judged value slots through a ledger that could address `config` only. A malformed CEL envelope (`{ dialect: 'cel', source: 'rec.' }`), a template envelope (`{ dialect: 'template', … }`) and a `{…}` token string (`'{rec.id}'`) all registered there, while the same three under a `subflow`'s `config.input` were refused. The malformed envelope failed the step at run time; the token string was handed to the action as its literal text.
+  - **Now.** The value-envelope and value-slot template checks read the ledger's `connectorConfig` entry, so all three are refused at registration, each located at `connectorConfig.input.<key>` with the same refusal a `subflow` input value draws. A flow row in `sys_metadata` carrying one is skipped at boot with a `warn` naming it, its trigger not armed.
+  - **Unchanged.** Literals and valid CEL envelopes register and dispatch as before; an envelope nested inside a literal is data; `input` stays optional.
+  
+  **The remedy.** Write a computed value as `{ dialect: 'cel', source: '…' }` and a constant as a literal; follow the CEL spelling each refusal names.
+- 3a2f4c0: fix(service-automation)!: a `map` whose item run was cancelled records the item as cancelled when the map's own run is resumed
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Ruling-ref: 6523833308
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authored key or accepted value is added, removed, renamed or re-shaped: `MapConfigSchema` keeps every key it had, and only the description of `outputVariable` gains a sentence. What changes is a runtime value, the entry a `map` records for an item whose run was cancelled, and a refusal of a resume that used to advance past an unrecorded item. No stored metadata holds either, so `objectstack migrate meta` has nothing to rewrite. -->
+  
+  `cancelRun` on a `map` item's run terminates that item and leaves the map's run parked on it. Resuming the map's run by its own id used to re-run the map, which moved past the item with nothing recorded: `results` held only the later items' outputs, `results[i]` stopped being item `i`, and the run finished `completed`.
+  
+  - **A cancelled item keeps its slot.** The resume reads the item run's history. When it says `cancelled`, the map goes on, and that item's entry in `outputVariable` (and in the node's `results`) is the closed marker `{ $status: 'cancelled', $itemRunId }` instead of an output. A downstream node reads it where it reads the results: `results[i]['$status'] == 'cancelled'`. A child flow's output keys are its declared variable names, which never start with `$`, so no real output looks like the marker.
+  - **Never a run or a success.** The node's `count` is the items that ran; the marker is not counted, and the cancelled item adds nothing to the step's totals.
+  - **Nothing to record is refused.** An item whose suspension is gone without a `cancelled` entry in its run history (no entry, an unreadable store, a run that completed without reaching the map) is refused `409 RESUME_CHILD_PENDING` before anything moves, the same code as an item that is still suspended.
+  - **Through a `subflow` too.** Resuming a run that waits on the map through a `subflow` link records the marker one level down, the same way.
+  - A caller still cannot write the map's handoff variables: a resume signal that writes the engine's `$` namespace is refused `400 INVALID_SIGNAL`, cancelled item or not.
+  
+  `MapConfigSchema.outputVariable`'s description in `@objectstack/spec` now says an element can be that marker.
+
+### Patch Changes
+
+- 2282aa8: **Shipped in 18.2.0**, whose CHANGELOG missed this entry; listed here one release late.
+  
+  feat(trigger-schedule): a scheduled run whose due time passed while no kernel was ticking is recorded as `missed` in the flow's run history, and is not run
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A hosted kernel that is stopped, evicted or restarting does not tick, and a scheduled flow due in that gap used to leave no trace: nothing ran and nothing said so, so an app could not tell a sweep had not happened. Now the next kernel to bind the flow records each such due time once, as a run-history entry with status `missed`:
+  
+  - **What the entry says.** `startedAt` is the due time that passed and `completedAt` the instant the next kernel detected it. No step ran, so `steps` is empty; `trigger.type` is `schedule`. The entry is listed by `listRuns` (and `GET /api/v1/automation/:name/runs`), `?status=missed` selects it, and it is durable history in `sys_automation_run`, aged out like every other terminal run.
+  - **Record only.** Nothing is run for a missed due time. It is never replayed or caught up; the flow's next due time runs as usual.
+  - **What counts as a silence.** The flow's job was still armed when its kernel stopped (its `sys_job` row still `active`: a kernel that stops ticking cancels nothing, while disabling, republishing or withdrawing a flow does), and a due time of the schedule that kernel armed falls after its last fire and before the next kernel bound the flow. A kernel that ticked through records nothing, and a flow that was deliberately unbound records nothing for the time it was unbound.
+  - **A refusal is not a silence.** A kernel that refuses the flow on purpose (scheduled work switched off for it, a missing acting organization, an unreadable schedule) now disarms the job by its name even when it never bound it, so the next kernel to run the flow does not read that kernel's life as missed due times. `FlowTrigger` gains an optional `release(flowName)`, which the engine calls when its scheduled-work policy refuses a flow before the trigger is reached.
+  - **Never a run that happened.** A due time whose tick window is claimed in the dispatch ledger (`sys_flow_dispatch`) was dispatched, landed or died in flight, and is not recorded. With no persisted ledger the check is skipped, and a ledger read that fails records nothing for that due time; the trigger says either at `warn`, naming the flow.
+  - **Bounded by the run history's own cap.** At most the run history's per-flow cap (`maxTerminalRunsPerFlow`, 100 by default) of the newest due times are recorded per flow per detection, since the store keeps no more terminal rows than that per flow. One `warn` line names the flow, how many earlier due times were not recorded and the earliest of them.
+  - **Two replicas, one row.** The entry's id is derived from the flow and the due time, so replicas that detect the same silence write one history row.
+  
+  `DbJobAdapter` gains `readArming(name)` (adapter-local, like `setReplayGuard`; not part of `IJobService`), which reads how a job's `sys_job` row was left. `AutomationEngine` gains `recordMissedRun(...)` and `missedRunLimit()`, the run stores expose their configured `maxTerminalRunsPerFlow`, and `TERMINAL_RUN_STATUSES` and the `sys_automation_run.status` options gain `missed`.
+- 8c0306f: fix(service-automation): switching a packaged flow off now records which administrator did it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The flow toggle (`POST /api/v1/automation/:name/toggle`) writes a row in the activation ledger (`sys_metadata_activation`). Until now, that row and its audit entry named nobody: `created_by` / `updated_by` on the ledger row and `user_id` / `actor` on the `sys_audit_log` row were null, even when a signed-in administrator made the request. The action and security catalog doors were fixed in the previous release; the flow door reaches the ledger through `IAutomationService.toggleFlow`, which could not carry the caller until its `caller` parameter landed.
+  
+  - `@objectstack/runtime`: the flow toggle door passes `toggleFlow(name, enabled, { userId })`, the signed-in user's id and nothing else.
+  - `@objectstack/service-automation`: `AutomationEngine.toggleFlow(name, enabled, caller?)` implements the contract's `caller`. The ledger write runs as that user, elevated and with no positions or permissions, so the engine and the audit plugin record the user's id on both rows. Only `userId` is read from `caller`. With no caller, or a caller without an id, the write stays unattributed, as before. `FlowActivationStore.setActive(row, options?)` takes the same optional `{ context }` as the shared activation store in `@objectstack/core`; a store that ignores it keeps working.
+- a3009cb: fix(plugin-approvals)!: a decision on a request whose flow was deleted while its run was paused is refused 409 `RESUME_TARGET_LOST` before anything is recorded, instead of being recorded and answered 500 `RESUME_FAILED` (#26477)
+  
+  Clause-②: yes (narrowing: an approve, reject or send-back on a request whose paused run can never resume, because its flow was deleted or the node it parked on was edited away, is refused 409 `RESUME_TARGET_LOST` with nothing written, where it was recorded as finalized and answered 500 `RESUME_FAILED`; widened: `@objectstack/service-automation`'s `AutomationEngine` gains the read-only public method `unresumableSuspensionCause(runId)`)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the change is a runtime refusal of a decision that could never take effect; nothing an author writes is renamed or removed, so there is no FROM → TO mapping to register -->
+  
+  A suspended run outlives the flow it belongs to: `DELETE /api/v1/automation/:name`, an uninstall or an overlay removal drops the flow and leaves the parked row. The approvals pre-flight asked only whether a suspension still existed, so it passed such a run, the decision was written and the request flipped to `approved`, and only the resume after it hit the engine's flow-gone exit. The approver got a 500 for a decision that stood, and the flow never continued.
+  
+  What changes:
+  
+  - `@objectstack/service-automation`: `AutomationEngine.unresumableSuspensionCause(runId)` answers why an existing suspension can never be resumed (`Flow 'F' not found for run 'R'`, or `Suspended node 'N' no longer exists in flow 'F'`), or `undefined` when it can continue or no suspension exists. It is the resume's own never-dispatched classification, shared with the resume path, so the two cannot disagree. It is read-only: it settles nothing (the resume still settles a gone-for-good run, as before), and it rejects when the suspended-run store cannot be read, as `hasSuspendedRun` does.
+  - `@objectstack/plugin-approvals`: the decision pre-flight (approve, reject, send back and resubmit) asks that question after the existence check. A run whose flow or parked node is gone answers the same 409 `RESUME_TARGET_LOST` a cancelled run already gets, naming the cause, and nothing is recorded: the request stays `pending` with its approvers. A store that cannot be read still fails open, as the existence check does.
+  
+  **BREAKING** for a caller that relied on the decision being recorded:
+  
+  - **Before.** Approving a request whose flow had been deleted wrote the decision, set the request to `approved`, and answered 500 `RESUME_FAILED` with `finalized: true` and `repairable: false`. The run stayed parked or stranded.
+  - **Now.** The same call answers 409 `RESUME_TARGET_LOST` and writes nothing.
+  - **Fix.** Nothing to change in metadata. To release such a request, recall it (the recall's resume settles the orphaned run), or restore the flow and decide again.
+- e438a55: feat(automation): a paused screen says whether another screen can follow, and the screen-flow runner reads Next or Submit and counts steps from it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A screen-flow wizard's primary button read Submit on every step, so a requester believed the whole wizard was submitted on step 1, and no step counter could be drawn: the paused screen carried nothing about the screens after it, and a flow can branch after any screen, so only the engine can tell.
+  
+  - **`@objectstack/spec` — `ScreenSpec.progress`** (optional, `ScreenProgressSpec`) on the paused screen a run serves, and its wire spelling on `TriggerFlowResponseSchema`. `nextScreen` is `'none'` (no path out of this screen reaches another one: the last step), `'certain'` (every path pauses on another screen first) or `'possible'` (a branch, a fault path, a loop, a pause that serves no screen, or a `subflow` decides — the engine does not guess). `step` (1-based) and `stepCount` are present only when every path agrees on them. Nothing a metadata author writes changes.
+  - **`@objectstack/service-automation`** fills it from the flow graph of the run when a `screen` node pauses (`readScreenProgress`). A screen that never pauses is not counted; one the run's caller may already have answered counts as possible, never certain. A screen inside a child run (`subflow`) carries only `nextScreen` when its own graph shows another screen, and no `progress` when it does not, because the parent may continue with screens of its own.
+  - **`@object-ui/app-shell` — `FlowRunner`** labels the flat step's button `common.next` while another screen is certain or possible and `common.submit` on the last, and draws `form.stepOf` beside the flow's name only when both `step` and `stepCount` are served. A screen served without `progress` keeps Submit and no counter, as before.
+  
+  What to do: nothing. A custom runner that reads the paused screen can read `progress` the same way.
+- 7735d1d: feat(service-automation): an administrator sets a declarative connector's credential in the environment's credential store, and a missing one degrades its instance instead of failing the boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A provider-bound `connectors:` entry names its secret with `auth.credentialRef`. Before, the open tier resolved that name from the server's environment variables only, and a name with no value failed the boot. On a hosted environment, where the administrator who installs an app has no server environment, a connector-bearing app could never be credentialed.
+  
+  The reference now resolves through three sources, in order: an environment variable of the same name (it always wins), then the new `sys_connector_credential` store, then the host's `credentialResolver` if one is injected. The store keeps one row per reference with its value in a `Field.secret` column: encrypted at rest by the host crypto provider and masked on every read. It is written through `setConnectorCredential` / `clearConnectorCredential` and listed by `listConnectorCredentialRefs` on the `automation` service, which the REST routes `GET`/`PUT`/`DELETE /api/v1/automation/connectors/credential-refs` serve.
+  
+  - A reference no source answers for degrades the instance naming it, with a reason that names the reference and how to set it. Before, it failed the boot. A `credentialResolver` that throws is still fatal at boot.
+  - Setting or clearing a credential reconciles at once: every instance naming the reference re-materializes, or is torn down and degraded, with no restart.
+  - A credential the upstream refuses (HTTP 401 / 403) degrades the instance with the upstream's message, never the value. An `mcp` instance is refused when it connects; a `rest` or `openapi` instance on the first call that answers 401 / 403, which still returns its answer. A stored credential is marked `rejected`, and its instance is not retried until the credential is set again, the declaration changes, or the server restarts; the mark itself stays until the value is set again or an `mcp` handshake proves it. A call answered 2xx does not clear it, since the endpoint may not check the credential; it only stamps the last-verified time of a credential still `set`. A credential from an environment variable or the host's resolver is retried on the usual backoff instead, since it can change where the service cannot see it, and the listing reports it `rejected` until a provider proves it or the server restarts.
+  - Under the `group` and `isolated` tenancy postures the store is not read, and writes to it are refused with a 403 naming the posture.
+  - A value starting with `secret:` is refused with a 400: the data engine would store it as a handle to another stored secret. Writes run one at a time with their reconcile, so the instances end on the value the store ends on; a first write another replica makes at the same moment answers 409.
+  - The value never appears in a log record, the listing, `GET /connectors`, an error body or a read of the object. A provider message that echoes it carries `[credential withheld]` instead, and so does one that echoes it percent-encoded or base64-encoded, including the base64 `user:value` pair of a basic credential.
+  
+  A deployment that relied on the boot failing for an unset reference now boots, with that instance degraded and named on `GET /api/v1/automation/connectors`.
+- 0c8c27e: feat(console): Setup → Integrations → Connector Credentials, and a credential step after a marketplace install
+  
+  Clause-②: yes (widening: `@objectstack/service-automation` exports `CONNECTOR_CREDENTIALS_UI_BUNDLE`, `CONNECTOR_CREDENTIALS_COMPONENT_REF` and `CONNECTOR_CREDENTIALS_NAV_CAPABILITY`, and registers a new Setup navigation entry `nav_connector_credentials` resolving component ref `automation:connector-credentials`; no existing key, route or shape changes)
+  Metadata-protocol: none
+  
+  An administrator can now set a connector credential without the API or the server environment.
+  
+  - **Setup → Integrations → Connector Credentials** lists every reference the credential routes list (`GET /api/v1/automation/connectors/credential-refs`): its status (`set`, `missing`, `rejected` with the upstream's reason), the connectors naming it, and when and by whom it last changed. Each writable reference has a masked input that starts empty, whatever is stored; an empty input means "keep the current value", so nothing is sent for it. Saving sends `PUT` and the row takes the entry the server answers after its reconcile. A reference with a value stored here has **Clear**, behind a confirmation, which sends `DELETE`. A reference an environment variable supplies is read-only.
+  - Where the routes refuse (`403` for a missing capability or a multi-organization tenancy posture, `501`, `503`), the page shows the server's own sentence as a configuration notice, and a server without the routes (`404` / `405`) gets "this server does not manage connector credentials". Neither is drawn as an error.
+  - **After a marketplace install** into this runtime — install-local, an org package installed here, or a cloud install once its app is served — the install result lists the credentials the package's connectors still need (the same listing, filtered by `connectors[].packageId`), each with the same masked input and **Skip for now**. A skipped reference stays listed with a link to the Setup page. The step comes after the install because the routes refuse a reference no installed package declares (`404`); the connectors materialize as soon as a credential is set, with no restart. Where the listing cannot be read, the install answer's `credentialNote` is shown instead.
+  - The navigation entry is contributed by `@objectstack/service-automation` at `kernel:ready` through the manifest service, so it appears only where the automation service runs, and only for a viewer holding `manage_metadata`. The label is translated in the four platform locales; the page and the step are translated in all ten Console packs.
+- a2f434d: fix(service-automation): a connector credential written or cleared through the door reaches every replica, not only the one that took the request
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `PUT` and `DELETE /api/v1/automation/connectors/credential-refs/:ref` reconciled the declarative connector instances of the replica that served the request. On a multi-replica deployment every other replica kept what it had: an instance whose stored value its upstream had refused is held with no retry timer, so a corrected credential took effect there only after a metadata reload or a restart, and requests landing on those replicas kept failing against a degraded connector.
+  
+  - **A fourth cluster lane.** After the row is written or cleared, the door publishes `{ originNode, ref }` on the `connector-credential.mutated` cluster channel. The payload is an address only: never a value, a fingerprint or a revision.
+  - **Peers converge from their own read.** A peer drops its own `originNode`, then runs its connector reconcile on its reconcile queue, which re-reads the shared `sys_connector_credential` rows. Exactly the instances naming a changed reference re-materialize, held ones included; a cleared reference degrades them, naming it.
+  - **Attached where the other lanes are.** `MetadataClusterBridgePlugin` (`@objectstack/service-cluster`) attaches the lane at `kernel:ready` beside `metadata.changed`, `metadata.mutated` and `datasource.mutated`, duck-typed against the automation service's `attachConnectorCredentialPubSub()`. As with lanes 2 and 3, it is skipped on the in-process `memory` cluster driver, so a single replica behaves as before.
+  - **What it does not promise.** Delivery is at-most-once, as for every lane of the family: a lost message is not retried, and the next metadata reload or restart still reconciles that replica.
+- 79d78b4: fix(service-automation): a refused write inside a `map` item or a `subflow` reaches the flow's caller as the structured refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow whose data node met a refusal (a permission, a validation rule, a duplicate, an app hook's declared refusal) already reported it on the run's result as `innerRefusal` (`{ code, message }`) and the producer-marked `userMessage`, and every flow door served them on the `FLOW_FAILED` details. When that write sat inside a `map` item or a `subflow`, the container built a new failure of its own and the two members were lost, so the caller got only the whole node chain as text (`Node 'recalc_each' failed: map 'recalc_each': item 0 (subflow '…') failed: …`). Both containers now carry the child run's members onto the failure they return, so the refusal reaches the top run however deep it was met, nested `map` → `subflow` included. A `map` stops at its first failing item and carries that item's refusal. A child that failed with no refusal carries none, as before, and the `error` text is unchanged.
+- e320e36: fix(service-automation): a refusal met inside a `try_catch` with no catch region, or by a `subflow` child that pauses and fails on resume, reaches the flow's caller as the structured refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow whose data node met a refusal (a permission, a validation rule, a duplicate, an app hook's declared refusal) reports it on the run's result as `innerRefusal` (`{ code, message }`) and the producer-marked `userMessage`, and `map` and `subflow` carry it across themselves. Two more paths built a new failure and lost both members, so the caller got only the node chain as text:
+  
+  - A `try_catch` with no catch region. It now carries the refusal its last failed attempt met, so a retry ladder reports the last attempt's refusal, never an earlier one's.
+  - A `subflow` child that paused (a screen, an approval, a wait) and then met a refusal on resume, when the caller resumed the parent's run id. The parent's failure now carries the child's refusal, through nested subflows too.
+  
+  Resuming the child's own run id (the leg a `map` item takes) already carried it, and is now pinned. A failure that met no refusal carries no member, as before, and the `error` text is unchanged.
+- ed8b237: feat: a datasource that names a connector instance in `external.connector` borrows that instance's credential at runtime, and its driver presents it per request
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The runtime half of ADR-0015 amendment D7. A datasource over a vendor API that names a declared connector instance now reads with that instance's credential — the one set under Setup → Connector credentials (or the instance's environment variable, or the host's resolver) — so one credential serves the connector's flow actions and the datasource's virtual objects:
+  
+  ```ts
+  connectors: [{ name: 'sap_s4', type: 'api', provider: 'openapi', providerConfig: { spec: './sap-openapi.json' },
+    auth: { type: 'bearer', credentialRef: 'sap_token' } }],
+  datasources: [{ name: 'sap_orders', driver: 'sap_orders', config: {},
+    schemaMode: 'external', external: { connector: 'sap_s4' } }],
+  // served by createODataDriverPlugin({ name: 'sap_orders', serviceRoot: '…' }), its auth left at 'none'
+  ```
+  
+  - **`@objectstack/service-automation`** registers a `connector-credential-source` service that lends a declared instance's credential (bearer, API key, basic), resolved through the same chain the connector itself uses. A credential set or changed through the credential door is picked up by the datasource's next request, with no restart.
+  - **`@objectstack/service-datasource`** borrows it when such a datasource connects (a plugin driver the engine already adopted from its `driver.<name>` service is judged at that connect too), is probed (Test connection) or is saved from the admin door, and hands the driver factory a credential handle on `DatasourceConnectionSpec.credential`. A datasource whose instance is not declared, is a catalog descriptor, has no `auth` credential or is disabled — or a stack with no automation service to lend it — is refused, fail-closed, with a reason naming the fix: it never connects to fail its first read with an upstream 401.
+  - **`@objectstack/driver-odata`** presents it: a datasource it serves that names `external.connector` borrows the handle at its first request and sends every request through `callWithBorrowedCredential`, in the form the instance's `auth` declares (bearer, basic, or an API key as a header or query parameter). An upstream's error text is stripped of every spelling of the presented credential before it is thrown (`withoutBorrowedCredential`), so an API key sent as a query parameter never reaches an error body through a service that echoes the request URI. `external.credentialsRef` keeps its path; both channels at once, or an `auth.scheme` set on the plugin beside the connector, refuse the request.
+  - **`@objectstack/types`** carries the contract (`IConnectorCredentialSource`, `ConnectorCredentialHandle`, `CONNECTOR_CREDENTIAL_SOURCE_SERVICE`) and `callWithBorrowedCredential`, the one rule a plugin driver presents a borrowed credential by: refreshed when it has expired, refreshed once and retried on a `401`, and a `503 SERVICE_UNAVAILABLE` naming the instance when the fresh one is refused too.
+  
+  Nothing changes for a datasource that binds its own secret with `external.credentialsRef`. The handle answers the grant-bearing kinds (OAuth2 and the app-credential exchange) through the same interface when connector instances can declare them; a driver written against it today needs no change then.
+- bacb3e6: fix(service-automation): a refusal met inside a `try_catch` catch region reaches the flow's caller as the structured refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `try_catch` whose catch region itself fails now carries the refusal that region met (a permission, a validation rule, a duplicate, an app hook's declared refusal) on the run's result as `innerRefusal` (`{ code, message }`) and the producer-marked `userMessage`, the same way a `try_catch` with no catch region already does. Before, the caller got only the node chain as text (`try_catch 'ID': catch region failed — …`), so a runner had no business message to show.
+  
+  The refusal carried is the catch region's own, never the try region's refusal that it handled. A catch region that failed with no refusal carries neither member, even when the try region was refused, and the `error` text is unchanged.
+- 4793aa4: fix(service-automation)!: a resume of a run parked on a `map` node, addressed by the parent's run id while the in-flight item's child run is still suspended, is refused with a code naming the child run id, instead of completing the parent past an item that never ran (#27877)
+  
+  Clause-②: yes (narrowing) — `resume(runId)` on a run whose resume chain reaches a `map` link with a still-suspended item child, which answered success before, is refused, with a new wire code `RESUME_CHILD_PENDING` (a new member of the `AutomationResult.code` union, the `TriggerFlowResponseSchema` `code` enum and the ADR-0112 ledger).
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is added, removed, renamed or re-shaped: the one protocol change is a new member of a response code enum, which no metadata author writes. A resume the engine accepted is refused before any state is touched, so there is no stored or authored shape for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at `AutomationEngine.resume` (`@objectstack/service-automation`), served by the generic resume route (`POST /automation/:name/runs/:runId/resume`) and the MCP `resume_run` tool (`@objectstack/runtime`), with its code added to the contract (`@objectstack/spec`).
+  
+  - **Before.** A run parked on a `map` node, resumed by its own id while the item's child run was parked on a pause open to the generic route (a `screen`, a `wait`, any node declaring `resumeAuthority: 'any'`), re-ran the map node. The map had already counted the in-flight item as started, so it moved past it: the resume answered success, the parent's run row was `completed`, and the item child stayed in `listSuspendedRuns()` with nothing left to continue into.
+  - **Now.** That resume is refused with the new code `RESUME_CHILD_PENDING` (409 on both doors), and the message names the item run id to resume instead. Nothing moves: the parent stays parked on the item, the map's progress is unchanged, and the item child stays resumable. The same holds when a `subflow` link leads down to such a map: the refusal names the item run of the deepest map link.
+  - **Unchanged.** Resuming the item run continues the map exactly as before, through the engine's own up-bubble. A parent parked on a `subflow` node still delegates the signal to its child. An item parked on a node only its owning service may resume still answers `PERMISSION_DENIED` (403) at the parent's id. A `map` whose item run is gone (cancelled, or never persisted) is not refused.
+  - **New code.** `RESUME_CHILD_PENDING` joins `AutomationResult.code`, `TriggerFlowResponseSchema.data.code` and the error-code ledger under `@objectstack/service-automation`; the runtime resume door maps it to 409. It is not `RESUME_IN_PROGRESS`: that one is benign and needs nothing from the caller, this one is answered only by resuming a different run id. A client that switches exhaustively over the code union gains one member.
+  - **Who sees it.** A caller that resumes a batch flow by the parent run id it launched with, while an item is parked on a screen or a wait.
+  
+  **The remedy.** Resume the item run the refusal names (also listed by `listSuspendedRuns()`, the run whose context carries the parent's id); the parent continues when the map's last item completes.
+- 00c9a0b: fix: a plugin-driver datasource refused at boot for its connector instance's credential recovers on the next granted borrow, and the connector call path withholds the form-encoded spelling of a credential
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-datasource`**: a datasource served by a plugin driver (driver-odata) that names `external.connector`, whose instance could not lend at boot (undeclared, disabled, no `auth`), was recorded `failed-credentials` and marked unavailable until a restart, although the driver borrows again on every request and served as soon as the instance was repaired. The first borrow the lender grants for that instance now retracts the verdict and the engine's unavailable mark, so Setup → Datasources shows it available again with no restart. A grant for any other instance leaves it standing. The degraded-boot banner says which recovery applies; with no lender registered the verdict still lasts until a restart.
+  - **`@objectstack/types`**: `IConnectorCredentialSource` gains an optional `onLent(listener)`, called with the instance's name on every granted borrow and returning the unsubscribe. A source without it keeps working; nothing then retracts such a verdict.
+  - **`@objectstack/service-automation`**: the connector credential source implements `onLent`. The connector call path's `credentialForms` now takes its list from `borrowedCredentialForms`, so an upstream that echoes an API key in a form-encoded query string (a space written `+`) has that spelling withheld from the degraded reason, the stored status and the logs, as a datasource borrowing the same credential already had.
+- 645534d: fix: a flow an administrator switched off is refused with a plain sentence, the same one a switched-off action reads as
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The flow refusal** (`@objectstack/service-automation`). A packaged flow switched off under Setup › Packaged automation is still refused `FLOW_DISABLED`, at every door that runs it: its trigger, a direct run, and a parent flow that calls it as a subflow. The message now reads: "This flow is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name." It no longer names the ledger table or the ADR. The engine writes those, with the code and the flow's name, to an `info` log line each time it refuses one. A flow disabled by its own status (`obsolete` / `invalid`) still reads "Flow '…' is disabled", so the two reasons stay distinguishable.
+  - **One sentence for both** (`@objectstack/types`, `@objectstack/objectql`). `describeTurnedOffPackagedItem('action' | 'flow')` builds the sentence. The action refusal (`ACTION_DISABLED`) reads from it too, and its wording is unchanged. Only the last clause differs: a flow can be copied under a new name, and an action cannot, so the action sentence still offers another action instead.
+- d6c0a75: fix(service-automation): a corrupt correlation cycle back to the resumed run no longer names that run as its own child
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The resume gate walks a run's linked-run chain to find the suspension a resume really continues. That walk now counts the caller's own run as already visited, so a corrupt `map:` / `subflow:` correlation that points back at it (A → B → A) ends the chain at B. The `409 RESUME_CHILD_PENDING` refusal then names the item run B to resume, never run A, the one the caller is already resuming.
+  
+  The client's `resume()` docs, the service-automation README and the automation QA checklist now list `409 RESUME_CHILD_PENDING` beside the other resume refusals that leave the suspension intact.
+- 066ff51: fix(service-automation): a degraded connector instance whose backoff retry meets a configuration fault stops retrying and reports the configuration reason
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A declarative connector instance whose upstream was unreachable at boot is degraded and retried on a backoff (#3017). When the upstream later answered and the provider refused the instance's configuration (for example an `mcp` or `openapi` `providerConfig.include` naming a tool or operation the upstream does not offer), the fault was logged and skipped, but the instance stayed in the retry set: `GET /api/v1/automation/connectors` kept the stale "could not reach" reason, and the timer reconnected against a fault no retry can clear.
+  
+  ADR-0097 does not retry a configuration fault, and now that holds on this path too:
+  
+  - The instance's `degradedReason` becomes the provider's configuration message, and the retry timer no longer schedules it. An unchanged metadata reload does not re-attempt it; an edit of its declaration, or a restart, does.
+  - When a previously-materialized connector is still serving (a changed entry whose new configuration was pending a retry), it keeps serving and the retry stops.
+  - A credential the upstream refuses on the retry keeps its hold path, and an upstream still unreachable on the retry keeps degrading and retrying, as before.
+- ec7e15a: fix(service-automation)!: a `connector_action` call whose evaluated input breaks the action's declared `inputSchema` fails the step before dispatch, naming each missing or mistyped parameter, and nothing is sent (#27995)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export, type or error code is removed or renamed: `ConnectorActionSchema.inputSchema` and `connectorConfig.input` keep their shapes, and the refusal reuses the existing `VALIDATION_ERROR` code of the platform vocabulary. What narrows is the run-time dispatch of one node: a call the action's own declared schema says is wrong is no longer sent upstream. Nothing stored is rewritten or re-judged at rest, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** (an accept-set narrowing at run time), shipped as `patch`: nothing a metadata author writes changes shape (`Metadata-protocol: none`), so the level follows the kind, and the banner and the ADR-0087 disposition stay.
+  
+  **FROM.** The `connector_action` node evaluated `connectorConfig.input` and handed it to the connector's handler unchecked. The action's declared `inputSchema` (built from the OpenAPI operation by `connector-openapi`, passed through from `tools/list` by `connector-mcp`, or written by a code connector such as `connector-slack`) was advisory: a call to an OpenAPI `getPet` with `input: {}` reached the remote URL although `petId` is declared `required`, and what came back was the remote's choice.
+  
+  **TO.** After the input's value slots are evaluated and before the handler is called, the evaluated input is judged against the action's `inputSchema`:
+  
+  - Judged: `required` at every object level reached, `type` (a type list, OpenAPI 3.0 `nullable: true`, and `integer` as a whole number), and descent through `properties` and array `items`. `null` on an optional property counts as absent, as a provider that serializes a section drops it; `null` on a required property is judged against its type. Text is never converted to a declared number or boolean.
+  - Not judged, so never refused here: `$ref`, `oneOf` / `anyOf` / `allOf`, `enum`, `format`, bounds, `pattern`, `additionalProperties`, and any `type` name outside the JSON Schema seven. The remote still judges those, as before. An action that declares no `inputSchema` dispatches whatever it is given.
+  - A failing call fails the step with `code: 'VALIDATION_ERROR'` on `$error`. The error names each problem by its dotted path (`missing required 'path' (with 'path.petId')`, `'query.verbose' must be boolean, got string`, `'tags[1]' must be string, got number`), says nothing was sent, and points at `GET /api/v1/automation/connectors`, which lists the action's schema. The handler is never called.
+  - The failure is a `runtime` one, not a guard refusal: the input can come from run data, so a `fault` edge or a `try_catch` region can handle it.
+  
+  **`@objectstack/connector-openapi`.** So that the check never demands what a caller cannot supply, an OpenAPI action's `inputSchema` no longer lists the `Accept`, `Content-Type` and `Authorization` header parameters (OAS 3.0.3 §4.7.12.1 says they SHALL be ignored; the transport and `auth` set them), nor the header or query parameter the connector's `api-key` `auth` fills (`headerName`, default `X-API-Key`, or `paramName`). The credential reaches the request from `auth` as before; a flow never writes it into `connectorConfig.input`. `GET /api/v1/automation/connectors` lists the action without them.
+  
+  **Who sees it.** A flow or agent whose `connector_action` input omits a parameter the action declares `required`, or sends one of a type the action does not declare: that step now fails before the call instead of the remote answering it. For example, an OpenAPI path parameter declared `type: integer` sent as the string `"7"` (a text field holding an id is the usual source) is refused, where the provider used to interpolate it into the path; the error then says to cast it.
+  
+  **Fix.** Make `connectorConfig.input` satisfy the action's `inputSchema`: supply every required parameter, and send each one as the declared type (`{ path: { petId: 7 } }`, not `{ path: { petId: '7' } }`). A value computed by a CEL envelope is judged on what it evaluates to, so cast text to the declared type there: `{ path: { dialect: 'cel', source: '{"petId": int(record.vendor_id)}' } }`, with `double()` for a number and `bool()` for a boolean.
+- cc5586d: fix(service-automation): a connector definition saved, published or deleted on one replica now converges every replica
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A connector instance definition changed through the per-item publish door re-materialized only on the replica that published it: that replica's `metadata:reloaded` hook ran the connector reconcile, but the hook is kernel-local, and the cluster's metadata-mutation lane (lane 2, `metadata.mutated`) delivered the change to the other replicas' mutation listeners, where the automation plugin acted on `flow` mutations only. Peers kept serving the old definition until a reload or a restart. A direct active save (`PUT /api/v1/meta/connector/:name`) raised no reload at all, so it did not re-materialize even the replica that wrote it.
+  
+  The automation plugin's metadata-mutation listener now queues the same soft reconcile `metadata:reloaded` runs for a `connector` mutation that is not a draft. No new cluster channel is added: a peer converges on the lane 2 replay it already receives, re-reading the shared store.
+  
+  - A publish on the writing replica reconciles from both of its signals; the second run finds the instance unchanged, so the provider is still called once per changed definition.
+  - A direct active save re-materializes the writing replica and converges its peers. A deleted connector is torn down on every replica.
+  - A draft save, and a mutation of any other type, runs no connector reconcile. Flow mutations are handled as before.
+- b59bf60: fix(service-automation): a `connector_action` dispatch to a held connector instance names what recovers it, instead of saying the platform retries it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A degraded connector instance that the platform does not retry (it is **held**) used to answer a dispatch with "Dispatch is unavailable until that is resolved; the platform retries automatically." Nothing retried it. Now the refusal names the fix:
+  
+  - **A configuration fault met on a retry** (#27992), or **a credential written into the declaration that the upstream refused**: "Dispatch is unavailable until its declaration is edited (or the server restarts); the platform does not retry it."
+  - **A stored credential the upstream refused** (#27237): "Dispatch is unavailable until credential '<ref>' is set again (or the server restarts); the platform does not retry it."
+  - **An instance on the backoff** (an unreachable upstream, an environment or vault credential the upstream refused) keeps "the platform retries automatically".
+  
+  The engine's degraded-connector record carries the hold: `registerDegradedConnector` takes an optional fifth argument, `RegisteredConnector` gains an optional `degradedHold`, and `AutomationEngine.getConnectorDegradedHold(name)` reads it. The engine's `Connector registered DEGRADED` warning no longer says the materializer retries a held instance. A degraded reason that ends with a full stop no longer gets a second one in the refusal.
+- c48cd2c: fix(service-automation)!: a connector pull whose input breaks the read action's declared `inputSchema` is refused before the action is called, with `VALIDATION_ERROR` naming each parameter (#28040)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export, type or error code is removed or renamed: `MappingSchema.connectorSource` and `ConnectorActionSchema.inputSchema` keep their shapes, and the refusal reuses the existing `VALIDATION_ERROR` code the pull door already answers its other input faults with. What narrows is the run-time dispatch of the connector pull: a call the action's own declared schema says is wrong is no longer sent upstream. Nothing stored is rewritten or re-judged at rest, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** (an accept-set narrowing at run time), shipped as `patch`: nothing a metadata author writes changes shape (`Metadata-protocol: none`), so the level follows the kind, and the banner and the ADR-0087 disposition stay.
+  
+  **FROM.** `pullConnectorSource` (the door a `job`'s `pull` runs) built the action's input from `connectorSource.input` plus the watermark parameter and called the connector's handler with it unchecked. The check the `connector_action` flow node gained in #27995 did not cover this door, so a pull whose input missed a parameter the action declares `required` still reached the remote API; for an OpenAPI `getPet`-style action the path placeholder was sent literally.
+  
+  **TO.** The input the pull is about to send, with the watermark parameter added, is judged against the action's `inputSchema` by the same check the `connector_action` node runs (one shared helper, so the two doors judge alike: `required`, `type` with OpenAPI 3.0 `nullable`, descent through `properties` and `items`; keywords outside that subset never refuse). A failing input throws `ConnectorPullError` with `code: 'VALIDATION_ERROR'`, `status: 400` and the new `reason: 'input_schema_mismatch'`, naming each problem by its dotted path (`missing required 'query.since'`, `'query.limit' must be integer, got string`); a text value where a number or boolean is declared adds a hint to write it as that JSON type (no CEL runs on this door, so there is no cast to suggest). The action is not called and nothing is written, so the job run is recorded `failed` and its `retryPolicy` applies. An action that declares no `inputSchema` pulls whatever it is given, as before. The `connector_action` node's behaviour and messages are unchanged.
+  
+  **TypeScript.** `ConnectorPullRefusalReason` gains `'input_schema_mismatch'`, and `ConnectorPullRegistry` now requires `getConnectorDescriptors()` (where the action's `inputSchema` is read). The automation engine already has it; a hand-built registry passed to `pullConnectorSource` adds it.
+  
+  **Who sees it.** A `mapping` whose `connectorSource.input` omits a parameter the read action declares `required`, or sends one of a type the action does not declare: its pull now fails before the call instead of the remote answering it. A required parameter that only the watermark supplies is absent on the first pull (nothing is stored yet), so that pull is refused too.
+  
+  **Fix.** Make `connectorSource.input` satisfy the action's `inputSchema`, which `GET /api/v1/automation/connectors` lists: supply every required parameter, and write each one as the declared type (`{ query: { limit: 50 } }`, not `{ query: { limit: '50' } }`). The watermark parameter is sent as the value stored in its target field, so the action must declare that parameter with the stored field's type (a text or datetime field ⇒ `string`, the ISO form a pull sends for a date), and must not declare it `required` unless `connectorSource.input` also gives it a first value.
+- 86c6955: fix(service-automation): a currency hole refused after a failed tenant-settings read is a runtime failure, not a guard refusal (#28056)
+  
+  Clause-②: no (a refusal that followed a failed read of the organization's default currency is now an ordinary runtime failure, which a `fault` edge routes; every run that succeeded still succeeds, and a refusal after a read that succeeded stays the guard refusal it was)
+  Metadata-protocol: none
+  
+  A flow text slot's `{{ amount | currency }}` hole with no argument formats in the organization's default currency (`localization.currency`). When none reached the run, the node was refused as a guard refusal: a `fault` edge could not route it, and the message told the operator to set the default currency. That is right when the read succeeded and found none. It was also what happened when the read of `sys_setting` failed, so a transient backend fault failed a `notify` run with a misleading cause, where a retry would succeed.
+  
+  - **The resolver says when the read failed.** The automation plugin's tenant-currency resolver now rejects when `resolveLocalizationContext` answers `readFailed`, as the messaging channels' reader does (#27257). `FlowTenantCurrencyResolver` documents it: `undefined` means the read succeeded and found no default; a rejection means the read failed.
+  - **Run setup notes the failure.** Run setup, and a resumed segment that re-reads the default, still leave `AutomationContext.currency` unset, and note the failed read beside that run's context. Nothing is added to `AutomationContext` or the persisted run.
+  - **The refusal is graded.** When a text slot refuses after a failed read, it is rendered once more with a placeholder currency. If that renders, the only refusal was the missing default: the node fails with a plain runtime error that says the setting could not be read, so a `fault` edge routes it and a flow under `errorHandling.strategy: 'retry'` succeeds once the read does. If it still refuses, a default would not cure it, and the guard refusal stands.
+  - **Unchanged.** A read that succeeds and finds a default formats in it. A read that succeeds and finds none refuses the node as before.
+  
+  It applies to every text slot a node renders (`notify`, `http`, `screen`), since they share one renderer.
+- cbb6df1: fix(service-automation): a `runAs: 'user'` run carries its user's posture rung, so a flow run as the platform administrator is served the ledger's deployment-level rows its user's request is served (#28070)
+  
+  Clause-②: yes (widening) — `RunIdentityContext` (barrel-exported), and so the data context `resolveRunDataContext` answers, gains an optional `posture` member, and `FlowUserGrants` gains one; a `runAs: 'user'` run seeded with `PLATFORM_ADMIN` is served the rows that rung admits.
+  Metadata-protocol: none
+  
+  A request carries the posture rung its user resolves to (`ExecutionContext.posture`, derived in `@objectstack/core`'s `resolveUserAuthzGrants` and copied on by `resolveAuthzContext`). A `runAs: 'user'` automation run seeded the same user's positions, permission sets, peers and email through the same resolver, and no rung. Every reader keyed on the rung then answered the run as for a principal below it. The measured case: after #26750 the compliance ledger's deployment-level rows (`tenant_id` NULL) are served to `PLATFORM_ADMIN` alone, so a flow run as the platform administrator was served organization rows only. That failed closed (fewer rows, never more).
+  
+  - **Now.** Run setup takes the rung off the resolution it already makes for the run's user (the automation plugin's grants bridge forwards `resolveUserAuthzGrants`' own `posture`; nothing in this package derives one), seeds it beside the positions and permission sets, and every data node carries it to the data engine. The platform administrator's run is served the deployment-level rows, as their request is.
+  - **Only with the grants it came from.** The rung is seeded exactly when the run's positions and permission sets are resolved at setup. A context that brought its own grants (a door's pre-resolved envelope, an agent's narrowed ceiling) gains no rung from a re-resolution, so a rung never stands beside grants it was not derived from. A value that names no rung is not carried.
+  - **After an approval decision.** The decision switch removes the submitter's rung with their other facts, and the decider's segment carries the decider's own.
+  - **Unchanged.** A `runAs: 'system'` run (elevated; no rung is resolved or carried). A member's run is served what the member's request is served, as before: a rung below `PLATFORM_ADMIN` admits nothing a missing one did not, and plugin-security's tenant-wall exemption already enforced the narrower of the carried rung and its capability probe.
+  - **Still without a rung.** A run started through the REST or action door, which forwards the request's positions and permission sets but not its rung, keeps failing closed for the rung's readers until that door forwards it.
+- 7d846b5: fix(runtime): a flow started through the REST or action door carries its caller's posture rung beside their positions and permission sets, so a platform administrator's manual run is served the ledger's deployment-level rows their request is served (#28099)
+  
+  Clause-②: yes (widening) — `AutomationContext` (`@objectstack/spec/contracts`) gains one optional member, `posture` (typed `ExecutionContext['posture']`); the REST trigger door and the action door fill it from the request's resolved execution context, and a run carrying it is served what that rung admits.
+  Metadata-protocol: none
+  
+  A request carries the posture rung its user resolves to (`ExecutionContext.posture`, ADR-0095 D2/D3). Since #28070 a `runAs: 'user'` run whose grants the engine resolves (a record-change run, the segment after an approval decision) carries that rung too. A run started through a door did not: the trigger door (`buildAutomationContext`, `POST /api/v1/automation/:name/trigger`, the legacy trigger route and a declared `type: 'flow'` endpoint) and the action door (`dispatchFlowAction`, REST `/actions` and MCP `run_action`) forward the caller's positions and permission sets, so run setup does not re-resolve them, and they dropped the rung. A platform administrator's manually-run flow was then served the organization's ledger rows only. That failed closed (fewer rows, never more).
+  
+  - **Now.** Both doors copy the request's own `ec.posture` onto the run context, as they copy its positions, permission sets, organization and locale. Run setup keeps it beside the forwarded grants and does not re-derive it, and every data node carries it to the data engine. The platform administrator's door-started run is served the deployment-level rows, as their request is.
+  - **The caller's own rung, as-is.** It is read off the execution context only (a request body key named `posture` stays a flow param), never derived from the flow's author, never raised, and never filled in when the request carries none: such a run carries no rung, as before.
+  - **Only beside the grants it came from.** A door forwards positions and permission sets only when they are non-empty, so a rung can arrive without them. Run setup then drops the forwarded rung and resolves the grants itself, taking the rung off that same resolution; a run whose grants stay unresolved (the resolver has no rung, rejects, answers nothing, or is not wired) carries none.
+  - **Docs.** The trigger route's *Identity* paragraph in `flows.mdx` now names every fact the doors forward (user, positions, permissions, tenant, posture rung, language), and `record-view-auditing.mdx` no longer says a door-started run is "not, yet" served the deployment-level rows.
+  - **Unchanged.** A run whose grants the engine resolves (#28070), the approval decision switch, and a `runAs: 'system'` run.
+- 3238750: feat(spec)!: `oauth2` and `app-credential` join declarative connector-instance auth, and the runtime `oauth2` variant is retired (ADR-0143 S0, #28137)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered connector-auth-config-oauth2-retired -->
+  
+  An upstream that takes no static credential (an OAuth 2.0 API, a Feishu, DingTalk or WeCom app) had no open-tier way to be declared: the instance `auth` stopped at four static kinds, and the runtime `authentication` shape had an `oauth2` variant that held a client secret and a refresh token inline and that nothing ran. ADR-0143 opens the grant-bearing kinds on the instance, with the secret as a reference.
+  
+  - **`@objectstack/spec`**: `ConnectorInstanceAuthSchema` gains `oauth2` (D2.1), one strict shape per `grant` (`authorization_code` with PKCE always on, `client_credentials` for a confidential client), and `app-credential` (D2.2, `vendor` `feishu` / `dingtalk` / `wecom`, `appId`, a required `credentialRef`). The publish door refuses a missing `tokenUrl`, `clientId` or `authorizationUrl` at its key under `auth`, except on `provider: 'mcp'` over `http`, where the MCP authorization flow discovers them. An inline `clientSecret`, `refreshToken`, `accessToken` or `appSecret` is refused by name with the `credentialRef` prescription. `signed` is not a member (#26710). `ConnectorOAuth2Schema` is removed from `ConnectorAuthConfigSchema` (D7), and `ResolvedConnectorAuth` stays the four static kinds. The per-dispatch handle types (`ConnectorCredentialHandle`, `BorrowedConnectorCredential`, `BorrowedConnectorAuth`, `ConnectorCredentialRequest`) move into `@objectstack/spec/integration`, and `ConnectorProviderContext` gains an optional `credentialHandle` (D4). The D3 entry `connector-auth-config-oauth2-retired` names the removal for `os migrate meta`.
+  - **`@objectstack/types`**: re-exports the four handle types from `@objectstack/spec/integration`; the same names, structurally unchanged.
+  - **`@objectstack/service-automation`**: this server does not run the per-dispatch token resolution yet (ADR-0143 S1). A grant-bearing instance is held **degraded** with a reason that names its kind, and its upstream is never called without the credential. A datasource that borrows it through `external.connector` is refused with `422`, naming the kind.
+  
+  **BREAKING** for a connector that writes `authentication: { type: 'oauth2', ... }`.
+  
+  - **Before.** `authentication: { type: 'oauth2', authorizationUrl, tokenUrl, clientId, clientSecret, refreshToken }` was accepted, with the secret and the refresh token inline, and no runtime obtained or refreshed a token from it.
+  - **Now.** `ConnectorAuthConfigSchema` refuses it at `type`, with a prescription naming ADR-0143 D7 and the replacement. No first-party source declares it.
+  - **Fix.** Declare the grant on a declarative instance's `auth`, with the secret as a reference: `auth: { type: 'oauth2', grant: 'authorization_code', authorizationUrl, tokenUrl, scopes, clientId, credentialRef: 'VENDOR_CLIENT_SECRET' }`, or `grant: 'client_credentials'` without `authorizationUrl`. Code that registers a connector with a token it already holds passes `{ type: 'bearer', token }`.
+- 898e439: fix(plugin-approvals): a revise-window recall on a batch item finds its batch run past the first 1000 parked runs
+  
+  Clause-②: no (a recall on a store with more than 1000 parked runs now wakes its batch, as it already does below that; no schema, accept set, error code or result field changes)
+  Metadata-protocol: none
+  
+  The recall found the batch above the item it cancels in `listSuspendedRunsDurable()`. On a database-backed store that listing reads one page of 1000 `paused` rows, and a process adds only the runs it parked itself. So when another replica (or this process before a restart) parked the batch and more than 1000 runs were parked ahead of it, the recall did not find the batch. The batch stayed parked on the cancelled item, and the recall said nothing.
+  
+  - **Now.** Before it cancels the item, the recall asks the engine for the batch through the item's own link to it. The new `AutomationEngine.suspendedMapParentOf(itemRunId)` reads the item's suspension, then its parent's, by id. It answers the parent only while the parent is parked on `map:<itemRunId>` at the `map` node that launched the item. The read comes before `cancelRun` because the cancel removes the item's suspension, and the link with it.
+  - **Unchanged.** Below 1000 parked runs the recall wakes the batch as before. A recall with no batch above it, and a run parked on the item at a node other than the built-in `map`, are left alone as before. A failed lookup is reported in `resumeError` after the cancel, as before.
+- 00a350f: fix(plugin-approvals): re-issuing a restored approval continuation proves the pause past the first 1000 parked runs
+  
+  Clause-②: no (a re-issue on a store with more than 1000 parked runs now proves the pause as it already does below that; no schema, accept set, error code or result field changes)
+  Metadata-protocol: none
+  
+  `continueRestoredRun` proves the pause it continues is the one the request's outcome was issued at, by reading where the run is parked. It read that from `listSuspendedRunsDurable()`. On a database-backed store that listing reads one page of 1000 `paused` rows, and a process adds only the runs it parked itself. So when another replica (or this process before a restart) parked the run and more than 1000 runs were parked ahead of it, the run was on no page. Every re-issue was refused with `INVALID_STATE` "parked at no node this engine can see", every retry read the same page, and the recorded outcome never took effect.
+  
+  - **Now.** The proof asks the engine for that one run. The new `AutomationEngine.suspensionOf(runId)` reads the run's suspension by id, through the same strict, store-authoritative read `hasSuspendedRun` uses, and answers its flow, node and correlation, or `undefined` when it is not suspended. It rejects when the store cannot be read.
+  - **Unchanged.** Below 1000 parked runs the re-issue proceeds as before. A run that is not parked, or is parked at another node, is still refused, and the refusal still names the node. An engine without the read is still refused; the refusal now names `suspensionOf` as the missing read.
+- 4a7b99f: fix(service-automation): harden the OAuth2 connector connection door (ADR-0143 S1 follow-up, #28326)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-automation`**:
+    - **The connect that is waiting for its callback is held sealed.** The pending authorization (the PKCE verifier, the user, the organization and the redirect URI) is held in the cluster KV, or in process on a single node, as an AES-256-GCM envelope under a key derived from the raw `state`. The server keeps only the state's digest. A party that can read the KV learns none of those values. A value that is edited, or moved to another state's slot, opens as nothing, and its code is never exchanged. A connect begun before the upgrade and completed after it is refused as expired; begin it again.
+    - **The connection row is written only over the revision that was read.** A refresh, the "reconnect required" mark and a reconnect are each one conditional write (`where: { id, revision }`), so a stale writer on any replica never overwrites a newer grant. A reconnect that loses such a race is refused `503` and keeps nothing; begin it again.
+    - **A connection store that cannot be read refuses a connect or a revoke with `503`**, the declared answer, instead of an undeclared `500`.
+    - **An `oauth2` token endpoint's redirect is refused, never followed.** The token request carries the client secret and the refresh token, and a `307` or `308` would replay them to the `Location` it names.
+    - **Plain `http://` is accepted only to a loopback host:** `localhost`, a `127.0.0.0/8` address or `[::1]`. A `*.localhost` name is no longer accepted, because the system resolver sends it to DNS like any other name. Every other `tokenUrl` or `authorizationUrl` must be `https://`, or the instance is held degraded with the field named.
+  - **`@objectstack/runtime`**: the route ledger row for `DELETE /api/v1/automation/connectors/:name/connection` now says that a revoke is local only. No RFC 7009 revocation is sent to the vendor yet, because no revocation endpoint is known for the instance until ADR-0143 S2 discovery. The refresh token stays valid at the vendor until it expires or is revoked there.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [1c63231]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [cee4b16]
+- Updated dependencies [cb8988e]
+- Updated dependencies [4702c46]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [652da20]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [5782008]
+- Updated dependencies [4f93696]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [57e00f5]
+- Updated dependencies [c90b5b1]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [b29a88c]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [6845035]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [da7bcc8]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [308f826]
+- Updated dependencies [e00374a]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [86f2afe]
+- Updated dependencies [e0aed00]
+- Updated dependencies [875d007]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [475d428]
+- Updated dependencies [4a5396b]
+- Updated dependencies [a3d24c9]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [9ae6384]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [642dd4f]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [7591c60]
+- Updated dependencies [6caca51]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [b339465]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [d5951c8]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [5055b10]
+- Updated dependencies [488b3ed]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [f048e42]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [b9b22b9]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/metadata-protocol@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/plugin-auth@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

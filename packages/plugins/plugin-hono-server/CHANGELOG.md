@@ -1,5 +1,238 @@
 # @objectstack/plugin-hono-server
 
+## 18.3.0
+
+### Patch Changes
+
+- 481ade6: fix(runtime)!: a same-origin `type: 'api'` action is dispatched through the action doors, so its packaged-action switch holds (#27506)
+  
+  Clause-②: no (narrowing) — no key, accepted value or export of `@objectstack/spec` changes. Two published runtime surfaces narrow for their consumers: `POST /actions/_activation/:object/:action` now refuses (409) to flip an off-origin `type: 'api'` action it accepted and recorded before, and the `headers` member of `@objectstack/runtime`'s `HttpDispatcherResult.response` is widened from `string` values to `string | string[]`, which a reader that assigned a value to a `string` no longer compiles against. An api action that reaches `POST /actions/:object/:action` or MCP `run_action` now passes the doors' gates (the sign-in floor, `requiredPermissions`, the activation switch, the param contract, the subject-row load) before its target runs, where the console's direct fetch passed none of them.
+  Metadata-protocol: none
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author writes is retired, renamed or re-shaped: no metadata key, accepted value or stored row moves, and `objectstack migrate meta` has nothing to rewrite. What narrows is a door's answer (409 where a flip of an off-origin api action used to be recorded) and a published TypeScript member's value type (`HttpDispatcherResult.response.headers`, widened to `string | string[]`), whose affected party is a code consumer reached by its own compiler, not a metadata upgrader; the member's declaration is neither a Zod projection nor referenced by any `packages/spec` surface. No ADR-0087 id is named or touched (not registered or already-registered), the packages publish (not unpublished), the widened member was concretely typed at base (not type-surface-only), and no export is retired (not runtime-export-retired). -->
+  Skills-docs: `content/docs/ui/actions.mdx` (the `type` table and the "Call it over REST" dispatch table) now state the same-origin forward and the off-origin refusal; no file under `skills/**` teaches that an api action is refused by the doors or invisible to MCP (`skills/objectstack-ui/rules/actions.md` shows an api action only as a declaration), so no skill line changes.
+  
+  Switching off a `type: 'api'` packaged action in the ADR-0126 §8 ledger did not stop it: the console fetched the action's `target` directly, the `/actions` door answered 400 for the type, and the MCP `run_action` bridge refused it outright — so "Ban User switched off" still banned, and an agent could not do what a human click could. Ruled on #27506 (option C, in three steps; this is the server step, ADR text in #27610, the console in #27611):
+  
+  - **Same-origin api actions are server-dispatched.** `POST /api/v1/actions/:object/:action` and MCP `run_action` accept a `type: 'api'` action whose `target` is a path on this origin. The door runs every gate it already runs, then **forwards the request in-process** to the declared target (`IHttpServer.getRawApp()`'s request injector) with the caller's own credentials (`Authorization`, `Cookie`, the admin-session recovery header, tenant and proxy headers, the proxy headers carried as the caller sent them for the target's own `server.trustProxy` rule to judge) and the body the declaration assembles by the console's own rules — `recordIdParam` / `recordIdField` from the subject row (refused by name when the row cannot supply it), `bodyShape.wrap`, the `outputs.*` fold, `organizationId` for an `/api/v1/auth/` target, `bodyExtra` merged last, `method` (no body on `DELETE`), `${param.*}` / `${ctx.recordId}` / `${ctx.user.id}` / `${ctx.org.id}` / `{field}` in the path. The forwarded URL is `http://<Host header><path>`, the URL the direct request has at this process; a caller-sent `X-Forwarded-Host` / `X-Forwarded-Proto` never chooses it. The target still authorizes the caller itself (ADR-0066 D4); its status and JSON body are the door's answer (its `data` unwrapped, as the console's direct fetch handed `result.data`), and a credential rotation it emits is relayed: over REST every `Set-Cookie` line plus `set-auth-token` / `set-admin-session-token`, so `impersonate_user` works through the door on both the cookie and the bearer lane; over MCP **only the bearer pair** — no `Set-Cookie` line enters a tool result, because the MCP door admits cookie sessions and a tool result is JSON text whatever receives it can read. A disabled api action answers **409 `ACTION_DISABLED`** and the target is never called; a forwarded request that lands back on an action door is refused (400), as is a `${ctx.selection.*}` target token or a `{{page.<var>}}` body token the server cannot resolve (400, naming it; any other `{{…}}` is the author's literal text); a target that answers 2xx with a non-JSON body is refused **502** naming its content-type (the console's direct fetch read such an answer as `{}`); a kernel with no in-process request path answers 503 and does not send the caller around the door.
+  - **Off-origin api actions stay browser-only, and cannot be switched.** A `target` on another host is still refused by both doors (400, naming the origin), MCP does not list it, and `POST /actions/_activation/:object/:action` refuses to flip it (**409**) with the reason — a ledger row nothing would consult is not recorded.
+  - **MCP lists same-origin api actions** on the same terms as every other action (`ai.exposed`, the caller's permissions, no `sys_*` object).
+  - **`HttpDispatcherResult.response.headers`** accepts a `string[]` value, emitted as one header line per element; the Hono server plugin's route `res.header` and the published `@objectstack/hono` adapter's `toResponse` (its `response` arm and both `stream` arms) append an array instead of comma-joining it (the only correct spelling for `Set-Cookie`).
+  
+  **BREAKING** at two published runtime surfaces (`@objectstack/runtime`).
+  
+  - **The activation write door, `POST /api/v1/actions/_activation/:object/:action`.** *Before:* flipping a `type: 'api'` action whose `target` is on another origin was accepted and recorded as a ledger row, which nothing ever consulted — the switch read as set and did nothing. *Now:* that request is refused `409` (`error.code` `RESOURCE_CONFLICT`) with a message naming the origin and saying why (the browser calls that origin directly and this server never sees the request), and no row is written. Same-origin api actions, and every other action type, flip exactly as before. *Who sees it:* a Setup caller or script that switched an off-origin api action off and read the 2xx as "stopped". *The remedy:* none at the door — move the action's `target` onto this origin (a path starting with `/`) to make it switchable, or remove the action from the app; a script that treated the 2xx as success now reads the 409 reason.
+  - **The type `HttpDispatcherResult.response.headers`** (`packages/runtime/src/http-dispatcher.ts`). *Before:* `Record<string, string>`. *Now:* `Record<string, string | string[]>`; an array is one header line per element, and the `/actions` door emits one for `Set-Cookie`. *Who sees it:* an adapter or host outside this repository that reads the member and hands each value to a `string`-typed header setter (`error TS2345`). *The remedy, one line:* branch on `Array.isArray(value)` and emit each element as its own header line (Hono: `c.header(name, line, { append: true })`; Fetch `Headers`: `headers.append(name, line)`); joining the array with `, ` is NOT equivalent for `Set-Cookie`. The two in-repo adapters (`@objectstack/plugin-hono-server`, `@objectstack/hono`) ship that change in this release.
+- db44327: feat(rest,plugin-hono-server,cloud-connection): metadata lists, the uncached item reads, `runtime/config` and `auth/me/localization` answer an `ETag` and `304`; every timed response carries `db`, `meta` and `total`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's first reads on every load sent no validator, so each one was a full download every time. Measured against HotCRM on `main`, none of these sent an `ETag`, a `Cache-Control` or a `304`: `GET /runtime/config`, `GET /auth/me/localization`, the type list (`GET /meta`, `GET /meta/types`), every `GET /meta/:type` list, and the item reads the shared item cache never serves (`GET /meta/app/:name`, `/meta/dashboard/:name`, `/meta/doc/:name`, `/meta/book/:name`, and drafts, `?package=` and member-scoped reads). Each of them now answers:
+  
+  - **`ETag`**: a weak validator (`W/"…"`) that hashes the body actually served, after every per-caller step (read gates, the app filter, the field mask, the translation, the host's environment). Two callers whose permissions change what they see get different validators, and one caller's validator never answers `304` for another caller's body.
+  - **`Cache-Control: private, no-cache`**: the browser keeps the body and revalidates it on every use, so a publish, a permission change or a language switch shows on the next read. No shared cache stores it. A schema served under an undetermined field visibility keeps `private, no-store` and gets no validator.
+  - **`304 Not Modified`**, with no body, when `If-None-Match` names the current validator.
+  
+  `metadata.enableCache: false` still switches the `/meta` validators off, as its description says ("Enable HTTP cache headers").
+  
+  `Server-Timing` (still opt-in: `OS_SERVER_TIMING=true`, or an admin's `X-OS-Debug-Timing: 1`):
+  
+  - Every timed response carries `db` and `meta` beside `total`. A request that ran no SQL or read no metadata says so with a zero member (`db;dur=0;desc="0 queries"`), so "nothing spent there" no longer reads like "not measured".
+  - The `/meta` routes count each metadata read into `meta` (`meta;dur=…;desc="N reads"`).
+  - `GET /runtime/config` now opens the timing gate for an admin who sends `X-OS-Debug-Timing`. It resolves the caller only when that header is sent; the payload never depends on who asked.
+  
+  `@objectstack/types` exports the rule the three packages share: `representationEtag(body)`, `ifNoneMatchHits(header, etag)` and `REVALIDATE_PRIVATE_CACHE_CONTROL`.
+- b6db369: fix(deps): `@hono/node-server` goes to `^2.1.3`, the first release with the GHSA-rmxm-3fg6-px4f fix (#27921)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/plugin-hono-server` declares `@hono/node-server` as a runtime dependency, so a downstream install now resolves the patched line instead of an affected `2.1.1`. `@objectstack/client` declares the same range as a devDependency and moves in lockstep. No API, behaviour or export changes.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/observability@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

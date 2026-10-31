@@ -1,5 +1,186 @@
 # @object-ui/collaboration
 
+## 18.3.0
+
+### Patch Changes
+
+- 8c8c5b5: refactor(collaboration)!: retire the zero-consumer `useCommentSearch` and `createPresenceUpdater` exports
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/collaboration#useCommentSearch, @object-ui/collaboration#CommentSearchConfig, @object-ui/collaboration#CommentSearchReturn, @object-ui/collaboration#createPresenceUpdater) the retired operands are a React hook, its two option and result types, and a plain helper factory in a published ui package's entry that nothing in the workspace imported; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these four names from `@object-ui/collaboration`. None had an importer anywhere in the workspace, so the Console and every `@object-ui/*` package are unaffected. `useCommentSearch` is deleted with its module; `createPresenceUpdater` leaves the package entry only. Everything else the entry exports is unchanged, including `usePresence`, `PresenceProvider`, `CommentThread` and their types.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `useCommentSearch` TO a `useMemo` over your own comment list that keeps the entries whose `text` or `author` contains the trimmed, lower-cased query.
+  - FROM `CommentSearchConfig` TO `{ comments: CommentEntry[] }`, with `CommentEntry` from `@object-ui/types`.
+  - FROM `CommentSearchReturn` TO the shape your own search state returns; the result rows can keep using `CommentSearchResult` from `@object-ui/types`.
+  - FROM `createPresenceUpdater` TO a `Map<string, PresenceUser>` keyed by `userId` that you update from your realtime channel, or `PresenceProvider` with `useTenantPresence` / `useRecordPresence`, which the package keeps exporting.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- Updated dependencies [2302b92]
+- Updated dependencies [3e195be]
+- Updated dependencies [f486e9c]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [b3f7344]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [a122269]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [fc92c62]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [d7df639]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [2655ebd]
+- Updated dependencies [48bffe3]
+- Updated dependencies [a33fce2]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [4145210]
+- Updated dependencies [1ed3360]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [b223072]
+- Updated dependencies [7614f8f]
+- Updated dependencies [03069ca]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [aa874c8]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [8a1f467]
+- Updated dependencies [a5d7098]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [946395d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [b339465]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [13d85bb]
+- Updated dependencies [3ba5206]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [bed8306]
+- Updated dependencies [91e4652]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [847e424]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @object-ui/i18n@18.3.0
+  - @object-ui/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

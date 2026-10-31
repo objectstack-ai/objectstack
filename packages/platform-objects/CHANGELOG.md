@@ -1,5 +1,584 @@
 # @objectstack/platform-objects
 
+## 18.3.0
+
+### Minor Changes
+
+- a9f654e: feat!: ownership queues: records wait in a queue until a member claims them, and assignment rules route new records (ADR-0142)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-queue-field-reserved -->
+  
+  **BREAKING** for one shape only: an object whose records have a user owner (`ownership: 'user'`, the default) can no longer declare its own field named `queue`. The platform now injects a `queue` column on every such object, and `registerObject` refuses the declaration with `422 INVALID_METADATA` (`ObjectQueueColumnRefusedError`), naming the object. An `objectExtensions` entry that declares `queue` on such an object is not refused, because an extension is folded over its object at read time: its `queue` is ignored, the platform's column stands, and a warning names the extension. The remedy: rename the business field (for example `support_queue`) and copy its data across, or, when the object's records have no user owner, declare `ownership: 'business_unit'`, `'org'` or `'none'`. The upgrade guide entry is `object-queue-field-reserved`.
+  
+  Beside that, two enum additions: `ShareRecipientType` gains `queue` (a sharing rule can now name a queue as its recipient), and the `queue` approver type is authorable again (it leaves `NON_AUTHORABLE_APPROVER_TYPES`, so it is no longer marked deprecated). Two metadata types are new: `queue` and `assignment_rule`.
+  
+  - **`@objectstack/spec`**: new `queue` and `assignment_rule` metadata types (`QueueSchema`, `AssignmentRuleSchema`) and the stack keys `queues` and `assignmentRules`. A declared queue's members are positions. New `IOwnershipQueueService` contract, registered under `ownership-queue`. `queue` joins the injected system columns of `ownership: 'user'` objects and `PUBLIC_FORM_SERVER_MANAGED_FIELDS`. `APPROVER_VALUE_BINDINGS.queue` reads both a declared queue and an organization's `sys_queue` row, and `APPROVER_ORG_SCOPED.queue` is `true`. The explain rule kinds `queue_membership` and `queue_claim` are new. `QUEUE_NOT_FOUND` (422) is registered under plugin-security.
+  - **`@objectstack/objectql`**: objects with `ownership: 'user'` get a system-managed `queue` column beside `owner_id`. Declaring your own `queue` field on one is refused at registration (`INVALID_METADATA`), and an extension's own `queue` field on one is ignored with a warning. An update can carry a write precondition: when it no longer matches, the update answers `409 CONCURRENT_UPDATE`. Declared assignment rules run once for each inserted row that has no owner and no queue after the `beforeInsert` hooks. A rule can park the row in a queue, or pick a member by `round_robin` or `least_loaded`. Assignment never refuses an insert. `kernel:ready` refuses to boot a stack that declares queues or assignment rules when no `ownership-queue` service is registered.
+  - **`@objectstack/metadata-core`**: `queue` is classified as an injected system column.
+  - **`@objectstack/metadata`**: the artifact door registers a stack's `queues` and `assignmentRules`, so an artifact-only runtime serves them.
+  - **`@objectstack/plugin-sharing`**: three new objects, `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, and the `ownership-queue` service. The service resolves a queue name from the registry first, then from the organization's own rows, and has one member expander. A record with no owner that sits in a queue can be read and edited by the queue's members, never deleted. The `queue` sharing recipient grants matched records to the queue's members, and its grants are recomputed when membership changes or the queue is switched on or off.
+  - **`@objectstack/plugin-security`**: the owner gate handles `queue`. A **claim** sets `owner_id` from empty to yourself, by id. It is admitted when the sharing model allows you the record, and only one claimant wins: the loser gets `409`. A **release** gives your own record back to its home queue. A **move** to another queue needs the transfer grant, and a queue name that does not resolve is refused with `422 QUEUE_NOT_FOUND`. An insert that names a queue needs the transfer grant or membership of that queue. A guest can supply neither. Explain reports the queue reasons on the sharing layer.
+  - **`@objectstack/plugin-approvals`**: a `queue` approver resolves to the queue's members when the step opens. An empty queue adds nobody and logs a warning. The `queue:<name>` placeholder is never written again.
+  - **`@objectstack/lint`**: a queue-only approval node is reported `approval-approvers-may-resolve-empty`, and the org-axis red line admits the queue recipient. Two new advisory rules come with `os explain` entries: `assignment-rule-user-target` (warning) and `assignment-rule-queue-unstaffed` (info).
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, so `os migrate organization-ownership` plans them instead of refusing.
+  - **`@objectstack/runtime`**: `POST /security/_activation/:type/:name` also switches a declared `queue` or `assignment_rule` on and off.
+  - **`@objectstack/platform-objects`**: the two new metadata types' labels, and the queue recipient option, are translated in zh-CN, ja-JP and es-ES.
+  - **`@object-ui/app-shell`**: the flow designer no longer warns that a queue approver resolves to nobody.
+  - **`@objectstack/skills`**: the platform skill lists `queues` and `assignmentRules` among the stack's top-level keys.
+  
+  What to do: rename any `queue` field on a user-owned object, or in an extension of one, as above. Every other existing stack behaves as before. To use queues, declare `queues` and `assignmentRules` in your stack, and make sure plugin-sharing is installed: it registers the `ownership-queue` service.
+- 63e3873: feat(spec)!: a single-word language name (`Chinese`, `English`, `Japanese`) is refused as a locale
+  
+  The 18.x locale shape refused `zh_CN`, a padded value and a multi-word name such as `Chinese (Simplified)`, but its 2–8 letter language subtag still admitted any single word of that length. An author who wrote `locale: 'Chinese'` got a green save, and the strings were stored under a locale no session ever asks for, so they never rendered. The refusal text already said a language name is refused.
+  
+  The language subtag is now 2–3 letters, the ISO 639 codes every tag in use starts with (BCP-47 reserves 4 letters and registers no 5–8 letter language). Everything else in the shape is unchanged: hyphen-separated 1–8 letter-or-digit subtags (`en`, `zh-CN`, `zh-Hans-CN`, `es-419`, `yue-HK`), and case is not judged. The one shape moves in all three places that hold it:
+  
+  - `LocaleSchema` (`@objectstack/spec/system`): a `translation` item's `locale`, translation bundle keys, `i18n.defaultLocale` / `fallbackLocale` / `supportedLocales`, a seed dataset's `locale` scope and the seed loader's `locale`.
+  - `SYS_USER_LOCALE_TAG_PATTERN` (`@objectstack/platform-objects/identity`): the `locale_bcp47_shape` rule on a user's own `sys_user.locale` column.
+  - `LOCALE_TAG_SHAPE` (`@objectstack/service-messaging`): the read side that picks a recipient's notification locale, byte-identical to the column rule.
+  
+  Clause-②: no (narrowing) — the locale shape refuses values it used to accept. Nothing is widened.
+  
+  Metadata-protocol: narrowed (a locale whose language subtag is 4–8 letters, in practice a language name, is refused on translation items, bundle keys, the i18n configuration and seed datasets)
+  
+  <!-- adr-0087: not-required (already-registered translation-locale-non-tag-refused) the 18.x D3 entry already prescribes rewriting a language name by hand, and its conversion already lists such a stored row as a TODO through LocaleSchema; this diff narrows the same shape and corrects that entry's subtag length -->
+  
+  **BREAKING** for an author or user who wrote a language name as a locale.
+  
+  - **Before.** `defineTranslation({ name: 'qa_x', locale: 'Chinese', … })` parsed and its strings never rendered; `PATCH` of a user's `locale` to `Japanese` was stored, and that user's notifications fell to the delivery ladder's floor.
+  - **Now.** The value is refused at `locale` (or at the bundle key) with a message naming the tag shape, and the user's write is refused by the column's `locale_bcp47_shape` rule.
+  - **Fix.** Write the tag, not the name: `Chinese` → `zh-CN`, `English` → `en`, `Japanese` → `ja-JP`. A language name has no single tag it can have meant, so `os migrate meta --stored` lists a stored translation row as a TODO (D3 entry `translation-locale-non-tag-refused`) and you rewrite it by hand. A user whose stored `locale` is already a name such as `Japanese` keeps loading: their notifications fall to the deployment default, and saving that value again is refused until it is replaced with a tag.
+- c26d643: feat(spec): a dataset measure declares its `polarity`, so a lower-is-better KPI draws a rising delta as bad news
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `DatasetMeasureSchema` declares one optional key, `polarity`, with three values (`DatasetMeasurePolarity`): `'higher'` (a rise is good), `'lower'` (a fall is good: turnaround days, overdue counts, cost) and `'neutral'` (neither direction is good or bad). It is declared on the measure, the semantic layer, so every widget over the measure agrees, and not on a widget's `compareTo`, which is the executor's closed comparison directive. An undeclared polarity keeps today's colours: a rise green, a fall red. Nothing infers a polarity from the measure's name. The near-miss keys `betterWhen`, `direction`, `goodDirection` and `trendDirection` are pointed at `polarity`, and the boolean spellings `higherIsBetter` / `lowerIsBetter` are answered with the three values.
+  
+  The dataset answer's column descriptor declares the same vocabulary as `fields[].polarity` (`AnalyticsResult` and `AnalyticsResultResponseSchema`), and the analytics service relays the measure's declared value onto it, on the live query and the draft-data preview alike, the measure's `__compare` column included. An undeclared measure and every dimension column carry no `polarity` key, so an answer over a dataset that declares none is unchanged.
+  
+  The dataset form's measures repeater offers `polarity`, labelled in every shipped locale (`@objectstack/platform-objects` metadata-form catalogs).
+- 13dc413: feat(spec): a greyed action says why — `disabledReason` beside `disabled`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `ActionSchema` gains one optional key, `disabledReason`: the sentence a greyed action shows to say why it is unavailable, beside the `disabled` predicate that greys it. An action that does not declare it parses exactly as before, and the console keeps its default reason, "Not available for this record".
+  
+  ```ts
+  defineAction({
+    name: 'submit_for_approval',
+    label: 'Submit for approval',
+    objectName: 'clm_contract',
+    disabled: "record.legal_review_status != 'approved'",
+    disabledReason: 'An approved legal review is required before the contract enters approval.',
+  });
+  ```
+  
+  - **An `I18nLabel`.** A plain string or an inline locale map (`{ en, 'zh-CN' }`). A blank string is refused at parse: `''` or whitespace only. Omit the key to keep the default. The locale-map arm is the `InlineLocaleMapSchema` every `I18nLabel` takes, so a map is not checked for blank values. `disabledMessage`, `disabledTooltip`, `disabledHint` and `disabledText` are renamed onto it.
+  - **Translated with the copy keys.** The slot is `objects.OBJECT._actions.ACTION.disabledReason` (`globalActions.ACTION.disabledReason` for an action with no `objectName`), beside `confirmText` and `successMessage`. `translateAction` overlays it, and `os i18n extract` (`@objectstack/cli`) scaffolds it for an action that declares one and seeds nothing for one that does not.
+  - **Display only.** It does not change what `disabled` evaluates to and is never read as a condition: `os validate` checks `disabled`, not `disabledReason`. It is not access control either. A call that reaches the server anyway is refused by the action's own rules (its body or hook, `requiredPermissions`), never by this text.
+  - **Studio.** The action editor's Placement section gains a "Disabled Reason" row under "Disabled", translated in `@objectstack/platform-objects` for zh-CN, ja-JP and es-ES.
+  
+  Nothing renders the key yet. The console's greyed-action surfaces (the record header, the record section bar, the declared actions bar and the four `action:*` renderers) read it in the follow-up change. Until then the liveness ledger marks it `planned` with `authorWarn`, so `os validate` warns an author who declares it that nothing shows it yet.
+- 6dbff8e: feat(spec,ui)!: the record page's `slots.tabs` is retired — a slotted page fills six slots, and a page that needs its own tab strip is `kind: 'full'`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`page.slots.tabs` is a tombstone that refuses every value; `slots.related` / `slots.relatedLists` are refused by name instead of being read as `tabs`)
+  
+  <!-- adr-0087: registered page-slots-tabs-removed, page-slots-tabs-retired -->
+  
+  **BREAKING** accept-set narrowing on the record page (`@objectstack/spec`), with the console following it in the same release.
+  
+  The record page composes its tabs and columns from the object's roles and relationship flags. An authored `tabs` slot replaced that whole strip, so a page that used it lost every synthesized related list and its wide-screen columns. The slot is gone; the six live slots (`header`, `actions`, `alerts`, `highlights`, `details`, `discussion`) are unchanged.
+  
+  - **FROM → TO.** `slots: { tabs: … }` on a `kind: 'slotted'` page → delete the key. To change which related lists appear or their order, set `relatedList` / `relatedList: 'primary'` on the child's reference field; to replace the Details body, author `slots.details`; a page that needs its own strip is `kind: 'full'` and authors its header, highlights, `page:tabs` strip and `record:discussion` in `regions`, drawn as authored.
+  - **The one-line fix.** `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` page is converted when it is read (the `page-slots-tabs-removed` conversion): the slot is dropped, and a page whose only slot it was becomes an empty slotted page, which renders the synthesized default. Whether such a page should become `kind: 'full'` is a judgement the conversion cannot make; the upgrade guide entry `page-slots-tabs-retired` lists it.
+  - **What the parse says.** `slots.tabs` is refused with its prescription ("`page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) — …") at `defineStack` as `STACK_SCHEMA_INVALID` / 422, and at the metadata save door. `slots.related` and `slots.relatedLists` are refused by name with the same remedy. TypeScript rejects `tabs` in a `definePage` slot map.
+  - **The pair check.** `checkPageSlotPair` (the `details` + `tabs` refusal) is removed from `@objectstack/spec/ui` with the slot it paired; the `page-slots-details-beside-tabs-refused` upgrade entry is folded into `page-slots-tabs-retired`.
+  
+  The four in-repo pages that authored `slots.tabs` are rebuilt as `kind: 'full'` pages that render the same nodes in the same order: `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`), `sys_approval_request_detail` (`@objectstack/plugin-approvals`) and the showcase `showcase_project_detail`.
+  
+  The console (`@object-ui/*`): `buildDefaultPageSchema` composes from the six slots only, and `RecordDetailView` lays every slotted page out by width (three columns from 1280 px), since none can opt out with an authored strip any more. `@object-ui/types` drops the pair check from its page schemas and types `PageSlotMap.tabs` as `never`. The Studio slot canvas lists six slots.
+  
+  `@objectstack/skills`: the UI skill says a slotted page has no `tabs` slot and how to shape the strip instead.
+- c63ce2a: feat(spec): an object declares the business order of its related lists (`relatedLists`), and `relatedList: 'primary'` places a list instead of ordering it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  The order of a record page's related lists was not authorable: owned (`master_detail`) children came first and lookup children after, each in the order the packages declared them, so a lead's related lists were in an order nobody chose.
+  
+  - **`@objectstack/spec`**: `ObjectSchema` gains `relatedLists?: string[]`, beside `highlightFields`. It is an ordered list of inbound relationships, most important first. Each entry is a child object name (`'task'`, every list of that child) or `object.field` for one FK when the child points at this object through several (`'event.related_to'`). Listed lists come first in that order, and the rest follow in the old derived order. `defineStack`, and so `os validate` and `os build`, refuses an entry that matches no inbound `lookup` / `master_detail` field with `STACK_CROSS_REFERENCE_INVALID`, naming the entry and the relationships that do exist. A child declared only by a sibling package, or a platform object, is not judged there. The runtime publish door gives the same verdict on an object write (`related-list-ref-unknown`, HTTP 422 `INVALID_METADATA`), judged against the objects the registry and the stored rows hold, so a Studio, REST or MCP author is refused too. `ObjectFieldGroupSchema` gains `relatedList?: string`, spelled the same way: a group that carries it stands for that list's table in the record's details column instead of a section of fields, and a field that names such a group as its `group` is refused at parse. The record page v3 layout draws that placement; until then such a group is not drawn, as any group without fields is not. The Studio object form offers both keys.
+  - **`relatedList: 'primary'` changes meaning.** It no longer orders lists; `relatedLists` does. It now says where a list is drawn: in the record's body as a full-width table rather than as a side card, which on today's tabbed record page is still its own tab. And a `master_detail` FK that sets `inlineEdit` (any arm) and declares no `relatedList` is now `'primary'` by default, so inline-edited line items get their own tab on the tabbed page. Write `relatedList: true` on that FK to keep the old placement in the shared Related tab. `relatedList: false` still hides a list whatever `relatedLists` says.
+  - **`@object-ui/app-shell`**: `deriveRelatedLists` resolves the order in one pure function, `resolveRelatedListOrder`, and marks the inline-edit default as `isPrimary`. Studio's related-list control on a relationship field reads that default too: an inline-edited `master_detail` with no `relatedList` shows as Primary, and picking Show there writes `relatedList: true`.
+  - **`@objectstack/lint`**: new reference-integrity member `validateRelatedListRefs` (rule `related-list-ref-unknown`, `error`), on the CLI and on `object` writes at the runtime publish gate. A child the snapshot does not hold is refused only when no package closure is in force; under a closure it is not judged.
+  - **`@objectstack/metadata-core`**: the served object's field-level-security scrub classifies `relatedLists` and a field group's `relatedList` as relationship names, not fields of the object, so a caller denied a field still receives them.
+  - **`@objectstack/platform-objects`**: the two new form rows are labelled in en, zh-CN, ja-JP and es-ES.
+  - **`@objectstack/skills`**: objectstack-data's relationship rules teach `relatedLists` and the placement reading of `'primary'`; objectstack-ui's related-list bullet follows.
+  
+  In this repo three record pages move on merge, each gaining its own line-items tab out of the shared Related tab: `crm_opportunity` (its `crm_opportunity_line_item.opportunity` FK), `showcase_invoice` (`showcase_invoice_line.invoice`) and `showcase_expense_report` (`showcase_expense_line.expense_report`). Each FK sets `inlineEdit: 'grid'` and declares no `relatedList`.
+  
+  What to do: nothing, unless an object has a `master_detail` child with `inlineEdit` that should stay in the shared Related tab; write `relatedList: true` on that FK. To choose the order of an object's related lists, declare `relatedLists` on it.
+- 0cd578f: fix(spec)!: a `fixed` currency config needs its code — `currencyConfig.defaultCurrency` loses its `'CNY'` default, and a `dynamic` config parses with no code
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered currency-config-fixed-default-currency-required, currency-config-dynamic-default-currency-removed -->
+  
+  **BREAKING** for one shape: a `currencyConfig` with `currencyMode: 'fixed'` and no `defaultCurrency`, on a currency field or on a formula field whose `returnType` is `currency`. Ruling X on #27119: an amount whose currency is not known takes the tenant default, and nothing guesses.
+  
+  - **Before.** `defaultCurrency` was `.default('CNY')`. `{ currencyMode: 'fixed' }` parsed to `{ currencyMode: 'fixed', defaultCurrency: 'CNY' }`, so the field silently became a yuan field and showed `¥` in a dollar or euro app. Every `dynamic` config's parse output carried that `'CNY'` too, though nothing reads a `dynamic` config's code.
+  - **Now.** A `fixed` config without a code is refused at every door that parses a field (`defineStack`, `os validate`, the object save door), with one `custom` issue at `currencyConfig.defaultCurrency`: "`currencyConfig.currencyMode: 'fixed'` needs `defaultCurrency`, the field's one currency: give its ISO 4217 code (e.g. `defaultCurrency: 'USD'`), or use `currencyMode: 'dynamic'` to display amounts in the tenant default currency (the `localization.currency` setting)." A `dynamic` config (and an empty one) parses to `{ currencyMode: 'dynamic' }`: no code is materialized. An authored code under `dynamic` is still accepted and still unread.
+  - **FROM → TO.** `currencyConfig: { currencyMode: 'fixed' }` → `currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' }` (the code the field is in; until now it displayed CNY), or `currencyMode: 'dynamic'` / no `currencyConfig` for the tenant default currency.
+  - **The one-line fix.** Write the code next to `currencyMode: 'fixed'`.
+  - **Stored rows and built artifacts (ADR-0087).** A built artifact holds the parsed stack, so its `fixed` configs carry the code the old parse filled in and keep it. A `sys_metadata` object row is stored as authored, so a row saved as `{ currencyMode: 'fixed' }` (Studio's Fixed mode with the code left blank, or a `/meta` write) has no code, and nothing converts one in: guessing `'CNY'` is what the ruling forbids. Such a row still loads and is registered unchanged; boot counts it `invalid` and prints `[metadata_spec_invalid] stored object/NAME fails the current spec schema even after conversion (fields.FIELD.currencyConfig.defaultCurrency: …)`, and the next save of that object is refused (422 `INVALID_METADATA` at `fields.FIELD.currencyConfig.defaultCurrency`) until the code is written. Its display does not change: the registry already held the row as stored, and the console reads a `fixed` code only when there is one, so it showed the tenant default before and still does. `@objectstack/formula` now reads a formula over that field as an unproven currency instead of fixed CNY. The D2 conversion `currency-config-dynamic-default-currency-removed` strips the unread code from `dynamic` configs (and configs with no mode) on stored-row rehydration and inside a built artifact's declared-floor window, on objects and object extensions; no display changes. It is retired from the load path, so an authored source is never rewritten. The upgrade guide entry is `currency-config-fixed-default-currency-required`.
+  - **Readers.** None changes what it displays. The console's `resolveFieldCurrency` and the analytics field-currency relay already read the code only under `fixed`. `@objectstack/formula`'s return-type inference reads a field's currency through `CurrencyConfigSchema`; a `fixed` config without a code no longer parses there, so it reads as an unproven currency instead of CNY.
+  - **`@objectstack/platform-objects`.** The field form's `defaultCurrency` help text says the code is required in fixed mode instead of "Defaults to CNY", in en, zh-CN, ja-JP and es-ES.
+  
+  Survey at the change: 11 `fixed` currency configs across `examples/**`, `packages/platform-objects/**`, `packages/qa/**`, seeds and fixtures, none without a code.
+- 4145210: feat(spec): `currencyMode: 'record'` + `currencyField` — a record-mode amount points at a sibling ISO 4217 code field (ADR-0144 D2)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A currency amount (or a `formula` with `returnType: 'currency'`) can now carry a currency per record. `currencyConfig.currencyMode` gains a third value, `record`, and `currencyConfig.currencyField` names the field on the same object that holds each record's ISO 4217 code. The amount itself stays a bare number (ADR-0104 D1).
+  
+  ```ts
+  fields: {
+    currency_code: Field.text({ label: 'Currency', valueDomain: 'iso_4217_currency' }),
+    amount: Field.currency({ label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } }),
+  }
+  ```
+  
+  - `currencyField` is required under `record`, refused under `dynamic` and `fixed`, and never empty; `defaultCurrency` is refused under `record`.
+  - The object refuses a `currencyField` that names no other declared field, a field that is not `text`, or a `text` field without `valueDomain: 'iso_4217_currency'`. Each refusal is located at `fields.FIELD.currencyConfig.currencyField` and lists the object's candidate code fields.
+  - `dynamic` and `fixed` configs parse exactly as before; an app that never writes `record` sees no change.
+  
+  ⛔ Not released alone: this ships in the same release as the record-mode aggregate refusals and the per-row display.
+
+### Patch Changes
+
+- bb91ae8: feat(spec): a report declares the period it covers (`dateRange`) and the export of its table (`exportOptions`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `ReportSchema` gains two optional top-level keys. A report that declares neither parses and renders exactly as before.
+  
+  - **`dateRange: { dimension?, defaultRange, allowCustomRange }`.** A date window over one dimension of the report's dataset. `defaultRange` and `allowCustomRange` are the dashboard's own declaration, verbatim: the same preset table (`DATE_RANGE_DEFAULT_RANGES`), the same defaults (`this_month`, `true`) and the same rename hints. `dimension` names a dataset **dimension** that declares `type: 'date'`, not a raw object field; omitted, the dataset's one `type: 'date'` dimension is used. The window is a filter, not a bucket. The renderer sends it as `selection.timeDimensions: [{ dimension, dateRange }]` with no `granularity`, which the analytics service already accepts. `dateFilter` / `timeRange` are renamed onto `dateRange`, the dashboard's own spellings.
+  - **`exportOptions: { formats?, includeHeaders?, fileNamePrefix? }`.** Three members of the list export block, under its key name. `formats` is `csv` / `xlsx` only (`json` and `pdf` are refused with a report-side message). Export is on by default (both formats) and `formats: []` turns it off. `maxRecords` and `streaming` are list-only and are refused with that reason. There is no report permission key: the control is gated on the dataset base object's `ObjectPermission.allowExport`, the axis the list toolbar uses. `allowExport` written on a report is answered with that pointer.
+  - **Refused on a `joined` report**, on the container and on a block. The blocks may bind different datasets, and the report draws one table per block.
+  - **No subscription.** `subscription` / `schedule` on a report are answered: there is no scheduled delivery of a report.
+  
+  `@objectstack/lint` adds the dataset-aware half as a reference-integrity rule, `validateReportDateRange`. It runs on `os validate`, `os lint` and `os build`, and at the report publish door. Four `error` verdicts, each with an `os explain` entry: `report-date-range-dimension-unknown`, `report-date-range-dimension-not-date`, `report-date-range-dimension-ambiguous` (dimension omitted, two or more date dimensions) and `report-date-range-dimension-none` (dimension omitted, no date dimension). The liveness author-warning lint now walks `reports`, and both keys warn (`liveness-planned-property`) until the Console report page reads them. The report editor form gains a collapsed "Period & export" section, translated in `@objectstack/platform-objects` for zh-CN, ja-JP and es-ES.
+  
+  Nothing renders either key yet. The Console report page's period chip and export control are the renderer's half, and until it lands an author declaring either key gets a planned-property warning that says so.
+- 416a760: fix(platform-objects): the settings audit `old_hash` / `new_hash` columns describe both digest formats they carry
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_setting_audit` described `old_hash` and `new_hash` as "SHA-256 of the … value (canonicalised)", and `sys_platform_setting_audit` named no format. A secret row never carries an unkeyed SHA-256, so an operator or agent checking a row against the declared format read every secret row as malformed. Both objects now state what the settings audit writer records:
+  
+  - **A non-secret value:** `sha256:` followed by the hex SHA-256 of its canonical JSON.
+  - **A secret value (`encrypted: true`):** the crypto provider's keyed digest, `hmac-sha256:…`. Never an unkeyed hash, which would let anyone holding the trail confirm a guessed secret.
+  - **Null:** `old_hash` when the previous value was unset, `new_hash` on reset, and either one for a secret when no keyed digest is available.
+  
+  Rows written before the `sha256:` digest may carry `fnv32:`; compare only values with the same prefix. Only the description text changes: no column type, length or name, and nothing about what is written.
+- 74801d1: fix(platform-objects): drop the field form's `externalId` labels from the metadata-forms translations
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The field metadata form no longer offers `externalId` (the key is graded `dead`: nothing matches on it), so its label and its "Mark as external ID for upsert operations" help text are regenerated out of the `metadata-forms` bundles for every locale (`en`, `zh-CN`, `ja-JP`, `es-ES`).
+- 39fd5fb: feat(app-shell): a key-only record control, and the Studio hook form offers `refusals` with it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A hook built in Studio can now declare its refusal catalogue. The hook form shows a **Refusals** row beside the body: add a code, write the message the user reads and an optional 4xx status, rename or remove a code. The saved body is exactly `refusals: { CODE: { message, status? } }`, the shape `HookSchema` accepts, so a hook made in Studio no longer has to be edited as code to refuse in translatable text.
+  
+  - **`@object-ui/app-shell`.** The metadata form's `record` editor gains a key-only face. A `type: 'record'` row that declares `widget: 'key-only-record'` edits a map of closed entries (add, rename, remove, reorder, edit each entry's fields) and never writes the key into the entry. A key is checked against the record's served key rule (`propertyNames.pattern`, derived from the spec), so a code like `clean_version` is refused before it reaches the draft. A rename moves the entry in place once the new key is valid. A record row with no such widget behaves as before: the key is still mirrored into each entry.
+  - **`@objectstack/spec`.** `hookForm` offers `refusals` with that control. `HookSchema` is unchanged.
+  - **`@objectstack/platform-objects`.** The generated metadata-form bundles carry the three new hook-form rows, translated in zh-CN, ja-JP and es-ES.
+  - **`@object-ui/i18n`.** One new Studio string, `engine.form.key` (en, zh), which names the key column when the form declares no key label.
+- 6eaf404: fix(spec): the `newTabUrl` path refusal is registered as an ADR-0087 D3 semantic entry, and the action form labels the field "New-tab path"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  <!-- adr-0087: registered ui-action-new-tab-url-path-refused -->
+  
+  Supersedes, in the same release, the ADR-0087 disposition of the `newTabUrl` narrowing note (`fix(spec)!: an action's newTabUrl is a path on this backend and must start with /`), which declared `not-required (no-migration-prescription)` while carrying a remedy. That narrowing is now registered: D3 semantic entry `ui-action-new-tab-url-path-refused` (protocol 18) names the surface (an `action` whose `newTabUrl` does not start with `/`), the two remedies (write the backend path, or drop `opensInNewTab` / `newTabUrl` and declare a `type: 'url'` action with `target: 'https://…'` and `openIn: 'new-tab'`), and why neither is applied mechanically: an external URL names no path on this backend, and the url-action rewrite changes the action's type, drops its handler and replaces an auth-enforcing endpoint with a page the browser opens directly. So `os migrate meta` and the upgrade guide carry it as a structured TODO, and a stored row holding such a value behaves exactly as that note says (loads unchanged and registered, counted `invalid` with a `[metadata_spec_invalid]` boot line, served with `_diagnostics`, next save refused until rewritten). No accept set changes here.
+  
+  The action form's `newTabUrl` field label now says path in every locale: "New-tab path" (en), "新标签页路径" (zh-CN), "新しいタブのパス" (ja-JP), "Ruta de pestaña nueva" (es-ES).
+- c13ef04: fix(platform-objects): the action form's `newTabUrl` help text says it is a path on this backend starting with `/`, in all four locales (en, zh-CN, ja-JP, es-ES), and names the `type: 'url'` action for an external page — matching the spec, which now refuses an absolute `newTabUrl`
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 10f27b6: feat(cli, runtime, platform-objects): `os plugin install ./x.osplugin` installs a signed plugin artifact locally, after verifying its signature against the environment's trusted publisher keys and its files against the manifest's `integrity` map (#27123)
+  
+  Clause-②: no — no key, accepted value or export of `@objectstack/spec` changes; the new object and commands are platform code, not authorable metadata
+  Metadata-protocol: none
+  
+  The first slice of ADR-0025's local install loop (§3.5 M1). Before this, a built and signed `.osplugin` had no command that installed it.
+  
+  - **`os plugin keygen --out PATH`** writes a publisher Ed25519 key pair: `PATH.key.pem` (private, mode `0600`, stays with the publisher) and `PATH.pub.pem`, and prints the key id and the public key's fingerprint (`sha256:` + hex of the SPKI DER bytes). It never overwrites a key file without `--force`.
+  - **`os plugin trust add PUB.pem --key-id ID`**, **`trust list`**, **`trust revoke ID`** manage the environment's trusted keys in the new deployment-level object `sys_trusted_key` (registered by `PlatformObjectsPlugin`, beside `sys_secret`; no tenant column; `manage_platform_settings`; the API offers reads only). The writes run in system context and are recorded by the audit mirror. Only a public key is accepted: a PEM holding a private key, or a key that is not Ed25519, is refused. One key id names one key and one key carries one key id. A revoked row stays, and neither its key id nor its key is trusted again.
+  - **`os plugin install ARTIFACT`** reads the archive and refuses, by name and with exit status 1, before anything is written:
+    - an entry that could land outside the install directory, two entries that differ only in letter case, or a file that is also the directory of another entry (`artifact_entries_refused`);
+    - a file whose digest is not the one the manifest's `integrity` map declares, a declared file that is missing, or a packaged file the map does not name (`integrity_mismatch`);
+    - a missing signature (`signature_missing`), one that is there but cannot be read (`signature_unreadable`), a malformed one (`signature_malformed`), a key id the environment does not trust (`signature_key_untrusted`) or has revoked (`signature_key_revoked`), a trusted-key row whose fingerprint is not its key's (`trusted_key_invalid`), and a signature that does not verify over the artifact's bytes (`signature_invalid`);
+    - an installations file it cannot read (`record_unreadable`), which a write would clobber, and an install directory that already holds other bytes no installation of this project put there (`install_dir_taken`): two projects sharing one `OS_HOME` and environment share the directory, and one does not overwrite the other's install.
+  
+    It then unpacks the artifact to `<OS_HOME>/plugins/<env>/<id>/<version>/`, keeping the original `artifact.osplugin` and `artifact.osplugin.sig` beside the files, and writes an installation record (the version, the key id and fingerprint it verified against) to `<OS_HOME>/plugin-installations/`, keyed by environment and project like the package disable-state store. A swap that fails puts the earlier install of the same version back. `--trust-unsigned` installs an artifact that has no signature, with a warning on stderr; it never makes a present signature that fails verification pass. `--json` prints one document.
+  - **Not yet.** `os serve` does not load installed plugins: the boot-time loader is the next slice of the same loop.
+  
+  `@objectstack/runtime` exports the two stores both sides read: `addTrustedKey`, `listTrustedKeys`, `revokeTrustedKey`, `resolveTrustedKey`, `readPublisherPublicKey`, `publicKeyFingerprint`, and `pluginInstallDir`, `loadPluginInstallations`, `recordPluginInstallation`.
+- 194e66c: feat(platform-objects): `sys_exchange_rate` — an organization's dated exchange rates, with a Setup list under Localization
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A new system object holds the rates multi-currency amounts are converted with, one row per currency and effective date:
+  
+  - **Columns.** `currency` (an ISO 4217 code, checked on write), `rate` (exact decimal, 12 decimal places and 24 digits in all, strictly positive), `effective_date` (date) and `source` (`manual` / `import` / `app`, default `manual`).
+  - **Direction.** One row means 1 unit of the organization's home currency (Localization → Default currency) = `rate` units of the row's currency, so a home amount is the foreign amount divided by `rate`. The sentence is exported as `EXCHANGE_RATE_DIRECTION` and shown on the Setup list page; the scale and precision are exported as `EXCHANGE_RATE_SCALE` and `EXCHANGE_RATE_PRECISION`.
+  - **One rate per currency per day.** `(currency, effective_date)` is unique within an organization; two organizations may each hold their own EUR rate for the same day.
+  - **Who.** Per organization (its `organization_id` is injected and the tenant wall scopes it). Organization administrators read and write it; rank-and-file members do not see it. Every change is captured in the audit log and shown on the record's History tab.
+  - **Where.** Setup → Configuration → Exchange Rates, directly under Localization. `PlatformObjectsPlugin` registers the object with the other platform-infrastructure objects. `PLATFORM_OBJECTS_BY_PACKAGE` (`@objectstack/spec`) lists it under `platform-objects`, so a reference to `sys_exchange_rate` resolves as a real platform object.
+  - **Upgrade ceremony.** The organization-ownership inventory (`@objectstack/cli`) lists `sys_exchange_rate`, so `os migrate organization-ownership` plans it instead of refusing it as an uninventoried platform table.
+  
+  Nothing reads the table yet: the write-time home-currency conversion that uses it ships in the same release.
+- 0c8c27e: feat(console): Setup → Integrations → Connector Credentials, and a credential step after a marketplace install
+  
+  Clause-②: yes (widening: `@objectstack/service-automation` exports `CONNECTOR_CREDENTIALS_UI_BUNDLE`, `CONNECTOR_CREDENTIALS_COMPONENT_REF` and `CONNECTOR_CREDENTIALS_NAV_CAPABILITY`, and registers a new Setup navigation entry `nav_connector_credentials` resolving component ref `automation:connector-credentials`; no existing key, route or shape changes)
+  Metadata-protocol: none
+  
+  An administrator can now set a connector credential without the API or the server environment.
+  
+  - **Setup → Integrations → Connector Credentials** lists every reference the credential routes list (`GET /api/v1/automation/connectors/credential-refs`): its status (`set`, `missing`, `rejected` with the upstream's reason), the connectors naming it, and when and by whom it last changed. Each writable reference has a masked input that starts empty, whatever is stored; an empty input means "keep the current value", so nothing is sent for it. Saving sends `PUT` and the row takes the entry the server answers after its reconcile. A reference with a value stored here has **Clear**, behind a confirmation, which sends `DELETE`. A reference an environment variable supplies is read-only.
+  - Where the routes refuse (`403` for a missing capability or a multi-organization tenancy posture, `501`, `503`), the page shows the server's own sentence as a configuration notice, and a server without the routes (`404` / `405`) gets "this server does not manage connector credentials". Neither is drawn as an error.
+  - **After a marketplace install** into this runtime — install-local, an org package installed here, or a cloud install once its app is served — the install result lists the credentials the package's connectors still need (the same listing, filtered by `connectors[].packageId`), each with the same masked input and **Skip for now**. A skipped reference stays listed with a link to the Setup page. The step comes after the install because the routes refuse a reference no installed package declares (`404`); the connectors materialize as soon as a credential is set, with no restart. Where the listing cannot be read, the install answer's `credentialNote` is shown instead.
+  - The navigation entry is contributed by `@objectstack/service-automation` at `kernel:ready` through the manifest service, so it appears only where the automation service runs, and only for a viewer holding `manage_metadata`. The label is translated in the four platform locales; the page and the step are translated in all ten Console packs.
+- ca64f6f: fix(platform-objects): the API key Revoke and Restore toasts name the key
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `revoke_api_key` and `restore_api_key` row actions on `sys_api_key` now say which key they acted on, for example `API key "QA key" revoked`, instead of the bare `API key revoked` / `API key restored`. The zh-CN, ja-JP and es-ES translations name the key too. Nothing to do.
+- f40b777: Clause-②: yes (widening: `@object-ui/app-shell` exports `InvitationLinkHint` and `@object-ui/plugin-form` exports `useInitialFieldFocus`; no accept set moves)
+  Metadata-protocol: none (platform object metadata only, no authorable key: `sys_invitation.status` options gain display labels, with `rejected` read as "Declined"; the role param of the four `invite_user` actions, `sys_member.add_member` and `sys_member.update_member_role` gains one shared `helpText`; `sys_invitation.resend_invitation` gains a `description` and carries its email and role over from the row; `sys_member.update_member_role` gains a `description` naming the member; the `expired` invitations list projects `role`)
+  
+  The Invitations screens read more clearly and behave more predictably. Invitation statuses show as labels (Pending, Accepted, Declined, Expired, Canceled) instead of raw values. Every role picker that grants an organization role explains each role on its own line, and Change Role names the member it changes. Resend is a confirmation that names the invitee and keeps the invitation's email and role, instead of an editable form. The workspace's cancel dialog dismisses with "Keep invitation".
+  
+  The console's action dialogs check an email or URL param before anything runs and mark a malformed value on its field. They open on their first editable field instead of Cancel, and closing one returns focus to the control that opened it: an action button that was disabled while its action ran, a row menu's trigger, or the first opener when a param dialog hands over to a result dialog. This applies to every action that uses the param, confirm and result dialogs.
+  
+  The sign-in page tells a visitor to open their invitation link where sign-up is by invitation only. After accepting an invitation, the page says the user joined the organization and as which role, and Continue enters it.
+- 86c9d53: spec(ui): `requiredPermissions` on a `type: 'api'` action — a same-origin api action is gated at the platform action door (ADR-0066 D4 amended 2026-10-29)
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The documented meaning of `requiredPermissions` on a `type: 'api'` action changes; no key, accepted value or default moves, and the schema shape is unchanged.
+  
+  - **Before.** The `requiredPermissions` docblock and `.describe()` (and the generated references under `content/docs/references/`), and the Studio action form's `requiredPermissions` help text (with its `en` / `zh-CN` / `ja-JP` / `es-ES` bundles in `@objectstack/platform-objects`), said a `type: 'api'` action pointed at a custom endpoint is called by the browser directly, never passes through the platform action route, and that the endpoint must re-check the capability itself — the 2026-07 scope note of ADR-0066 D4.
+  - **Now.** Per ADR-0066 D4 as amended on 2026-10-29, a `type: 'api'` action whose `target` is a same-origin platform path (the declared `target`, before interpolation, starts with exactly one `/` and goes on past it — not `//`, nor `/` followed by a backslash) is dispatched by the platform action door — `POST /actions/:object/:action` and the MCP `run_action` bridge — which runs the D4 capability gate, the anonymous baseline and the ADR-0126 activation consult before forwarding the call in-process to the declared `target` as the caller. MCP keeps its `ai.exposed` opt-in and its fail-closed refusal of actions on `sys_*` objects, so those (`sys_user.ban_user` and the like) reach an agent through REST `POST /actions/:object/:action`, not MCP. The door gates the calls it dispatches, and only those: the target endpoint stays directly reachable, so it must still enforce the declared capability itself, the door's gate being the added check (defence in depth, not a replacement). The `.describe()` and the help text say "on every call the door dispatches", so they stay true before and after the server half lands. An api action whose `target` is not a same-origin platform path stays browser-only and ungoverned: the door does not dispatch it, MCP does not list it, and the activation switch refuses to flip it. The `operation: 'update'` refusal beside a `type: 'api'` executor now says `api` "calls the endpoint it names" rather than that the browser calls it. The description and the help text also drop `modal` from the list of server-dispatched types: the door dispatches `script`, `flow` and the declarative `operation: 'update'` write, and answers a `modal` action 400 as a client-side type.
+  - **Landing.** ADR-0066 records the decision; the runtime that implements the door's api forwarding ships separately (ADR-0066 D4's amendment note names the server card). Until it lands the door still refuses `type: 'api'` and the console fetches `target` directly. Nothing an author writes today is refused or re-read differently by this release.
+- f552fa8: feat(plugin-auth): an invite says whether its mail was delivered, and a pending invitation's link can be copied from Setup → Invitations
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a deployment that does not deliver mail (the stock `log` transport, or no email service at all), inviting someone used to toast "Invitation sent to …" while nothing left the server, and nothing offered the accept link, so the invitee never arrived.
+  
+  - `POST /api/v1/auth/organization/invite-member` (invite and resend) now answers a top-level `outcome` beside the invitation row: `sent` when the deployment delivers mail, `link_only` when it does not. It is decided at call time by the same rule sign-up uses, the email service's own `isConfigured()` answer, so a wired `log` transport is not delivery. The row's columns are unchanged.
+  - The four `invite_user` actions (Users, Members, Invitations, the organization page) and `resend_invitation` declare `outcomeMessages`: the `link_only` message says the invitation was created and no email went out, and points to Copy Invite Link. `successMessage` stays the fallback.
+  - New action `sys_invitation.copy_invitation_link` (Copy Invite Link, on the invitation row and record header): answers `{ acceptUrl }`, the same link the invitation mail carries, in a copyable result dialog. The link admits whoever opens it, so the server answers it only to an owner, admin or delegated admin of the invitation's organization, only for a pending invitation, and never while the environment is cloud-managed (`409 RESOURCE_CONFLICT`); it is never logged.
+  - `PUBLIC_AUTH_FEATURES` books the new action under the `organization` and `cloudManaged` gates.
+- 8cb8c7f: fix(platform-objects): the Setup sidebar names each settings page the way the settings hub does, and lists every page the hub lists; Notification Events and the audit action read in words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **One name per settings page.** The Setup sidebar's Configuration entries now carry the hub card's title in every shipped locale. In English, "Email" becomes "Mail Delivery". In zh-CN, ja-JP and es-ES the mail, company, file storage and feature flags entries take the hub's wording (for example 邮件 becomes 邮件投递, 公司信息 becomes 公司).
+  - **The same set of pages.** SMS Delivery (`nav_settings_sms`) and Data Lifecycle (`nav_settings_lifecycle`) gain sidebar entries; until now they were reachable only through "All Settings". Both require `manage_platform_settings`, as their settings namespaces do.
+  - **Notification Events.** Severity options read Info / Warning / Critical, and Source Object is drawn as the object's label (the `object-ref` widget the sharing rules use) instead of its api name. The stored values are unchanged: severity keeps `info` / `warning` / `critical`, and the field still stores the object name.
+  - **Audit action.** Each `sys_audit_log.action` option carries a label ("Config Change" for `config_change`, "Login Failed" for `login_failed`, …), so the English list, detail and System Overview's "Audit Events by Action" chart no longer show the codes. The stored values are unchanged.
+- 8ec00cf: fix(platform-objects): Setup's user screens show a user's real state, and the copy-password line only when a password was generated
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Four rows of the Setup → Users pass, all on the platform's own `sys_user` metadata:
+  
+  - **Create User / Set Password result.** The dialog no longer carries the sentence "If a temporary password was generated, copy it now — it is shown only once and never stored." on every result. A dialog-level description shows on both outcomes, and a typed password returns no temporary password, so the line asked the administrator to copy something that was not there. The instruction is now the label of the Temporary password field itself ("Temporary password: copy it now, it is shown only once and never stored"), which the dialog draws only when the server generated one. The zh-CN, ja-JP and es-ES packs carry the same change.
+  - **User record, Details tab.** Details now shows the saved Locale (in Identity) and an Account Status section with Banned, Ban Reason and Ban Expires. These fields were hidden or in no section, and the details grid draws only its authored sections, so a banned user read as active.
+  - **Users list.** The default `all_users` view gains Banned and Platform Role columns, so a banned user or an admin is spotted without opening each record.
+  - **Locale help.** The help now says the setting is the language the user sees the interface in as well as their notifications. It used to say notifications only, while the console applies it to the whole interface. All four shipped packs carry it.
+- 5954705: fix(plugin-auth): a role change that grants an org-admin permission set says which set it granted (#27862)
+  
+  Clause-②: yes (widening: update-member-role's success answer gains outcome 'permission_set_granted' and grantedPermissionSet; the two sys_member actions gain outcomeMessages)
+  Metadata-protocol: none
+  
+  Raising a member to `admin` or `owner` grants an org-admin permission set as a side effect (`organization_admin`, or `organization_admin_no_bypass` on a wall-less posture). The role change used to answer the member row alone, so the console toasted "Member role updated" and the administrator later found a set on the user that nobody visibly assigned.
+  
+  - **Now.** When the role change left the member holding an org-admin set they did not hold before it, `POST /api/v1/auth/organization/update-member-role` answers two more members beside the member row: `outcome: 'permission_set_granted'` and `grantedPermissionSet: { name, label }`, the label read from the security catalog. The `sys_member` actions Change Role and Make Owner show it: "Member role updated. The new role also granted the permission set Organization Administrator (no record bypass)."
+  - **Unchanged.** A role change that grants nothing (admin to owner keeps the set already held, a demotion revokes it) and a refusal answer exactly as before. The member row's own columns are untouched. What is granted does not change: the grant is still written by `plugin-security`'s reconciler alone, and the new hooks only read.
+  - **Fails toward silence.** A grant read that fails leaves the answer as the route wrote it, without the line.
+- dc4755c: fix(spec): the permission-set form asks for the label first, and requires it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Identity section of `permissionForm` (the form `/meta/types` serves for the `permission` kind) listed `name`, the API name, before an optional `label`, so an administrator creating a permission set typed a machine name first and could save a set with no human label, while the Console's create form fills `name` from the label. The section now lists `label` first and required, then `name`, whose help says it is derived from the label when the set is created.
+  
+  `required` on a form row is a layout flag the renderer reads: `PermissionSetSchema` is unchanged and still accepts a set with no label, and nothing changes in how `name` is derived.
+  
+  `@objectstack/platform-objects` carries the regenerated metadata-form bundles: the `permission` form's `label` row now precedes `name` in every locale, the English `name` help is the new source text, and the zh-CN, ja-JP and es-ES `name` help is translated to match.
+- f3d2845: feat(platform-objects): the platform identity actions an agent may reach declare it — additive acts exposed, destructive lifecycle acts exposed behind confirmation, credential and ownership acts human-only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `sys_*` identity objects' actions now carry the ADR-0011 `ai` block by risk, as ADR-0011's 2026-10-30 addendum records (58 actions assessed, 38 declared):
+  
+  - **Exposed (21).** Additive or self-scoped acts declare `ai: { exposed: true, description }`: the four `invite_user` mirrors, resending and accepting an invitation, adding a member to an organization or a team, creating, editing and renaming a team or an organization, switching the active organization, re-enabling an OAuth application, enabling two-factor authentication, updating your own profile, resending the verification email, and requesting SSO domain verification.
+  - **Exposed, confirmation required (17).** Destructive or privilege-changing lifecycle acts also declare `requiresConfirmation: true`, so MCP `run_action` refuses them `428 ACTION_CONFIRMATION_REQUIRED`, with nothing run, until the call carries `confirm: true`: banning, unbanning and unlocking a user, setting a user's manager, revoking an API key or a session, signing out other devices, cancelling or declining an invitation, removing a member or a team member, deleting a team, an OAuth application or an SSO provider, disabling an OAuth application, leaving an organization, and unlinking a sign-in provider.
+  - **Human-only (20).** Acts that mint a credential or a session, change ownership, a role or a sign-in factor, or destroy an account or an organization (impersonating a user, setting a password, creating a user or an API key, transferring ownership, changing a member's role, deleting an organization, and the rest the addendum names) declare no `ai` block and are not listed over MCP. `sys_invitation.copy_invitation_link` declares none either; it was not part of the assessment.
+  
+  Over MCP these actions are listed and run behind every existing gate: the capability gate, the installation's action switch, the param contract, the confirmation gate and the identity route's own authorization. They are `type: 'api'` actions forwarded to identity routes that accept a signed-in session only, so an agent connected over OAuth sees them listed and is refused at the route when it runs one.
+- bed8306: feat(console): an action's param dialog names its own submit verb — `submitText` is drawn on the submit button in place of "Confirm"
+  
+  Clause-②: yes (widening) — `@object-ui/types` `UIActionSchema` and `@object-ui/core` `ActionDef` gain the optional member `submitText`, typed by derivation from the spec's `ActionSchema`; `@object-ui/i18n` `useObjectLabel()` gains the resolver `actionSubmitText`. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **The console.** The dialog an action opens to collect its `params` draws the action's `submitText` on its submit button ("Send", "Log Call"). Both param-collection handlers resolve it the way they resolve `description`: the translation bundle's `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action) first, then the authored inline locale map collapsed to the active language, then the authored string. An action that names no verb keeps "Confirm", and the button still says "Uploading…" while a file param uploads. `action:button`, `action:icon`, `action:group` and `action:menu` forward the key to the runner.
+  - **Studio.** The action form offers the key ("Submit button label"), translated in every shipped locale.
+  - **`os i18n extract`.** Scaffolds `objects.OBJECT._actions.ACTION.submitText` (or `globalActions.ACTION.submitText`) for an action with a non-empty `params` — the only action `translateAction` overlays it onto — and no slot for any other action.
+  - **Spec.** The liveness ledger row for `ActionSchema.submitText` is `live`, with its author warning dropped; the key's description no longer says no renderer shows it.
+- 001c04b: fix(spec): the permission-set form's Name help says when the name is filled from the label, and when to type it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's create form fills a new permission set's Name from the Label's Latin letters and digits only, so a label written all in Chinese or Japanese fills nothing. The Name help used to say the name is derived from the label in every case, so a zh-CN or ja-JP administrator saw an empty, required Name under a hint that said it had been filled. The help now names both outcomes: filled from the label's Latin letters and digits, otherwise typed by the administrator, in snake_case. The zh-CN, ja-JP and es-ES translations follow. No schema, accepted value or create behaviour changes.
+- e2772b4: feat(plugin-security): Setup → People & Organization opens the Position Holders and Permission Set Assignment pages
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Setup app's People & Organization group gains two entries, contributed by `@objectstack/plugin-security` beside its Positions / Capabilities / Permission Sets entries:
+  
+  - **Position Holders** (`nav_position_holders`) — `type: 'component'`, `componentRef: 'security:position-holders'`.
+  - **Permission Set Assignment** (`nav_permission_set_assignment`) — `type: 'component'`, `componentRef: 'security:permission-set-assignment'`.
+  
+  The console registers the two pages under those refs; until then an entry opens the console's not-found page. The entries carry no gate of their own, exactly like the catalog entries: the Setup app's `setup.access` and the ungated group anchor decide who sees them, and they disappear wherever the plugin is not installed.
+  
+  `@objectstack/platform-objects`' Setup bundles carry both labels in `en`, `zh-CN`, `ja-JP` and `es-ES`, with each translation's source digest recorded.
+- ac9c2f0: fix(platform-objects): the user directory no longer returns another user's sign-in phone number to non-admin readers
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the shipped non-admin permission sets' field read on two `sys_user` columns: the two fields change their declared field group, and the group is the declaration those sets already read. The remedy is a permission set's existing `fields` entry, never a rewrite of anyone's code or metadata. No exported declaration is removed or narrowed (not runtime-interface-only or type-surface-only); the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `patch`: a non-protocol narrowing takes `patch` and keeps this banner and its ADR-0087 disposition.
+  
+  `sys_user.phone_number` and `sys_user.phone_number_verified` are the better-auth phone sign-in identifier and its verified flag — account administration data, not directory data. Both are now declared in the identity object's `Admin` field group, which the shipped permission sets already treat as field-level security: the non-admin sets (`member_default`, `viewer_readonly`, `external_default`) mark every field of that group `readable: false`, and the admin sets (`admin_full_access`, `organization_admin` and its no-bypass variant) keep it.
+  
+  **FROM.** On `origin/main`, an org member holding only the non-admin sets could, on the generic data door (`GET /api/v1/data/sys_user`, `POST /api/v1/data/sys_user/query`, the record read and the activity stream):
+  
+  - read both fields on every org peer's row and on their own;
+  - write a **filter** naming either field, and have it evaluated;
+  - **sort** by either field;
+  - **group by** either field, or name it as an **aggregate** operand;
+  - run a `$search` whose default field set scanned `phone_number` (it is `searchable: true`, one of the object's three searchable fields beside `name` and `email`).
+  
+  **TO.** For the same member:
+  
+  - **Row position.** Both fields are withheld from every `sys_user` row served — a colleague's direct read, the list read, a `fields=` projection naming them, and the activity stream's recorded changes. The member's **own row** is withheld them too: field-level read security does not distinguish rows (ADR-0066).
+  - **Filter, sort, group-by, aggregate.** A query naming either field in its filter (`where` / `having`), its sort, its group-by or an aggregation is refused `403 PERMISSION_DENIED` before the engine is asked, at every verb that carries a query — a bulk write's own predicate included.
+  - **`$search`.** The default search set is narrowed **silently**: `phone_number` is dropped from the fields a member's `$search` scans, so a user picker keeps answering on `name` and `email`, and a search for a colleague's number returns no row rather than a refusal.
+  - **Writes.** Both fields stay `readonly: true` and are written through better-auth only, so no reachable write changes.
+  
+  **Unaffected.** Platform admins and organization admins read, filter, sort and search both fields exactly as before. System- and auth-context readers — sign-in by phone, SMS delivery, the admin import's match on `phone_number`, the better-auth adapter — read under a context no permission set reaches. The signed-in user's own number is read from the auth session: better-auth's session user carries both phone fields when the phone-number sign-in plugin is enabled.
+  
+  **Field group.** Wherever a form lays fields out by their declared group, the two fields now sit in `Admin` instead of `Account`.
+  
+  **Grant-back.** No configuration change is needed for shipped apps. A deployment that wants org members to keep reading, filtering on or searching colleagues' phone numbers grants a permission set naming `sys_user.phone_number` (and `sys_user.phone_number_verified`) with `readable: true` in its `fields` entries; field grants merge most-permissively, so that one set out-votes the baseline's withhold. A client that filtered or sorted members' `sys_user` queries on either field drops that predicate or runs it with an administrator's grant.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

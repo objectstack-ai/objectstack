@@ -1,5 +1,332 @@
 # @objectstack/plugin-audit
 
+## 18.3.0
+
+### Minor Changes
+
+- 7811c3f: feat(spec): a comment's author is told which @mentioned users will not be notified, and a mention added by editing is notified
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  The `@mention` recipient gate withholds a notification from a mentioned user who cannot read the comment or its record. Until now it only logged that, so the author believed the person had been told. The comment still saves with every mention; now the requester's own answer says who will not be notified.
+  
+  - **Spec.** `CreateDataResponseSchema` and `UpdateDataResponseSchema` declare an optional, response-only `withheldMentions`: the ids of the users this write @mentioned whose notification the mention gate withheld. Ids only, never the reason. Only a `sys_comment` write fills it, only on the requester's own answer to that request, and the key is omitted when nobody was withheld. It is not a field of `sys_comment` and is never stored, since a stored member would tell every reader who cannot read the thread. `WriteObservabilityOptions` declares the in-process listener that carries it, `onMentionsWithheld(userIds)`, beside `onFieldsDropped` and `onValidationAdvisory`. Like them it never crosses the wire.
+  - **plugin-audit.** The mention writer reports the gate's own verdict to that listener, which it reads off its hook's `ctx.input.options` (the write's own options bag). Readability is not derived a second time, and who the gate admits is unchanged. The writer now also runs on `sys_comment` `afterUpdate`, so a mention added by editing a comment is judged and notified like one written with it. An edit judges only the mentions it added; a mention the comment already carried is not judged or notified again. The editor, who may be a parent-record editor rather than the author, is the actor of an edit's notifications: they are named in the title and never notified themselves. `MentionGateInput` takes an optional `onWithheld(userId)` callback.
+  - **metadata-protocol.** `createData` and `updateData` pass the listener and answer the ids as `withheldMentions`. A nested write that a hook or a flow makes inside this one carries its own options, so its verdicts never reach this answer.
+  - **client.** `CreateDataResult` and `UpdateDataResult` declare `withheldMentions?: string[]`, mirroring the two schemas.
+  - **objectql.** `engine.update` accepts the `onMentionsWithheld` option. The engine never calls it; it carries it to the `after*` hooks with the rest of the caller's bag.
+  
+  Nothing to do for existing clients: a client that does not read `withheldMentions` sees the same answer as before.
+- 3a054cb: feat(spec,runtime,plugin-audit): an action run through MCP leaves an audit row naming its surface
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The audit trail could not tell an action an agent ran over MCP from one a person clicked. Neither action door wrote a row for the invocation itself: the script branch printed a `[action-audit]` log line, the api, flow and declarative-update branches printed nothing, and the `sys_audit_log` rows for the action's own data writes do not say which door started it.
+  
+  - **`ExecutionContext.surface`** (`@objectstack/spec`): `'rest' | 'mcp'`, optional. The door an action invocation came through. Set only by the two action doors, from the door's own identity, on the envelope of the invocation they record; never client-supplied, never read by authorization. `@objectstack/core` declares it a non-entry field (identity resolution does not produce it).
+  - **One `action_invocation` row per invocation** (`@objectstack/plugin-audit`): the `audit` service slot gains `recordActionInvocation`, and `sys_audit_log.action` gains the value `action_invocation`. The row carries the caller (`user_id`, `actor`, `tenant_id`), the action's object and subject record, and in `metadata` the `surface`, `action_name`, `branch` (`script` / `api` / `flow` / `update`), `outcome`, the status and error code of a refusal, the `run_id` of a `resume_run`, and `performed_by` / `on_behalf_of` when an agent performed the call. No new column.
+  - **Both doors write it on every branch** (`@objectstack/runtime`): REST `POST /actions/:object/:action` (`surface: 'rest'`) and the `/mcp` bridge's `run_action` / `resume_run` (`surface: 'mcp'`), for every call that cleared the door's admission gates, whether the branch then answered or refused. A call refused by an admission gate (not found, `ai.exposed`, the `requiredPermissions` gate, the activation switch, the param contract, the confirmation gate) ran nothing and writes no row. The `api` branch's row is written by the door after the forward answers, so it names the true door although the target re-authenticates the caller.
+  
+  Nothing about which actions a door may run changes. The existing `[action-audit]` log line stays. To read the rows: filter `sys_audit_log` on `action = 'action_invocation'` and read `metadata.surface`.
+
+### Patch Changes
+
+- c3fb185: plugin-audit: a mention notification reaches a mentioned user only when they may read the comment it previews, as well as the record it links
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `@mention` recipient gate decided each mentioned user on one read: may they open the record the comment is on. The notification also carries a preview of the comment's text, and being able to read a record does not mean being able to read its comments, because the comment object has its own object-level grant, tenant wall and row scope. The gate now also runs each recipient's own read of the comment, by id. It uses the same evaluator as the comment read path (`resolveReadableParentIds`, in the recipient's resolved envelope), and it withholds the notification when that read does not return the comment. Each withheld recipient is logged at `warn` with a new reason: `cannot_read_thread`, or `no_comment_id` when the comment has no id to read it by. The comment text is never logged.
+  
+  For administrators: a mentioned user is notified only when a permission set they hold grants read on comments. To notify a population that should take part in record discussions, grant comment read in a set it holds.
+- e744244: fix(plugin-audit): the compliance ledger keeps no copy of secret-store key material
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audit writer copies each audited row into `sys_audit_log` (`new_value` / `old_value`) and into `sys_activity.metadata`. For the secret store and the two settings holders, that copy carried the encrypted key-material column. Every new copy now omits those columns, the way a field declared `internal` is omitted:
+  
+  - **What is still recorded.** Each create, update and delete of those rows keeps its ledger and activity row: which record, its producer-scoped label, key id, algorithm and version, who changed it and when. A write that changes only the key material still records its row, with the material on neither side.
+  - **Which columns.** The list is closed, held by the writer (`KEY_MATERIAL_COPY_COLUMNS`), and keyed by the platform-object definitions' own names. A column of the same name on any other object is recorded as before.
+  - **Copies already written.** `migrateKeyMaterialCopies(engine, logger, { apply })` and `migrateArchivedKeyMaterialCopies(driver, logger, { apply })` remove the columns from copies stored before this release, in the hot `sys_audit_log` / `sys_activity` tables and in an archive datasource. Both runs are dry by default, idempotent, change only the copy column, and keep each row's stored `updated_at`. Their reports hold counts only. The pure planners `planKeyMaterialAuditRowPatch` and `planKeyMaterialActivityRowPatch` are exported with them.
+- 2ecf6a7: fix(plugin-audit)!: the compliance ledger's deployment-level rows (no `tenant_id`) are served to the platform administrator alone, in every tenancy posture, `single` included (#26750)
+  
+  Clause-②: no (narrowing) — under `single`, a non-system reader of `sys_audit_log` that is not the platform administrator (an organization administrator, the holder of a set that grants the ledger read, a holder of `view_all_audit_log`) is no longer served the ledger rows that carry no `tenant_id`; under a wall, the shipped sets' row scope already excluded them. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export is added, removed or renamed: one runtime read rule on sys_audit_log changes which stored rows a reader who is not the platform administrator is served, and the view_all_audit_log description gains one sentence. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** read narrowing on `sys_audit_log` (`@objectstack/plugin-audit`), on every engine read of the ledger: the data API's list, by-id, count and aggregate, and the Setup views and record history built on them.
+  
+  - **Before.** The ledger has no organization column (ADR-0131 D7); the organization a row is about is the attribution field `tenant_id`, and a row about a deployment-level action carries none: a GLOBAL settings change, a user-import run, a platform-admin standing change, a user account the platform administrator creates or resets through the admin endpoints, a system write about an object with no organization column. Under a wall the shipped row policy `sys_audit_log_org` kept those rows from every organization reader. Under `single` no wall is enforced and that policy is stripped, so every reader whose sets grant the ledger read was served them, and a holder of `view_all_audit_log` was served them past the parent-record gate too.
+  - **Now.** In every posture, a ledger row with no `tenant_id` is served only to the platform administrator: the carried `PLATFORM_ADMIN` posture rung, which the unscoped `admin_full_access` grant derives. Every other non-system reader is served only the rows about an organization. Which organization's rows stays the row policy's answer, unchanged. The same holds under a wall for a set that authors its own ledger row policy or grants the superuser read bypass on the ledger: its holder is not the platform administrator.
+  - **Unchanged.** The rows stay stored. A system-context read and a context-less programmatic read still return every row. The platform administrator reads every row as before, on a request that carries the `PLATFORM_ADMIN` rung, which the request's authorization context resolves for the administrator. A context built outside that resolution carries no rung and is served the rows about an organization only (fail-closed, never wider): for example, an automation run with `runAs: 'user'` whose run context seeds no posture. The parent-record gate and the field-level redaction of the snapshots are unchanged. A walled deployment on the shipped sets serves every reader the same rows as before.
+  - **The capability text.** The `view_all_audit_log` description (`PLATFORM_CAPABILITIES`, `@objectstack/spec`) gains one sentence saying the same for `single`.
+  
+  **Upgrade note for `single` operators who granted the ledger to someone who is not the platform administrator.** An auditor role (a set granting `sys_audit_log` read, with or without `view_all_audit_log`), an organization administrator, or a `viewer_readonly` holder no longer sees deployment configuration history: global settings changes, user-import runs, platform-admin standing changes, and the user accounts the platform administrator creates or resets through the admin endpoints. The organization's own record history and tenant-scope settings changes are still served. A person who must read deployment configuration history needs the platform administrator's grant (`admin_full_access`); no narrower grant serves those rows. A job that exports the full ledger reads it in system context and is unaffected.
+- b2b4972: fix(plugin-audit): an @mention by email matches the user whatever the address's casing
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A comment that @-mentioned a colleague by email in a different case than the stored address (`Carol@Example.com` for `carol@example.com`) was accepted, but the mention resolved no user and the colleague was never notified; the server logged `mention notification withheld` with reason `unknown_email`. The mention lookup now normalises the address the way identity and sign-in do (trim, then lowercase, through the shared `normalizePlatformAdminEmail`), so it names the same user sign-in would. Who may be notified is unchanged: the record and comment read checks still decide.
+- 8cb8c7f: fix(platform-objects): the Setup sidebar names each settings page the way the settings hub does, and lists every page the hub lists; Notification Events and the audit action read in words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **One name per settings page.** The Setup sidebar's Configuration entries now carry the hub card's title in every shipped locale. In English, "Email" becomes "Mail Delivery". In zh-CN, ja-JP and es-ES the mail, company, file storage and feature flags entries take the hub's wording (for example 邮件 becomes 邮件投递, 公司信息 becomes 公司).
+  - **The same set of pages.** SMS Delivery (`nav_settings_sms`) and Data Lifecycle (`nav_settings_lifecycle`) gain sidebar entries; until now they were reachable only through "All Settings". Both require `manage_platform_settings`, as their settings namespaces do.
+  - **Notification Events.** Severity options read Info / Warning / Critical, and Source Object is drawn as the object's label (the `object-ref` widget the sharing rules use) instead of its api name. The stored values are unchanged: severity keeps `info` / `warning` / `critical`, and the field still stores the object name.
+  - **Audit action.** Each `sys_audit_log.action` option carries a label ("Config Change" for `config_change`, "Login Failed" for `login_failed`, …), so the English list, detail and System Overview's "Audit Events by Action" chart no longer show the codes. The stored values are unchanged.
+- 125ad06: fix(runtime): the two `action_invocation` rows of an `api` action that forwards to another action route name each other
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A `type: 'api'` action whose `target` is another action route on the same server answers through two doors, so it writes two `sys_audit_log` rows: the outer door's (`branch: 'api'`, `surface: 'mcp'` for an agent's `run_action`, `rest` for a click) and the inner REST door's for the action it reached. The two could only be joined by their timestamps, and the inner row read like a person's direct REST call. Now each row names the other:
+  
+  - **The outer row's `metadata.target`** is the action's declared `target`, on the `api` branch only. It is the declaration, not the interpolated path: a path built from the caller's params can carry a param value, and this row records no params.
+  - **The inner row's `metadata.forwarded_from`** is the forward mark the request arrived carrying (`<object>/<action>` of the outer action), the same `x-objectstack-action-forward` header the inner door already reads for its loop refusal. It is a hint, not a surface: any caller can send the mark, so a forged one mislabels this key and nothing else, and the inner row's `surface: 'rest'` still names the door the request came through. Because the header is caller text bound for the ledger, it is recorded only in the forwarding door's own shape: two snake_case machine names joined by one slash, at most 255 characters. Any other value is left out of the row, and the call is answered exactly as it would be without it.
+  
+  **Public surface (widening):** `ActionInvocationAuditEvent`, exported by `@objectstack/plugin-audit`, gains two optional members, `target` and `forwardedFrom`. An event that sets neither writes the same row as before. The runtime's matching event type and helpers are internal to `@objectstack/runtime`. Rows written before this change carry neither key.
+- Updated dependencies [af1e1e0]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [1f1eda4]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [31a6ca7]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [b2b3124]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [0eb2d21]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [693a729]
+- Updated dependencies [9fa70b4]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [ee9a8d6]
+- Updated dependencies [385aa12]
+- Updated dependencies [79d5dac]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [99aeee6]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [8d66cbe]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [a1d8bf6]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [b8b3208]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e29a1b1]
+- Updated dependencies [72c0152]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [a3d24c9]
+- Updated dependencies [a7de844]
+- Updated dependencies [ecd944f]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [6a648ac]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d8de26d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [5f31470]
+- Updated dependencies [11a7f96]
+- Updated dependencies [ae64120]
+- Updated dependencies [139bc18]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [f9a1363]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [7abe151]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [2db3281]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [35ffb77]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [e2d0dab]
+- Updated dependencies [99a6a78]
+- Updated dependencies [54c2496]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/objectql@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

@@ -1,5 +1,315 @@
 # @object-ui/plugin-calendar
 
+## 18.3.0
+
+### Minor Changes
+
+- b53d9f3: refactor(types,plugin-calendar,plugin-gantt,plugin-list,plugin-view)!: the flat `object-calendar` and `object-gantt` field-mapping keys leave the published schemas; producers emit the `calendar` / `gantt` block (#25923)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No `@objectstack/spec` key, object definition, stored row or stored shape moves: the spec's `ComponentPropsMap['object-calendar']` and `['object-gantt']` rows already refuse every key this change takes off `@object-ui/types`, so no metadata that the spec accepts carries them, and `objectstack migrate meta` has nothing to rewrite. What narrows is the `@object-ui/types` mirror of those rows: its TypeScript interfaces, its tolerant zod mirrors and, for `object-calendar`, the strict authoring face derived from them, which now refuses the five flat keys by name as the spec does. The affected party is a TypeScript author or a hand-written node, reached by the compiler and by `objectui validate`, and the renderers still read the flat spelling a host hands them. One drawing outcome moves: `getGanttConfig` validates a `gantt` block and never validated the flat spelling, so a pre-door stored view whose `options.gantt` carries a value the spec refuses now shows the refusal screen instead of drawing; that row is outside what the spec accepts, and its conversion belongs to the stored-row census of #25923, not to tolerance in a consumer. The other categories are closed on facts: the five packages publish (not unpublished); no ADR-0087 id covers this change (not registered or already-registered); and the narrowed symbols are zod-backed metadata shapes (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  `@object-ui/types` published, on `ObjectCalendarSchema` and `ObjectGanttSchema`, a flat spelling of the field mapping that the spec refuses on the node. A declared flat key is one the strict authoring face derives from, so `objectui validate` accepted the `object-calendar` spelling the spec refuses. The keys only the host writes now live on each renderer package's own hand-off type (ui/AGENTS.md Commandment #0.1), and the producers write the block.
+  
+  - **`@object-ui/types`**: `ObjectCalendarSchema` (TypeScript and zod) no longer declares `startDateField`, `endDateField`, `titleField`, `colorField` or `allDayField` flat; they are written in its `calendar` block. The `dateField` / `endField` tombstones stay and now prescribe `calendar.startDateField` / `calendar.endDateField`. `ObjectGanttSchema` no longer declares the 29 `GanttConfig` keys flat (`startDateField`, `endDateField`, `titleField`, `progressField`, `dependenciesField`, `colorField`, `viewMode`, `summaryExtent`, `interactions` and the rest), nor the legacy `dependencyField` alias or the `search` / `searchableFields` pair; they are written in its `gantt` block (the pair is not authored at all). `staticData`, `filter`, `sort`, `gantt` and the other node keys stay. For `object-gantt` the strict authoring face already refused every flat key (its arm is the `properties` bag), so the narrowing there is the published TypeScript and zod export.
+  - **`@object-ui/plugin-calendar`**: `ObjectCalendarFlatFields` and `ObjectCalendarHandoff` type the flat read `getCalendarConfig` keeps for a host that mounts the renderer directly. The renderer is unchanged: the `calendar` block wins, and the flat spelling is read only without it.
+  - **`@object-ui/plugin-gantt`**: `ObjectGanttFlatFields` (derived from `GanttConfig`, plus the alias and the search pair) and `ObjectGanttHandoff` type the flat read the same way. The renderer is unchanged.
+  - **`@objectstack/spec`**: the `object-calendar` and `object-gantt` flat-key refusals no longer say `ObjectView` / `ListView` emit the flat spelling; they hand the binding off in the block, and the flat spelling is only a stored-document fallback the renderer still reads. The prescription itself is unchanged.
+  - **`@object-ui/plugin-list`** and **`@object-ui/plugin-view`**: `ListView` and `ObjectView`'s `generateViewSchema` emit `calendar: { … }` and `gantt: { … }` on the node they build instead of the flat keys. They emit the block only where the renderer's flat branch drew: a calendar once `startDateField` is declared, a gantt once both dates are, with `titleField` floored at `'name'` as that branch floored it. A gantt binding carrying a value the spec's `GanttConfigSchema` refuses (a pre-door stored `options.gantt`, say) goes out nested too, and now shows the renderer's refusal screen where the unvalidated flat branch drew it.
+  
+  **BREAKING** for TypeScript code or hand-written nodes that write the flat keys on these two node types.
+  
+  - **Before.** `const node: ObjectCalendarSchema = { type: 'object-calendar', objectName: 'event', startDateField: 'start' }` compiled, and the `object-calendar` strict face accepted it.
+  - **Now.** The flat key is a compile error, and `objectui validate` refuses it by name on `object-calendar` (it already did on `object-gantt`). A renderer handed a flat node by a host still draws it.
+  - **Fix.** Move the keys into the block: FROM `{ type: 'object-calendar', startDateField: 'start', titleField: 'name' }` TO `{ type: 'object-calendar', calendar: { startDateField: 'start', titleField: 'name' } }`, and FROM `{ type: 'object-gantt', startDateField: 's', endDateField: 'e', progressField: 'p' }` TO `{ type: 'object-gantt', gantt: { startDateField: 's', endDateField: 'e', titleField: 'name', progressField: 'p' } }` (the `gantt` block requires `titleField`). Code that hands a flat node straight to `<ObjectCalendar>` or `<ObjectGantt>` types it as `ObjectCalendarProps['schema']` or `ObjectGanttProps['schema']`, which carry the flat keys.
+- 17b5152: feat(spec,ui)!: a record opens one way per object — `navigation.mode` keeps `drawer` (now the default), `page`, `new_window` and `none`; `modal`, `split` and `popover` are retired, and a list page's `recordAction` drops `modal`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`navigation.mode` refuses `modal`, `split` and `popover`; `interfaceConfig.recordAction` refuses `modal`; an omitted `navigation.mode` defaults to `drawer` instead of `page`)
+  
+  <!-- adr-0087: registered navigation-mode-overlay-values-removed, ui-record-open-overlay-modes-retired -->
+  
+  **BREAKING** accept-set narrowing and default change on the record-open surface (`@objectstack/spec`), with the console following it in the same release.
+  
+  The model, ruled by the maintainer: an object has one default way to open a record — the drawer, which expands to the full page (the same record page at two widths) — and `page` only for an object that declares it. A centred dialog and a popover were extra surfaces for the same record, and the side-by-side pane is each reader's own choice, not something an author fixes for every reader.
+  
+  - **FROM → TO.** `navigation.mode: 'modal'`, `'split'` or `'popover'` (on a list view, an object's `listViews` entry, or a page list block: `list-view`, `object-grid`, `object-kanban`, `object-calendar`, `object-map`, `object-gantt`, `object-tree`, `object-timeline`) → delete the value; the block takes the `drawer` default. `interfaceConfig.recordAction: 'modal'` → delete the value; the default is `drawer`. Declare `page` only for an object whose record should open as a full page.
+  - **The one-line fix.** Delete the retired value. `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` row is converted when it is read (the `navigation-mode-overlay-values-removed` conversion), so a view saved from Studio with one of the three values keeps loading and opens the drawer.
+  - **What the parse says.** Each retired value is refused by name with its prescription, for example "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — …", at `defineStack` as `STACK_SCHEMA_INVALID` / 422. TypeScript rejects each at a `NavigationMode` position. A misspelt mode keeps zod's own message.
+  - **The default.** A navigation block written without `mode` parses to `drawer` (it parsed to `page`). The console never honoured that `page` for a list with no navigation block, because it guessed the surface from the object's field count; that guess is retired too. A list of an object with no authored navigation opens a clicked record in the drawer, whatever its field count, and a mobile viewport still pages. An artifact or stored row that a released toolchain parsed carries the old `page` written out and keeps opening as a full page; delete it to take the drawer.
+  - **The split pane.** It is now a reader's preference, read by the console's object page from the browser (`os:record-open-mode`, `drawer` or `split`, default `drawer`). It applies only to a record that opens in the drawer; an object or view that declares `page` keeps its declaration.
+  
+  The console (`@object-ui/*`): `useNavigationOverlay` defaults a block without `mode` to `drawer` and treats `drawer` as the one overlay mode. `NavigationOverlay` keeps the drawer face and the split face the console's object page draws from the preference; its `modal` and `popover` faces, the `popoverTrigger` / `popoverAnchorRef` props and the `useOverlayAnchor` export are removed, because no caller can reach them. The grid, kanban, calendar, gantt and tree renderers drop their `split` and `popover` plumbing. The registered `object-view` renderer opens records in the drawer (a page on a mobile viewport) instead of paging a field-heavy object. The Studio list-view inspector offers the four live modes, and the list page's `recordAction` the three live values.
+  
+  Migration for code that imported the removed component API: drop `popoverAnchorRef` / `popoverTrigger` from a `NavigationOverlay` call and any `useOverlayAnchor()` call; pass `mode="split"` with `mainContent` for a side-by-side pane.
+
+### Patch Changes
+
+- d8a9cc5: refactor(plugin-calendar,plugin-gantt)!: the calendar and gantt renderers read their binding from the `calendar` / `gantt` block only; the flat fallback read is retired (#25923)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No `@objectstack/spec` key, accepted value, stored row or stored shape moves. The spec's `ComponentPropsMap['object-calendar']` and `['object-gantt']` rows already refuse every flat key this change stops reading, `@object-ui/types` stopped declaring them in the earlier slice of #25923, and both producers in the console (`ListView` and `ObjectView`) already write the block, so no metadata the spec accepts reaches the retired read. A stored-row census over every metadata source this repository reaches (examples, apps, the console's shipped metadata, seeds, fixtures, platform-objects) found no stored view or node that writes the binding flat, so `objectstack migrate meta` has nothing to rewrite. What narrows is the drawing outcome for a host that mounts `ObjectCalendar` or `ObjectGantt` directly with a flat node: it now reaches the refusal screen. The `@objectstack/spec` half is prose only: the two refusals no longer say the renderer still reads the flat spelling. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id covers this change (not registered or already-registered); the narrowed type members are package-local hand-off types that neither package's entry exports (not type-surface-only or runtime-export-retired). -->
+  
+  `ObjectCalendar` and `ObjectGantt` kept a second, flat reading of their field binding for a host that mounts them directly with the keys written on the node. The spec refuses those keys on the node, `@object-ui/types` no longer declares them, and no producer writes them, so that read was a second dialect nothing should reach. It is retired.
+  
+  - **`@object-ui/plugin-calendar`**: `getCalendarConfig` reads the `calendar` block only. A node that writes `startDateField`, `endDateField`, `titleField`, `colorField` or `allDayField` flat, with no block, shows the "Calendar configuration required" screen, whose hint names the `calendar` block. The package-local `ObjectCalendarFlatFields` and `ObjectCalendarHandoff` types are gone, and `ObjectCalendarProps['schema']` is the published `ObjectCalendarSchema`.
+  - **`@object-ui/plugin-gantt`**: `getGanttConfig` reads the `gantt` block only. A node that writes its `GanttConfig` keys flat, with no block, shows the "Gantt configuration required" screen, which now names the `gantt` block, and in development a warning names every flat key the chart did not read, with or without a block beside it. The legacy singular `dependencyField` is read nowhere (the spec spells it `dependenciesField`, inside the block). The package-local `ObjectGanttFlatFields` type is gone; `ObjectGanttProps['schema']` keeps the two search keys `ListView` writes at runtime, now on `ObjectGanttSearchFields`.
+  - **`@objectstack/spec`**: the `object-calendar` and `object-gantt` flat-key refusals no longer say the renderer still reads the flat spelling. The prescription is unchanged: write the keys in the `calendar` / `gantt` block.
+  
+  **Supersedes, in the same release:** `25923-calendar-gantt-flat-keys-handoff.md` (the earlier slice of #25923) says the calendar and gantt renderers are unchanged and still read the flat spelling a host hands them, that `ObjectCalendarProps['schema']` and `ObjectGanttProps['schema']` carry the flat keys, and that the spec refusals call the flat spelling a fallback the renderer still reads. This change retires that read, so those sentences no longer hold: the renderers read the block only, the props types carry no flat binding key, and the refusals no longer say it.
+  
+  **BREAKING** for code that mounts `<ObjectCalendar>` or `<ObjectGantt>` with a flat node.
+  
+  - **Before.** `<ObjectGantt schema={{ type: 'object-gantt', objectName: 'task', startDateField: 's', endDateField: 'e' }} />` drew a chart, and the flat keys compiled against `ObjectGanttProps['schema']`.
+  - **Now.** The flat keys are a compile error on the props type, and the node shows the configuration-required screen.
+  - **Fix.** Write the binding in the block: `{ type: 'object-gantt', objectName: 'task', gantt: { startDateField: 's', endDateField: 'e', titleField: 'name' } }` (the `gantt` block requires `titleField`; the flat branch used to floor it at `'name'`), and `{ type: 'object-calendar', calendar: { startDateField: 'start' } }` for a calendar.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 2140821: fix(ui): a calendar event and a gantt bar open the same record page a grid row opens in the console
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the console a calendar event or a gantt bar opened a second, smaller rendering of the record (the quick-look `RecordDetailPanel`), while a grid row or a kanban card of the same object opened the record page in the drawer, with the drawer stack and ⤢ to the full page. Now every view opens the record page:
+  
+  - **Calendar and gantt.** A host's `onRowClick` takes the click, as it already did on the kanban, the grid, the gallery, the map, the timeline and the tree. Before, both views let their own drawer outrank the host's handler, and the gantt's registration never forwarded one. The console's handler opens the record in the drawer, or on its page where the view or the object declares `page`. Before, a calendar view that declared `page` opened the quick-look drawer instead.
+  - **The renderers' own drawer is the fallback.** A calendar or gantt that nobody hands a click (a standalone block, a list with no host handler, a host outside the console) still opens its own drawer, as before. `ListView` passes the two views its click router only when its own host routes record clicks, so a hostless list keeps that drawer instead of a click that opens nothing.
+  - **Gantt registration.** `ObjectGanttRenderer` forwards a function-typed `onRowClick` and nothing else. An authored non-function value is dropped, and host `data` stays dropped.
+  - **`RecordDetailPanel`** is unchanged apart from its docblock, which names it as the fallback and its later removal.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 71de060: fix(plugin-calendar): a calendar opens on the date its `calendar.initialDate` declares
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `calendar.initialDate` is now read where `ObjectCalendar` seeds the date it opens on. Before, every calendar opened on today whatever the key said, so a renewals calendar whose records fall months ahead opened on an empty month.
+  
+  - **Absent:** today, as before.
+  - **A wrapped date-macro token** (`{today}`, `{next_month_start}`, `{3_months_from_now}`, …): the date the token resolves to when the calendar opens, through the same `resolveDateMacros` resolver filter values use.
+  - **`first_record` / `next_record`:** one extra one-row read — the view's filter, plus a present start date (`first_record`) or a start date on or after the start of today (`next_record`), sorted by the start field ascending, one row — and the calendar opens on that record's start date. A `date` start field is bounded as a calendar day, any other as the instant of local midnight. No qualifying record, or a failed read, opens on today.
+  
+  The calendar shows the month, week or day of its active mode that holds the date. The seed happens once, on mount: after it, the user's navigation owns the date, and an anchor answer that arrives after the user has navigated is discarded.
+  
+  Both producers of the `object-calendar` node — a list view's calendar branch (`ListView`) and `ObjectView`'s generated calendar view — now forward `initialDate` inside the node's `calendar` block; before, they forwarded the block's five field bindings by name and dropped it. The `[PLANNED — not yet rendered]` marker is gone from `CalendarConfigSchema.initialDate`'s description, which now reads one sentence per form, and the `calendar` registry input descriptions of `object-calendar` and `list-view`, plus the designer's `calendar` options type, list the key.
+- Updated dependencies [2302b92]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8c8c5b5]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [b3f7344]
+- Updated dependencies [b53322d]
+- Updated dependencies [28804e8]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [9f181af]
+- Updated dependencies [2dd332d]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [47b6392]
+- Updated dependencies [d31329f]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [6866e2e]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [94bab5a]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [a122269]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [0d07de2]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [fc92c62]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [d7df639]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [8243694]
+- Updated dependencies [2140821]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [2594f5b]
+- Updated dependencies [2655ebd]
+- Updated dependencies [48bffe3]
+- Updated dependencies [a33fce2]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [1e8e529]
+- Updated dependencies [4145210]
+- Updated dependencies [1ed3360]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [b223072]
+- Updated dependencies [7614f8f]
+- Updated dependencies [359e935]
+- Updated dependencies [5b17215]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [69991ff]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [8a1f467]
+- Updated dependencies [2f2c6b9]
+- Updated dependencies [5c083e8]
+- Updated dependencies [a5d7098]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [946395d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c4cb5ec]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [b339465]
+- Updated dependencies [e15a87c]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [916531a]
+- Updated dependencies [3ba5206]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [bed8306]
+- Updated dependencies [91e4652]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [64e5efd]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @object-ui/plugin-detail@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/mobile@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/permissions@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

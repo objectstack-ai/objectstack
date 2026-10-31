@@ -1,5 +1,263 @@
 # @objectstack/connector-openapi
 
+## 18.3.0
+
+### Minor Changes
+
+- 7f17135: feat(connector-openapi): a declarative `openapi` instance takes `providerConfig.include`, an operation allowlist
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A `provider: 'openapi'` connector instance can now list the operations it exposes: `providerConfig.include: string[]`. Only the listed operations become actions, so a large API (hundreds or thousands of operations) comes up as the handful of actions its flows call, without trimming the document by hand. The key has the same allowlist meaning as the `mcp` provider's `include`.
+  
+  - **An entry is an action key.** Write an operation's `operationId`, or, for an operation the document gives no `operationId`, its generated `method_path` key (`delete /customers/{id}` is `delete_customers_id`). An operation that has an `operationId` is named only by it. These are the same keys the actions are exposed under, so the `actionId` in a flow and the entry in `include` are spelled the same way.
+  - **An unknown entry fails the boot.** An entry the document does not carry (a typo, or an operation the upstream renamed or removed) is a configuration fault at materialization: boot fails, or the entry is skipped on reload, with an error naming the entry and listing the document's keys. It is never ignored.
+  - **The shape is checked before the document loads.** An `include` that is not an array of non-empty strings is refused the same way, so a malformed allowlist never exposes the whole document.
+  - An instance without `include` is unchanged: every operation is an action.
+- 55b5042: fix(connector-openapi): a document that is not OpenAPI 3.x is refused at load — a Swagger 2.0 document included
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export changes: providerConfig.spec keeps its three forms, and what is now refused is an external document the generator never mapped correctly. The fix is to the document, outside the metadata, so there is nothing for a metadata migration to rewrite and no tombstone. -->
+  
+  The declarative `openapi` provider loaded any JSON object as its document. A Swagger 2.0 document "loaded" with its `host` / `basePath` ignored and its `body` / `formData` parameters dropped, so the instance came up with wrong actions and no error. The provider now checks the document's `openapi` field on every `providerConfig.spec` form (inline object, http(s) URL, package-relative file): absent, or anything but `3.x` (a `swagger: "2.0"` document included), is a configuration fault — fatal at boot, a skipped entry on reload — whose message names the inline document, URL or file and the remedy. The runtime never converts.
+  
+  **BREAKING** accept-set narrowing at the `openapi` provider's document load. What an upgrader sees: an instance whose `spec` is a Swagger 2.0 document now fails boot with `connector-openapi provider: connector 'NAME' providerConfig.spec file './x.json' is a Swagger "2.0" document; … Convert the document to OpenAPI 3.x offline …`. The document is converted outside the runtime (any Swagger 2.0 → OpenAPI 3 converter); the metadata keeps its shape. A 3.x document (3.0 or 3.1) loads as before.
+- b358e79: feat(spec): `signed` joins declarative connector-instance auth, with `aliyun-acs3-hmac-sha256` as its first scheme (ADR-0143 D2.3, #26710)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One member is added to the instance-auth union and optional members to the provider context and materialization. Nothing an author or a provider wrote before is refused or re-shaped, so there is nothing for a migration to rewrite. -->
+  
+  An upstream that authenticates every request by a signature over the request itself, rather than by a token it is sent, had no way to be declared on a connector instance. ADR-0143 D2.3 adds that kind, `signed`, with a closed list of schemes. A scheme joins the list only together with its signer and its vendor test vectors. This release ships one scheme: Alibaba Cloud's OpenAPI V3 signature.
+  
+  - **`@objectstack/spec`**
+    - `ConnectorInstanceAuthSchema` gains `{ type: 'signed', scheme, keyId, credentialRef }`, a closed shape for each scheme. `keyId` is the public key identifier. The signing key is only ever a `credentialRef`.
+    - The publish door refuses an unknown or missing `scheme` at `auth.scheme`, naming the value it got and the schemes that ship. It refuses an inline `secret`, `privateKey`, `secretKey` or `accessKeySecret` by name, with the `credentialRef` prescription, and an authored `signature`. It refuses `signed` on `provider: 'mcp'` at `auth.type`.
+    - `@objectstack/spec/integration` gains the request-signer seam: `ConnectorRequestSigner` (`sign`, plus an optional `verifyResponse` for schemes that sign their responses), `ConnectorProviderContext.requestSigner`, and `ConnectorMaterialization.requestSignerApplied`.
+    - `connectorFetchOptions` takes an optional signer and signs every attempt `resilientFetch` makes, retries included. `readConnectorResponse` runs the scheme's response verification before parsing.
+    - With no signer, both behave exactly as before.
+  - **`@objectstack/service-automation`**
+    - A `signed` instance's key resolves through the same credential chain as the static kinds, with the same degrade on an unresolved reference.
+    - The key is bound to the scheme's signer at materialization, and the provider receives only the signer.
+    - The service refuses to serve a `signed` instance on a provider that does not acknowledge the signer, so such an instance never calls its upstream unsigned.
+    - A datasource that borrows a `signed` instance through `external.connector` is refused with `422`.
+  - **`@objectstack/connector-rest`, `@objectstack/connector-openapi`**
+    - Both apply a handed request signer to every request and acknowledge it.
+    - A static credential together with a signer is refused.
+    - `bearer`, `api-key` and `basic` requests are unchanged.
+
+### Patch Changes
+
+- 6d5c021: fix(connector-openapi): parameters declared on an OpenAPI 3.x path item reach the input schema of every action under that path
+  
+  Clause-②: no — only the generated action's `inputSchema` (what `GET /automation/connectors` shows an author or the flow designer) gains the path-level parameters the document already declares; nothing validates a call's input against that schema, so every call accepted before is still dispatched as before.
+  Metadata-protocol: none
+  
+  A Path Item Object's `parameters` apply to every operation under that path, and the generator read only each operation's own `parameters`. So a document that declares an id once on the path, the usual vendor shape for GET / PATCH / DELETE on one resource (`'/pets/{petId}': { parameters: [{ name: 'petId', in: 'path', required: true }], get: …, delete: … }`), produced actions whose input schema had no `petId` at all, and none when that was the only parameter.
+  
+  - **Now.** Each operation's parameters are its path item's `parameters` followed by its own. An operation entry with the same `name` and `in` as a path-level one replaces it whole (its schema and its `required`), as OpenAPI defines; a path-level and an operation-level parameter that share a name but not `in` are both kept.
+  - **Unchanged.** An operation under a path item with no `parameters` gets exactly its own, as before. A `$ref` parameter is still left to the caller to de-reference and is skipped when it is not. A Swagger 2.0 document converted by `normalize-openapi` gets the same fix: the conversion keeps path-level parameters on the path item (in 3.x form), so they were dropped the same way before and arrive now.
+- ec7e15a: fix(service-automation)!: a `connector_action` call whose evaluated input breaks the action's declared `inputSchema` fails the step before dispatch, naming each missing or mistyped parameter, and nothing is sent (#27995)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export, type or error code is removed or renamed: `ConnectorActionSchema.inputSchema` and `connectorConfig.input` keep their shapes, and the refusal reuses the existing `VALIDATION_ERROR` code of the platform vocabulary. What narrows is the run-time dispatch of one node: a call the action's own declared schema says is wrong is no longer sent upstream. Nothing stored is rewritten or re-judged at rest, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** (an accept-set narrowing at run time), shipped as `patch`: nothing a metadata author writes changes shape (`Metadata-protocol: none`), so the level follows the kind, and the banner and the ADR-0087 disposition stay.
+  
+  **FROM.** The `connector_action` node evaluated `connectorConfig.input` and handed it to the connector's handler unchecked. The action's declared `inputSchema` (built from the OpenAPI operation by `connector-openapi`, passed through from `tools/list` by `connector-mcp`, or written by a code connector such as `connector-slack`) was advisory: a call to an OpenAPI `getPet` with `input: {}` reached the remote URL although `petId` is declared `required`, and what came back was the remote's choice.
+  
+  **TO.** After the input's value slots are evaluated and before the handler is called, the evaluated input is judged against the action's `inputSchema`:
+  
+  - Judged: `required` at every object level reached, `type` (a type list, OpenAPI 3.0 `nullable: true`, and `integer` as a whole number), and descent through `properties` and array `items`. `null` on an optional property counts as absent, as a provider that serializes a section drops it; `null` on a required property is judged against its type. Text is never converted to a declared number or boolean.
+  - Not judged, so never refused here: `$ref`, `oneOf` / `anyOf` / `allOf`, `enum`, `format`, bounds, `pattern`, `additionalProperties`, and any `type` name outside the JSON Schema seven. The remote still judges those, as before. An action that declares no `inputSchema` dispatches whatever it is given.
+  - A failing call fails the step with `code: 'VALIDATION_ERROR'` on `$error`. The error names each problem by its dotted path (`missing required 'path' (with 'path.petId')`, `'query.verbose' must be boolean, got string`, `'tags[1]' must be string, got number`), says nothing was sent, and points at `GET /api/v1/automation/connectors`, which lists the action's schema. The handler is never called.
+  - The failure is a `runtime` one, not a guard refusal: the input can come from run data, so a `fault` edge or a `try_catch` region can handle it.
+  
+  **`@objectstack/connector-openapi`.** So that the check never demands what a caller cannot supply, an OpenAPI action's `inputSchema` no longer lists the `Accept`, `Content-Type` and `Authorization` header parameters (OAS 3.0.3 §4.7.12.1 says they SHALL be ignored; the transport and `auth` set them), nor the header or query parameter the connector's `api-key` `auth` fills (`headerName`, default `X-API-Key`, or `paramName`). The credential reaches the request from `auth` as before; a flow never writes it into `connectorConfig.input`. `GET /api/v1/automation/connectors` lists the action without them.
+  
+  **Who sees it.** A flow or agent whose `connector_action` input omits a parameter the action declares `required`, or sends one of a type the action does not declare: that step now fails before the call instead of the remote answering it. For example, an OpenAPI path parameter declared `type: integer` sent as the string `"7"` (a text field holding an id is the usual source) is refused, where the provider used to interpolate it into the path; the error then says to cast it.
+  
+  **Fix.** Make `connectorConfig.input` satisfy the action's `inputSchema`: supply every required parameter, and send each one as the declared type (`{ path: { petId: 7 } }`, not `{ path: { petId: '7' } }`). A value computed by a CEL envelope is judged on what it evaluates to, so cast text to the declared type there: `{ path: { dialect: 'cel', source: '{"petId": int(record.vendor_id)}' } }`, with `double()` for a number and `bool()` for a boolean.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

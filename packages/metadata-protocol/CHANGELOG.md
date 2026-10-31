@@ -1,5 +1,646 @@
 # @objectstack/metadata-protocol
 
+## 18.3.0
+
+### Minor Changes
+
+- 0c47e87: feat(metadata): the layered read takes the bundle member selector, so the layers of one locale of an `email_template` can be read
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  `GET /api/v1/meta/:type/:name/layers` and the protocol's `getMetaItemLayered` now accept `member`, the same bundle member selector the by-name read, delete, publish, history and revert already take. Before, the layered view only ever showed the canonical member (`en-US` for `email_template`) and refused `?member=` with 400, so an editor built on it could not open a second locale of a template.
+  
+  - **Named the same way.** `?member=` on the REST route and `member` on `GetMetaItemLayeredRequest` (`@objectstack/spec`), spelled as the member's discriminator value (`zh-CN`). Absent, the canonical member's layers, as before; naming the canonical value is the same request.
+  - **Every layer is that member's.** `code` is the package's artifact for that member, `overlay` the environment's stored row for that member, and `effective` what the by-name read with the same `member` serves. A member with nothing shipped and nothing stored answers `404`, the absent item, never the canonical member's layers.
+  - **Refused as the item read refuses it.** A `member` on a type whose identity is its name alone (every type but `email_template` today), a blank one, or one over 100 characters is a `400 VALIDATION_ERROR` naming the selector. A repeated `?member=` is refused by the multiplicity rule.
+  - **Both transports.** `RestServer`'s route and the runtime dispatcher's `/meta` catch-all judge the route's query through the one shared decision (`metaItemQueryRefusal('layers', …)` in `@objectstack/rest`), whose closed set for the route is now `package` and `member`. `META_ITEM_LAYERS_PARAMS` reads `['package', 'member']`.
+  - **Unchanged.** The deprecated `?layers=` flag on the plain read still refuses a `member` beside it; read one member's layers on `/layers` instead.
+- c90b5b1: fix(metadata-protocol)!: the metadata save doors refuse an object whose `datasource` names a datasource that does not exist, instead of storing and publishing an object that never registers (#26724)
+  
+  Clause-②: no (narrowing) — `saveMetaItem` (draft and live), the draft promotion behind `publishMetaItem` and `publishPackageDrafts`, and the restore doors (`rollbackMetaItem`, `revertCommit`) refuse an `object` whose `datasource` names no registered driver, no declared or stored datasource and no pending datasource draft, which they stored before. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: `ObjectSchema.datasource` already names a datasource ID, and the door now refuses an ID that names none, which never worked. A stored object that already holds such a binding keeps re-saving; there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** accept-set narrowing at the metadata save and publish doors (`@objectstack/metadata-protocol`), served by `PUT /api/v1/meta/object/:name`, `POST /api/v1/meta/object/:name/publish` and `POST /api/v1/packages/:id/publish-drafts`.
+  
+  - **Before.** An object saved with a misspelled `datasource` (`gapdata_nosuch`) was stored, and `publish-drafts` answered `outcome: 'published'`. The engine routes an explicit `datasource` to the driver of that name only, so the object never registered: every `/api/v1/data/:object` call answered 404 "not registered", with no pointer to the cause.
+  - **Now.** The save answers `422 INVALID_METADATA` with one finding at `datasource`: "Object 'NAME' names datasource 'DS', and no datasource of that name exists here: …". Nothing is stored. A draft stored before this is refused at its publish the same way, and a package publish then promotes nothing.
+  - **What exists.** No `datasource`, or `'default'`; a driver the engine has registered under the name (a `driver.*` service or an `onEnable` `drivers.register`, with no datasource item); a datasource item the code layer declares (`*.datasource.ts`) or this environment stores, connected or not; on a draft save, any datasource draft of that name; on a package publish, a datasource draft of the same batch.
+  - **Not judged.** A save, publish or restore that keeps the `datasource` the object already holds: the binding is not that write's. So `os migrate`'s re-saves, which never run `onEnable`, keep working for an object bound to a driver registered there.
+  
+  **The remedy.** Correct the name, declare the datasource first (or draft it in the same package and publish both together), or remove `datasource` to use the primary datasource.
+- 8d79bbd: feat(spec): a draft's per-key provenance records writes made through the MCP build door, and the OAuth client that made them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A pending draft's `draftChanges` (the strict draft read's per-key provenance) could tell Studio's AI copilot from a person in Studio and from any other caller, but not an AI agent outside the console building through a deployment's MCP build door. Such a write was recorded as `api`, and nothing said which agent it was.
+  
+  - **Spec.** `MetadataAuthoringSurfaceSchema` gains `mcp`: an AI agent outside the console writing on a person's behalf through the MCP build door. A new `MetadataAuthoringClientSchema` (`{ id, name? }`) is the OAuth client the person consented to. A `draftChanges` entry carries it as an optional `client`, present only beside `by: 'mcp'`. `SaveMetaItemRequestSchema` gains an optional `client`, stated only by the MCP build door, in-process, from the token it verified.
+  - **The save.** A draft save with `surface: 'mcp'` stamps `by: 'mcp'` and its `client` on every key path it changes. A `client` beside any other surface, or of the wrong shape, is refused `400 INVALID_REQUEST` before anything is written. `actor` is still the person the agent writes for.
+  - **The HTTP doors.** `?surface=mcp` is refused `400 VALIDATION_ERROR`, as `?surface=copilot` is: only the MCP build door may state it. No HTTP door reads a `client`.
+  - **Studio.** The properties' draft chip and source line mark an `mcp` write as they mark the copilot's, and name the client: 「由 MCP 客户端「Claude」在 2 分钟前作为草稿加入」 / "Added as a draft by the MCP client "Claude" 2 min ago". A client that registered no name is shown as an unnamed MCP client, never by its id. The pending-changes sheet's drill-in lists which AI tools drafted part of the item, in all ten console locales.
+  
+  Nothing to do for existing callers: a save that states no surface is still recorded as `api`, and an entry without `client` reads as before. The MCP build door starts stating `mcp` and its client in a later change.
+- 4a5396b: fix(i18n): a tenant's rewrite of a validation rule that an object extension contributes is served as written in every locale, on the refusal and on `/meta` (#27559)
+  
+  Clause-②: yes (widening) — `SchemaRegistry` (`@objectstack/objectql`) gains the public read `getPackagedObjectBase(name)`
+  Metadata-protocol: semantic
+  
+  #27221 made a tenant's reworded rule message beat the package's translation, but only for rules the object's owning package declares. A rule a second package adds through `objectExtensions` was compared with nothing, so when a tenant overlaid the object and reworded that rule, a reader in any locale the extension's bundle carries still got the extension's translation, on the rejected write's error and on the rule `/meta` serves.
+  
+  - **Now.** A rule's packaged message is the message of whichever code package shipped that rule name: the owner, or a package that extends the object. Both readers compare against that one packaged rule set, so a tenant's rewrite of an extension rule is served and returned as written, and an extension rule the tenant left alone is still translated.
+  - **The fold is unchanged.** Validations stay additive (ADR-0029 D9.2a): when the tenant's overlay carries its reworded copy of an extension rule, the extension's own rule still runs beside it, and that copy, unchanged, is still translated.
+  - **`SchemaRegistry.getPackagedObjectBase(name)`** answers the packaged owner's declaration with each code extender's `validations` appended (by reference when no extender ships a rule; `undefined` where `getPackagedObjectOwner` is). Only `validations` widens: `label`, `pluralLabel` and `description` stay the owner's, so an extension's label keeps winning over the owner's catalog. `ObjectStackProtocolImplementation.getPackagedObjectBase` and the rule evaluator's packaged lookup both read it.
+  - **`@objectstack/spec`**: the `TranslateDocumentOptions.packagedBase` docs say what an object's packaged base now carries. No type or behaviour changes.
+- 7811c3f: feat(spec): a comment's author is told which @mentioned users will not be notified, and a mention added by editing is notified
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  The `@mention` recipient gate withholds a notification from a mentioned user who cannot read the comment or its record. Until now it only logged that, so the author believed the person had been told. The comment still saves with every mention; now the requester's own answer says who will not be notified.
+  
+  - **Spec.** `CreateDataResponseSchema` and `UpdateDataResponseSchema` declare an optional, response-only `withheldMentions`: the ids of the users this write @mentioned whose notification the mention gate withheld. Ids only, never the reason. Only a `sys_comment` write fills it, only on the requester's own answer to that request, and the key is omitted when nobody was withheld. It is not a field of `sys_comment` and is never stored, since a stored member would tell every reader who cannot read the thread. `WriteObservabilityOptions` declares the in-process listener that carries it, `onMentionsWithheld(userIds)`, beside `onFieldsDropped` and `onValidationAdvisory`. Like them it never crosses the wire.
+  - **plugin-audit.** The mention writer reports the gate's own verdict to that listener, which it reads off its hook's `ctx.input.options` (the write's own options bag). Readability is not derived a second time, and who the gate admits is unchanged. The writer now also runs on `sys_comment` `afterUpdate`, so a mention added by editing a comment is judged and notified like one written with it. An edit judges only the mentions it added; a mention the comment already carried is not judged or notified again. The editor, who may be a parent-record editor rather than the author, is the actor of an edit's notifications: they are named in the title and never notified themselves. `MentionGateInput` takes an optional `onWithheld(userId)` callback.
+  - **metadata-protocol.** `createData` and `updateData` pass the listener and answer the ids as `withheldMentions`. A nested write that a hook or a flow makes inside this one carries its own options, so its verdicts never reach this answer.
+  - **client.** `CreateDataResult` and `UpdateDataResult` declare `withheldMentions?: string[]`, mirroring the two schemas.
+  - **objectql.** `engine.update` accepts the `onMentionsWithheld` option. The engine never calls it; it carries it to the `after*` hooks with the rest of the caller's bag.
+  
+  Nothing to do for existing clients: a client that does not read `withheldMentions` sees the same answer as before.
+- 642dd4f: fix(metadata-protocol)!: a datasource saved through the metadata door may name only the credentials reference its own stored row holds (#27762)
+  
+  Clause-②: no (narrowing) — the metadata save door refuses a `datasource` body whose `external.credentialsRef` is not the reference its own stored row already holds, where it stored the value as given before. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: `DatasourceSchema` keeps `external.credentialsRef` authorable, and the save door refuses one value of it, a reference the save's own stored row does not hold. A stored row is never re-judged: it is read and served as before, and a save that sends its reference back keeps it. There is nothing for a migration to rewrite and no tombstone; the remedy is a door, the datasource admin door's `secret`, which the refusal names. -->
+  
+  **BREAKING** accept-set narrowing on the metadata save door (`saveMetaItem`: `PUT /api/v1/meta/datasource/:name`, the runtime dispatcher's `/meta` door, MCP and in-process saves), the rule #27582 set for `secret` fields and #27722 applied to the datasource admin door's create: a non-system write may only seal a new value or keep its own record's stored reference.
+  
+  - **Before.** A `datasource` body's `external.credentialsRef` was stored as given.
+  - **Now.** A save may name only the reference its own stored row already holds. A create (no stored row), an edit naming another reference or naming one where its row holds none, and a draft naming one the active row it overlays does not hold, are refused with `VALIDATION_ERROR` / `400` before anything is written. The message names the key and never the value, and the answer is the same whatever the value names. The package copy and the unmanaged import, which save new rows through the same door, are judged the same way.
+  - **Unchanged.** The GET → edit → PUT round trip, which sends back the reference the read serves, keeps it. A body that names no reference saves as before. The server-stated rewrites (`source` set, the stored-metadata migration) keep their pass-through. Rows already stored are not re-judged.
+  - **Who sees it.** A caller of the metadata save door that writes a datasource's `external.credentialsRef` by hand. The Console's datasource page saves through the datasource admin door, which this does not change.
+  
+  **The remedy.** Send back the reference a read of the datasource serves, or omit the key to save it with no credential bound. To bind a credential, send the secret to the datasource admin door (`POST /api/v1/datasources`, or `PATCH /api/v1/datasources/:name`), which mints and stores the reference.
+- 7591c60: fix(metadata-protocol)!: a datasource restored or published from a stored body may name only the credentials reference its row holds now (#27818)
+  
+  Clause-②: no (narrowing) — the restore doors and the draft publish refuse a stored `datasource` body whose `external.credentialsRef` is not the reference the active row they write into holds now, where they wrote it back as stored before. Nothing is widened.
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: `DatasourceSchema` keeps `external.credentialsRef` authorable, and the doors that make a stored body active refuse one value of it, a reference the row they write into does not hold now. A stored row is never re-judged at rest: it is read and served as before, and only the write that would make it the active row is judged. There is nothing for a migration to rewrite and no tombstone; the remedy is a door, the datasource admin door's `secret`, which the refusal names. -->
+  
+  **BREAKING** accept-set narrowing on the doors that make a stored body the active row, completing the rule #27762 applied to the metadata save door (the #27582 own-reference rule: a non-system write may only seal a new value or keep its own record's stored reference). These doors seal nothing, so the one reference the body they write may name is the one the active row holds now.
+  
+  - **Before.** A history version brought back by `rollbackMetaItem` (`POST /api/v1/meta/datasource/:name/rollback`) or by `revertCommit`'s restore limb (`POST /api/v1/packages/:id/commits/:commitId/revert`), and a draft promoted by the per-item publish (`POST /api/v1/meta/datasource/:name/publish`) or the package publish, became the active row with whatever `external.credentialsRef` it was stored with.
+  - **Now.** Each is judged as an active write into the row it lands in, with the save door's judge: a body naming a reference that row does not hold now is refused with `VALIDATION_ERROR` / `400` before anything is written. The message names the datasource and the key, never the value, and the answer is the same whatever the value names. A rollback answers the refusal; a commit revert reports it per item in `failed[]`; a package publish aborts on it.
+  - **Unchanged.** A version or draft naming the reference the row holds now is written and keeps it. One naming no reference is written as it stands, with no credential bound, as a save omitting the key is. The save door's own rule and its server-stated pass-through are unchanged, and no server-stated restore or publish exists. Rows already stored are not re-judged at rest.
+  - **Who sees it.** An operator who rolls back or reverts a datasource to a version whose reference its row no longer holds, because the reference was rotated through the datasource admin door since, or because the version was stored before the save door judged the key: that restore is refused. An author who publishes a datasource draft after its active row's reference was rotated, or a draft stored before the save door judged the key: that publish is refused.
+  
+  **The remedy.** For a refused restore, restore a version that names the reference a read of the datasource serves, or save the version's settings through the metadata door with the key omitted. For a refused publish, save the draft again with the key omitted, or discard it, then publish. Either way, to bind a credential, send the secret to the datasource admin door (`POST /api/v1/datasources`, or `PATCH /api/v1/datasources/:name`), which mints and stores the reference.
+- e26cf9a: feat(spec): a hook can tell the person who saved a record what the save set in motion
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A `beforeInsert` / `beforeUpdate` / `afterInsert` / `afterUpdate` hook had no way to tell the person saving what the save started, such as sending a deal for approval. The single-record write answer carried `warnings` (advisory validation-rule hits) and nothing else a save could say. Now a hook can attach one message to the save's answer.
+  
+  - **Spec.** `CreateDataResponseSchema` and `UpdateDataResponseSchema` declare an optional, response-only `notice`: one author-written message, info severity, separate from `warnings`. When more than one call sets it, the last one wins. The key is omitted when no hook set one, and it is never stored on the record. `WriteObservabilityOptions` declares the in-process listener a hook calls to set it, `onNotice(message)`, beside `onFieldsDropped`, `onValidationAdvisory` and `onMentionsWithheld`. Like them it never crosses the wire.
+  - **metadata-protocol.** `createData` and `updateData` pass the listener and answer the last non-empty message as `notice`. A nested write that a hook or a flow makes inside this one carries its own options, so its notice never reaches this answer.
+  - **client.** `CreateDataResult` and `UpdateDataResult` declare `notice?: string`, mirroring the two schemas.
+  - **objectql.** `engine.update` accepts the `onNotice` option. The engine never calls it; it carries it to the hooks with the rest of the caller's bag.
+  
+  How a hook sets it: read the write's own options bag off `ctx.input.options` and call the listener when it is there.
+  
+  ```ts
+  const opts = ctx.input.options as WriteObservabilityOptions | undefined;
+  opts?.onNotice?.('Sent to your manager for approval');
+  ```
+  
+  A hook whose handler runs as code in the server process (registered with `registerHook`, or a declarative `handler` bound as a function) can call it today. A hook that runs in the sandbox (a `body`, including a `handler` the build lowers into one) cannot yet, and neither can a record-triggered flow: both are follow-up work.
+  
+  Nothing to do for existing clients: a client that does not read `notice` sees the same answer as before.
+
+### Patch Changes
+
+- 8eeb3b3: feat(spec)!: retire the list view's `options` bag; stored bags fold onto the top-level blocks, and the renderers read the blocks alone (#25923)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered list-view-options-bag-folded, ui-list-view-options-bag-folded -->
+  
+  A flattened list view overlay carried every per-kind block twice: as the top-level `kanban`, `calendar`, `gallery`, `timeline`, `gantt`, `map`, `tree` and `chart`, and again under a legacy `options` bag the top-level block won over per key. Each renderer re-implemented that merge. The bag is retired, and each block has one spelling.
+  
+  - **`@objectstack/spec`**: the list overlay's `options` is a removed-key tombstone. The view write door refuses a body that carries it, by name, with the prescription to move each `options.KIND` block to `KIND`. The ADR-0087 D2 conversion `list-view-options-bag-folded` folds a stored bag onto the top-level blocks before a row is served (the top-level value wins per key; for `chart`, whose block replaced the bag whole, a bag beside a block is dropped), and `os migrate meta --from 17` lists the same edits for a source. A bag it cannot fold (an `options.grid`, a non-object block, a bag on a form view) is left in place with a TODO. The D3 entry `ui-list-view-options-bag-folded` names what the fold cannot decide: the bag was judged with every key optional, so a folded block can still miss a key its block requires. The page `list-view` component row shares the tombstone.
+  - **`@object-ui/types`**: `ListViewSchema.options` takes the spec's tombstone by reference, so every published door refuses a bag at `options` with the spec's text, and the TypeScript face has no bag. `NamedListView.options` is a `?: never` tombstone that names the top-level blocks. The dataset-chart filter refusal reads the `chart` block alone, and the page node's flat `options` is refused with the bag's own text rather than pointed at `properties.options`.
+  - **`@object-ui/plugin-list`**: `ListView` reads each kind from its top-level block alone: the render branches, the capability gate, the projection and expand collectors and the fetch effect's dependencies no longer read `options`. The `list-view` registration publishes no `options` input.
+  - **`@object-ui/app-shell`**: the object page relays each per-kind block at the top level of the list schema, held by value per block so an equal rebuild keeps its identity, and no longer forwards a stored bag. The interface page sends one `map` block (its derivation with the authored keys laid over) and no bag. The Studio view preview and the list-view inspector no longer fold a bag; the server does. `storedLegacyOptions` is removed.
+  - **`@object-ui/plugin-view`**: the host list schema carries the active view's blocks at the top level instead of under `options`.
+  - **`@object-ui/plugin-map`**: two development warnings name the view's `map` block instead of `options.map`.
+  - **`@object-ui/console`, `@objectstack/rest`, `@objectstack/metadata-protocol`, `@objectstack/lint`**: test pins only (the registry parity row, the write door's refusal and served fold, and the lint finding), no runtime change.
+  
+  **BREAKING** for a list view body, a page `list-view` node or a `ListView` host that writes `options`.
+  
+  - **Before.** `{ type: 'kanban', columns: ['name'], options: { kanban: { groupByField: 'stage' } } }` was accepted at the view write door and drew a board laned on `stage`, and `ListView` read the bag beside the top-level blocks.
+  - **Now.** The write door and every `@object-ui/types` door refuse `options` by name, and `ListView` reads no bag. A view already stored with one is served folded onto its top-level blocks and renders from them. On the object page those blocks now pass through the same relay defaults as a block written top-level (the kanban `titleField: 'name'` floor, for one), so a folded row can draw differently from its bag where the bag left such a key unset. No reachable source stores a bag (census: 0 rows), and `ObjectView.storedRowParity-10380` pins the folded rendering.
+  - **Fix.** Move each block to the top level: `{ type: 'kanban', columns: ['name'], kanban: { groupByField: 'stage', columns: ['name'] } }`, keeping the top-level value where both set a key, and add any key the block requires that the bag never had (a kanban's `columns`, a gantt's `titleField`, a chart's `dataset` and `values`). A grid's settings are top-level keys of the view. Run `os migrate meta --from 17` for a source, with `--write` to apply the edits it can prove.
+- 1c63231: fix(metadata-protocol)!: `GET /api/v1/meta/:type/:name/diff` refuses a `from` or `to` version that has no history row with 404 `VERSION_NOT_FOUND`, as the rollback door already does, instead of answering 200 "no change" or "everything removed"
+  
+  Clause-②: no (narrowing) — `diffMetaItem` (and the REST `/diff` door that forwards to it) refuses a named version with no history row of the item, which it answered 200 before. The default range and every version that has a row answer exactly as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A read door's answer to a version that does not exist: no key of any metadata schema is added, removed, renamed or re-shaped, no export or type changes, and the refusal is the existing VERSION_NOT_FOUND code the rollback door answers. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at `diffMetaItem` (`@objectstack/metadata-protocol`), served by `GET /api/v1/meta/:type/:name/diff`.
+  
+  - **Before.** A `from` or `to` version the item has no history row at was compared as an empty document. `?from=998&to=999` answered 200 with nothing added, removed or changed, which reads as "these versions are identical". `?from=1&to=999` answered 200 with every top-level key of version 1 under `removed`, which reads as "the item was deleted". An item that never existed answered 200 "no change". The rollback door refused the same numbers with 404.
+  - **Now.** A named `from` or `to` with no history row of the item is refused 404 `VERSION_NOT_FOUND`, with the rollback door's own sentence: `No history row at version N for TYPE/NAME.` An item with no history at all is refused the same way. A version number that exists only in another item's history is this item's miss, refused the same way; it was never read from the other item.
+  - **Unchanged.** The default range (no `from` / `to`) answers as before, for every item, including one with no history. A version that has a row answers as before, a delete tombstone included (compared as an empty side). A history read failure is still the 503 `SERVICE_UNAVAILABLE`, and a deployment that never provisioned the history table still gets the empty default diff.
+  - **Who sees it.** A caller who names a version that does not exist, for example a mistyped or pruned number, or `from=0` used to mean "before the first version". It now gets 404 instead of a 200 that described a change that did not happen.
+  
+  **The remedy.** Name versions from `GET /api/v1/meta/:type/:name/history`. To compare a version against nothing, omit `from` on an item's first version: the default from side is absent when no earlier version differs.
+- cee4b16: fix(metadata-protocol): on PostgreSQL, the NULL-safe row identity of `sys_setting` and `sys_notification_preference` now lands, and a tightening that did not land is reported instead of answered `created`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On PostgreSQL the declared unique both tables start with is a UNIQUE CONSTRAINT (the driver builds it with knex `table.unique()`), not a bare index. The boot migration that replaces it with the NULL-safe key ran `DROP INDEX` on the constraint's index, which PostgreSQL refuses (2BP01, printed on every boot), and then `CREATE UNIQUE INDEX IF NOT EXISTS` under the name the constraint still held, which succeeds as a no-op. Both migrations reported `created` while the plain, NULL-distinct key stayed: two tenant-scope or global-scope settings rows for one (organization, namespace, key) could coexist.
+  
+  - **The drop.** On PostgreSQL the replace step now frees the name the way the driver's own `dropIndexIfExists` does: `ALTER TABLE … DROP CONSTRAINT IF EXISTS`, then `DROP INDEX IF EXISTS`. No `CASCADE`.
+  - **The verdict.** On PostgreSQL `created` is answered only after the definition under the real name reads back (`pg_get_indexdef`) equal to the one the probe built. When it does not (something depends on the old constraint and the drop is refused), the boot prints the existing `[metadata-protocol] could not rebuild …` line naming what is not enforced, with the refusal, and keeps running.
+  - **Existing duplicates.** When rows already break the NULL-safe key, nothing is deleted or merged and the old key stays, as before. The `cannot tighten …` line now also says how many keys are duplicated and how many rows hold them, on every dialect. It prints no row values.
+  - SQLite and MySQL run the same probe, drop and create statements as before, with the same outcomes. The only new statement there is the count, and it runs only on a conflict.
+- 4702c46: fix(metadata-protocol)!: the Data API refuses an empty projection and a count flag that is neither true nor false, instead of reading them as absent (#26644)
+  
+  Clause-②: no (narrowing) — `GET /data/:object`, `POST /data/:object/query` (both transports: `RestServer` and the runtime dispatcher) and `GET /data/:object/:id` refuse a projection that names no field, and the list doors refuse a `count` / `$count` other than true or false, where they answered 200 before. Nothing is widened and no export changes.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: two query-parameter values the list normalizer read as the absent default are now refused 400 VALIDATION_ERROR naming the parameter. A caller drops the parameter or sends a well-formed value; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the shared list normalizer (`findData`) and the by-id read (`getData`), served by every Data API door that uses them.
+  
+  - **Before.** A blank or comma-only `$select` / `select` / `fields` (`?$select=`, `?$select=,`), and an empty array in a JSON body (`"fields": []`), became an empty projection, which every driver serves as no projection: all columns, under a 200. A `$count` / `count` other than `true` or `false` (`?$count=maybe`, `?$count=1`, a blank `?count=`) was left unlowered, so the `count=false` opt-out never matched and the count ran: a `total` was reported as if `$count=true` had been sent.
+  - **Now.** Both are refused `400 VALIDATION_ERROR` before any read, with a message naming the parameter the caller wrote and the value (`Query parameter '$select' names no field; got ""`, `Query parameter '$count' must be true or false; got "maybe"`), as a blank `$top` already is. The accepted count values are the spec's `QueryTransportParamsSchema.count`: the boolean, or the strings `true` and `false`. `GET /data/:object/:id?select=` answers with the same code; that route's catch already reports every projection refusal (an unknown field included) as `404`, and the empty projection joins that answer.
+  - **Unchanged.** An absent parameter keeps its default: every column, and the count runs. A named projection (`$select=a,b`, trailing commas and spaces trimmed as before), `$count=true`, `$count=false` and a JSON `null` answer exactly as before. `POST /data/:object/query` already refused a non-boolean `count` at its body schema (`400 VALIDATION_FAILED`), and still does.
+  - **Who sees it.** A caller that builds `$select` from a list that can be empty, or sends a mistyped `$count`. It now learns that from a 400 instead of an answer that looked normal.
+  
+  **The remedy.** Leave the parameter out to read every column or to keep the count, or send a projection naming at least one field and a count flag of `true` or `false`.
+- 652da20: fix(metadata-protocol): a seed that stores many `seedFile` values no longer starves sign-ins and other requests while it runs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A seed that stores many `seedFile(path)` values no longer starves the requests that arrive while it runs. On a synchronous driver (better-sqlite3, the wasm fallback) every step of a seed file's work — the `sys_file` row, the bytes, the claim that commits it — resolves as a microtask, so the claims the seed loader settled after each 200-row insert batch ran as one unbroken chain and a sign-in during a background boot seed waited seconds unread behind it. The connection pool was never the bottleneck; the event loop was. The loader now hands the event loop one turn after each row's files are stored and after each row's claim, and writes a dataset that carries seed files in insert batches of 20 rows instead of 200. Datasets without seed files are unchanged.
+- 5782008: fix(metadata-protocol): a draft's `_diagnostics` reports what its publish will refuse (#26707)
+  
+  Clause-②: no (the draft verdict reports more; no accepted value is refused)
+  Metadata-protocol: none
+  
+  A draft the runtime authoring gate refuses at publish (a flow edge whose condition does not parse, an API-triggered flow with no secret, an RLS predicate over a field the database cannot filter, a summary field with no operations, a dashboard global filter on an unknown field, a dataset `include` that names an unknown relationship) used to read `_diagnostics.valid: true` on the draft read, so the editors and the Problems tab called it valid and the refusal arrived only at Publish, where one such draft rolls back the whole package release.
+  
+  - **One rule set.** The draft read (`GET /api/v1/meta/:type/:name?state=draft`, and the `previewDrafts` read of a pending draft) now runs the same runtime authoring gate the publish runs, on the stored draft body, with the same package scope, the same pending in-package drafts (so a reference to a sibling draft the same Publish-all lands is not an error) and the same restored credential paths. Each refusal is added to `_diagnostics.errors` with the gate's rule id as `code` and the publish's own `message`, and `valid` becomes `false`. ⛔ No rule is restated.
+  - **The draft still saves.** No draft save is refused; publish refuses exactly what it refused before; package publish keeps its atomic rollback.
+  - **Paths.** A gate path inside the item (`objects.invoice.fields.total.summaryOperations`) is served item-relative (`fields.total.summaryOperations`); a gate path that names a place rather than a key (a flow edge) is served as the gate wrote it.
+  - **Not covered.** The save-door refusals (they refuse the save itself, so no stored draft carries them), the plugin authoring gates and the package build probes that `publish-drafts` runs, and the list reads and the diagnostics sweep, which keep their read-time verdicts.
+- 4f93696: **BREAKING** fix(metadata)!: a save or a draft publish naming a package that is not installed is refused, for every metadata type; Studio shows "package not found"
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) What is refused is a REQUEST, never a stored shape: a `/meta` save naming a package id no installed package has, and `publish-drafts` on such an id. No metadata document changes meaning or validity, no key or value is retired, and rows already stored under such an id still read, list and discard exactly as before, so there is nothing for `objectstack migrate meta` to rewrite. The remedy is a different request (name an installed package, create one first, or name none), not a conversion between two metadata versions. The other categories are closed on facts: all three packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no spec or Zod face moves (not type-surface-only, not runtime-interface-only); and no export is retired (not runtime-export-retired). -->
+  
+  `PUT /api/v1/meta/:type/:name?package=ID` used to store the item bound to `ID` even when no installed package has that id, as a draft (`?mode=draft`) or live. With no manifest there was no namespace, so the object prefix rule was skipped too, and `POST /api/v1/packages/ID/publish-drafts` then put those drafts live, owned by a package that cannot be uninstalled or exported. Only `flow` refused it.
+  
+  - **`@objectstack/metadata-protocol`**: the flow-only named-base rule is now one helper that `saveMetaItem` asks for every type, draft and active, on authoring saves. A save naming an id the package registry does not hold is refused `422 WRITABLE_PACKAGE_REQUIRED`, with the id as `packageId`, and nothing is written. The flow refusal is unchanged, byte for byte, and other types get the same sentence with their type name. Saves naming no package, the `sys_metadata` sentinel or an installed package are unchanged, and so are the two server-side rewrites of stored rows (`migrate-stored` and package duplication).
+  - **`@objectstack/runtime`**: `POST /packages/:id/publish-drafts` on an id the registry does not hold answers `404 RESOURCE_NOT_FOUND` (the answer `GET /packages/:id` gives) before anything is published, even when drafts are stored under that id. Those drafts are not migrated or deleted. `POST /packages/:id/discard-drafts` still removes them.
+  - **`@object-ui/app-shell`**: `/studio/ID/…` for an id the package list does not hold shows "package not found", with a way back to the Studio landing, instead of a builder whose saves the server refuses. A pillar segment Studio does not have shows a not-found state instead of the Interfaces pillar. Kernel packages the switcher hides are still opened. If the package list fails to load, the builder shows as before.
+  
+  **What to do.** Save into a package that is installed: create it first (`POST /api/v1/packages`, or **New package** in Studio), or save without `?package=`. To clean up drafts saved under a mistyped id before this change, call `POST /api/v1/packages/ID/discard-drafts`.
+- 57e00f5: fix(metadata-protocol): the metadata save door stores an action as its `ActionSchema` parse, so a declared `requiresFeature` / `requiresMembershipReach` is lowered into `visible`
+  
+  Clause-②: no — the save door refuses nothing it accepted before. It already judged the body by the same parse; what changes is only what it stores for an action that passed.
+  
+  Metadata-protocol: none
+  
+  `PUT /api/v1/meta/object/NAME` (draft and active) and a standalone `action` save judged an action by `ActionSchema`, then stored the request body as written. `ActionSchema`'s parse lowers `requiresMembershipReach` and `requiresFeature` into `visible`, and the console reads `visible` alone, so the stored action kept both gate keys raw, had no `visible`, and its button was offered to every user.
+  
+  Now the door stores the parse it already ran:
+  
+  - an object's own `actions` array is stored as the parsed array; every other key of the object body stays as written;
+  - a standalone `action` item is stored as the parsed action.
+  
+  A stored action therefore carries the lowered `visible` (and its schema defaults, and a CEL shorthand wrapped in `{ dialect, source }`), the same shape a code package's action has been stored in since #25981. The parse is idempotent over its own output, so a GET then PUT round trip stores the same bytes.
+  
+  Rows already saved before this fix are not rewritten. Saving the object (or action) again stores it lowered.
+- 5bd3d2f: fix(metadata-protocol): load-time diagnostics no longer report "`picklist` and `options` cannot both be declared" on a field that declares only `picklist`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A select field that names a shared list (`picklist: 'industry'`) is served with the list's options written beside `picklist`, and the diagnostics judged that served copy, so every shared-picklist field of every app was reported as declaring both keys: in an item's `_diagnostics`, in the list read's, and in `GET /meta/diagnostics` (Setup › All Metadata Types). They now judge the field as its author wrote it.
+  
+  - **The rule stands.** A field that authors both `picklist` and `options` is still reported, with the same message and severity, at `fields.NAME.options`.
+  - **What `/meta` serves is unchanged.** A picklist-bound field is still served with `picklist` and the resolved `options`.
+  - **How the two are told apart.** The picklist resolution marks the options array it derives; `@objectstack/metadata-core` exports `markResolvedPicklistOptions` and `isResolvedPicklistOptions`, and the diagnostics leave a marked array out of the judgement. The mark is not part of any response or stored row.
+- 6845035: **BREAKING** fix(metadata)!: the per-item publish and a save naming no package no longer extend a row bound to a package that is not installed
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) What is refused is a REQUEST, never a stored shape: a per-item publish whose draft would go live in a package id no installed package has, and a save naming no package whose address the item's stored rows give in such an id. No metadata document changes meaning or validity, no key or value is retired, and rows already stored under such an id still read, list, delete and discard exactly as before, so there is nothing for `objectstack migrate meta` to rewrite. The remedy is a different request (create the package first, or remove the rows bound to it and save again), not a conversion between two metadata versions. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); no spec or Zod face moves (not type-surface-only, not runtime-interface-only); and no export is retired (not runtime-export-retired). -->
+  
+  A save or a `publish-drafts` naming a package id that is not installed is already refused. Two doors still extended rows bound to such an id, stored before that refusal existed: a save naming no package kept the binding the item's rows gave it, and `POST /api/v1/meta/:type/:name/publish` (with `?package=ID` or without) put the draft live, owned by a package that cannot be uninstalled or exported.
+  
+  - **`@objectstack/metadata-protocol`**: both doors now ask the same named-base rule the save door asks. `PUT /api/v1/meta/:type/:name` naming no package, draft or active, on an item whose stored rows are bound to an id the package registry does not hold, is refused `422 WRITABLE_PACKAGE_REQUIRED` with the id as `packageId`, and nothing is written. The per-item publish whose draft would go live in such an id, named or given by the item's rows, is refused the same way, and nothing is published. Rows bound to an installed package, rows bound to no package, and saves naming a package are unchanged. Stored rows are not migrated or deleted.
+  
+  **What to do.** For an item bound to a package id that is not installed: create a package with that id (`POST /api/v1/packages`), after which its rows save and publish again; or remove its rows bound to that id (`DELETE /api/v1/meta/:type/:name?package=ID` for the active row, `POST /api/v1/packages/ID/discard-drafts` for drafts) and save the item again into an installed package or with no package.
+- 308f826: fix(metadata-protocol): when a seed in a package publish fails, the `seedApplied` receipt counts the rows the earlier seeds wrote and names the seed that stopped the load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/packages/:id/publish-drafts` applies every published seed body in one load. The load writes seed by seed and stops at the first one that throws (for example, a seed naming an object that does not exist); the rows the seeds ahead of it wrote stay written. The receipt used to answer `inserted: 0, updated: 0` all the same, so an author or Studio reading it was told nothing had been written while the table held those rows.
+  
+  Now the receipt keeps its shape and its counters describe what was written:
+  
+  - `inserted` / `updated` are the rows the load wrote before it stopped, including any rows the failing seed itself wrote before it threw.
+  - `success` is `false`, as before.
+  - `error` names the seed that stopped the load by the object its dataset populates: `seed apply stopped at the seed for object 'OBJECT': ...`, followed by the same sentence as before (a refusal the error declared is quoted, anything else is withheld as `seed apply failed`).
+  
+  Unchanged: which seeds are published, that the seeds after the failing one are not applied, and that nothing is rolled back. A throw before the loader writes anything (a malformed seed body, for example) still answers `inserted: 0, updated: 0` and the same `error` as before.
+- e00374a: fix(metadata-protocol): an object draft's verdict names the package namespace-prefix refusal its publish gives (#27444)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` describes what a draft's `_diagnostics` carries; the namespace-prefix rule itself is unchanged.
+  
+  A draft object saved into a package whose manifest declares a namespace, under a name without the `<namespace>_` prefix, read `_diagnostics: { valid: true }` until "Publish all" refused the whole batch with `NAMESPACE_PREFIX`. The draft read now asks the same judge the publish pre-flight and the per-item publish ask, on the package the draft is staged into, and folds its answer into `_diagnostics`: `valid: false` with an `errors[]` entry whose `code` is `NAMESPACE_PREFIX` and whose message is the sentence publish refuses with. The draft save itself is unchanged — it still stores and answers 200 `state: "draft"` — and publish refuses exactly as before.
+- 86f2afe: fix(metadata-protocol)!: a `searchFields` override naming no field (`$searchFields=`, `$searchFields=,`, `[]`) is refused 400, not read as absent, so a narrowed search no longer runs over the default search fields (#27484)
+  
+  Clause-②: no (narrowing) — the data doors (`GET /data/:object`, `POST /data/:object/query`, `GET /data/:object/export`, and every other caller of `findData`) refuse a `searchFields` value that names no field, which they answered 200 over the default search set before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a query value that names no field is refused where it was read as absent. The fix for a caller is to send a field name or leave the parameter out, which the refusal says; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the query door (`@objectstack/metadata-protocol`), served by every Data API door.
+  
+  - **Before.** A blank or comma-only `$searchFields` (or `searchFields`), an empty array, or an empty object-form `search.fields` was read as no override, and the search scanned the object's whole default search set: `?$search=initech&$searchFields=` answered the rows `?$search=initech&$searchFields=industry` excludes, under a 200. The export route dropped a blank `searchFields` itself before the query ran.
+  - **Now.** `400 VALIDATION_ERROR`, naming the parameter the caller wrote (`Query parameter '$searchFields' names no field`), the envelope `$select` answers for a projection naming no field (#26644). No row is read. On the list and query doors this holds with or without a `search` term: `?$searchFields=` alone is refused too, as a non-empty override naming an unknown field already is.
+  - **Unchanged.** An absent `searchFields` searches the default set; a named one narrows it; a name outside the searchable set is still `400 INVALID_FIELD`. The engine (`find` / `count` called directly) still reads an empty override as absent. The export route still ignores `searchFields` sent without `search`.
+  - **Not yet narrowed.** The published declarations (`QueryTransportParamsSchema.$searchFields`, `EngineQueryOptionsSchema.searchFields`, `QuerySchema.searchFields`, `FullTextSearchSchema.fields`) still admit `''` and `[]`; the refusal is the door's. So on `POST /data/:object/query` the sibling `select: []` is the body schema's `400 VALIDATION_FAILED` while `searchFields: []` is this `400 VALIDATION_ERROR`. Narrowing the declarations is follow-up #27683.
+  - **Who sees it.** An API caller that sends `searchFields` with no field in it. The Console and the bundled view plugins send the parameter only when it holds at least one field.
+  
+  **The remedy.** Leave the parameter out to search the default fields, or name the fields to search.
+- 875d007: fix(rest): `GET /meta/diagnostics` refuses an unknown type, severity or package instead of answering an all-clear, and keys an alias's stats by its canonical type (#27514)
+  
+  Clause-②: no (narrowing — owes one contract-review-tier review before the queue)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The narrowed face is a REQUEST to one read door: query values that were never honoured (an unknown type, severity or package) are now refused instead of answered with an empty sweep, and an alias's stats move to the canonical key the sweep already listed it under. No stored metadata, package source or object definition holds a diagnostics request or response, no schema key or export changes, and the remedy is the caller's own query string, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  `/meta/diagnostics` is the door an author, an agent or CI reads to learn whether metadata is healthy, and three query values it could not honour were answered `200` with zero issues.
+  
+  - **`?type=`** naming no metadata type (`zzz_unknown`) is refused with `400 INVALID_REQUEST`, by the same verdict `GET /meta/:type` uses: the platform's static type spelling, then the types this deployment carries live. A near-miss spelling of a declared type (`viewes`) keeps its existing refusal, which names the spellings it was reaching for.
+  - **`?severity=`** other than `error` or `warning` is refused with `400 INVALID_REQUEST`. An empty value still means the default, `error`.
+  - **`?package=`** naming a package that is not installed, and that no swept item is bound to, is refused with `400 INVALID_REQUEST`. An installed package with no items still answers its zeros, items bound to an uninstalled package are still swept, and `package=all` still sweeps every package.
+  - **An alias** (`?type=views`) is swept and keyed in `stats` and `entries` under its canonical type (`view`), so it answers exactly what `?type=view` answers.
+  - **One envelope.** Every refusal of this route now answers the nested `{ error: { code, message } }` the repeated-parameter refusal already used. The near-miss type refusal used to answer `{ error: '…', code }`.
+- 475d428: fix(metadata-protocol): a metadata save's audit row names the user who saved it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A signed-in user's metadata save (`PUT /api/v1/meta/:type/:name`, the `/automation` definition doors, a delete) wrote its `sys_audit_log` row on `sys_metadata` with `user_id` and `actor` both null, although the save named its actor and the `sys_metadata` row's `created_by` / `updated_by` recorded it. `SysMetadataRepository.put` and `delete` run their writes as the system, so the audit writer saw no session user. They now pass the save's actor as `ExecutionContext.attributedUserId`, the existing attribution channel the audit writer reads into `user_id`. The write is still authorized as the system; the actor is never presented as the caller. A save with no actor (boot sync, seeds, engine self-writes) stays unattributed, as before.
+- a3d24c9: feat(objectql,cli,metadata-protocol): backfill the currency code of rows stored before an amount field was switched to `currencyMode: 'record'`, and acknowledge the switch at the metadata save
+  
+  Clause-②: yes (widening) — a new `@objectstack/objectql` export (`backfillRecordCurrencyCodes` and its report helpers), a new command `os migrate record-currency-codes`, and a new finding `currency_mode_to_record` registered in the existing 409 `destructive_change` face, lifted by its existing `force`
+  Metadata-protocol: none
+  
+  An existing `dynamic` or `fixed` amount switched to `record` names a code field, and the rows already stored hold an amount beside a blank code. Such a row is not refused for resting, but until it holds a code it displays as a plain number, falls into the `null` group of a grouped aggregate, and sits outside every currency-paired filter.
+  
+  - **The backfill.** `os migrate record-currency-codes --object <object> --field <amount> --code <ISO 4217>` writes the code you give into every row whose amount is not blank and whose code is blank. ⛔ The code is never derived: not from a former `defaultCurrency`, not from the organization's `localization.currency`. A row that holds a code is never touched; a row with a blank amount is left alone. Dry run by default; `--apply` writes (with `--yes` when not interactive). The report counts the rows written, the rows skipped because they hold a code, and the rows skipped because their amount is blank. Running it again finds nothing, so a clean second report is the verification. A code that is not an ISO 4217 code, or a field that is not a `record`-mode currency field, is refused before any row is read (`INVALID_FIELD`, 400). Each row is written through the engine's update, so the write is judged and audited like any other. No `sys_migration` flag is recorded.
+  - **The engine function.** `backfillRecordCurrencyCodes(engine, logger, { object, field, code, apply })` from `@objectstack/objectql`, with `formatRecordCurrencyBackfillReport` and `recordCurrencyBackfillComplete`; `isRecordCurrencyBlank` is the one blank predicate the write guard and the backfill share.
+  - **The save.** Saving an object (REST `PUT /meta`, Studio, a package publish) whose stored amount field moves to `currencyMode: 'record'` from any other mode now answers the existing 409 `DESTRUCTIVE_CHANGE` with the finding `currency_mode_to_record`, whose message names the three consequences and the command. Re-submit with `force` to save. It reads no row, and fires only where a previous version exists: a code-declared package registered at boot is not refused.
+- 9ae6384: fix(metadata-protocol): promoting a permission set with no draft answers `NO_DRAFT` before another owner's name collision
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The draft promotion (`POST /api/v1/meta/permission/:name/publish`, and `publishPackageDrafts`, which promotes through the same step) asked the permission-set name judge (`NAMESPACE_CONFLICT` / 422) even when no draft existed at the address, so a publish with nothing to publish, of a name another package holds, answered the collision instead of `NO_DRAFT` / 404. The name judge now runs only when a draft was read, like the promotion's other draft judges, so the caller is told about its own state first. Refusal for refusal: with no draft the promotion was refused before and is refused now, and with a draft the same refusals run in the same order.
+- 6caca51: fix(metadata-protocol)!: a `$searchFields` entry naming a `secret` / `password` field is refused 400 `INVALID_FIELD` at the data door, even when the object's `searchableFields` declares it, instead of searching the rest of the declared set (#27829)
+  
+  Clause-②: no (narrowing) — the data doors (`GET /data/:object`, `POST /data/:object/query`, and every other caller of `findData`) refuse a search-field override naming a credential field, which they answered 200 over the rest of the declared search set before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: a query value naming a credential field is refused where the engine silently dropped it. The fix for a caller is to search another field, which the refusal says; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the query door (`@objectstack/metadata-protocol`), served by every Data API door.
+  
+  - **Before.** On an object whose `searchableFields` declares a `secret` or `password` field, `?$search=TERM&$searchFields=api_key` passed the door, the engine withheld the credential column from the scan (ADR-0100), and its tolerant intersection then searched the rest of the declared set: 200 with rows matched in `name`. `$searchFields=name,api_key` silently dropped `api_key`. The credential itself was never searched.
+  - **Now.** `400 INVALID_FIELD` naming the field (`Field 'api_key' on object 'OBJ' is type 'secret', a credential, and cannot be searched`), before any row is read — the same answer the auto-default path already gave a credential name. It covers the standalone `searchFields` / `$searchFields` slot and the object-form `search.fields`. Judged by `isCredentialFieldType` (`@objectstack/spec/data`), the predicate the engine's withhold reads.
+  - **Unchanged.** A request that names no credential field is served as before; with no `$searchFields`, the declared set is searched and the declared credential entry is never scanned. The engine's withhold stays as the floor for direct engine callers.
+  - **Who sees it.** An API caller naming a credential field in `$searchFields`, typically a client echoing the object's `searchableFields` verbatim on an object that declares one (the linter has flagged that declaration since `validate-searchable-fields` learned the credential check).
+  
+  **The remedy.** Remove the credential field from the object's `searchableFields` and from the request; search another column.
+- 3e0fd7a: fix: `GET /meta/object` serves which packaged actions are switched off beside the item, and a switched-off action is refused with a plain sentence
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Served beside the object** (`@objectstack/metadata-protocol`, `@objectstack/rest`). `GET /api/v1/meta/object/:name` serves `disabledActions` beside `item`: the names in `item.actions` that the deployment's activation ledger switches off. `GET /api/v1/meta/object` serves the same answer keyed by object name. The default cached door carries it too, read live on every call and kept out of the ETag, so a read that carries it is answered in full rather than `304 Not Modified`. The key is absent where no ledger answered (no engine, or an engine with no ledger attached), on a draft read, and on every type other than `object`. `item.actions` is unchanged. The protocol reads the engine's `getDisabledActions` through the kernel's service table by name and imports no engine.
+  - **The fact it serves** (`@objectstack/objectql`). `ObjectQL.getDisabledActions()` returns the names the engine's activation projection switches off, the same projection both dispatch doors consult before they refuse a call, or `undefined` when no ledger is attached. `listDisabledActions()` is unchanged.
+  - **The refusal sentence** (`@objectstack/objectql`, `@objectstack/runtime`). A switched-off action is still refused 409 `ACTION_DISABLED` at the REST and MCP doors, and the message now reads: "This action is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or you can use another action." It no longer names the ledger table or the ADR. The engine writes those, with the code and the action's name, to an `info` log line each time it refuses one.
+- d5951c8: fix(metadata-protocol): a package rollback carries every item a revert step refused, and answers `success: false`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `rollbackToPackageCommit` (`POST /packages/:id/rollback`) reverts each newer `apply` commit with `revertCommit`. A step that refuses an item — for example a restore of a row stored under a non-canonical type (`STORED_TYPE_NOT_CANONICAL`) — reports it in the step's own returned `failed[]` and does not throw. The rollback read only a thrown error, so it answered `success: true` with an empty `failed[]` for a package left half rolled back.
+  
+  Each refused item now lands in the rollback's `failed[]` as `{ commitId, error }`: the commit it belongs to, and an `error` that names the item (`Item 'TYPE/NAME' was not reverted: ...`) and quotes the step's client-facing refusal text. `success` is false whenever `failed[]` is non-empty, which is what the declared answer (`RollbackToPackageCommitResponseSchema`) already says: "True exactly when nothing failed". The answer's shape is unchanged.
+  
+  Nothing else moves. A refused item stops neither its commit nor the rollback: the other items of that commit are still reverted, its revert commit is still recorded, and the commit is still listed in `revertedCommits`. A step that throws still lands as one `failed[]` entry for its commit, and the rollback goes on to the next commit, as before.
+- 6fd87b7: fix(objectql,metadata-protocol)!: an in-process search-field override that names no searchable field is refused, never widened to a default set (#28120)
+  
+  Clause-②: no (narrowing) — two in-process tolerances the Data API doors already refuse are closed. The stored-metadata reader seam (`narrowStoredMetadataSearch`) no longer narrows an override that names no field (an empty list, a comma string with no name, a list with no string entry): it passes it to the engine, which refuses it. And the engine (`find`, `findOne`, `count`, `aggregate`) refuses a `searchFields` or object-form `search.fields` that names none of the fields the search scans, where `resolveSearchFields` used to drop the names and scan the whole default set. No export, answer member, status or error code is added: the refusals are the doors' `VALIDATION_ERROR` / 400 and `INVALID_FIELD` / 400. Folds #28121.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: an engine option value the doors already refuse is now refused in process too, with the doors' codes. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the in-process search override (`@objectstack/objectql`, `@objectstack/metadata-protocol`).
+  
+  - **Before.** A host handler, hook or flow reading `sys_metadata` / `sys_metadata_history` through the reader seam with `searchFields: []` was served: the seam read the empty list as "names none" and wrote the narrowed default set over it. On any object, a search whose override named no searchable field (every name unknown, unsearchable or withheld) was resolved to the object's default search set.
+  - **Now.** The empty override reaches the engine's refusal through the seam: `400 VALIDATION_ERROR`, before any driver read. An override naming no searchable field is refused `400 INVALID_FIELD` (`param: 'searchFields'` or `'search.fields'`, `field` / `fields` naming what the caller wrote) before any driver read, the code the REST door answers for the same value. `mapDataError` serves both with the door's status and code.
+  - **Unchanged.** An absent (or `null`) override searches the default set. An override naming no searchable field sent without a `search` is still not judged in process, since nothing is scanned (the door refuses it with or without a search term). A named override narrows as before. An override naming SOME searchable field still has its other names dropped in process (the doors refuse them). An object with no searchable field at all keeps its own refusal (#24284).
+  
+  **The remedy.** Name at least one field the object searches (its `searchableFields`, or the default set), or leave the key out to search the default fields.
+- 5055b10: fix(metadata-protocol): a same-named row in a dependent package no longer replaces the base package's item for a read that names no package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a writable package that depends on a code package saved an item under a name the code package ships (`showcase_task.default` saved into `com.default.acme-custom`), `GET /api/v1/meta/view/showcase_task.default` with no `package` served the dependent package's copy, under the code package's `_packageId`, and so did the layered read's `effective`. The code package that ships the name was not a candidate of that read: the dependent package's row won by being the only stored row.
+  
+  The by-name read and the layered read that name no package now take their stored content from the code package that ships the name: its own stored row, else the package-unbound row (the overlay Setup writes, which still wins over the code item), else the code item. A read naming the dependent package still serves its own row, and a writable package's own item, a name no code package ships, is still served to the read naming no package. Where a package-less save, delete and the read's `version` land does not move.
+- 488b3ed: fix(studio): object pickers offer only the objects the edited package may reference
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A package may reference only the objects inside its closure: its own, those of the packages it declares as dependencies (transitively), and the platform's. The publish gate refused anything else, but Studio's object picker (a record trigger's object, a flow node's object, a lookup's related object, a new dataset's object) offered every object, so the author found out only after building on one.
+  
+  The picker now offers the closure. Objects outside it are listed last, disabled, in a group that starts collapsed, under the reason and a **Declare a dependency** entry that opens the package's edit dialog when the package is writable. A dependency declared there re-reads the closure, and the object becomes pickable without a reload. Where the package list cannot be read, nothing is disabled and the server judges the pick, as before. The value stays free text: a name typed and committed with Enter is still saved as typed and judged by the server.
+  
+  `@objectstack/lint` exports `resolvePackageClosure(packageId, getPackage)`, the dependency walk the publish gate ran inline. `@objectstack/metadata-protocol`'s gate now calls it; what the gate admits is unchanged. Studio calls the same function over `GET /api/v1/packages`, and `narrowObjectsToPackageClosure` over the object list, so the picker and the gate cannot disagree.
+- b9b22b9: fix(metadata-protocol): a metadata write refused with `NOT_OVERRIDABLE`, `NOT_CREATABLE`, `INVALID_METADATA` or `DESTRUCTIVE_CHANGE` now leaves its `denied` row in `sys_metadata_audit`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_metadata_audit.code` has always documented `not_overridable`, `not_creatable`, `invalid_metadata` and `destructive_change` as `denied` values, and the save, publish, rollback and delete doors refuse with exactly those codes. No audit write stamped them, though: only the lock gate (`item_locked`) and the stale-version check (`metadata_conflict`) left a row. A reader of `GET /api/v1/meta/:type/:name/audit` concluded that a refused attempt never happened.
+  
+  - **The row.** `outcome: 'denied'`, `code` the documented lower-case value, `operation` the door (`save`, `publish`, `rollback` or `delete`), `actor` and `source` as the door's allowed row records them, and `note` the sentence the caller was refused with. The type is filed under its canonical singular, as every other row is.
+  - **Where it is written.** Where the door hands the refusal back to its caller, so a refusal raised by any of the gates inside the door is covered, including one added later.
+  - **What still writes no row.** A refusal with any other code (`INVALID_REQUEST`, `RESOURCE_CONFLICT`, a driver fault, any 5xx) writes nothing, as before; the column's set of values stays closed. `item_locked` and `metadata_conflict` keep the rows their own gates write and are not written twice. A refusal one door hands back through another is recorded once. The batch package publish keeps its `batch_aborted` row.
+  - **No caller change.** The refusal the caller receives is unchanged: the same code, status and message. The audit write is best-effort, as it always was.
+- 710c2da: harden(metadata): a permission set's name is unique across packages
+  
+  Clause-②: no (narrowing) — the metadata doors now refuse a permission-set write whose name a DIFFERENT owner already holds (`PUT /api/v1/meta/permission/:name`, draft or publish; `POST /api/v1/meta/permission/:name/publish` and `POST /api/v1/packages/:id/publish-drafts`; the restore doors `rollbackMetaItem` and `revertCommit`), with `NAMESPACE_CONFLICT` / 422 and nothing written. This pulls the metadata doors back to an already-declared contract: a grant resolves its set by name alone (ADR-0131 D4), a package never writes into a record another owns (ADR-0086 D4), and the security catalog holds one name per deployment on every path — the registry already refuses a second holder of a set name at install and at cold boot with this envelope, and the Studio dialog already refuses the duplicate. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, accepted value, metadata type, export or type changes: a write the metadata doors accepted against an already-declared contract (ADR-0086 D4, ADR-0131 D4) is now refused with the registry's own NAMESPACE_CONFLICT envelope, so there is nothing for a migration to rewrite and no tombstone; a deployment already holding one name under two owners clears it by renaming or deleting one of the two sets, which the refusal names. -->
+  
+  **BREAKING** accept-set narrowing at the metadata doors (`@objectstack/metadata-protocol`), served by the permission-set save door, the draft→active promotion and the restore doors.
+  
+  - **Before.** The metadata doors keyed a permission-set write by `(type, name, package)`, so a package could save, publish or restore a set under a name another installed package, or the environment, already held. Resolution by bare name then answered one of the two, and the create precondition (`If-None-Match: *`) was evaluated against the keyed row alone, so it did not notice the name was taken by another owner.
+  - **Now.** A permission-set write whose name a different owner holds is refused — `NAMESPACE_CONFLICT` / 422, the code and status the registry answers for the same rule at install and at cold boot, nothing written — at the save door (draft and publish mode), again at the draft→active promotion (the per-item publish and the package publish), and at the restore doors, so neither a draft authored before another owner took the name nor a version of a deleted set can become a second holder. The check runs before the create precondition, so `If-None-Match: *` cannot smuggle a cross-owner create.
+  - **Owner.** The owner is the binding the write lands in: the package its row is written under, or the environment for a package-unbound row. A draft save that names no package over a package's set is that package's own edit (the draft inherits the package), and a package-less row stored beside exactly one package's row is that package's, not a second owner. `permission` takes no environment overlay (ADR-0005), so the rule is symmetric on the owner; the owning package, or the environment, re-authoring its own set is unchanged, and the original holder's access is untouched.
+  - **Holders.** The stored active rows, by binding, and the registry's own reading of which packages hold a name — a set a package ships in code or declares in its install — the same reading the cold boot and `os migrate security-catalog-overlays` read.
+  - **Who sees it.** A deployment where two owners write one set name: the second write is refused where it used to be accepted. Three faces of the same doors see it too. `POST /api/v1/packages/:id/duplicate` copies each permission set through the save door under the target package, renaming only a name that carries the source package's namespace prefix, so a copied set whose name lacks that prefix is now reported in the response's `failed[]` with this refusal instead of being copied as a second holder — prefix the set with your own module prefix before duplicating. `os migrate meta --stored --apply` re-saves each stored row the conversion chain rewrites through the save door, so on a deployment already holding one name under two owners such a row of either owner is reported failed until one of the two sets is renamed or deleted (a package-less row stored beside exactly one package's row is that package's, and is re-saved).
+  - **`@objectstack/spec`.** `ERROR_CODE_LEDGER` lists `NAMESPACE_CONFLICT` under `@objectstack/metadata-protocol` too, since that package now stamps it; the `ErrorCode` union is unchanged.
+  
+  **The remedy.** Rename the set to a name no other holder holds (prefix it with your own module prefix), or rename or delete the other holder's set first; to change the existing set, edit it in the package that holds it and re-publish.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [ae7f49e]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [20457f6]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [216a39e]
+- Updated dependencies [e6e4199]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [3beb224]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [9229738]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [f57eddc]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [1346052]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [3de484d]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [e793e9d]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [11137d4]
+- Updated dependencies [3efccfd]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [57f8ca2]
+- Updated dependencies [488b3ed]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [28c274f]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/lint@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/metadata@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/sdui-parser@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

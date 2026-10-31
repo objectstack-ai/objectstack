@@ -1,5 +1,335 @@
 # @objectstack/cloud-connection
 
+## 18.3.0
+
+### Patch Changes
+
+- 7735d1d: feat(cloud-connection): the install-local answer lists the connector credentials the installed package names, and which are not set yet
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST /api/v1/marketplace/install-local` answers with `credentialRefs` when the package's connectors name any `auth.credentialRef`. Each entry has the reference, the instances naming it, its `status` from the automation service's credential listing (`set` / `missing` / `rejected`, or `unknown` when that listing cannot be read) and its `source`, never a value. When any of them is not set, a `credentialNote` names them and says how to set them. An unset reference never refuses the install: the instance naming it installs degraded and materializes once the credential is set (#27237). Under the `group` and `isolated` tenancy postures, where the credential routes refuse writes, the note names the environment variable or the host's resolver instead of the `PUT` route. The answer's keys are unchanged for a package whose connectors name no credential.
+- aef631b: fix(cloud-connection): an install-local uninstall withdraws the package's flows from the automation engine at once, and unbinds their triggers
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `DELETE /api/v1/marketplace/install-local/:manifestId` withdrew the package from the registry and ran its uninstall cleanups, but never told the running kernel. The automation engine withdraws a flow only when it re-syncs on `metadata:reloaded`, so the uninstalled package's flows stayed registered: `GET /api/v1/meta/flow/NAME` answered 404 while `GET /api/v1/automation/NAME` still answered `active`, `POST /api/v1/automation/NAME/trigger` still ran the flow and wrote a run row, and its record and schedule triggers stayed armed. That lasted until some unrelated reload, such as a view publish or another package's install. The door's note said the package was withdrawn from the running kernel.
+  
+  - **Now.** After the registry withdrawal and the cleanups, the door announces `metadata:reloaded` with `{ changed: ['app/MANIFEST_ID'] }`, the same signal the install door's hot load announces. The engine's re-sync withdraws every flow it had armed that the package no longer provides and unbinds each one's trigger. Right after the `DELETE` returns, `GET /api/v1/automation/NAME` and its trigger door answer 404, and a write to a watched object runs nothing.
+  - **When the re-sync does not run.** If a subscriber throws, or the kernel context cannot announce, the uninstall still answers 200, and `cleanups` carries one failed outcome named `metadata:reloaded`. The note then says the engine can still hold the package's flows until the next restart. The cause goes to the operator log at `warn`, with the restart as the remedy.
+  - **Unchanged.** Nothing is announced when the uninstall did not happen (a refused caller, an id this door never installed, a ledger write that failed), or when the registry refused the withdrawal, because the package is still registered.
+- db44327: feat(rest,plugin-hono-server,cloud-connection): metadata lists, the uncached item reads, `runtime/config` and `auth/me/localization` answer an `ETag` and `304`; every timed response carries `db`, `meta` and `total`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's first reads on every load sent no validator, so each one was a full download every time. Measured against HotCRM on `main`, none of these sent an `ETag`, a `Cache-Control` or a `304`: `GET /runtime/config`, `GET /auth/me/localization`, the type list (`GET /meta`, `GET /meta/types`), every `GET /meta/:type` list, and the item reads the shared item cache never serves (`GET /meta/app/:name`, `/meta/dashboard/:name`, `/meta/doc/:name`, `/meta/book/:name`, and drafts, `?package=` and member-scoped reads). Each of them now answers:
+  
+  - **`ETag`**: a weak validator (`W/"…"`) that hashes the body actually served, after every per-caller step (read gates, the app filter, the field mask, the translation, the host's environment). Two callers whose permissions change what they see get different validators, and one caller's validator never answers `304` for another caller's body.
+  - **`Cache-Control: private, no-cache`**: the browser keeps the body and revalidates it on every use, so a publish, a permission change or a language switch shows on the next read. No shared cache stores it. A schema served under an undetermined field visibility keeps `private, no-store` and gets no validator.
+  - **`304 Not Modified`**, with no body, when `If-None-Match` names the current validator.
+  
+  `metadata.enableCache: false` still switches the `/meta` validators off, as its description says ("Enable HTTP cache headers").
+  
+  `Server-Timing` (still opt-in: `OS_SERVER_TIMING=true`, or an admin's `X-OS-Debug-Timing: 1`):
+  
+  - Every timed response carries `db` and `meta` beside `total`. A request that ran no SQL or read no metadata says so with a zero member (`db;dur=0;desc="0 queries"`), so "nothing spent there" no longer reads like "not measured".
+  - The `/meta` routes count each metadata read into `meta` (`meta;dur=…;desc="N reads"`).
+  - `GET /runtime/config` now opens the timing gate for an admin who sends `X-OS-Debug-Timing`. It resolves the caller only when that header is sent; the payload never depends on who asked.
+  
+  `@objectstack/types` exports the rule the three packages share: `representationEtag(body)`, `ifNoneMatchHits(header, etag)` and `REVALIDATE_PRIVATE_CACHE_CONTROL`.
+- d70e94a: fix(cloud-connection)!: an install-local install connects and records the datasources the package declares, as a boot of its artifact does
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object or datasource definition, stored row or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the install-local door's accept set: a package whose declared datasource name is already held in the target environment is refused `409` where it was installed `200`. Whether a package is refused depends on what the environment already holds, not on the package's metadata, and the package's metadata stays valid as written; the remedy is the author's choice of a datasource name that is not taken, never a mechanical rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed, only added (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** accept-set narrowing at `POST /api/v1/marketplace/install-local`, alongside the widening below (a new `@objectstack/runtime` export and a new field on the install answer).
+  
+  - **Before.** A package declaring a datasource whose name the environment already held (the host's `default`, a datasource created in Setup, another package's) installed `200`, and its declaration was dropped: measured on `main` with a package declaring `showcase_external`, the install answered `200` with `hotLoaded: true`.
+  - **Now.** The same install is refused `409 RESOURCE_CONFLICT`, with `details.datasource` naming the held name, before anything is written. Accepting it now would serve the package's objects from the holder's pool (the connect is idempotent on the name) and, by recording the name as code, make the holder's own datasource read-only.
+  - **Unchanged.** A package that declares no datasource, or only names nothing else holds, installs as before; a reinstall of the same package is not a collision with itself.
+  - **Who sees it.** Only an install-local caller (`os package install`, an AI agent, a script) installing a package whose datasource name collides with one the environment already has.
+  
+  **The remedy.** Give the package's datasource a name the environment does not already hold, and install again.
+  
+  **What else changes.**
+  
+  A package installed through `POST /api/v1/marketplace/install-local` had its objects registered and nothing of its datasources: an object bound to the package's own datasource answered `404 OBJECT_NOT_FOUND` on every read and write, and the datasource was not served as code-defined. Now the install, and every restart's rehydrate of the ledger, take the path a boot of the package's artifact takes:
+  
+  - **One path.** `@objectstack/runtime` exports `connectPackageDatasources`, which `AppPlugin.start` now calls for the booted artifact and install-local calls for an installed package. Each declared datasource is registered in the metadata registry as `origin: 'code'`, stamped with the package (`_packageId`, `_packageVersion`), its name is recorded in the host's code-datasource set, and it is connected through the `datasource-connection` service's `connectDeclared` (the ADR-0062 D2 gate and the host's connect policy apply as on a boot). The boot's own behaviour is unchanged.
+  - **The install answer** carries `datasources`: each declared datasource's connect verdict (`connected`, or the connection service's own non-`ok` status). Omitted for a package that declares none.
+  - **A credential that cannot be resolved** is that datasource's named non-`ok` verdict, never a driver gap: the package is installed, Setup → Datasources reports the datasource as `error` with its reason, and a read of an object bound to it answers `503 ERR_DATASOURCE_UNAVAILABLE` naming it. Where a code datasource's credential comes from is not changed here.
+  - **Reinstall and uninstall.** A reinstall replaces the previous version's datasources; the uninstall closes their pools, removes their registrations and their names, reported as the `runtime.package-datasources` entry in `cleanups`.
+- Updated dependencies [af1e1e0]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [1c63231]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [8c0306f]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [cee4b16]
+- Updated dependencies [4702c46]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [652da20]
+- Updated dependencies [1f1eda4]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [5782008]
+- Updated dependencies [4f93696]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [96e7a43]
+- Updated dependencies [31a6ca7]
+- Updated dependencies [1539aad]
+- Updated dependencies [57e00f5]
+- Updated dependencies [c90b5b1]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [e1ab32e]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [b2b3124]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [67cf0b1]
+- Updated dependencies [e46e25c]
+- Updated dependencies [81b4599]
+- Updated dependencies [6845035]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [0eb2d21]
+- Updated dependencies [49d652e]
+- Updated dependencies [045cfa4]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [693a729]
+- Updated dependencies [9fa70b4]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [ee9a8d6]
+- Updated dependencies [385aa12]
+- Updated dependencies [79d5dac]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [99aeee6]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [8d66cbe]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [a1d8bf6]
+- Updated dependencies [308f826]
+- Updated dependencies [33ab543]
+- Updated dependencies [e00374a]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [b8b3208]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [86f2afe]
+- Updated dependencies [e29a1b1]
+- Updated dependencies [72c0152]
+- Updated dependencies [e0aed00]
+- Updated dependencies [481ade6]
+- Updated dependencies [875d007]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [475d428]
+- Updated dependencies [4a5396b]
+- Updated dependencies [a3d24c9]
+- Updated dependencies [a7de844]
+- Updated dependencies [ecd944f]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [bc496bf]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [47c3e12]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [9ae6384]
+- Updated dependencies [07585bf]
+- Updated dependencies [6a648ac]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [e8cdf4e]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d8de26d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [642dd4f]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [7591c60]
+- Updated dependencies [6caca51]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [d5951c8]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [95f545e]
+- Updated dependencies [3a054cb]
+- Updated dependencies [c4390f7]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [5f31470]
+- Updated dependencies [d70e94a]
+- Updated dependencies [11a7f96]
+- Updated dependencies [ae64120]
+- Updated dependencies [139bc18]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [f9a1363]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [7abe151]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [2db3281]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [35ffb77]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [744ad0a]
+- Updated dependencies [5055b10]
+- Updated dependencies [488b3ed]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [125ad06]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [4a7b99f]
+- Updated dependencies [b9b22b9]
+- Updated dependencies [e2d0dab]
+- Updated dependencies [99a6a78]
+- Updated dependencies [54c2496]
+- Updated dependencies [04b1402]
+- Updated dependencies [79bf748]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/objectql@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/runtime@18.3.0
+  - @objectstack/metadata-protocol@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/observability@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

@@ -1,5 +1,265 @@
 # @objectstack/plugin-mcp-server
 
+## 18.3.0
+
+### Patch Changes
+
+- 9bf6598: feat(mcp): the HTTP MCP runtime bridges a host-injected authoring `ToolRegistry` behind a new `metadata:write` OAuth scope, with door provenance on every call
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A developer driving an MCP client (Claude Code, Claude Desktop, …) against a hosted environment could read and run it over `/api/v1/mcp` but never build in it: `handleHttpRequest` served the data and action tools only, and no OAuth scope existed under which a token could even ask for authoring. This change adds the scope and its first reader.
+  
+  - **`@objectstack/spec` — `MCP_OAUTH_SCOPE_METADATA_WRITE` (`metadata:write`)** joins `data:read`, `data:write` and `actions:execute` in `MCP_OAUTH_SCOPES`, so the authorization server advertises it and the runtime's up-front scope check admits it. It is a tool-surface grant, not a data grant: `scopesToAgentPermissionSets` maps it alone to the no-object-access floor, and beside a data scope it changes nothing about the data ceiling. **`MCP_OAUTH_SCOPE_CONSENT_COPY`** declares the one-sentence consent copy for every scope (the three existing sentences the Console already renders, plus the new one), keyed by `McpOauthScope` so a scope cannot be added without its sentence.
+  - **`@objectstack/mcp` — `handleHttpRequest(request, { authoring })`** accepts an optional `McpAuthoringInjection`: a host's `McpAuthoringToolRegistry` plus the token principal and the environment. Its tools appear in `tools/list` only when the request's `grantedScopes` names `metadata:write`; without the scope they are not registered, so `tools/call` on one is answered exactly as `create_record` is without `data:write` (the SDK's unknown-tool error, one mechanism). The undefined grant of an API key or a session is served no authoring tool: authoring follows the token's consent. Every call into the registry receives a fresh `McpAuthoringToolContext` — `door: 'mcp'` (`MCP_TOOL_DOOR`), `actor.id`, `principal`, `environmentId` — built from the host's inputs alone, so no request header can claim another door, user or environment; the principal (and its `scopes`) is a frozen per-call copy, so a tool that writes into its context taints neither the next call nor the host's object. Tool names are the host's to keep unique: the SDK throws on a duplicate registration (a native name or a repeat within the registry) and the request fails with it. The runtime stays door-agnostic: which tools the host injects is the host's business.
+  - **`renderSkillMarkdown({ grantedScopes, authoringTools })`** renders a Build section naming the injected tools, with the build loop (create → verify → draft, a person publishes in the UI) and the switched frontmatter description `OBJECTSTACK_SKILL_DESCRIPTION_WITH_AUTHORING`, only under the same grant; it teaches `describe_object` before a change only when the grant also carries `data:read`, the scope that registers it; every other render is byte-identical to before.
+  - **Unchanged.** The stdio transport's `bridgeTools` still calls its registry with one argument; the data and action tools register, refuse and answer as before. New exports: `MCP_TOOL_DOOR`, `grantsAuthoringTools`, and the types `McpToolDoor`, `McpTokenPrincipal`, `McpAuthoringToolContext`, `McpAuthoringToolRegistry`, `McpAuthoringInjection`.
+  
+  What to do: nothing for an existing host. A host that wants the build door passes `authoring` to `handleHttpRequest` and `grantedScopes` / `authoringTools` to `renderSkill`.
+- e5c5035: fix(mcp): `validate_expression` refuses a blank or whitespace-only expression with the save gate's verdict
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `validate_expression` MCP tool used to answer `ok: true` for an empty or whitespace-only expression, while saving that same expression is refused with `422 INVALID_METADATA` ("An expression in an evaluated slot needs a non-blank `source` …"). An agent that validated first and then saved was told the expression was fine.
+  
+  The tool now parses the expression with the same spec input schema the save/build gate uses for the slot (`EvaluatedExpressionInputSchema` for the `formula`, `validation` and `flow_condition` sites, `TemplateExpressionInputSchema` for the `template` site) before it runs the formula checks. When that schema refuses, the tool answers `ok: false` with that schema's own issue: the `code` is the schema's issue code and the `message` is the published sentence (`EVALUATED_EXPRESSION_SOURCE_REQUIRED`, or `TYPED_EXPRESSION_SOURCE_REQUIRED.template` for a template). The fields and functions in scope still come back. A non-blank expression gets the same answer as before.
+- bc496bf: fix(mcp): an action on a `sys_*` object whose author exposed it to AI is listed and run over MCP, behind every gate the action already has
+  
+  Clause-②: yes (widening: MCP `list_actions` / `run_action` / `resume_run` now admit a `sys_*` action that declares `ai.exposed: true`; `McpActionSummary` gains the optional `aiExposed`)
+  Metadata-protocol: none
+  Ruling-ref: #27681 ruling `6513869839` letter B
+  
+  MCP refused every action on a `sys_*` object by its object name, ahead of the action's own AI opt-in, so no declaration could open one, while `POST /api/v1/actions/:object/:action` served the same action to the same caller. Now the name refusal yields to the action's own `ai: { exposed: true, description }` (ADR-0011), and to nothing else:
+  
+  - **Where.** `run_action`, `list_actions` and `resume_run`, in the runtime bridge and in the `@objectstack/mcp` tool layer. An agent that lists sees exactly the system-object actions it may run.
+  - **What still runs behind the flag, unchanged.** The ADR-0066 D4 capability gate, the ADR-0126 §8 activation switch, the declared param contract, the `ai.requiresConfirmation` confirmation (428 `ACTION_CONFIRMATION_REQUIRED` without `confirm: true`), the subject load under the caller's row-level security, and for a `type: 'api'` action the target endpoint's own authorization.
+  - **No deployment switch.** `allowSystemObjects` keeps its meaning (the tool layer's filter) and opens nothing in the runtime: a `sys_*` action without the declaration stays refused there.
+  - **Nothing changes on day one.** No platform `sys_*` action declares an `ai` block, so every one of them stays hidden and refused until its declaration lands.
+  - **`McpActionSummary.aiExposed`** (optional) is how a bridge attests the author's opt-in to the tool layer, which never sees the declaration. A bridge that does not set it keeps every `sys_*` action hidden and refused, as before. The runtime bridge sets it on every action it lists.
+- d3b0a40: feat(datasource): import objects from an OData datasource's `$metadata` — EDM types map to field types, the key to the id, and navigations to lookups; Studio's datasource page imports several entity sets at once, and MCP gains `list_remote_tables` / `import_object`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Type matrix (`@objectstack/spec/data`).** `SqlDialect` gains `'odata'`, whose aliases map the EDM primitives (`Edm.String`, `Edm.Int16/32/64`, `Edm.Decimal`, `Edm.Double`, `Edm.Boolean`, `Edm.Date`, `Edm.DateTimeOffset`, `Edm.TimeOfDay`, `Edm.Guid`, `Edm.Binary`, `Edm.Stream`, `Collection(…)`) onto the matrix's canonical types. `Edm.Duration`, the geography / geometry families and a service's own enum or complex types stay unknown, so a draft flags them for review. `Edm.Int64` and `Edm.Decimal` take the same verdict as SQL `bigint` / `numeric` (exact for `number`).
+  - **Gate 2 gets looser, for SQL federation too.** `lookup` and `master_detail` are now exact under the `text`, `integer` and `bigint` rows, as they already were under `uuid`: a reference stores the target's id, which on a federated object is the remote key a foreign-key column carries. Before, `isCompatible` refused a lookup over `CustomerID int` or `varchar` as a `type_mismatch` error, so the boot validation (`onMismatch: 'fail'`) refused any federated object that declared one. Nothing that passed before fails now.
+  - **Draft (`@objectstack/service-datasource`).** For an OData datasource (the driver reports dialect `odata-4.0`, read as the `odata` vocabulary) `generateObjectDraft` / `importObject` / `refreshCatalog` and the validation map EDM types through that arm. A column whose name is not a snake_case field name drafts as its snake_case spelling with `external.columnMap` carrying the remote name (`CategoryID` → `category_id`); `rename` overrides now land in `columnMap` too, so a renamed field stays bound to its column. A remote table name drafts the same way (`Products` → `products`; a leading capital used to give `_products`). A single-valued navigation becomes a `lookup` on the column its `ReferentialConstraint` names when the constraint references the target's single key and the target is imported on the same datasource (or is the object itself); every other navigation is left out of the draft and named in `review` with its reason — import the target first.
+  - **Driver (`@objectstack/driver-odata`).** `introspectSchema()` lists each navigation's `referentialConstraints`.
+  - **Studio.** The datasource page's tables tab selects several entity sets and imports them in one go, saving lookup targets before the tables that reference them; the write opt-in is offered only on a datasource that allows writes, and an imported object stays read-only otherwise (single-table dialog included).
+  - **MCP.** `list_remote_tables` and `import_object` reach the same `IExternalDatasourceService` calls, registered only for a token whose scopes name `metadata:write`, and refused by the runtime bridge without the capability the REST twins require (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`, now exported from `@objectstack/rest`).
+- 04b1402: harden(data): changing an API key through the data door requires a signed-in session
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no file under `skills/**` names `sys_api_key` or teaches managing a key with an API key, and the docs teach key revocation and rotation from the API Keys list (`content/docs/ai/connect-mcp.mdx`, `content/docs/api/error-catalog.mdx`), a signed-in surface; every taught use stays true.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime write door: the data doors stop taking writes to `sys_api_key` from a caller an API key authenticated, and the remedy is to make the same change from a signed-in session, never a rewrite of anyone's code or metadata. No exported declaration is removed or narrowed; four names are added to `@objectstack/core`'s entry (the widening this changeset's `yes` declares); all four packages publish; no ADR-0087 id is named or touched. -->
+  
+  **BREAKING** (an accept-set narrowing).
+  
+  Managing API keys is a signed-in-session act on every data door, as minting one through `POST /api/v1/keys` is. An API key keeps acting as its owner for data, automation and MCP.
+  
+  **FROM.** The data doors judged a write to `sys_api_key` by the row and column rules alone, whichever credential authenticated the caller.
+  
+  **TO.** A write to `sys_api_key` from a caller an API key authenticated is refused `403 PERMISSION_DENIED`, and nothing is written, on the REST data routes (`/api/v1/data/sys_api_key`, the bulk routes and the cross-object `POST /api/v1/batch`), on the runtime dispatcher's data faces (`/data`, the `/mcp` HTTP tools, the action doors) and on the stdio MCP transport's `create_record`, `update_record` and `delete_record` tools, whose principal is always the configured `OS_MCP_STDIO_API_KEY`. The message tells the caller to sign in and manage the key from the API Keys page.
+  
+  - **Who is affected.** Only a script, integration or agent that changed `sys_api_key` rows through one of those doors while authenticated with an API key. **Fix:** make the change signed in, from the API Keys list (Account → Developer), or with a session cookie or session bearer token.
+  - **What does not change.** A signed-in session manages its own keys from the list as before, and the existing rule on who restores a key a forced password reset revoked is unchanged. Reading `sys_api_key` is unchanged on every door. System-context writes (the mint, the last-used stamp, the forced reset) are untouched. An operation the object does not expose keeps its `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+  - **Where it is decided.** One rule, `apiKeyManagementCredentialRefusal`, added to `@objectstack/core`'s entry with `API_KEY_MANAGEMENT_READ_OPERATIONS`, `API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE` and the type `ApiKeyManagementCredentialInput`, asked beside each door's exposure gate. The REST and dispatcher doors read which credential authenticated the request from the shared request resolver (`onAdmission`); the stdio transport's credential is its API key by construction. The `ExecutionContext` shape is unchanged.
+  - **Embedders calling `HttpDispatcher` data handlers directly.** The rule is positive on the credential: a context with no `admission` keeps today's answer.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [11a7f96]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [700ec85]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes
