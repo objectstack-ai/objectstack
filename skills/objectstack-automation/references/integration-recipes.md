@@ -36,8 +36,7 @@ deployment and to the sender. Scaffolded apps list the three executors in
 ## 1 · OpenAPI document, static key — Stripe balance, nightly
 
 ```ts
-// Trim the vendor's OpenAPI 3.x document to the operations the app calls; its path
-// is package-relative.
+// Trim the vendor's OpenAPI 3.x document to the operations the app calls.
 export const StripeConnector = defineConnector({
   name: 'stripe', label: 'Stripe', type: 'api', provider: 'openapi',
   providerConfig: { spec: './src/connectors/stripe.trimmed.json' },
@@ -78,7 +77,7 @@ export const GitHubMcp = defineConnector({
   providerConfig: {
     transport: { kind: 'http', url: 'https://api.githubcopilot.com/mcp/',  // `stdio` spawns a local process:
                  headers: { 'X-MCP-Readonly': 'true' } },   // denied unless the host allowlists the command
-    include: ['search_issues'],                             // tool-name allowlist → the actions
+    include: ['search_issues'],
   },
   auth: { type: 'bearer', credentialRef: 'GITHUB_MCP_TOKEN' }, // folded into the request headers
 });
@@ -148,9 +147,10 @@ Each `operationId` is a named action in the flow palette and to agents;
 
 ## Not yet — declare the rest, mark the integration blocked, write no plugin
 
-- **OAuth-protected vendor** (DocuSign, Salesforce, Google): the declarative `auth`
-  union has no `oauth2`; the authorization-code / refresh
-  lifecycle is not delivered in the open tier. Do not park a short-lived access
-  token behind a `bearer` ref. Blocked on the platform's outbound-OAuth card.
+- **OAuth-protected vendor** (DocuSign, Salesforce, Google): `auth` declares
+  `oauth2` (`authorization_code` / `client_credentials`) and `app-credential`
+  (`feishu` / `dingtalk` / `wecom`), the secret a `credentialRef`, but no server
+  runs the grant yet: the instance is held degraded, calling no upstream. Do not
+  park a short-lived token behind a `bearer` ref. Blocked on the outbound-OAuth card.
 - **Signature-authenticated vendor** (Alipay, WeChat Pay, Aliyun — RSA2 / HMAC
   canonical-request signing): no auth kind signs requests today; blocked on the request-signing card.
