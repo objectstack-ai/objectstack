@@ -30,6 +30,7 @@ const zh = {
       manage_org_users: '管理组织用户',
       manage_metadata: '管理元数据',
       manage_mailboxes: '管理邮箱',
+      manage_connector_connections: '管理连接器连接',
       manage_platform_settings: '管理平台设置',
       setup_access: '访问 Setup',
       setup_write: '保存设置',

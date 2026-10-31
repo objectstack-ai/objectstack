@@ -97,6 +97,18 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // row it reaches carries the organization column, so the organization wall
   // still bounds a holder to its own organization's mail.
   { name: 'manage_mailboxes', label: 'Manage Mailboxes', description: 'Administer inbound mailboxes: read the mailbox directory, and read every mirrored inbound message and its record associations in the holder’s organization past the mail read gates, the unassociated pool (messages no record matched) included. Without it a message is served only to its mailbox’s owner and to a caller who can read a record it is associated with.', scope: 'org' },
+  // [ADR-0143 D5] The connector connection capability. Connecting a vendor
+  // account to an `oauth2` `authorization_code` connector instance is an
+  // organization act (Q1 = A: one connection per instance per organization),
+  // so the door that reads, begins, completes and revokes that connection
+  // (`/automation/connectors/:name/connection` and the OAuth callback, in
+  // `@objectstack/runtime`) asks this capability and nothing else — never the
+  // platform-scoped `manage_metadata`. Held by default by platform
+  // administrators (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other position,
+  // the organization administrator included, only by explicit grant. `org`:
+  // the door acts on the caller's own organization's connection, and the
+  // holder never sees a token.
+  { name: 'manage_connector_connections', label: 'Manage Connector Connections', description: 'Connect, reconnect and revoke the holder’s organization’s connection of an OAuth2 connector instance, and read its status. A connection authorizes the platform to call the vendor on the organization’s behalf; no token is ever shown to the holder.', scope: 'org' },
 ];
 
 /** Set of built-in capability names, for fast membership checks (lint, gating). */
