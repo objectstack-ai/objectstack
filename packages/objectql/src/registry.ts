@@ -6795,9 +6795,10 @@ export class SchemaRegistry {
   }
 
   /**
-   * Return a copy of `app` with all registered navigation contributions
-   * merged into its `navigation` tree. The stored app is never mutated, so
-   * repeated reads stay idempotent.
+   * Return a copy of `app` with the registered navigation contributions of
+   * every ENABLED package merged into its `navigation` tree (#28117: a disabled
+   * package's are dropped). The stored app is never mutated, so repeated reads
+   * stay idempotent.
    *
    * Public so the protocol serving path (`getMetaItems` / `getMetaItem` for
    * `app`) can merge contributions the same way `getApp` / `getAllApps` do —
@@ -6815,6 +6816,12 @@ export class SchemaRegistry {
     const sorted = [...contributions].sort((a, b) => a.priority - b.priority);
     for (const c of sorted) {
       if (!c.items.length) continue;
+      // [#28117] A disabled package's contributions leave the app, as its
+      // objects leave the data plane: "disabled" has one meaning (hidden +
+      // refused + data kept). Asked per read, never cached, so an enable
+      // restores them with nothing to invalidate; skipped BEFORE the group
+      // lookup, so a disabled contribution is not relocated or diagnosed either.
+      if (this.isPackageDisabled(c.packageId)) continue;
       if (c.group) {
         const group = this.findNavGroup(nav, c.group);
         if (group) {

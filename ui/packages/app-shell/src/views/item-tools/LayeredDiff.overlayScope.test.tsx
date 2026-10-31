@@ -23,7 +23,7 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { GetMetaItemLayeredResponseSchema } from '@objectstack/spec/api';
 import type { MetadataLayered } from '@object-ui/data-objectstack';
 import { LayeredDiff } from './LayeredDiff';
-import { translateConsoleValue } from './i18n';
+import { translateConsoleValue } from '../metadata-admin/i18n';
 
 afterEach(cleanup);
 
