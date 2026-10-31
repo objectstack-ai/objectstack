@@ -12,10 +12,16 @@
 /** The `oauth2` endpoint fields this check covers, in the order a reason names them. */
 export const OAUTH2_ENDPOINT_FIELDS = ['tokenUrl', 'authorizationUrl'] as const;
 
-/** True for `localhost`, a `*.localhost` name, any `127.0.0.0/8` address and `[::1]`. */
+/**
+ * True for `localhost`, any `127.0.0.0/8` address and `[::1]`, judged on the
+ * host the WHATWG parser extracts (so `http://localhost@evil.example` is
+ * `evil.example`). ⛔ Not a `*.localhost` name: RFC 6761 reserves it, but the
+ * system resolver (glibc's included) does not special-case it, so such a name
+ * resolves through DNS like any other and may leave the machine.
+ */
 function isLoopbackHost(hostname: string): boolean {
     const host = hostname.toLowerCase();
-    if (host === 'localhost' || host.endsWith('.localhost')) return true;
+    if (host === 'localhost') return true;
     if (host === '[::1]') return true;
     return /^127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(host);
 }

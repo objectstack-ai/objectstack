@@ -11,7 +11,6 @@ describe('ADR-0143 D4 — which oauth2 endpoint a secret may be sent to', () => 
         'https://idp.example.com/token',
         'HTTPS://IDP.EXAMPLE.COM/token',
         'http://localhost:8080/token',
-        'http://idp.localhost/token',
         'http://127.0.0.1:9000/token',
         'http://127.255.0.1/token',
         'http://[::1]:9000/token',
@@ -25,6 +24,13 @@ describe('ADR-0143 D4 — which oauth2 endpoint a secret may be sent to', () => 
         'http://128.0.0.1/token',
         'http://127.0.0.1.example.com/token',
         'http://localhost.example.com/token',
+        // A `*.localhost` name resolves through DNS like any other name.
+        'http://idp.localhost/token',
+        'http://localhost.localhost/token',
+        // The userinfo is not the host: this is a request to evil.com.
+        'http://localhost@evil.com/token',
+        // An IPv4-mapped IPv6 address is not one of the two loopback spellings.
+        'http://[::ffff:127.0.0.1]/token',
         'ftp://idp.example.com/token',
         'javascript:alert(1)',
         'not a url',

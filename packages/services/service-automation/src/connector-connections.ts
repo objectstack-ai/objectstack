@@ -90,6 +90,16 @@ export interface ConnectorGrantWrite {
 }
 
 /**
+ * How many rows a predicate write reports it changed. The engine answers a
+ * `multi` update with the affected-row count; anything else (a driver that
+ * returns no count) is read as "none" — the revision guard fails closed.
+ */
+function affectedRows(result: unknown): number {
+    const count = typeof result === 'number' ? result : Number((result as { count?: unknown } | null)?.count);
+    return Number.isFinite(count) ? count : 0;
+}
+
+/**
  * The `sys_connector_connection` store. One per automation plugin. It never
  * caches a token: {@link resolveRefreshToken} reads the row at the moment of use.
  */
@@ -139,6 +149,28 @@ export class ConnectorConnectionStore {
         return undefined;
     }
 
+    /**
+     * Write `fields` over the row `id` only while it still carries `revision`:
+     * one conditional statement, `where: { id, revision }`, so the revision
+     * check and the write cannot be split by another writer on any replica.
+     * `true` when the row was written; `false`, with nothing written, when the
+     * row moved (or is gone) since `revision` was read.
+     */
+    private async updateAtRevision(
+        engine: ConnectorCredentialEngine,
+        id: string,
+        revision: number,
+        fields: Record<string, unknown>,
+        context: Record<string, unknown>,
+    ): Promise<boolean> {
+        const result = await engine.update(CONNECTOR_CONNECTION_OBJECT, fields, {
+            where: { id, revision },
+            multi: true,
+            context,
+        });
+        return affectedRows(result) > 0;
+    }
+
     /** Every organization's row for one instance. */
     async listFor(connectorName: string): Promise<ConnectorConnectionRecord[]> {
         const engine = this.resolveEngine();
@@ -186,7 +218,7 @@ export class ConnectorConnectionStore {
      */
     async connect(args: { organizationId: string; connectorName: string; userId?: string } & ConnectorGrantWrite): Promise<ConnectorConnectionRecord> {
         const engine = this.engineOrThrow(`Connector instance '${args.connectorName}' was not connected`);
-        const existing = await this.read(args.organizationId, args.connectorName);
+        const existing = await this.readOrRefuse(args.organizationId, args.connectorName);
         const context = { ...SYSTEM_CONTEXT, ...(args.userId ? { userId: args.userId } : {}) };
         const row = {
             grant: 'authorization_code',
@@ -199,9 +231,10 @@ export class ConnectorConnectionStore {
             connected_at: new Date().toISOString(),
             connected_by: args.userId ?? null,
         };
+        let moved = false;
         try {
             if (existing) {
-                await engine.update(CONNECTOR_CONNECTION_OBJECT, { id: existing.id, ...row }, { context });
+                moved = !(await this.updateAtRevision(engine, existing.id, existing.revision, row, context));
             } else {
                 await engine.insert(
                     CONNECTOR_CONNECTION_OBJECT,
@@ -221,7 +254,13 @@ export class ConnectorConnectionStore {
                 `Connector instance '${args.connectorName}' was not connected: the connection store refused the write. Nothing was kept.`,
             );
         }
-        const stored = await this.read(args.organizationId, args.connectorName);
+        if (moved) {
+            throw new ConnectorCredentialUnavailableError(
+                `Connector instance '${args.connectorName}' was not connected: its connection changed while this connect was `
+                    + 'completing (another connect, a refresh or a revoke landed first). Nothing was kept; begin the connect again.',
+            );
+        }
+        const stored = await this.readOrRefuse(args.organizationId, args.connectorName);
         if (!stored) {
             throw new ConnectorCredentialUnavailableError(
                 `Connector instance '${args.connectorName}' was not connected: the connection did not read back after its write.`,
@@ -235,47 +274,49 @@ export class ConnectorConnectionStore {
      * (D2.1, atomically), the new expiry and scopes. Written only over the
      * revision `record` carries — `false`, with nothing written, when another
      * writer moved the row since (a reconnect, a revoke, a refresh on another
-     * replica). The caller runs this inside the connection's refresh lock.
+     * replica). The revision is checked by the write itself
+     * ({@link updateAtRevision}), not by a read before it; the caller's
+     * refresh lock narrows the race, it does not carry the invariant.
      */
     async recordRefresh(record: ConnectorConnectionRecord, write: ConnectorGrantWrite): Promise<boolean> {
         const engine = this.engineOrThrow(`The connection of connector instance '${record.connectorName}' was not renewed`);
-        const current = await this.read(record.organizationId, record.connectorName);
-        if (!current || current.revision !== record.revision) return false;
         const rotated = write.refreshToken !== undefined;
-        await engine.update(
-            CONNECTOR_CONNECTION_OBJECT,
+        return this.updateAtRevision(
+            engine,
+            record.id,
+            record.revision,
             {
-                id: current.id,
-                ...(rotated ? { [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: write.refreshToken, revision: current.revision + 1 } : {}),
+                ...(rotated ? { [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: write.refreshToken, revision: record.revision + 1 } : {}),
                 ...(write.scopes !== undefined ? { scopes: write.scopes } : {}),
                 expires_at: write.expiresAt ? write.expiresAt.toISOString() : null,
             },
-            { context: SYSTEM_CONTEXT },
+            SYSTEM_CONTEXT,
         );
-        return true;
     }
 
     /**
      * Record that the authorization server refused the grant `record` held
      * (revoked, or expired with no usable refresh). `reason` is the platform's
-     * sentence, never the server's text. Left alone when the row moved since.
+     * sentence, never the server's text. Left alone when the row moved since
+     * — checked by the write itself ({@link updateAtRevision}): a reconnect
+     * that landed between the refusal and this write keeps its fresh grant.
      */
     async markReconnectRequired(record: ConnectorConnectionRecord, reason: string): Promise<void> {
         const engine = this.resolveEngine();
         if (!engine) return;
-        const current = await this.read(record.organizationId, record.connectorName);
-        if (!current || current.revision !== record.revision) return;
-        await engine.update(
-            CONNECTOR_CONNECTION_OBJECT,
-            { id: current.id, status: 'reconnect_required', status_reason: reason, [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: null },
-            { context: SYSTEM_CONTEXT },
+        await this.updateAtRevision(
+            engine,
+            record.id,
+            record.revision,
+            { status: 'reconnect_required', status_reason: reason, [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: null },
+            SYSTEM_CONTEXT,
         );
     }
 
     /** Remove the connection of one instance in one organization. `false` when it was not connected there. */
     async revoke(organizationId: string, connectorName: string, userId?: string): Promise<boolean> {
         const engine = this.engineOrThrow(`The connection of connector instance '${connectorName}' was not revoked`);
-        const existing = await this.read(organizationId, connectorName);
+        const existing = await this.readOrRefuse(organizationId, connectorName);
         if (!existing) return false;
         const context = { ...SYSTEM_CONTEXT, ...(userId ? { userId } : {}) };
         await engine.delete(CONNECTOR_CONNECTION_OBJECT, { where: { id: existing.id }, context });

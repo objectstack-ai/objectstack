@@ -21,6 +21,32 @@
  * otherwise (a single-node deployment). The KV key is the SHA-256 of the
  * state, so the raw state is never a key anyone can list.
  *
+ * **What is held there is sealed** (AES-256-GCM), under a key derived from the
+ * raw state by HKDF-SHA-256 — and the raw state is held nowhere on the server:
+ * it lives in the administrator's browser, round-trip through the vendor, and
+ * the server keeps only its digest. So the KV trust boundary is:
+ *
+ *   - a party that can READ the KV (a shared Redis, its backups, a replica's
+ *     memory dump) learns no verifier, user, organization or redirect URI —
+ *     only an opaque envelope under a digest it cannot invert;
+ *   - a party that can WRITE the KV cannot alter or re-home an entry it did
+ *     not seal: the envelope authenticates under its own state's key, and its
+ *     AAD names the slot it was written to, so an edited, swapped or moved
+ *     value opens as nothing ("no connect waiting") and its code is never
+ *     exchanged;
+ *   - what a KV writer CAN still do is delete an entry (a connect that has to
+ *     be begun again) or plant one under a state it chose itself. Write access
+ *     to the cluster KV is inside the platform's trust boundary — the same KV
+ *     carries the cluster lock the refresh single-flight relies on — and the
+ *     callback still answers only the signed-in user the planted entry names.
+ *
+ * Why not the host `ICryptoProvider`: its contexts are scoped by the closed
+ * `CRYPTO_CONTEXT_SCOPES` vocabulary (ADR-0128 D1), which has no member for
+ * this producer, and its handle is persisted as a `sys_secret` row — a
+ * durable record for a value that lives ten minutes. The state-derived key
+ * needs no shared server secret, so it also holds on a cluster whose replicas
+ * share nothing but the KV.
+ *
  * **What it is bound to.** The organization and the user that began it, and
  * the instance. A callback completed by anyone else — another user's browser
  * carrying a code an attacker obtained for their own vendor account — is
@@ -28,7 +54,7 @@
  * deployment by the caller and never taken from the request.
  */
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 import type { IKV } from '@objectstack/spec/contracts';
 
 /** How long a begun connect may wait for its callback. */
@@ -71,37 +97,90 @@ export function createAuthorizationState(): string {
 const stateKey = (state: string): string =>
     `connector-oauth2:pending:${createHash('sha256').update(state, 'utf8').digest('hex')}`;
 
-/** The store over the cluster's ephemeral KV. */
+/**
+ * A pending authorization as it is held: an AES-256-GCM envelope, never the
+ * value. `v` names the sealing scheme, so a later one is told apart rather
+ * than guessed at.
+ */
+export interface SealedPendingAuthorization {
+    readonly v: 1;
+    /** 96-bit nonce, base64url. */
+    readonly iv: string;
+    /** Ciphertext of the JSON-encoded {@link PendingAuthorization}, base64url. */
+    readonly ct: string;
+    /** GCM authentication tag, base64url. */
+    readonly tag: string;
+}
+
+/** HKDF `info` for the sealing key — distinct from the digest that names the slot. */
+const SEAL_KEY_INFO = 'objectstack:connector-oauth2:pending-authorization:seal:v1';
+
+/** The sealing key of one state: HKDF-SHA-256 over the raw state, which the server never holds. */
+function sealKey(state: string): Buffer {
+    return Buffer.from(hkdfSync('sha256', Buffer.from(state, 'utf8'), Buffer.alloc(0), SEAL_KEY_INFO, 32));
+}
+
+/** Seal `pending` under `state`'s key, bound (AAD) to the slot `key` it is written to. */
+export function sealPendingAuthorization(state: string, pending: PendingAuthorization): SealedPendingAuthorization {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', sealKey(state), iv);
+    cipher.setAAD(Buffer.from(stateKey(state), 'utf8'));
+    const ct = Buffer.concat([cipher.update(JSON.stringify(pending), 'utf8'), cipher.final()]);
+    return { v: 1, iv: base64url(iv), ct: base64url(ct), tag: base64url(cipher.getAuthTag()) };
+}
+
+/**
+ * Open what {@link sealPendingAuthorization} sealed under `state`, or
+ * `undefined` — never a throw — when the value is not an envelope of this
+ * scheme or does not authenticate under this state and slot. A callback reads
+ * that the same as "no connect waiting": fail closed, nothing exchanged.
+ */
+export function openPendingAuthorization(state: string, sealed: unknown): PendingAuthorization | undefined {
+    const envelope = sealed as Partial<SealedPendingAuthorization> | null | undefined;
+    if (!envelope || envelope.v !== 1) return undefined;
+    if (typeof envelope.iv !== 'string' || typeof envelope.ct !== 'string' || typeof envelope.tag !== 'string') return undefined;
+    try {
+        const decipher = createDecipheriv('aes-256-gcm', sealKey(state), Buffer.from(envelope.iv, 'base64url'));
+        decipher.setAAD(Buffer.from(stateKey(state), 'utf8'));
+        decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
+        const plain = Buffer.concat([decipher.update(Buffer.from(envelope.ct, 'base64url')), decipher.final()]).toString('utf8');
+        return JSON.parse(plain) as PendingAuthorization;
+    } catch {
+        return undefined;
+    }
+}
+
+/** The store over the cluster's ephemeral KV. It holds only sealed envelopes. */
 export function kvPendingAuthorizationStore(kv: IKV): PendingAuthorizationStore {
     return {
         async put(state, pending) {
-            await kv.set(stateKey(state), pending, { ttl: PENDING_AUTHORIZATION_TTL_SECONDS });
+            await kv.set(stateKey(state), sealPendingAuthorization(state, pending), { ttl: PENDING_AUTHORIZATION_TTL_SECONDS });
         },
         async take(state) {
             const key = stateKey(state);
-            const entry = await kv.get<PendingAuthorization>(key);
+            const entry = await kv.get<unknown>(key);
             if (!entry) return undefined;
             // Only the caller whose delete lands holds it: a replayed callback,
             // or two racing on two replicas, finds nothing.
             const deleted = await kv.delete(key, { ifVersion: entry.version });
-            return deleted ? entry.value : undefined;
+            return deleted ? openPendingAuthorization(state, entry.value) : undefined;
         },
     };
 }
 
-/** The in-process store, for a deployment with no cluster service. */
+/** The in-process store, for a deployment with no cluster service. It holds the same sealed envelopes. */
 export function memoryPendingAuthorizationStore(now: () => number = Date.now): PendingAuthorizationStore {
-    const held = new Map<string, PendingAuthorization>();
+    const held = new Map<string, { expiresAt: number; sealed: SealedPendingAuthorization }>();
     return {
         async put(state, pending) {
             for (const [key, value] of held) if (value.expiresAt <= now()) held.delete(key);
-            held.set(stateKey(state), pending);
+            held.set(stateKey(state), { expiresAt: pending.expiresAt, sealed: sealPendingAuthorization(state, pending) });
         },
         async take(state) {
             const key = stateKey(state);
-            const pending = held.get(key);
+            const entry = held.get(key);
             held.delete(key);
-            return pending;
+            return entry ? openPendingAuthorization(state, entry.sealed) : undefined;
         },
     };
 }
