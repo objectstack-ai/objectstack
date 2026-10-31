@@ -39,6 +39,9 @@ vi.mock('../useMetadata', () => ({ useMetadataClient: () => h.client }));
 
 import { ObjectPicker } from './ObjectPicker';
 import { t, tFormat } from '../i18n';
+// The picker imports the lint module lazily; warmed here so its first load is
+// paid at import, not inside a test's bounded wait.
+import '@objectstack/lint';
 
 /** What `GET /api/v1/packages` answers: the acme package's manifest declares `deps`. */
 let deps: Record<string, string> = {};
