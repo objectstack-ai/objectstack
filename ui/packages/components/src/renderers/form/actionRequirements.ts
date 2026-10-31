@@ -49,7 +49,7 @@ export interface PatchingUpdateAction {
   source: object
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
+function isPatchObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value)
 }
 
@@ -68,10 +68,10 @@ export function patchingUpdateActions(actions: unknown): PatchingUpdateAction[] 
   const out: PatchingUpdateAction[] = []
   const seen = new Set<string>()
   for (const action of actions) {
-    if (!isPlainRecord(action)) continue
+    if (!isPatchObject(action)) continue
     if (action.operation !== "update") continue
     const patch = action.patch
-    if (!isPlainRecord(patch) || Object.keys(patch).length === 0) continue
+    if (!isPatchObject(patch) || Object.keys(patch).length === 0) continue
     if (action.params != null && !(Array.isArray(action.params) && action.params.length === 0)) continue
     if (!Array.isArray(action.locations) || action.locations.length === 0) continue
     const name = typeof action.name === "string" ? action.name : ""
