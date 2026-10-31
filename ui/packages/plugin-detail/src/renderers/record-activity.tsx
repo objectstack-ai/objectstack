@@ -81,6 +81,7 @@ import { useRecordAriaProps } from './recordComponentAria';
 import { useDefaultRecordPage } from '../defaultRecordPage';
 import {
   RecordFieldChangesContext,
+  RecordTimelinePanelContext,
   filterTimelineStream,
   mergeTimelineStream,
   type TimelineStreamFilter,
@@ -270,13 +271,18 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   }, [canSelfFetch, dataSource, objectName, recordId, pageSize, systemActorLabel]);
 
   // objectstack#27055, Target 3 — on the synthesized default record page this
-  // block IS the timeline: ONE stream of the discussion, the activity and the
-  // field changes the host hands over (`RecordFieldChangesContext`), filtered
-  // by the chips 全部 / 活动 / 讨论 / 变更 and paged by 「查看全部 N 条 →」.
+  // block IS the 动态 stream: ONE stream of the discussion, the activity and
+  // the field changes the host hands over (`RecordFieldChangesContext`). In
+  // full (the 动态 tab) it is filtered by the chips 全部 / 活动 / 讨论 / 变更
+  // and paged `limit` entries at a time; in the 动态 panel (objectstack#27524,
+  // `RecordTimelinePanelContext`) it peeks: the newest few, no chips.
   const asStream = useDefaultRecordPage();
+  const timelinePanel = React.useContext(RecordTimelinePanelContext);
+  const asPeek = asStream && timelinePanel !== null;
+  const peekEntries = timelinePanel?.entries ?? 0;
   const fieldChanges = React.useContext(RecordFieldChangesContext);
   const [streamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
-  const [streamShowAll, setStreamShowAll] = React.useState(false);
+  const [streamPages, setStreamPages] = React.useState(1);
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
   const applied = React.useMemo(() => {
@@ -286,15 +292,22 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
     }
     // The chip filters the WHOLE stream before the page is cut, so 讨论 is
     // every comment, not the comments of the first page.
-    const stream = filterTimelineStream(mergeTimelineStream(sourceItems, fieldChanges), streamFilter);
+    const stream = filterTimelineStream(mergeTimelineStream(sourceItems, fieldChanges), asPeek ? 'all' : streamFilter);
     // Filtered only (no window): `applyFeedConfig` windows a chronological
     // feed from its tail, but the stream is newest first, so its window is the
-    // HEAD — the newest `limit` entries, not the oldest.
+    // HEAD — the newest entries, not the oldest.
     const all = applyFeedConfig(stream, { types, showCompleted, unifiedTimeline }, Number.MAX_SAFE_INTEGER, BLOCK_NAME);
     const total = all.items.length;
-    if (streamShowAll || total <= limit) return { items: all.items, hasMore: false, total };
-    return { items: all.items.slice(0, limit), hasMore: true, total };
-  }, [hostItems, discussionItems, fetched, types, showCompleted, unifiedTimeline, pageSize, asStream, fieldChanges, streamFilter, streamShowAll, limit]);
+    if (asPeek) {
+      // A reply sits under its comment in the tab; the peek names roots only.
+      const held = new Set(all.items.map((item) => item.id));
+      const roots = all.items.filter((item) => !item.parentId || !held.has(item.parentId));
+      return { items: roots.slice(0, peekEntries), hasMore: false, total };
+    }
+    const shown = limit * streamPages;
+    if (total <= shown) return { items: all.items, hasMore: false, total };
+    return { items: all.items.slice(0, shown), hasMore: true, total };
+  }, [hostItems, discussionItems, fetched, types, showCompleted, unifiedTimeline, pageSize, asStream, asPeek, peekEntries, fieldChanges, streamFilter, streamPages, limit]);
   const items = applied.items;
   const hasMore = applied.hasMore || (canSelfFetch && fetchedHasMore);
 
@@ -316,9 +329,17 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   React.useEffect(() => { setFilterMode(defaultFilterMode); }, [defaultFilterMode]);
 
   const handleLoadMore = React.useCallback(() => {
-    if (asStream) setStreamShowAll(true);
+    if (asStream) setStreamPages((n) => n + 1);
     else setExtraPages((n) => n + 1);
   }, [asStream]);
+
+  // The 动态 panel's count chip: the whole stream's size, unknown while the
+  // feed loads or a read was refused (a refused read is not "none").
+  const reportCount = timelinePanel?.onCount;
+  const peekCount = asPeek && !loading && !activityDenied && !commentsDenied ? applied.total : null;
+  React.useEffect(() => {
+    reportCount?.(peekCount);
+  }, [reportCount, peekCount]);
 
   // Write path: whatever the host's DiscussionContext provides, nothing more.
   // `enableMentions: false` withholds the suggestion list, which is what turns
@@ -347,18 +368,24 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         onUploadAttachments={discussion?.onUploadAttachments as any}
         activityDenied={activityDenied}
         commentsDenied={commentsDenied}
-        {...(asStream
+        {...(asPeek
           ? {
-              variant: 'stream' as const,
-              streamFilter,
-              onStreamFilterChange: (next: TimelineStreamFilter) => {
-                setStreamFilter(next);
-                setStreamShowAll(false);
-              },
+              variant: 'peek' as const,
               totalCount: applied.total,
-              titleLabel: tt('detail.timeline', 'Timeline'),
+              onViewAll: timelinePanel?.onViewAll,
             }
-          : {})}
+          : asStream
+            ? {
+                variant: 'stream' as const,
+                streamFilter,
+                onStreamFilterChange: (next: TimelineStreamFilter) => {
+                  setStreamFilter(next);
+                  setStreamPages(1);
+                },
+                totalCount: applied.total,
+                titleLabel: tt('detail.timeline', 'Activity'),
+              }
+            : {})}
       />
     </div>
   );

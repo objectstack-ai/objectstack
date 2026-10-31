@@ -7,63 +7,66 @@
  */
 
 import * as React from 'react';
-import { Badge, Button, cn } from '@object-ui/components';
+import { Button, cn } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
 import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
-import { ChevronLeft, ChevronRight, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import {
-  recordPageArrangementFor,
+  RECORD_PAGE_TIMELINE_PANEL,
   relatedListIdsIn,
   type DefaultPageColumns,
-  type RecordPageColumnSwitches,
+  type RecordPageTier,
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
 import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext } from './relatedListCompact';
-import { DefaultRecordPageContext } from './defaultRecordPage';
+import { DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
 import { RelatedCardStack } from './RelatedCardStack';
+import { RecordTimelinePanel } from './RecordTimelinePanel';
 import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
 
 export interface RecordPageColumnsProps {
-  /** The column tier to draw; the tabbed tier is the page itself, drawn by its host. */
-  tier: 'two-column' | 'three-column';
+  /** The tier to draw (`recordPageTierFor` of the container's width). */
+  tier: RecordPageTier;
   /** The synthesized page, partitioned (`buildDefaultPageColumns`). */
   columns: DefaultPageColumns;
   /**
    * The record's provenance line (created / updated / owner / id), which the
    * host draws once per page: at the foot of the details column, in every
-   * column tier (objectstack#27055, the v3 meta line).
+   * tier (objectstack#27055, the v3 meta line).
    */
   footer?: React.ReactNode;
   /**
-   * The reader's column switches (objectstack#27052): a column that is off is
-   * not drawn — the timeline folds into the related column's 「动态」 card; the
-   * related column is gone, rail and all (objectstack#27241). A related column
-   * that is on but has no room is the rail (`recordPageArrangementFor`).
-   * Absent: both on.
+   * The reader's right-column switch ⊟ (objectstack#27052; objectstack#27524,
+   * Target 4): off, a tier with a right column draws the details alone, the
+   * full width. The stack has no right column — its panels follow the
+   * details — so it does not read the switch. Absent: on.
    */
-  switches?: RecordPageColumnSwitches;
+  rightColumn?: boolean;
   /**
-   * The reader's arrangement of the related cards (objectstack#27055,
-   * Targets 7 and 10) — order, collapsed, hidden — from the host's workspace
-   * preference store, and the setter that keeps a new one. Absent: the
-   * reader's choices hold for this view only.
+   * The reader's arrangement of the related panels (objectstack#27055,
+   * Targets 7 and 10) — order, hidden — from the host's workspace preference
+   * store, and the setter that keeps a new one. Absent: the reader's choices
+   * hold for this view only.
    */
   relatedArrangement?: RelatedArrangement;
   onRelatedArrangementChange?: (next: RelatedArrangement) => void;
-  /** Enlarge a related card's list in place (Target 9, the host's `?related=`). */
+  /**
+   * Open a panel's whole face in place — a related list's `object.field`, or
+   * `timeline` for the 动态 stream — the host's `?related=`.
+   */
   onEnlargeRelated?: (id: RelatedCardId) => void;
   /**
-   * The enlarged related list (`object.field`, the host's `?related=`): drawn
-   * as a full-width table over the page body — the header stays, the columns
-   * step aside — until Esc or ‹ (`onCloseEnlargedRelated`). An id naming no
-   * related list of the page draws the columns.
+   * The open face (the host's `?related=`): a related list's full table, or
+   * the 动态 stream in full (`timeline`), drawn at the page's full width
+   * under the record header until Esc or ‹ (`onCloseEnlargedRelated`). An id
+   * naming nothing on the page draws the page.
    */
   enlargedRelated?: RelatedCardId;
   onCloseEnlargedRelated?: () => void;
   /**
    * The child objects' field definitions the host holds (its metadata), for
-   * the related cards' up-front counts (objectstack#27056). Absent: the counts
-   * read each child's definition first.
+   * the related panels' up-front counts (objectstack#27056). Absent: the
+   * counts read each child's definition first.
    */
   relatedFieldsOf?: (objectName: string) => FieldContainerLike;
   className?: string;
@@ -81,32 +84,64 @@ function relatedNodeId(node: any): RelatedCardId | null {
 }
 
 /**
- * The enlarged related list (objectstack#27055, Target 9 — the ONE path to a
- * related list's every record): the full `RelatedList` face the old Related
- * tab drew — every column, paging, sort, inline edit — at the page's full
- * width, under the record header. ‹ and Esc return to the columns. A dialog
- * open over the page keeps its own Esc.
+ * Whether an `Esc` belongs to a layer over the open face: an open menu, alert
+ * or floating content (a select, a tooltip), or a dialog the face is not
+ * inside (a popover, a confirm, a drawer opened over the page that holds the
+ * face). The dialog that holds the face — the record pane's drawer — is not one.
  */
-const EnlargedRelatedList: React.FC<{ node: any; onClose?: () => void }> = ({ node, onClose }) => {
+function escapeOwnedByLayer(face: Element): boolean {
+  const doc = face.ownerDocument;
+  if (doc.querySelector('[role="alertdialog"], [role="menu"], [data-radix-popper-content-wrapper]')) return true;
+  return Array.from(doc.querySelectorAll('[role="dialog"]')).some((dialog) => !dialog.contains(face));
+}
+
+function isTypingTarget(target: EventTarget | null): target is Element {
+  return (
+    target instanceof Element &&
+    !!target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')
+  );
+}
+
+/**
+ * A panel's whole face, open in place (objectstack#27055, Target 9): under the
+ * record header, at the page's full width, with ‹ to return. Esc returns too;
+ * a dialog or menu open over the page keeps its own Esc, and so does a field
+ * the reader types in.
+ */
+const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; children: React.ReactNode }> = ({
+  id,
+  title,
+  onClose,
+  children,
+}) => {
   const { t } = useDetailTranslation();
-  const p = { ...node, ...(node.properties ?? {}) };
-  const title = typeof p.title === 'string' && p.title ? p.title : p.objectName;
+  const faceRef = React.useRef<HTMLElement | null>(null);
   React.useEffect(() => {
     if (!onClose) return undefined;
+    // On the window, in the capture phase: inside the record pane the pane's
+    // own `Esc` (the drawer's dialog layer, the split pane's document
+    // listener) would act first and close or step the pane (objectstack#27524).
+    // The face takes the key, and keeps it from the pane.
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      const face = faceRef.current;
+      if (!face || escapeOwnedByLayer(face)) return;
+      if (isTypingTarget(event.target)) {
+        // A field keeps its own `Esc` (it closes a mention list, cancels an
+        // inline edit), so the key goes on to it; pressed in the face, it is
+        // marked handled, and the pane around the face stays open.
+        if (face.contains(event.target)) event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
       onClose();
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [onClose]);
-  const authoredLimit = typeof p.limit === 'number' && p.limit > 0;
-  const enlarged = authoredLimit
-    ? node
-    : { ...node, properties: { ...(node.properties ?? {}), limit: ENLARGED_PAGE_SIZE } };
   return (
-    <section className="flex min-w-0 flex-col gap-3" data-related-enlarged={relatedNodeId(node) ?? ''} aria-label={title}>
+    <section ref={faceRef} className="flex min-w-0 flex-col gap-3" data-related-enlarged={id} aria-label={title}>
       <div className="flex items-center gap-2">
         <Button
           type="button"
@@ -122,61 +157,40 @@ const EnlargedRelatedList: React.FC<{ node: any; onClose?: () => void }> = ({ no
         </Button>
         <h2 className="truncate text-sm font-semibold">{title}</h2>
       </div>
-      <SchemaRenderer schema={toRenderableSchema(enlarged)} />
-    </section>
-  );
-};
-
-const ALL_COLUMNS_ON: RecordPageColumnSwitches = { timeline: true, related: true };
-
-/**
- * The timeline folded into the related column (objectstack#27052): the
- * 「动态」 card under the lists. Closed until the reader opens it, and its
- * blocks are not mounted while closed, so the feed reads nothing before it is
- * asked for (objectstack#27056, Target 2).
- */
-const FoldedTimelineCard: React.FC<{ nodes: any[]; label: string }> = ({ nodes, label }) => {
-  const [open, setOpen] = React.useState(false);
-  const bodyId = React.useId();
-  return (
-    <section
-      className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4"
-      aria-label={label}
-      data-record-folded-timeline=""
-    >
-      <h2 className="text-sm font-semibold text-foreground">
-        <button
-          type="button"
-          className="flex items-center gap-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={() => setOpen((value) => !value)}
-          data-record-folded-timeline-toggle=""
-        >
-          <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden />
-          {label}
-        </button>
-      </h2>
-      {open && (
-        <div id={bodyId} className="flex flex-col gap-4">
-          {drawNodes(nodes)}
-        </div>
-      )}
+      {children}
     </section>
   );
 };
 
 /**
- * Grid templates by which columns have content. Literal strings, so
- * Tailwind's scanner emits each one. The v3 widths (objectstack#27055,
- * 「栏宽 1.25fr : 1fr : 320px」): details the widest, the timeline after it,
- * the related column a fixed 320 px rail.
+ * The enlarged related list (Target 9, the ONE path to a related list's
+ * every record): the full `RelatedList` face — every column, paging, sort,
+ * inline edit.
  */
-const THREE_COLUMN_TEMPLATE = {
-  all: 'grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_20rem]',
-  noTimeline: 'grid-cols-[minmax(0,1fr)_20rem]',
-  noRelated: 'grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]',
-  detailsOnly: 'grid-cols-1',
+function enlargedRelatedList(node: any): React.ReactNode {
+  const p = { ...node, ...(node.properties ?? {}) };
+  const authoredLimit = typeof p.limit === 'number' && p.limit > 0;
+  const enlarged = authoredLimit
+    ? node
+    : { ...node, properties: { ...(node.properties ?? {}), limit: ENLARGED_PAGE_SIZE } };
+  return <SchemaRenderer schema={toRenderableSchema(enlarged)} />;
+}
+
+/** The title an enlarged related list's face names it by. */
+function relatedNodeTitle(node: any): string {
+  const p = { ...node, ...(node.properties ?? {}) };
+  return typeof p.title === 'string' && p.title ? p.title : p.objectName;
+}
+
+/**
+ * Grid templates. Literal strings, so Tailwind's scanner emits each one:
+ * details | the right column at 320 px, or 380 px in the wide tier
+ * (objectstack#27524, Target 6).
+ */
+const GRID_TEMPLATE = {
+  twoColumn: 'grid-cols-[minmax(0,1fr)_20rem]',
+  wide: 'grid-cols-[minmax(0,1fr)_23.75rem]',
+  oneColumn: 'grid-cols-1',
 } as const;
 
 /** Each node of a column, drawn as a sibling of the others: a related-list
@@ -188,7 +202,6 @@ function drawNodes(nodes: any[]): React.ReactNode {
   ));
 }
 
-
 /**
  * A column stacks its blocks 16 px apart. A related list folded into its
  * stack's empty line stays MOUNTED with its content `hidden`
@@ -199,35 +212,33 @@ function drawNodes(nodes: any[]): React.ReactNode {
 const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)]:hidden';
 
 /**
- * The synthesized default record page in its column tiers (objectstack#26678):
- * one record header, then details | timeline | related as resident columns.
+ * The synthesized default record page, laid out by the width it has
+ * (objectstack#26678; one rule since objectstack#27524, Target 6): one record
+ * header, then the details and the right column — the 动态 panel first, then
+ * the related panels in the reader's arrangement.
  *
- * The frame mirrors the record page frame `PageRenderer` draws for the tabbed
- * tier (its padding and background, the header nodes 16 px apart), so the
- * header does not move when the page changes tier. The nodes are the page's
- * own — the same `page:header`, `record:details`, `record:discussion` and
- * `record:related_list` nodes the tab strip draws — so every tier shows the
- * same header and the same sections.
+ *  - `two-column` / `wide`: details | the right column (320 / 380 px). The
+ *    wide tier lets a details section take three field columns (two
+ *    otherwise, `DetailsColumnCapContext`) and the 动态 panel five entries
+ *    (three otherwise). The reader's ⊟ (`rightColumn`) takes the right
+ *    column out; the details then take the row.
+ *  - `stack`: ONE column — the details, then the right column's panels in
+ *    their order. No tabs, no rail: the stack is what a narrow container
+ *    (the split pane, a phone) draws.
  *
- * Two-column tier: details | timeline, and the related column folded into a
- * rail opened from a toggle above the columns. The rail opens over the
- * timeline rather than pushing a third column in, which is the point of the
- * tier: three columns do not fit. Closed, its lists are not mounted, so they
- * read nothing until opened. Whether it is open is this view's ephemeral
- * state.
- *
- * The reader's switches (objectstack#27052) take a column out: with the
- * timeline off the related column is resident in its place and the
- * timeline's blocks are its foot card (「动态」); with the related column off
- * there is no related column and no rail toggle (objectstack#27241: the
- * switch decides whether the column exists, the rail toggle only opens one
- * the switch allows). `data-record-columns-shown` names the resident columns.
+ * The frame mirrors the record page frame `PageRenderer` draws (its padding
+ * and background, the header nodes 16 px apart), so the header sits where an
+ * authored page's would. The nodes are the page's own — the same
+ * `page:header`, `record:details`, `record:activity` and
+ * `record:related_list` nodes its tab strip holds — so every tier shows the
+ * same header and the same sections. `data-record-columns-shown` names the
+ * columns drawn side by side.
  */
 export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   tier,
   columns,
   footer,
-  switches = ALL_COLUMNS_ON,
+  rightColumn = true,
   relatedArrangement,
   onRelatedArrangementChange,
   onEnlargeRelated,
@@ -237,26 +248,40 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   className,
 }) => {
   const { t } = useDetailTranslation();
-  const railId = React.useId();
-  const toggleRef = React.useRef<HTMLButtonElement>(null);
-  const [railOpen, setRailOpen] = React.useState(false);
-  const arrangement = recordPageArrangementFor(tier, switches);
-  // Body tables (in the details column) enlarge too (Target 8 names ⤢ on them).
-  const enlargedNode = enlargedRelated
-    ? [...columns.related, ...columns.details].find((node) => relatedNodeId(node) === enlargedRelated)
-    : undefined;
   const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
   const hasTimeline = columns.timeline.length > 0;
-  const hasRelatedLists = columns.related.length > 0;
-  // objectstack#27052 — a timeline the reader switched off is not a column:
-  // its blocks are the related column's foot card, under the lists.
-  const foldTimeline = arrangement.timelineFolded && hasTimeline;
-  const hasRelated = hasRelatedLists || foldTimeline;
-  const residentTimeline = hasTimeline && arrangement.columns.includes('timeline');
-  const residentRelated = hasRelated && arrangement.columns.includes('related');
-  const relatedInRail = hasRelated && arrangement.relatedRail;
-  const relatedLabel = t('detail.related');
-  const foldedTimelineLabel = t('detail.timelineFolded');
+  const hasPanels = hasTimeline || columns.related.length > 0;
+  const wide = tier === 'wide';
+  const besideDetails = tier !== 'stack';
+  const drawsPanels = hasPanels && (!besideDetails || rightColumn);
+  const viewAllTimeline = React.useCallback(
+    () => onEnlargeRelated?.(RECORD_PAGE_TIMELINE_PANEL),
+    [onEnlargeRelated],
+  );
+
+  // The open face: the 动态 stream in full, or a related list — body tables
+  // (in the details) enlarge too (Target 8 names ⤢ on them).
+  let enlarged: React.ReactNode = null;
+  if (enlargedRelated === RECORD_PAGE_TIMELINE_PANEL && hasTimeline) {
+    enlarged = (
+      <EnlargedFace
+        id={RECORD_PAGE_TIMELINE_PANEL}
+        title={t('detail.timeline', { defaultValue: 'Activity' })}
+        onClose={onCloseEnlargedRelated}
+      >
+        {drawNodes(columns.timeline)}
+      </EnlargedFace>
+    );
+  } else if (enlargedRelated) {
+    const node = [...columns.related, ...columns.details].find((n) => relatedNodeId(n) === enlargedRelated);
+    if (node) {
+      enlarged = (
+        <EnlargedFace id={enlargedRelated} title={relatedNodeTitle(node)} onClose={onCloseEnlargedRelated}>
+          {enlargedRelatedList(node)}
+        </EnlargedFace>
+      );
+    }
+  }
 
   // The provenance line closes the details column in every tier
   // (objectstack#27055): it describes the record the details show.
@@ -266,15 +291,20 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       {footer}
     </div>
   );
-  const timelineColumn = residentTimeline ? (
-    <div className={COLUMN_STACK} data-record-column="timeline">
-      {drawNodes(columns.timeline)}
-    </div>
-  ) : null;
-  const relatedContent = (
-    <>
-      {/* The related column's lists draw as compact cards the reader
-          arranges (objectstack#27055). */}
+  const rightPanels = drawsPanels ? (
+    <aside
+      className={COLUMN_STACK}
+      data-record-column="right"
+      aria-label={t('detail.relatedColumn', { defaultValue: 'Right column' })}
+    >
+      {hasTimeline && (
+        <RecordTimelinePanel
+          nodes={columns.timeline}
+          entries={wide ? 5 : 3}
+          onViewAll={onEnlargeRelated ? viewAllTimeline : undefined}
+        />
+      )}
+      {/* The related panels, in the reader's arrangement (objectstack#27055). */}
       <RelatedListCompactContext.Provider value>
         <RelatedCardStack
           nodes={columns.related}
@@ -284,91 +314,16 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           fieldsOf={relatedFieldsOf}
         />
       </RelatedListCompactContext.Provider>
-      {foldTimeline && <FoldedTimelineCard nodes={columns.timeline} label={foldedTimelineLabel} />}
-    </>
-  );
-
-  const template = residentTimeline
-    ? residentRelated
-      ? THREE_COLUMN_TEMPLATE.all
-      : tier === 'three-column' ? THREE_COLUMN_TEMPLATE.noRelated : 'grid-cols-2'
-    : residentRelated ? THREE_COLUMN_TEMPLATE.noTimeline : THREE_COLUMN_TEMPLATE.detailsOnly;
-  const closeRail = () => {
-    setRailOpen(false);
-    toggleRef.current?.focus();
-  };
-  const body = (
-    <>
-      {relatedInRail && (
-        <div className="flex justify-end" data-record-columns-toolbar="">
-          <Button
-            ref={toggleRef}
-            type="button"
-            variant={railOpen ? 'secondary' : 'outline'}
-            size="sm"
-            className="gap-1.5"
-            aria-expanded={railOpen}
-            aria-controls={railId}
-            onClick={() => setRailOpen((open) => !open)}
-            data-testid="record-related-rail-toggle"
-          >
-            {railOpen ? (
-              <PanelRightClose className="h-3.5 w-3.5" aria-hidden />
-            ) : (
-              <PanelRightOpen className="h-3.5 w-3.5" aria-hidden />
-            )}
-            <span>{relatedLabel}</span>
-            {columns.relatedCount > 0 && (
-              <Badge variant="secondary" className="h-4 min-w-[1rem] justify-center px-1 text-[10px] leading-none">
-                {columns.relatedCount}
-              </Badge>
-            )}
-          </Button>
-        </div>
-      )}
-      <div className="relative">
-        <div
-          className={cn('grid items-start gap-6', template)}
-          data-record-columns=""
-          data-record-columns-shown={['details', residentTimeline && 'timeline', residentRelated && 'related']
-            .filter(Boolean)
-            .join(' ')}
-        >
-          {detailsColumn}
-          {timelineColumn}
-          {residentRelated && (
-            <aside className={COLUMN_STACK} data-record-column="related" aria-label={relatedLabel}>
-              {relatedContent}
-            </aside>
-          )}
-        </div>
-        {relatedInRail && railOpen && (
-          <aside
-            id={railId}
-            aria-label={relatedLabel}
-            className={cn(
-              COLUMN_STACK,
-              'absolute right-0 top-0 z-20 min-h-full w-80 max-w-full border-l border-border bg-background pb-4 pl-4 shadow-[-12px_0_24px_-20px_rgba(0,0,0,0.35)]',
-            )}
-            data-record-column="related"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.stopPropagation();
-                closeRail();
-              }
-            }}
-          >
-            {relatedContent}
-          </aside>
-        )}
-      </div>
-    </>
-  );
+    </aside>
+  ) : null;
+  const sideBySide = besideDetails && drawsPanels;
+  const template = sideBySide ? (wide ? GRID_TEMPLATE.wide : GRID_TEMPLATE.twoColumn) : GRID_TEMPLATE.oneColumn;
 
   return (
     <DefaultRecordPageContext.Provider value>
     <RecordBodyTablesContext.Provider value={bodyTableIds}>
     <RelatedEnlargeContext.Provider value={onEnlargeRelated ?? null}>
+    <DetailsColumnCapContext.Provider value={sideBySide && !wide ? 2 : 3}>
       <div
         className={cn('w-full bg-background p-3 md:p-4 lg:p-6', className)}
         data-page-type="record"
@@ -376,9 +331,19 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       >
         <div className="flex flex-col gap-4">
           {drawNodes(columns.header)}
-          {enlargedNode ? <EnlargedRelatedList node={enlargedNode} onClose={onCloseEnlargedRelated} /> : body}
+          {enlarged ?? (
+            <div
+              className={cn('grid items-start gap-6', template)}
+              data-record-columns=""
+              data-record-columns-shown={sideBySide ? 'details right' : 'details'}
+            >
+              {detailsColumn}
+              {rightPanels}
+            </div>
+          )}
         </div>
       </div>
+    </DetailsColumnCapContext.Provider>
     </RelatedEnlargeContext.Provider>
     </RecordBodyTablesContext.Provider>
     </DefaultRecordPageContext.Provider>

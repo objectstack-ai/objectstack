@@ -28,8 +28,11 @@
  *    - one is a record-mode amount, and the other is another code field, a
  *      code or the tenant's; or
  *    - both resolve to `fixed` codes, and the codes differ.
- *    Non-monetary operands (a `count`) are not compared, so an amount per
- *    invoice stays legal.
+ *    Non-monetary operands are not compared, so an amount per invoice stays
+ *    legal: only an amount aggregate (`AMOUNT_AGGREGATES`) resolves a
+ *    currency, so a `count` resolves to none whatever field it names or
+ *    currency it declares (ADR-0144 open item 12: "a `count` operand is not
+ *    compared").
  *
  * ⛔ Not judged (the ruling's own list): a `fixed` code against the tenant's
  * currency, which is not known at compile ("cannot answer, do not block"); a
@@ -59,6 +62,7 @@
  */
 
 import type { Dataset, DatasetMeasure } from '@objectstack/spec/ui';
+import { AMOUNT_AGGREGATES } from './cube-record-currency-door.js';
 import { datasetInvalidError } from './dataset-refusal.js';
 
 /**
@@ -129,7 +133,7 @@ export function measureCurrencyResolver(dataset: Dataset, declaredCurrency: Decl
           ? { ...first, fixed: common.every((c) => c.kind === 'code' && c.fixed) }
           : first;
       }
-    } else if (!m.duration) {
+    } else if (!m.duration && AMOUNT_AGGREGATES.has(m.aggregate ?? '')) {
       const field = fieldOf(m);
       if (field?.currencyField !== undefined) r = { kind: 'record', codeField: field.currencyField };
       else if (m.currency) r = { kind: 'code', code: m.currency, fixed: field?.defaultCurrency === m.currency };

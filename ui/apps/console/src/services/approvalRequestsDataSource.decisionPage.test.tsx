@@ -241,14 +241,14 @@ const metadata = {
 
 const EN: I18nConfig = { defaultLanguage: 'en', detectBrowserLanguage: false };
 
-function openRequestPage() {
+function openRequestPage(search = '') {
   const ds = routeApprovalRecordReads(host as unknown as DataSource, {
     fetch: transport,
     baseUrl: 'http://test.local/api/v1',
   });
   return render(
     <I18nProvider config={EN} persistLanguage={false}>
-      <MemoryRouter initialEntries={[`/apps/demo/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`]}>
+      <MemoryRouter initialEntries={[`/apps/demo/${APPROVAL_REQUEST_OBJECT}/record/${REQ}${search}`]}>
         <MetadataCtx.Provider value={metadata as never}>
           <AdapterCtx.Provider value={host as never}>
             <RecordDetailView
@@ -332,10 +332,10 @@ describe("an approval request's record page with record:approval_decision (objec
   });
 
   it('the timeline reads the actions route, and no approvals are read ON the request itself', async () => {
-    openRequestPage();
-    const related = await screen.findByRole('tab', { name: /Related/ }, { timeout: 8000 });
-    fireEvent.mouseDown(related);
-    fireEvent.click(related);
+    // The actions list's whole face (`?related=`): the slotted page is laid
+    // out since objectstack#27524, so the list is a right-column panel and no
+    // longer a Related tab to open.
+    openRequestPage(`?related=${APPROVAL_ACTION_OBJECT}.request_id`);
     expect(await screen.findByText('Budget checked', undefined, { timeout: 8000 })).toBeTruthy();
     expect(wire.some((w) => w.path === `/api/v1/approvals/requests/${REQ}/actions`)).toBe(true);
     expect(host.find.mock.calls.some(([resource]) => resource === APPROVAL_ACTION_OBJECT)).toBe(false);

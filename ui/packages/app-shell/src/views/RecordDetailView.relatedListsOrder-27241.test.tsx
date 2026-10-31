@@ -9,11 +9,11 @@
 /**
  * objectstack#27069 / objectstack#27241 — the record page's default related
  * order reads the object's declared `relatedLists`: a reader who never
- * arranged the related column sees the cards in that order, the rest after
+ * arranged the related panels sees the cards in that order, the rest after
  * them in the derived order (owned `master_detail` children first, then
- * lookups). Measured from a real `RecordDetailView` mount at three columns
- * (the `recordPageTiers-26678` harness: the root's measured width is the one
- * input varied).
+ * lookups). Measured from a real `RecordDetailView` mount at 1440 px, details
+ * beside the right column (the `recordPageTiers-26678` harness: the root's
+ * measured width is the one input varied).
  */
 
 import * as React from 'react';
@@ -129,7 +129,7 @@ function renderPage(objects: ReturnType<typeof objectsWith>) {
 }
 
 const cardOrder = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll('[data-record-column="related"] [data-related-card-id]')).map((el) =>
+  Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
     el.getAttribute('data-related-card-id'),
   );
 

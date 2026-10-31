@@ -241,8 +241,9 @@ function makeMetadata(pages: any[]) {
 }
 
 function renderDetail(fixture: Fixture, pages: any[]) {
-  // The synthesized page's feed is its Timeline tab (objectstack#27055).
-  const search = pages.length === 0 ? '?tab=timeline' : '';
+  // The synthesized page's whole feed is its 动态 tab (objectstack#27055,
+  // objectstack#27524): the right column's panel draws only its newest lines.
+  const search = pages.length === 0 ? '?related=timeline' : '';
   return render(
     <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}${search}`]}>
       <MetadataCtx.Provider value={makeMetadata(pages)}>
@@ -296,10 +297,10 @@ function renderedRows(fixture: Fixture): string[] {
   return markers.filter((m) => screen.queryAllByText(m).length > 0);
 }
 
-const loadMoreCount = () =>
-  screen.queryAllByRole('button', { name: LOAD_MORE }).length +
-  // The stream's paging affordance (objectstack#27055): 「查看全部 N 条 →」.
-  document.querySelectorAll('[data-stream-view-all]').length;
+// Both surfaces page with one "Load more" button: the authored block's, and
+// the 动态 stream's (`data-stream-load-more`; its 「查看全部 N 条 →」 retired to
+// the 动态 panel in objectstack#27524).
+const loadMoreCount = () => screen.queryAllByRole('button', { name: LOAD_MORE }).length;
 
 /** Wait until BOTH feed reads have settled, so an absent row is an answer. */
 async function settled() {
@@ -354,7 +355,7 @@ describe('both composition routes render the same feed (objectui#8983)', () => {
     const authored = await viaAuthoredBlock(fixture);
     expect(authored.rows).toEqual(expected);
 
-    // The synthesized route is the Timeline stream (objectstack#27055), whose
+    // The synthesized route is the 动态 stream (objectstack#27055), whose
     // node DECLARES `showCompleted: true` — a stream shows what happened. It
     // still runs the one pipeline: the completed row is there because the
     // declared config says so, and the paging case below holds the window.

@@ -1531,9 +1531,12 @@ const en = {
     new: 'New',
     add: 'Add',
     activity: 'Activity',
-    timeline: 'Timeline',
-    timelineFolded: 'Activity',
-    relatedColumn: 'Related column',
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: 'Activity',
+    relatedColumn: 'Right column',
+    timelineComposer: 'Write a note… @ to mention',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} empty sections',
     emptySections_one: '{{count}} empty section',
@@ -2339,8 +2342,7 @@ const en = {
       newChat: 'New chat',
       toggleChatsList: 'Toggle conversations list',
       goHome: 'Back to home',
-      toggleTimeline: 'Show / hide timeline',
-      toggleRelated: 'Show / hide related',
+      toggleRelated: 'Show / hide the right column',
     },
     reportIndex: {
       title: 'Reports',

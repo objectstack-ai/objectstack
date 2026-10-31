@@ -446,7 +446,7 @@ export const ObjectCalendarRenderer: React.FC<{ schema: any; [key: string]: any 
  */
 const OBJECT_CALENDAR_INPUTS: ComponentInput[] = [
   { name: 'objectName', type: 'string', description: 'ObjectQL object name. The record source is one of `data`, `staticData` and `objectName`; the `object-calendar` schema refuses a block that declares none of them, unless the node\'s `dataSource.object` names the object, which then lands on this key.' },
-  { name: 'calendar', type: 'object', description: 'startDateField, endDateField, titleField, colorField' },
+  { name: 'calendar', type: 'object', description: 'startDateField, endDateField, titleField, colorField, allDayField, initialDate (where the calendar opens: `first_record`, `next_record` or a date-macro token such as `{next_month_start}`; omitted, today)' },
   { name: 'filter', type: 'array', description: 'Base query filter — the `ViewFilterRule` array `[{ field, operator, value }, ...]`, narrowing the records the calendar fetches. Lowered to `$filter` on the query.' },
   { name: 'sort', type: 'array', description: 'Sort order in `[{ field, order }]` form, ordering the records the calendar fetches. Lowered to `$orderby` on the query.' },
   { name: 'defaultView', type: 'enum', enum: ['month', 'week', 'day'], description: 'The grid the calendar opens on. A narrow viewport downgrades `day` to `month`; the author’s choice is otherwise honoured on first render.' },
