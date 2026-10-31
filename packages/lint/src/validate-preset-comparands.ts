@@ -10,7 +10,7 @@ import {
 } from '@objectstack/spec/data';
 import { normalizeFilterOperator } from '@objectstack/spec/ui';
 
-import { walkAuthoredFilters, type FilterSurface } from './filter-walk.js';
+import { filterGroupRules, walkAuthoredFilters, type FilterSurface } from './filter-walk.js';
 import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from './object-graph.js';
 
 /**
@@ -705,6 +705,14 @@ function judgeFilterValue(
     // Group ['and'|'or', ...members] or bare list — recurse the members.
     node.forEach((member, i) => {
       if (typeof member === 'string') return; // the leading keyword
+      // [#28020] An any-of group element: its rules are judged exactly as
+      // top-level rules are — a preset in one is the same refusal.
+      const rules = filterGroupRules(member);
+      if (rules) {
+        rules.forEach((rule, j) =>
+          judgeFilterValue(rule, `${path}[${i}].any[${j}]`, where, out, depth + 2, isTemporal));
+        return;
+      }
       judgeFilterValue(member, `${path}[${i}]`, where, out, depth + 1, isTemporal);
     });
     return;

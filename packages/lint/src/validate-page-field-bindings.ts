@@ -107,6 +107,7 @@ export interface PageFieldFinding {
 }
 
 import { walkPageComponents, type AnyRec } from './page-walk.js';
+import { filterGroupRules } from './filter-walk.js';
 // Real pages DO reference registry-injected columns — e.g. `sys_user.page.ts`
 // lists `created_at` in a related-list's columns — so the shared set is load-
 // bearing here, not merely defensive.
@@ -165,6 +166,25 @@ export function fieldRefsFrom(value: unknown, basePath: string): FieldRef[] {
     for (let i = 0; i < value.length; i++) one(value[i], `${basePath}[${i}]`);
   } else {
     one(value, basePath);
+  }
+  return out;
+}
+
+/**
+ * [#28020] Field references in a view filter LIST — the `ViewFilterRule` array
+ * a list page's `filterBy` and a related list's `filter` carry.
+ *
+ * Plain rules are ordinary {@link fieldRefsFrom} work. An any-of group element
+ * (`{ any: [rule, ...] }`) names no field of its own, so its rules are read in
+ * its place: {@link fieldRefsFrom} alone finds neither `field` nor `name` on the
+ * group and would skip every field the group's rules filter by.
+ */
+function filterFieldRefs(value: unknown, basePath: string): FieldRef[] {
+  if (!Array.isArray(value)) return fieldRefsFrom(value, basePath);
+  const out: FieldRef[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const rules = filterGroupRules(value[i]);
+    out.push(...(rules ? fieldRefsFrom(rules, `${basePath}[${i}].any`) : fieldRefsFrom(value[i], `${basePath}[${i}]`)));
   }
   return out;
 }
@@ -419,7 +439,7 @@ export function relatedListFieldRefs(
     related: [
       ...fieldRefsFrom(props.columns, at('columns')),
       ...sortFieldRefs(props.sort, at('sort')),
-      ...fieldRefsFrom(props.filter, at('filter')),
+      ...filterFieldRefs(props.filter, at('filter')),
       ...fieldRefsFrom(props.relationshipField, at('relationshipField')),
       ...(add ? fieldRefsFrom(add.linkField, at('add.linkField')) : []),
     ],
@@ -673,7 +693,7 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
       const refs: FieldRef[] = [
         ...fieldRefsFrom(cfg.columns, `${base}.columns`),
         ...sortFieldRefs(cfg.sort, `${base}.sort`),
-        ...fieldRefsFrom(cfg.filterBy, `${base}.filterBy`),
+        ...filterFieldRefs(cfg.filterBy, `${base}.filterBy`),
       ];
       const userFilters = isRec(cfg.userFilters) ? cfg.userFilters : undefined;
       if (userFilters) {
