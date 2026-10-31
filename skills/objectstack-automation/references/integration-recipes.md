@@ -30,8 +30,8 @@ deployment and to the sender. Scaffolded apps list the three executors in
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
   default `X-API-Key`, or `paramName` for a query-string key); `basic` (`username`
   stays in metadata); `signed` on `openapi` / `rest` (`scheme`
-  `aliyun-acs3-hmac-sha256` or `tencentcloud-tc3-hmac-sha256`, `keyId`) signs each
-  request. A secret in a url path has no variant — use a
+  `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
+  `keyId`) signs each request. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
 - `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
 
@@ -154,5 +154,5 @@ Each `operationId` is a named action in the flow palette and to agents;
   (`feishu` / `dingtalk` / `wecom`), but no server runs the grant yet: the
   instance is held degraded, calling no upstream. Do not park a short-lived
   token behind a `bearer` ref. Blocked on the outbound-OAuth card.
-- **RSA-signing vendor** (Alipay, WeChat Pay): no `signed` scheme signs RSA yet;
-  blocked on the request-signing card.
+- **WeChat Pay** (RSA-signed APIv3): no `signed` scheme signs it yet; Alipay is
+  `alipay-v3` (requests signed, responses verified against `vendorPublicKeyRef`).
