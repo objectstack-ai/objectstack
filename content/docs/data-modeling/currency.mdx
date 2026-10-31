@@ -253,6 +253,14 @@ states how many units of the foreign currency **one unit of the home currency** 
 with home currency USD, an EUR row of `0.92` means 1 USD = 0.92 EUR. A rate keeps up to
 twelve decimals.
 
+A year of rates loads from one CSV with the columns `currency`, `rate` and
+`effective_date`, through the list page's **Import** or the generic
+[import door](/docs/data-modeling/import-mappings) (`POST /api/v1/data/sys_exchange_rate/import/jobs`).
+A line repeating a currency and effective date already on file is refused for that row
+alone (`UNIQUE_VIOLATION`) and the rest of the file still lands; add a `source` column
+reading `import` to mark the rows imported, since an omitted one takes the default,
+`manual`.
+
 ### What a write stores
 
 When a record is inserted, and whenever an update changes its amount, its code or its

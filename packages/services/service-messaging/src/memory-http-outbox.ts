@@ -18,6 +18,7 @@ import {
     type HttpDelivery,
     type HttpDeliveryStatus,
     type HttpReapOptions,
+    type HttpDueWorkOptions,
     type IHttpOutbox,
     type RedeliverOptions,
     type UndeliverableHttpInput,
@@ -98,6 +99,15 @@ export class MemoryHttpOutbox implements IHttpOutbox {
 
     async reap(opts: HttpReapOptions): Promise<void> {
         this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs);
+    }
+
+    /** [#28383] Any `pending` row due by `now` — what claim() would take. */
+    async hasDueWork(opts: HttpDueWorkOptions): Promise<boolean> {
+        const now = opts.now ?? Date.now();
+        for (const row of this.rows.values()) {
+            if (row.status === 'pending' && (row.nextRetryAt === undefined || row.nextRetryAt <= now)) return true;
+        }
+        return false;
     }
 
     async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {
