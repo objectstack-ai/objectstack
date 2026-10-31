@@ -17,6 +17,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AppMetadataBundleResponseSchema } from '@objectstack/spec/api';
 import { PerfTiming, runWithPerfTiming } from '@objectstack/observability';
+import { representationEtag } from '@objectstack/types';
 // Explicit `.js` extension: NodeNext resolution (see the sibling meta tests).
 import { RestServer } from './rest-server.js';
 import { appNavigationReach, inboundRelationObjects, META_APP_BUNDLE_PARAMS } from './meta-app-bundle-routes.js';
@@ -242,9 +243,10 @@ describe('[#27627] one request answers the app, its reached objects, views, page
 // ── The validator ─────────────────────────────────────────────────────────────
 
 describe('[#27627] a per-caller validator: ETag, private, no-cache, and 304', () => {
-    it('sends a strong ETag under the item reads\' cache posture', async () => {
+    it('sends the /meta reads\' shared weak ETag of the served body, under their cache posture', async () => {
         const { res } = await bundle('admin');
-        expect(res.headers.ETag).toMatch(/^"[0-9a-f]{64}"$/);
+        expect(res.headers.ETag).toMatch(/^W\/"[0-9a-f]{16}"$/);
+        expect(res.headers.ETag).toBe(representationEtag(res.body));
         expect(res.headers['Cache-Control']).toBe('private, no-cache');
         expect(res.headers.Vary).toBe('Accept-Language');
     });
@@ -262,7 +264,8 @@ describe('[#27627] a per-caller validator: ETag, private, no-cache, and 304', ()
         expect(again.statusCode).toBe(304);
         expect(again.body).toBeUndefined();
         expect(again.sent).toBe(true);
-        expect((await bundle('member', 'crm', { headers: { 'if-none-match': `W/${etag}` } })).res.statusCode).toBe(304);
+        // Compared weakly (RFC 9110 §13.1.2): the opaque tag without its `W/` matches too.
+        expect((await bundle('member', 'crm', { headers: { 'if-none-match': etag.replace(/^W\//, '') } })).res.statusCode).toBe(304);
 
         const admin = (await bundle('admin', 'crm', { headers: { 'if-none-match': etag } })).res;
         expect(admin.statusCode).toBe(200);
@@ -287,6 +290,18 @@ describe('[#27627] a per-caller validator: ETag, private, no-cache, and 304', ()
         expect(res.statusCode).toBe(200);
         expect(res.headers['Cache-Control']).toBe('private, no-store');
         expect(res.headers.ETag).toBeUndefined();
+        expect(namesOf(res.body.objects)).toEqual(['account', 'secret_deal', 'contact', 'note', 'task', 'deal_line']);
+    });
+
+    it('`metadata.enableCache: false` sends no validator and answers a matching If-None-Match in full, as the item reads do', async () => {
+        const etag = (await bundle('admin')).res.headers.ETag;
+        const { res } = await bundle('admin', 'crm', {
+            headers: { 'if-none-match': etag },
+            patch: (rest) => { rest.config.metadata.enableCache = false; },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.headers.ETag).toBeUndefined();
+        expect(res.headers['Cache-Control']).toBeUndefined();
         expect(namesOf(res.body.objects)).toEqual(['account', 'secret_deal', 'contact', 'note', 'task', 'deal_line']);
     });
 });

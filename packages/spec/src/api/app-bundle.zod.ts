@@ -41,11 +41,11 @@ import { GetMetaItemResponseSchema } from './protocol.zod';
  * A name appears once per list, at its first position. Items outside the
  * bundle stay on their own `GET /meta/{type}/{name}` read.
  *
- * The response carries a strong `ETag` that identifies the bytes served to
+ * The response carries a weak `ETag` that identifies the body served to
  * THIS caller, under `Cache-Control: private, no-cache` (the item reads' own
  * cache posture), and `Vary: Accept-Language`; a request whose `If-None-Match`
  * names it is answered `304` with no body. Two callers are answered one
- * validator only when they are served the same bytes. When any member's field
+ * validator only when they are served the same body. When any member's field
  * visibility could not be determined, the bundle is served under
  * `Cache-Control: private, no-store` with no `ETag`, as that item's read is.
  */

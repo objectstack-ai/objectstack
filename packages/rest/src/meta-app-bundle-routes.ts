@@ -24,7 +24,7 @@
  * chosen because it is the chain's own entry — the cached arm reaches the same
  * gate and mask through the same functions for the two types it serves gated,
  * and serves the published value under a validator this bundle replaces with
- * its own (below).
+ * the bundle's own (below).
  *
  * A member the chain refuses (`absent`, `app-permission`,
  * `audience-permission`, `docs-audience`), or whose fetch throws the bare
@@ -47,15 +47,18 @@
  *
  * ## The validator
  *
- * A strong `ETag` is the SHA-256 of the JSON this response sends, so it folds
- * every per-caller dimension the item routes fold into theirs
- * (`foldVisibilityFingerprintIntoEtag`: the mask, the runtime view, the intake
- * reason, what the gate withheld, the switched-off actions) and the locale,
- * because each of them changes those bytes: two callers are answered one
- * validator only when they are sent the same body. `Cache-Control: private,
- * no-cache` is the item routes' own posture (`getMetaItemCached`); a member
- * served under an undetermined field visibility (ADR-0106 D6 tier 2) serves the
- * whole bundle `private, no-store` with no validator, as that item's read is.
+ * The `/meta` reads' one rule, `metaRepresentationCaching` and
+ * `sendMetaRepresentation` (`./meta-representation-validator.ts`, over
+ * `representationEtag` in `@objectstack/types`): the weak `ETag` hashes the
+ * JSON this response sends, so it folds every per-caller dimension the members
+ * were judged under (the gate, the mask, the runtime view, the intake reason)
+ * and the locale, because each of them changes those bytes; two callers are
+ * answered one validator only when they are sent the same body. The posture is
+ * `private, no-cache`, and a matching `If-None-Match` is a bodiless `304`. A
+ * member served under an undetermined field visibility (ADR-0106 D6 tier 2)
+ * carries its `private, no-store` and no validator, and so does the whole
+ * bundle, as that item's read does. `metadata.enableCache: false` sends no
+ * validator, as it does for the item reads.
  *
  * The closed query-parameter set is empty (AGENTS.md, Route & surface
  * ownership 5). The route registers through the per-item switch inside the
@@ -63,7 +66,7 @@
  * to it as to every `/meta` route.
  */
 
-import { normalizeIfNoneMatch, ObjectSchemaMaskEvaluationError } from '@objectstack/metadata-core';
+import { ObjectSchemaMaskEvaluationError } from '@objectstack/metadata-core';
 import type { GetMetaItemRequest, GetMetaItemsRequest } from '@objectstack/spec/api';
 import { deriveViewContainerObject } from '@objectstack/spec/ui';
 import { measureServerTiming } from '@objectstack/observability';
@@ -71,6 +74,7 @@ import { handleRouteError, sendFieldVisibilityFault, thrownAnswerIsBareNotFound 
 import type { MetaRouteScope } from './meta-collection-routes.js';
 import * as metaReadGate from './meta-item-read-gate.js';
 import type { MetaItemAnswer, MetaReadGatePolicy } from './meta-item-read-gate.js';
+import { metaRepresentationCaching, sendMetaRepresentation } from './meta-representation-validator.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { sendMetaItemAbsent, type RestServer } from './rest-server.js';
 
@@ -176,18 +180,6 @@ export function inboundRelationObjects(objects: readonly unknown[], targets: rea
     return found;
 }
 
-/**
- * The bundle's validator: the SHA-256 of the body it sends, hex. `undefined`
- * where the runtime has no Web Crypto digest, which serves the bundle with no
- * validator rather than a weaker one.
- */
-async function bundleValidator(json: string): Promise<string | undefined> {
-    const subtle = (globalThis as { crypto?: { subtle?: any } }).crypto?.subtle;
-    if (!subtle || typeof subtle.digest !== 'function') return undefined;
-    const digest: ArrayBuffer = await subtle.digest('SHA-256', new TextEncoder().encode(json));
-    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 /** A member the chain could not judge: the whole request answers it. */
 class BundleMemberFault extends Error {
     constructor(readonly object: string) {
@@ -202,7 +194,7 @@ class BundleMemberFault extends Error {
  * registrar.
  */
 export function registerMetaAppBundleRoute(this: MetaAppBundleRouteHost, scope: MetaRouteScope): void {
-    const { metaPath, isScoped, registerPerItemRoute } = scope;
+    const { metadata, metaPath, isScoped, registerPerItemRoute } = scope;
 
     registerPerItemRoute({
         method: 'GET',
@@ -318,22 +310,11 @@ export function registerMetaAppBundleRoute(this: MetaAppBundleRouteHost, scope: 
                     dashboards: dashboards.map((m) => m.envelope),
                 };
                 res.header('Vary', 'Accept-Language');
-                if ([app, ...objects, ...views, ...pages, ...dashboards].some((m) => m.cacheControl !== undefined)) {
-                    // [ADR-0106 D6 tier 2] A member served unmasked: no shared validator.
-                    res.header('Cache-Control', metaReadGate.META_UNDETERMINED_CACHE_CONTROL);
-                    res.json(body);
-                    return;
-                }
-                const validator = await bundleValidator(JSON.stringify(body));
-                res.header('Cache-Control', 'private, no-cache');
-                if (validator !== undefined) {
-                    res.header('ETag', `"${validator}"`);
-                    if (normalizeIfNoneMatch(req.headers?.['if-none-match']) === validator) {
-                        res.status(304).send();
-                        return;
-                    }
-                }
-                res.json(body);
+                // [ADR-0106 D6 tier 2] A member served unmasked was issued no
+                // validator; its posture is the whole bundle's.
+                const undetermined = [app, ...objects, ...views, ...pages, ...dashboards]
+                    .find((m) => m.etag === undefined)?.cacheControl;
+                sendMetaRepresentation(req, res, body, metaRepresentationCaching(body, undetermined), metadata.enableCache !== false);
             } catch (error: any) {
                 if (error instanceof BundleMemberFault) {
                     sendFieldVisibilityFault(res, error.object);
