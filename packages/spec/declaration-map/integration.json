@@ -31,6 +31,8 @@
     "ConnectorInstanceSignedAliyunAcs3AuthSchema": "integration/ConnectorInstanceSignedAliyunAcs3Auth",
     "ConnectorInstanceSignedAuth": "integration/ConnectorInstanceSignedAuth",
     "ConnectorInstanceSignedAuthSchema": "integration/ConnectorInstanceSignedAuth",
+    "ConnectorInstanceSignedTencentCloudTc3Auth": "integration/ConnectorInstanceSignedTencentCloudTc3Auth",
+    "ConnectorInstanceSignedTencentCloudTc3AuthSchema": "integration/ConnectorInstanceSignedTencentCloudTc3Auth",
     "ConnectorOAuth2Grant": "integration/ConnectorOAuth2Grant",
     "ConnectorOAuth2GrantSchema": "integration/ConnectorOAuth2Grant",
     "ConnectorRetryStrategy": "integration/ConnectorRetryStrategy",

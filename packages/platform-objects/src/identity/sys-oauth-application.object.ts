@@ -113,6 +113,14 @@ export const SysOauthApplication = ObjectSchema.create({
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Disable an OAuth application (the record; param: its client_id): its tokens are rejected and integrations using it stop working until it is re-enabled. Platform administrators only. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'enable_oauth_application',
@@ -134,6 +142,12 @@ export const SysOauthApplication = ObjectSchema.create({
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Re-enable a disabled OAuth application (the record; param: its client_id), so token issuance, authorization and introspection resume for that client. Platform administrators only.',
+      },
     },
     {
       name: 'create_oauth_application',
@@ -246,6 +260,14 @@ export const SysOauthApplication = ObjectSchema.create({
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Permanently delete an OAuth application (the record; param: its client_id): all tokens and consents issued to it are invalidated and its integrations stop working. This cannot be undone. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
   ],
 

@@ -105,9 +105,13 @@ describe('#7309 — an action that collects params opens ONE dialog', () => {
     // `ai.description` is the LLM-facing contract (≥40 chars, required when
     // `ai.exposed`) — the same word one level down. Putting the question there
     // would arm a tool description while the dialog fell back to its generic line.
+    // An action ADR-0011's 2026-10-30 addendum exposes carries its own
+    // `ai.description`, written for the model — never the dialog question.
     for (const [name, obj] of OBJECTS) {
       for (const action of CONVERTED[name] ?? []) {
-        expect(byName(obj, action).ai?.description, `${name}.${action}.ai.description`).toBeUndefined();
+        const a = byName(obj, action);
+        expect(a.description, `${name}.${action}.description`).toBeTruthy();
+        expect(a.ai?.description, `${name}.${action}.ai.description`).not.toBe(a.description);
       }
     }
   });

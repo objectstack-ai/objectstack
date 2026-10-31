@@ -2,6 +2,7 @@
 
 import type { ConnectorInstanceSignedAuth, ConnectorRequestSigner } from '@objectstack/spec/integration';
 import { createAliyunAcs3Signer } from './aliyun-acs3-hmac-sha256.js';
+import { createTencentCloudTc3Signer } from './tencentcloud-tc3-hmac-sha256.js';
 import type { RequestSigningClock } from './clock.js';
 
 export type { RequestSigningClock } from './clock.js';
@@ -31,9 +32,14 @@ export function createConnectorRequestSigner(
     switch (auth.scheme) {
         case 'aliyun-acs3-hmac-sha256':
             return createAliyunAcs3Signer(connector, auth.keyId, key, clock);
+        case 'tencentcloud-tc3-hmac-sha256':
+            return createTencentCloudTc3Signer(connector, auth.keyId, key, clock);
         default: {
-            const unsigned: never = auth.scheme;
-            throw new Error(`connector instance '${connector}': no signer implements scheme '${String(unsigned)}'`);
+            // Every member handled leaves `auth` itself `never` here.
+            const unsigned: never = auth;
+            throw new Error(
+                `connector instance '${connector}': no signer implements scheme '${String((unsigned as { scheme?: unknown }).scheme)}'`,
+            );
         }
     }
 }
