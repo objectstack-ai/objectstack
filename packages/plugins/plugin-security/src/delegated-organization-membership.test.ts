@@ -290,8 +290,8 @@ await (await boot('group', { lifetime: 'describe' })).engine.destroy();
  * its first case and shared by every case that only READS or is REFUSED: a
  * refused write stores nothing, and each such case still asserts that
  * (`stored`), so a shared stack is the stack it would have booted. A case
- * whose write lands, or that hands `boot` its own sharing service, still boots
- * its own. Booting one stack per case was most of this file's wall.
+ * whose write lands, that hands `boot` its own sharing service, or that pins
+ * another rule's refusal by what is stored, still boots its own. Booting one stack per case was most of this file's wall.
  */
 const sharedStacks = new Map<string, Promise<Awaited<ReturnType<typeof boot>>>>();
 function shared(posture: Posture, seeded = false) {
@@ -389,7 +389,10 @@ describe('[#25063] what the rule leaves alone', () => {
     });
 
     it(`\`${posture}\`: a delegated context with NO active organization keeps ADR-0123 D2's refusal`, async () => {
-      const b = await shared(posture);
+      // Its own stack, not the shared one: the refusal cells above share it, so
+      // a regression of THIS file's rule would land rows there and red this
+      // case too, for a rule (ADR-0123 D2) that did not move.
+      const b = await boot(posture);
       const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r1', name: 'one' }, { context: operator(undefined) } as never));
       expect(outcome.ok).toBe(false);
       expect(outcome.code).toBe('PERMISSION_DENIED');
