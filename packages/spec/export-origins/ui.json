@@ -412,6 +412,7 @@
     "RowHeight": "src/ui/view.zod.ts#RowHeight (type)",
     "RowHeightSchema": "src/ui/view.zod.ts#RowHeightSchema (const)",
     "SECTION_HEADING_COUNT_HOLE": "src/ui/component.zod.ts#SECTION_HEADING_COUNT_HOLE (const)",
+    "SINGLE_SERIES_CHART_TYPES": "src/ui/dashboard.zod.ts#SINGLE_SERIES_CHART_TYPES (const)",
     "STRING_ARM_REGISTERED_TYPES": "src/ui/component-type-vocabulary.ts#STRING_ARM_REGISTERED_TYPES (const)",
     "SelectionConfig": "src/ui/view.zod.ts#SelectionConfig (type)",
     "SelectionConfigParsed": "src/ui/view.zod.ts#SelectionConfigParsed (type)",

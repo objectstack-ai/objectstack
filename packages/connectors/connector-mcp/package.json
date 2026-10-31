@@ -29,7 +29,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@objectstack/core": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
     "@objectstack/service-automation": "workspace:*",
