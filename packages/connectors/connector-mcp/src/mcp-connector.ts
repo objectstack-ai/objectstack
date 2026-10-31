@@ -102,8 +102,13 @@ export interface McpConnectorOptions {
     icon?: string;
     /** How to reach the MCP server. */
     transport: McpTransport;
-    /** Only expose tools whose name matches (allowlist) — keeps the palette lean. */
-    include?: (toolName: string) => boolean;
+    /**
+     * Only expose tools whose name matches (allowlist) — keeps the palette lean.
+     * Called once per listed tool with its name and its `tools/list` entry as
+     * the server served it (the `mcp` provider hashes the entry to check a
+     * `toolsSnapshot` pin).
+     */
+    include?: (toolName: string, tool: McpToolDescriptor) => boolean;
     /** Identifies this client to the MCP server during the handshake. */
     clientInfo?: { name: string; version: string };
     /**
@@ -266,7 +271,7 @@ export async function createMcpConnector(opts: McpConnectorOptions): Promise<Mcp
     }
 
     const include = opts.include ?? (() => true);
-    const selected = tools.filter((t) => include(t.name));
+    const selected = tools.filter((t) => include(t.name, t));
 
     const name = opts.name ?? slugify(opts.label ?? 'mcp');
     const label = opts.label ?? titleize(name);
