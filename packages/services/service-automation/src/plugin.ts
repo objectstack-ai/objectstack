@@ -2194,14 +2194,21 @@ export class AutomationServicePlugin implements Plugin {
      *
      * Two modes:
      *  - **Boot** (`fatal: true`, called from `start()`): any problem — unknown
-     *    provider, invalid `providerConfig`, unresolvable `credentialRef`, name
-     *    conflict, duplicate — **throws**, which is fatal to bootstrap under both
-     *    LiteKernel and ObjectKernel (the ADR's "fail loudly" contract).
+     *    provider, invalid `providerConfig`, a host credential resolver that
+     *    throws, name conflict, duplicate — **throws**, which is fatal to
+     *    bootstrap under both LiteKernel and ObjectKernel (the ADR's "fail
+     *    loudly" contract).
      *  - **Reload** (`fatal: false`, called from `metadata:reloaded`): the same
      *    problems are **logged and the offending entry is skipped**, so a bad
      *    Studio publish / dev reload never crashes a live server. A changed
      *    entry's old connector keeps serving until the new one materializes
      *    successfully.
+     *
+     * A `credentialRef` no source answers for is in neither list: in both modes
+     * it degrades its instance, naming the reference, and a live connector under
+     * that name is torn down first, since the value it was materialized with is
+     * gone ({@link degradeConnectorForCredential}; ADR-0097's notes under §6 and
+     * under "Runtime reconcile").
      *
      * Reads the same declaration the descriptor audit does
      * ({@link readDeclaredConnectorItems}); with nothing declared there is

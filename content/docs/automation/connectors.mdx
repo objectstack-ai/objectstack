@@ -415,7 +415,7 @@ shape on a provider-bound instance —
 //    with `auth: { type, credentialRef }` instead (ADR-0097 §3)."
 authentication: { type: 'bearer', token: 'sk_live_9f…' },
 
-// ✓ a reference, resolved at boot:
+// ✓ a reference, resolved at materialization (unset, it degrades the instance):
 auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' },
 ```
 

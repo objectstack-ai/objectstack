@@ -383,6 +383,7 @@ export const RELATIONAL_META_READ_SET: Readonly<Record<string, RelationalMetaEnt
   // true now — objectui#7165 (finished by objectui#7188) gave `renderCellEditor`
   // the dependent record. Per AGENTS.md #5 §9 the corrected note points at the
   // instrument that re-derives the claim instead of restating its answer.
+  lookupAutofill: { verdict: 'spec', readers: LOOKUP_EDITOR_ONLY, note: "FieldSchema.lookupAutofill — the fields a pick fills (objectstack#28245). Read only by LookupField, and only when its host hands it an `onAutofill` writer (the record form does). The grid's line-item fill takes the pairs through GridField's own `lookupAutofill` prop, never off this bag, so it stays off the copy set." },
   dependsOn: { verdict: 'spec', readers: LOOKUP_EDITOR_ONLY, note: 'FieldSchema.dependsOn — cascading picker filter. Same route, and it ARRIVES: the declared column renders the trigger, gated while a named parent is empty. Whether that gate can LIFT here is re-derived by `__tests__/gridDependentValues-7165.test.tsx`, not asserted in this sentence — the grid’s inline editor has supplied the dependent record since objectui#7165/#7188, closing objectui#2215’s grid-side residue (objectui#7154). The bulk action dialog’s half of that residue is objectui#8755.' },
 
   // ── Read on this path, no producer ──────────────────────────────────────

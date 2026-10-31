@@ -26,7 +26,7 @@ import {
   CardTitle,
   cn,
 } from '@object-ui/components';
-import { LineItemsField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import type { GridFieldMetadata } from '@object-ui/types';
 import { createSafeTranslation } from '@object-ui/i18n';
 import { useSchemaContext, useRecordContext, useFilterScope, useResolvedFilter, useDataInvalidation, usePrintPage, NonGridRowCeilingNote } from '@object-ui/react';
@@ -745,6 +745,11 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
     [childSchema, schema.childObject, perms],
   );
 
+  const lineLookupAutofill = useMemo(
+    () => lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
+    [childSchema],
+  );
+
   const gridField = useMemo(
     () =>
       ({
@@ -886,6 +891,10 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
               value={rows}
               onChange={onChange}
               field={gridField}
+              // The child fields' declared `lookupAutofill` pairs, from the
+              // child schema loaded above: a lookup cell's pick fills their
+              // targets in the row. Empty until that schema arrives.
+              lookupAutofill={lineLookupAutofill}
               readonly={schema.readonly}
               // No input while the save is in flight (objectui#10631): `save`
               // reloads the rows once the batch lands, so a line edited in the
