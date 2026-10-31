@@ -84,6 +84,7 @@ import type { BulkActionDef } from '@object-ui/types';
 import { type ObjectGridColumnDraft } from './objectGridColumns';
 import { rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
+import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInlineRules';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
 import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
 import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary } from './objectGridProps';
@@ -2299,6 +2300,22 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return 'saved';
   };
 
+  /**
+   * The field rules a row's edits break, refused before anything is sent
+   * (objectstack-ai/objectstack#27520): the record form's own rules, judged
+   * here so a value the form would refuse never reaches the server. `null`
+   * when the edits keep every rule.
+   */
+  const inlineRuleRefusal = (changes: Record<string, any>): Error | null => {
+    const refusals = inlineEditRuleRefusals(
+      changes,
+      objectSchema?.fields,
+      (field) => resolveFieldLabel(objectName ?? '', field, objectSchema?.fields?.[field]?.label || field),
+      t,
+    );
+    return refusals.length > 0 ? inlineRuleRefusalError(refusals) : null;
+  };
+
   const defaultRowSave = async (
     _rowIndex: number,
     changes: Record<string, any>,
@@ -2311,6 +2328,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     if (id === undefined || id === null) {
       throw new Error('Cannot persist inline edit: row has no id/_id.');
     }
+    const refused = inlineRuleRefusal(changes);
+    if (refused) throw refused;
     // objectstack-ai/objectstack#28252 — the row's write answer feedback (its
     // warnings and its hook's notice) rides the save toast below, so the
     // write is one toast.
@@ -2377,6 +2396,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         if (id === undefined || id === null) {
           return Promise.reject(new Error('Cannot persist inline edit: row has no id/_id.'));
         }
+        // A row whose edits break a field rule is refused here, unsent; the
+        // other rows still go (each row is its own outcome).
+        const refused = inlineRuleRefusal(rowChanges);
+        if (refused) return Promise.reject(refused);
         return writeRowGuarded(dataSource, objectName, id, rowChanges, row);
       }),
     );
@@ -2720,7 +2743,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // author writes `true`, and an explicit `false` turns it off on an editable
     // grid. Not an alias fallback: the right side is the key's own default.
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
-    className: schema.className,
+    // The save bar sits on the grid's own inset, as its cells do (`px-3`),
+    // never flush against the view's edge (objectstack-ai/objectstack#27520).
+    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
       ? 'px-3 py-1 text-[13px] leading-tight'
       : rowHeightMode === 'short'

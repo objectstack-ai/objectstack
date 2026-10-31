@@ -238,8 +238,9 @@ describe('#6237 — a tab predicate gates the whole tab', () => {
     fireEvent.click(submitBtn());
 
     await waitFor(() => expect(screen.getByText(message)).toBeTruthy());
-    expect(toastError).toHaveBeenCalledTimes(1);
-    expect(String(toastError.mock.calls[0][0])).toBe(message);
+    // Said once, by the banner (objectstack-ai/objectstack#27520).
+    expect(screen.getByRole('alert').textContent).toBe(message);
+    expect(toastError).not.toHaveBeenCalled();
     // The hidden tab is never activated to "reveal" a field it cannot draw.
     expect(trigger()).toBeNull();
     expect(screen.getByRole('tab', { name: /basics/i })).toHaveAttribute('data-state', 'active');
