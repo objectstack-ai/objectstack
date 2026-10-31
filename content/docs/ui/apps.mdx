@@ -49,7 +49,7 @@ const crmApp = defineApp({
 | `navigation` | `NavigationItem[]` | optional | Navigation tree |
 | `areas` | `NavigationArea[]` | optional | Partition navigation by business domain — see [Areas](#areas) |
 | `contextSelectors` | `AppContextSelector[]` | optional | Sidebar scope dropdowns whose value is injected into navigation items — see [Context Selectors](#context-selectors) |
-| `landing` | `AppLandingEntry[]` | optional | **Planned.** Per-audience landing: which navigation entry each audience opens on — see [Landing per audience](#landing-per-audience) |
+| `landing` | `AppLandingEntry[]` | optional | Per-audience landing: which navigation entry each audience opens on — see [Landing per audience](#landing-per-audience) |
 | `branding` | `AppBranding` | optional | Visual customization |
 | `requiredPermissions` | `string[]` | optional | Required permissions to access |
 | `defaultAgent` | `string` | optional | Platform agent bound to this app's ambient AI chat — see [Default Agent](#default-agent) |
@@ -766,12 +766,10 @@ Refused at parse, at the entry's own path:
 keeps its own `visible` / `requiredPermissions` / `requiresObject` gates, and an
 entry the reader cannot see is passed over.
 
-<Callout type="warn">
-  **Planned — not yet applied.** The key is declared and validated, but no
-  console reads it yet, so every reader still opens on the app's first
-  navigation item until the console's landing redirect ships. `os validate`
-  says so for any app that declares it.
-</Callout>
+A `visible` that faults (one that names a root other than `current_user` or
+`features`, such as `record` or `app`, or that the evaluator cannot answer) is
+reported once in the browser console and its entry is passed over: the next
+entry is asked, and with none left the app opens on its first navigation item.
 
 ## Default Agent
 

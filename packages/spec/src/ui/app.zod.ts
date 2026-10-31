@@ -1816,8 +1816,8 @@ export function checkAppLandingItems(app: unknown, ctx: z.RefinementCtx): void {
  * than trusted. And it is not a second "where everyone lands": every entry
  * carries a required audience predicate, so "everyone" is still the first
  * navigation item. The maintainer ruled it spec-first rather than
- * enforce-first, so it lands `planned` in the liveness ledger, which warns an
- * author that no console reads it until the landing redirect ships.
+ * enforce-first; the console's landing redirect followed (#28450), and the
+ * liveness ledger carries it `live`.
  */
 const HOME_PAGE_ID_RETIRED =
   '`app.homePageId` was removed in @objectstack/spec 17.0.0 (ADR-0049). '
@@ -2036,9 +2036,11 @@ export const AppSchema = lazySchema(() => strictObject(
    * navigation item by `order`. Every `item` must name an entry of this app,
    * refused at parse otherwise ({@link checkAppLandingItems}).
    *
-   * PLANNED: declared spec-first; the console's landing redirect that reads it
-   * is its own card. Until it lands, an app opens on its first navigation item
-   * whatever this list says, and the liveness ledger tells the author so.
+   * The console's app-root landing reads it (#28450): each `visible` is asked
+   * with the evaluator a navigation entry's `visible` is asked with, over the
+   * same reader roots (`current_user` and `features`; no `data`). A predicate
+   * that faults, a root outside those included, passes its entry over, and the
+   * next entry is asked.
    *
    * @example Sales staff open on Leads, service staff on the service console
    * ```ts
@@ -2049,7 +2051,7 @@ export const AppSchema = lazySchema(() => strictObject(
    * ```
    */
   landing: z.array(AppLandingEntrySchema).min(1).optional()
-    .describe('[PLANNED — not yet rendered] Per-audience landing: the first entry whose `visible` (CEL) holds for the reader names the navigation entry (`item`, an `id` of this app\'s own `navigation` or `areas[].navigation`) the app opens on. An `item` that names no entry of this app, or a `group` / `separator` / `action` entry, is refused at parse. No match, or no key: the app opens on its first navigation item by `order`, as before. No console reads this list yet, so until the landing redirect ships every reader still opens on the first navigation item.'),
+    .describe('Per-audience landing: the first entry whose `visible` (CEL) holds for the reader names the navigation entry (`item`, an `id` of this app\'s own `navigation` or `areas[].navigation`) the app opens on; an entry whose `item` the reader\'s own navigation gates hide, or whose `visible` faults, is passed over. An `item` that names no entry of this app, or a `group` / `separator` / `action` entry, is refused at parse. No match, or no key: the app opens on its first navigation item by `order`, as before.'),
 
   /** 
    * Access Control
