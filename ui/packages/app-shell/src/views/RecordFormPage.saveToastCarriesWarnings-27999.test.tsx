@@ -39,9 +39,10 @@ import { RecordFormPage } from './RecordFormPage';
 
 const h = React.createElement;
 
-const { toastSuccess, toastWarning, saveState, ADAPTER } = vi.hoisted(() => ({
+const { toastSuccess, toastWarning, toastInfo, saveState, ADAPTER } = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
+  toastInfo: vi.fn(),
   saveState: { event: undefined as unknown, saved: undefined as Record<string, unknown> | undefined },
   ADAPTER: { getObjectSchema: async () => ({ fields: {} as Record<string, { label?: string }> }) },
 }));
@@ -50,7 +51,7 @@ vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), {
     success: toastSuccess,
     error: vi.fn(),
-    info: vi.fn(),
+    info: toastInfo,
     warning: toastWarning,
     loading: vi.fn(),
     dismiss: vi.fn(),
@@ -125,6 +126,7 @@ const NAMED = { id: 't1', subject: 'Quarterly review' };
 beforeEach(() => {
   toastSuccess.mockClear();
   toastWarning.mockClear();
+  toastInfo.mockClear();
   pending.length = 0;
   saveState.event = undefined;
   saveState.saved = undefined;
@@ -215,5 +217,42 @@ describe('RecordFormPage — a save with warnings shows one record-named toast (
 
     expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated']]);
     expect(toastWarning).not.toHaveBeenCalled();
+  });
+});
+
+// objectstack-ai/objectstack#28252 — the answer's `notice` (the message a hook
+// set, objectstack-ai/objectstack#28000) rides the same claim: still one toast.
+// Direction, written before the run: with the channel parking warnings only,
+// the notice cells RED (an info toast beside a bare success toast).
+describe('RecordFormPage — the save toast carries the hook notice (objectstack-ai/objectstack#28252)', () => {
+  const NOTICE = 'Sent to your manager for approval';
+
+  it('update with a notice only: one success toast, record-named, the notice under it', async () => {
+    await saveOn('edit', update({ warnings: undefined, notice: NOTICE }), NAMED);
+
+    expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated', { description: NOTICE }]]);
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+  });
+
+  it('create with a notice and a warning: one warning toast, the notice leading the lines', async () => {
+    await saveOn(
+      'create',
+      { operation: 'create', resource: 'showcase_task', id: 't1', droppedFields: [], warnings: [ADVISORY], notice: NOTICE },
+      NAMED,
+    );
+
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastInfo).not.toHaveBeenCalled();
+    expect(toastWarning.mock.calls).toEqual([
+      ['Task "Quarterly review" created', { description: `${NOTICE}\n${ADVISORY.message}` }],
+    ]);
+  });
+
+  it('CONTROL: a notice on a write the page did not make keeps the channel info toast', async () => {
+    await saveOn('edit', update({ resource: 'showcase_project', id: 'p1', warnings: undefined, notice: NOTICE }), NAMED);
+
+    expect(toastSuccess.mock.calls).toEqual([['Task "Quarterly review" updated']]);
+    expect(toastInfo.mock.calls).toEqual([[NOTICE]]);
   });
 });
