@@ -248,9 +248,16 @@ keep a destructive tool away from your flows and agents. It must be an array of
 tool names; any other shape (a string such as `include: 'web_search'`, an
 object) fails the boot before connecting, and never falls back to exposing
 every tool. An entry the server's `tools/list` does not carry — a typo, or a
-tool the server renamed or dropped — fails the boot with an error naming the
-entry and listing the server's tools; it is never ignored. Leave `include` out
-to expose every tool.
+tool the server renamed or dropped — is never ignored: the refusal names the
+entry and lists the server's tools. On an instance that sends no credential it
+fails the boot. When the instance sends its `auth` credential, the entry may
+instead be a tool the server hides from that credential: some servers list
+only the tools a credential is allowed to use (GitHub's hides each tool a
+classic token's scopes do not cover), and the answer does not say what it hid.
+That instance is degraded as a credential the upstream refuses (below), never
+failing the boot, and its reason names both causes: a credential without the
+scopes those tools need, or a declaration naming a tool the server does not
+have. Leave `include` out to expose every tool.
 
 <Callout type="warn">
 **Declarative stdio transports are denied by default.** Materializing one
@@ -376,7 +383,9 @@ plus a `credentialNote` naming the ones still to set.
 
 **A credential the upstream refuses** (HTTP `401` / `403`) degrades the
 instance, with a reason quoting the upstream's message, never the value. An
-`mcp` instance finds this out when it connects. A `rest` or `openapi` instance
+`mcp` instance finds this out when it connects, and treats a server that
+accepts the credential but does not list a tool its `include` names the same
+way. A `rest` or `openapi` instance
 finds out on the first call answering `401` / `403`; that call returns its
 answer as usual, and the instance is degraded after it. What happens next
 depends on where the value came from:
@@ -602,11 +611,11 @@ retry):
 | `auth` is a grant-bearing kind (`oauth2`, `app-credential`) on a server that does not yet run its per-dispatch resolution | **Not fatal**: the instance registers **degraded**, naming the kind, and the upstream is never called without its credential; a datasource borrowing it is refused with `422` |
 | `auth` is `signed` on a provider that does not say it applies the request signer | **Hard boot error** naming the instance, the scheme and the provider: its calls would go out unsigned — declare it through `rest` or `openapi` |
 | `credentialRef` resolves to nothing | **Not fatal**: the instance registers **degraded**, naming the reference — set it (`PUT …/credential-refs/:ref`), and it materializes without a restart |
-| The upstream refuses the credential (`401` / `403`) | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
+| The upstream refuses the credential (`401` / `403`), or an `mcp` server sent the credential does not list a tool the instance's `include` names | **Not fatal**: the instance registers **degraded**. A stored credential is marked `rejected` and waits until it is set again (or a restart); an environment or vault credential is retried on the backoff |
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
-| A retry of a degraded instance reaches the upstream and meets a configuration fault (an `include` naming a tool or operation the upstream does not offer) | **Not fatal**: the instance stays **degraded**, now with the configuration reason, and is **not retried** — dispatches fail saying to edit its declaration; an edit of the entry (or a restart) re-attempts it |
+| A retry of a degraded instance reaches the upstream and meets a configuration fault (an `include` naming a tool or operation the upstream does not offer; on an `mcp` instance that sends a credential, the credential row above applies instead) | **Not fatal**: the instance stays **degraded**, now with the configuration reason, and is **not retried** — dispatches fail saying to edit its declaration; an edit of the entry (or a restart) re-attempts it |
 | Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
 | A `connector_action` input that, once evaluated, breaks the action's `inputSchema` (a missing `required` parameter, a wrong `type`) | **The step fails before dispatch** with `VALIDATION_ERROR`, naming each parameter path, and nothing is sent; a `fault` edge or `try_catch` can route it. Supply the parameter or send the declared type: text is never converted, so cast it in a CEL envelope (`int()`, `double()`, `bool()`). `GET /api/v1/automation/connectors` lists the schema; `os validate` does not judge the input against the `inputSchema` yet |
 | A bad entry arrives via **runtime reload** (a Studio publish, a direct active save through `PUT /api/v1/meta/connector/:name`, or a delete, made on any replica — peers reconcile on [cluster lane 2](/docs/kernel/cluster#62-the-cluster-invalidation-family); or a dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
