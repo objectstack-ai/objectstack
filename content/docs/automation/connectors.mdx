@@ -495,7 +495,15 @@ a rotating refresh token is never spent twice.
   (`not_connected`, `connected`, `reconnect_required`), never a token. The
   `state` and the PKCE verifier are bound to the user and organization that
   began the connect and are used once; a callback from anyone else is refused
-  before its code is exchanged. The redirect URI is the deployment's
+  before its code is exchanged. While the connect waits (ten minutes at most)
+  it is held in the cluster KV, or in process on a single node, **sealed**
+  under a key derived from the `state` itself, which the server never stores:
+  the KV holds only the state's digest and an AES-256-GCM envelope, so a party
+  that can read the KV learns no verifier, user or organization, and a value
+  edited or moved there opens as nothing and its code is never exchanged.
+  Write access to the cluster KV stays inside the platform's trust boundary,
+  as it is for the cluster lock: such a writer can still delete a waiting
+  connect. The redirect URI is the deployment's
   (`OS_BASE_URL` or `OS_AUTH_URL` plus `/api/v1/automation/connectors/oauth/callback`,
   or the automation plugin's `connectorOAuthRedirectUri`), never the
   request's; register that URI with the vendor. The refresh token is kept
@@ -505,9 +513,15 @@ a rotating refresh token is never spent twice.
   instance's only connection, and is refused when there are several. When the
   vendor refuses the grant (`invalid_grant`), the connection is marked
   **reconnect required** and the instance degraded until an administrator
-  connects it again. A revoke deletes the stored connection only: the server
-  does not yet revoke the refresh token at the vendor (RFC 7009), so it stays
-  valid there until it expires or is revoked in the vendor's console.
+  connects it again. A refresh, and the mark "reconnect required", are each
+  written only over the revision they read, in one conditional write, so a
+  stale one never overwrites a newer connect on any replica. A revoke deletes
+  the stored connection only: the server does not revoke the refresh token at
+  the vendor (RFC 7009), because no revocation endpoint is known for the
+  instance yet — the auth declares none, and the discovery that would supply
+  one is ADR-0143 S2. The refresh token stays valid at the vendor until it
+  expires or is revoked in the vendor's console; revoke it there too when the
+  disconnect is a response to a leak.
 
 What is not served yet is held **degraded** with a reason that names it, and
 never called without its credential: `app-credential` (its vendor exchanges
@@ -515,8 +529,11 @@ are not run yet), an `oauth2` instance on a provider that does not yet ask the
 credential handle (the built-in `rest`, `openapi` and `mcp` providers do not
 yet), an `mcp` instance that left its endpoints to discovery, and an `oauth2`
 instance whose `tokenUrl` or `authorizationUrl` is not `https://` (plain
-`http://` is accepted only to a loopback host, so the client secret and the
-refresh token never cross a network in the clear). A datasource
+`http://` is accepted only to `localhost`, a `127.0.0.0/8` address or
+`[::1]` — not a `*.localhost` name, which the system resolver sends to DNS —
+so the client secret and the refresh token never cross a network in the
+clear; a token endpoint that answers with a redirect is refused rather than
+followed). A datasource
 that borrows from a grant-bearing instance (`external.connector`) is refused
 with `422`. Until then, declare a static kind (`bearer`, `api-key` or `basic`)
 to dispatch now; don't emulate a grant by putting a short-lived access token

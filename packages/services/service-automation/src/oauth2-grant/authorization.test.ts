@@ -13,6 +13,8 @@ import {
     createPkcePair,
     kvPendingAuthorizationStore,
     memoryPendingAuthorizationStore,
+    openPendingAuthorization,
+    sealPendingAuthorization,
     type PendingAuthorization,
 } from './authorization.js';
 
@@ -120,5 +122,60 @@ describe('ADR-0143 D5 — a begun connect is taken once', () => {
             return realDelete(key, opts);
         };
         expect(await store.take('st')).toBeUndefined();
+    });
+});
+
+describe('ADR-0143 D5 — a begun connect is held sealed (the KV trust boundary)', () => {
+    const begun = pending({ verifier: 'dummy-verifier-7Qx', redirectUri: 'https://app.example.com/cb-sealed' });
+    const keyOf = (state: string) => `connector-oauth2:pending:${createHash('sha256').update(state).digest('hex')}`;
+
+    it('the KV holds no verifier, user, organization, instance or redirect URI — only an envelope', async () => {
+        const { kv, held } = fakeKv();
+        await kvPendingAuthorizationStore(kv).put('st-sealed', begun);
+        const [, entry] = [...held][0];
+        const stored = JSON.stringify(entry.value);
+        for (const plain of [begun.verifier, begun.userId, begun.organizationId, begun.connector, begun.redirectUri, 'st-sealed']) {
+            expect(stored).not.toContain(plain);
+        }
+        expect(Object.keys(entry.value as object).sort()).toEqual(['ct', 'iv', 'tag', 'v']);
+    });
+
+    it('an envelope edited in the KV opens as nothing, so its code is never exchanged', async () => {
+        const { kv, held } = fakeKv();
+        const store = kvPendingAuthorizationStore(kv);
+        await store.put('st-edit', begun);
+        const [key, entry] = [...held][0];
+        const env = entry.value as { ct: string };
+        const ct = Buffer.from(env.ct, 'base64url');
+        ct[0] ^= 0x01;
+        held.set(key, { ...entry, value: { ...env, ct: ct.toString('base64url') } });
+        expect(await store.take('st-edit')).toBeUndefined();
+    });
+
+    it('an envelope moved to another state\'s slot opens as nothing there', async () => {
+        const { kv, held } = fakeKv();
+        const store = kvPendingAuthorizationStore(kv);
+        await store.put('st-victim', begun);
+        const [, entry] = [...held][0];
+        await kv.set(keyOf('st-other'), entry.value);
+        expect(await store.take('st-other')).toBeUndefined();
+        // The slot the envelope was sealed for still opens.
+        expect(await store.take('st-victim')).toMatchObject({ verifier: begun.verifier });
+    });
+
+    it('a plain value written into the KV is not read as a begun connect', async () => {
+        const { kv } = fakeKv();
+        await kv.set(keyOf('st-plain'), begun);
+        expect(await kvPendingAuthorizationStore(kv).take('st-plain')).toBeUndefined();
+    });
+
+    it('the seal opens only under the state it was sealed with; the memory store holds the same envelope', async () => {
+        const sealed = sealPendingAuthorization('st-a', begun);
+        expect(openPendingAuthorization('st-a', sealed)).toEqual(begun);
+        expect(openPendingAuthorization('st-b', sealed)).toBeUndefined();
+        expect(openPendingAuthorization('st-a', { ...sealed, v: 2 })).toBeUndefined();
+        const memory = memoryPendingAuthorizationStore();
+        await memory.put('st-m', begun);
+        expect(await memory.take('st-m')).toEqual(begun);
     });
 });

@@ -22,8 +22,15 @@
  *     refusal ("reconnect required", "the code was refused");
  *   - `invalid_client` / `unauthorized_client` → {@link OAuth2ClientRefusedError}:
  *     the client id or secret is wrong, which the instance's configuration fixes;
- *   - anything else, or a `2xx` without a bearer `access_token` →
- *     {@link OAuth2TokenResponseError}.
+ *   - a redirect (`3xx`), anything else, or a `2xx` without a bearer
+ *     `access_token` → {@link OAuth2TokenResponseError}.
+ *
+ * **A redirect is never followed.** The request carries the client secret
+ * and, on a refresh, the refresh token; a `307`/`308` would replay that body
+ * to wherever `Location` names — another host, or plain `http:` past the
+ * https-only check the instance's `tokenUrl` passed. RFC 6749 §3.2 gives a
+ * token endpoint no redirect to answer, so one is refused as a wrong answer
+ * (the `tokenUrl` is not the endpoint itself), not retried as an outage.
  *
  * The last two carry the connector seam's `503 SERVICE_UNAVAILABLE` (the
  * shape `connectorCredentialRefusal` stamps), a standard code: no code of
@@ -159,12 +166,23 @@ export async function requestOAuth2Token(request: OAuth2TokenRequest): Promise<O
             method: 'POST',
             headers,
             body: body.toString(),
+            // Answered, never followed: see the module header.
+            redirect: 'manual',
             signal: AbortSignal.timeout(request.timeoutMs ?? DEFAULT_TOKEN_TIMEOUT_MS),
         });
     } catch (err) {
         throw new ConnectorUpstreamUnavailableError(
             `the token endpoint of connector instance '${connector}' did not answer`,
             { cause: err },
+        );
+    }
+
+    // `manual` answers the 3xx itself (status 0 / `opaqueredirect` where the
+    // runtime hides it); either way nothing was sent past the first hop.
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+        throw new OAuth2TokenResponseError(
+            `the token endpoint of connector instance '${connector}' answered a redirect, which is not followed: the client `
+                + 'secret and refresh token are sent only to the declared tokenUrl. Declare the endpoint the redirect names',
         );
     }
 
