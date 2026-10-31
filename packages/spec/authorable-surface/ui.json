@@ -1365,6 +1365,7 @@
     "ui/View:name",
     "ui/View:object",
     "ui/View:protection",
+    "ui/ViewFilterOrGroup:or",
     "ui/ViewFilterRule:field",
     "ui/ViewFilterRule:operator",
     "ui/ViewFilterRule:value",
