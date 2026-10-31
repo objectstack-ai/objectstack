@@ -19,11 +19,12 @@
  * restated:
  *
  * - WHICH slot takes an envelope: the expression ledger
- *   (`FLOW_NODE_EXPRESSION_PATHS`), whose `value`-role entries name a node type
- *   and a `KEY.*` path. The key/value editor serves many other maps (an
- *   action's `params`, a request's `headers`, a subflow's `input` …), where an
- *   object naming a `dialect` is just data, so the affordance is offered only
- *   where the ledger declares the role.
+ *   (`FLOW_NODE_EXPRESSION_PATHS`), whose `value`-role entries name a node
+ *   type, the node block the path is rooted in (`config`, or a declared
+ *   sibling block) and a `KEY.*` path. The key/value editor serves many other
+ *   maps (an action's `params`, a request's `headers` …), where an object
+ *   naming a `dialect` is just data, so the affordance is offered only where
+ *   the ledger declares the role.
  * - WHAT is an envelope: `isExpressionEnvelopeShaped`, the predicate the
  *   ledger resolver and the executor both use.
  * - WHEN a value is refused: `AssignmentValueSchema`, whose issues lead with
@@ -44,6 +45,7 @@ import {
   AssignmentExpressionValueSchema,
   AssignmentValueSchema,
   FLOW_NODE_EXPRESSION_PATHS,
+  flowNodeExpressionBlock,
   isExpressionEnvelopeShaped,
   type AssignmentExpressionValue,
 } from '@objectstack/spec/automation';
@@ -60,17 +62,26 @@ const VALUE_DIALECT = AssignmentExpressionValueSchema.shape.dialect.value;
 export type ValueEnvelope = Pick<AssignmentExpressionValue, 'dialect' | 'source'> & Record<string, unknown>;
 
 /**
- * Whether the config field at `path` on a node of `nodeType` is a `value`-role
- * slot, meaning its map values may be CEL value envelopes.
+ * Whether the field at `path` on a node of `nodeType` is a `value`-role map,
+ * meaning its values may be CEL value envelopes.
  *
- * Only a `['config', KEY]` field can be one: the ledger's paths are dot paths
- * into `node.config`, and a value-role map is written as `KEY.*`.
+ * Only a `[BLOCK, KEY]` field can be one: a ledger path is a dot path into the
+ * node block its entry is rooted in (`flowNodeExpressionBlock` — `config`, or
+ * a declared sibling block such as a `connector_action` node's
+ * `connectorConfig`), and a value-role map is written as `KEY.*`. The block is
+ * part of the answer: `['config', 'input']` on a `connector_action` node is
+ * not its input map, which lives at `['connectorConfig', 'input']`.
  */
 export function isValueEnvelopeSlot(nodeType: unknown, path: readonly string[]): boolean {
-  if (typeof nodeType !== 'string' || path.length !== 2 || path[0] !== 'config') return false;
-  const ledgerPath = `${path[1]}.*`;
+  if (typeof nodeType !== 'string' || path.length !== 2) return false;
+  const [block, key] = path;
+  const ledgerPath = `${key}.*`;
   return FLOW_NODE_EXPRESSION_PATHS.some(
-    (entry) => entry.nodeType === nodeType && entry.role === 'value' && entry.path === ledgerPath,
+    (entry) =>
+      entry.nodeType === nodeType &&
+      entry.role === 'value' &&
+      entry.path === ledgerPath &&
+      flowNodeExpressionBlock(entry) === block,
   );
 }
 

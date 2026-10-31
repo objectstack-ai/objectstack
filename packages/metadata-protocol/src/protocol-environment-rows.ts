@@ -11,6 +11,11 @@
  *  - `findServedOverlayRow` — the stored row a by-name read serves;
  *  - `packagelessAddress` — the package a write that names none addresses.
  *
+ * [#28238] Beside them, `packagelessContentPackage`: the package a by-name
+ * read that names none takes its stored content from, given that address and
+ * the code packages that ship the name. Not a moved body: the rule the two
+ * by-name reads share.
+ *
  * A MOVE, not a redesign. Each function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
  * re-indented one level and otherwise unedited.
@@ -158,4 +163,50 @@ export async function packagelessAddress(
     }
     const candidates = [...bindings].sort();
     return { packageId: candidates.length === 1 ? candidates[0] ?? null : null, candidates, unbound };
+}
+
+/**
+ * [#28238, ADR-0048 §3.3] The package a by-name read that names no package
+ * takes its stored CONTENT from: {@link findServedOverlayRow}'s `packageId`
+ * for {@link ObjectStackProtocolImplementation.getMetaItem} and
+ * {@link ObjectStackProtocolImplementation.getMetaItemLayered}, so the plain
+ * read and the layered read's `effective` serve one row.
+ *
+ * `address` is the item's package-less write address
+ * ({@link packagelessAddress}, at `active`); `shipped` is every artifact an
+ * installed code package registered under the name
+ * (`ObjectStackProtocolImplementation#shippedArtifactsOf`). The code packages
+ * that ship the name are candidates of the address beside the stored rows'
+ * bindings:
+ *
+ *  - no code package ships the name, or the one package the stored rows are
+ *    bound to ships it: the write address's package, as before (#23291) —
+ *    else `undefined`, any row, the best-effort first match;
+ *  - exactly one code package ships it: that package. Its own stored row,
+ *    else the package-unbound row (ADR-0005), else its code item. A row bound
+ *    to another package, the only stored row of a dependent package that saved
+ *    the same name, is never served for it: that row stood in for the base's
+ *    item on every read naming no package and in the base's own app;
+ *  - several ship it, and no stored row is bound to one of them: `null`, the
+ *    package-unbound row alone, else the code item the registry answers;
+ *    several ship it and a row is bound to one: `undefined`, as before.
+ *
+ * Content only, and the read's alone. The write address does not move: a
+ * save, a delete and the read's `version` still resolve
+ * {@link packagelessAddress}'s `packageId`.
+ */
+export function packagelessContentPackage(
+    address: { readonly packageId: string | null; readonly candidates: readonly string[] },
+    shipped: readonly unknown[],
+): string | null | undefined {
+    const shippers = new Set<string>();
+    for (const artifact of shipped) {
+        const id = (artifact as { _packageId?: unknown } | null | undefined)?._packageId;
+        if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') shippers.add(id);
+    }
+    if (shippers.size === 0 || (address.packageId !== null && shippers.has(address.packageId))) {
+        return address.packageId ?? undefined;
+    }
+    if (shippers.size === 1) return [...shippers][0];
+    return address.candidates.some((id) => shippers.has(id)) ? undefined : null;
 }

@@ -207,3 +207,63 @@ describe.each(['drawer', 'modal'] as const)('`object-form` `formType: %s` — a 
     expect(channelToast).toHaveBeenCalledTimes(1);
   });
 });
+
+// objectstack-ai/objectstack#28252 — the answer's `notice` (the message a hook
+// set, objectstack-ai/objectstack#28000) rides the same claim. Direction,
+// written before the run: with the claim carrying warnings only, the notice
+// rows RED (the channel toasts it, the save toast carries no notice line).
+const NOTICE = 'Sent to your manager for approval';
+
+/** As `makeDS`, but each write's answer carries `notice` and, when `warned`, the warning. */
+function makeNoticeDS(channelToast: (message: string) => void, warned: boolean) {
+  const answer = () => ({ notice: NOTICE, ...(warned ? { warnings: [{ message: ADVISORY }] } : {}) });
+  const ds: any = {
+    getObjectSchema: vi.fn().mockResolvedValue(TASK),
+    findOne: vi.fn().mockResolvedValue({ ...STORED }),
+    find: vi.fn().mockResolvedValue({ data: [] }),
+    create: vi.fn(async (o: string, d: Record<string, unknown>) => {
+      const ev = { operation: 'create' as const, resource: o, id: 'n1', ...answer() };
+      if (!parkAnswerWarnings(ds, ev, () => channelToast(NOTICE))) channelToast(NOTICE);
+      return { id: 'n1', ...d };
+    }),
+    update: vi.fn(async (o: string, id: string, d: Record<string, unknown>) => {
+      const ev = { operation: 'update' as const, resource: o, id, ...answer() };
+      if (!parkAnswerWarnings(ds, ev, () => channelToast(NOTICE))) channelToast(NOTICE);
+      return { ...STORED, ...d };
+    }),
+  };
+  return ds;
+}
+
+describe.each(['drawer', 'modal'] as const)('`object-form` `formType: %s` — the save toast carries the hook notice', (formType) => {
+  it('edit with a notice only: one success toast, the notice under the record-named message', async () => {
+    const channelToast = vi.fn();
+    const onSuccess = vi.fn();
+    const ds = makeNoticeDS(channelToast, false);
+    render(<ObjectFormContainer schema={editSchema(formType, { onSuccess })} dataSource={ds} />);
+    await waitFor(async () => expect((await input('priority')).value).toBe('low'));
+    await fillAndSubmit({ priority: 'high' });
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(toastSuccess).toHaveBeenCalledTimes(1);
+    expect(toastSuccess).toHaveBeenCalledWith('Task "Fix login" updated', { description: NOTICE });
+    expect(toastWarning).not.toHaveBeenCalled();
+    expect(channelToast).not.toHaveBeenCalled();
+  });
+
+  it('create with a notice and a warning: one warning toast, the notice leading the lines', async () => {
+    const channelToast = vi.fn();
+    const onSuccess = vi.fn();
+    const ds = makeNoticeDS(channelToast, true);
+    render(<ObjectFormContainer schema={createSchema(formType, { onSuccess })} dataSource={ds} />);
+    await fillAndSubmit({ title: 'Write release notes' });
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(toastWarning).toHaveBeenCalledTimes(1);
+    expect(toastWarning).toHaveBeenCalledWith('Task "Write release notes" created', {
+      description: `${NOTICE}\n${ADVISORY}`,
+    });
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(channelToast).not.toHaveBeenCalled();
+  });
+});

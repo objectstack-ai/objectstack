@@ -16,7 +16,10 @@
  * success toast. While a save surface is open it CLAIMS the warnings of the
  * write it makes ({@link claimAnswerWarnings}); the channel parks them on that
  * claim ({@link parkAnswerWarnings}) instead of raising its own toast, and the
- * surface's toast carries them ({@link toastRecordSave}).
+ * surface's toast carries them ({@link toastRecordSave}). The answer's
+ * `notice` — the one message a hook on the write set for the person who made
+ * it (objectstack-ai/objectstack#28000) — rides the same claim, so a save
+ * still raises one toast (objectstack-ai/objectstack#28252).
  *
  * It lives here, below every save surface — `app-shell`'s record page and
  * record dialogs, and `plugin-form`'s `object-form` drawer and modal — so
@@ -35,6 +38,7 @@ export interface AnswerWarningsEvent {
   resource: string;
   id?: string | number;
   warnings?: readonly { message?: string }[];
+  notice?: string;
 }
 
 /**
@@ -48,15 +52,25 @@ export interface AnswerWarningScope {
   id?: string | number;
 }
 
+/**
+ * What a record save's answer tells the person beyond "saved": its advisory
+ * warning messages, distinct, and the notice a hook set, if any.
+ */
+export interface RecordSaveFeedback {
+  warnings: string[];
+  notice?: string;
+}
+
 /** A record save surface's hold on the answer warnings of its own write. */
 export interface AnswerWarningClaim {
   /**
-   * The distinct warning messages of the write that answered `saved`, removed
-   * from the claim. Every other event the claim parked is shown on the
-   * channel's own toast at once, so a write the surface did not make keeps
-   * the toast it always had.
+   * The answer feedback of the write that answered `saved`, removed from the
+   * claim: its distinct warning messages and its notice (the last one parked
+   * wins, as the last `onNotice` call does on the server). Every other event
+   * the claim parked is shown on the channel's own toast at once, so a write
+   * the surface did not make keeps the toast it always had.
    */
-  take(saved: unknown): string[];
+  take(saved: unknown): RecordSaveFeedback;
   /** Close the claim; whatever it still parks is shown on the channel's toast. */
   release(): void;
 }
@@ -139,11 +153,12 @@ export function claimAnswerWarnings(adapter: object, scope: AnswerWarningScope):
       const others = entry.parked.filter((p) => !own.includes(p));
       entry.parked = [];
       showAll(others);
-      const messages: string[] = [];
+      const feedback: RecordSaveFeedback = { warnings: [] };
       for (const p of own) {
-        for (const m of answerWarningLines(p.ev)) if (!messages.includes(m)) messages.push(m);
+        for (const m of answerWarningLines(p.ev)) if (!feedback.warnings.includes(m)) feedback.warnings.push(m);
+        if (p.ev.notice) feedback.notice = p.ev.notice;
       }
-      return messages;
+      return feedback;
     },
     release() {
       open?.delete(entry);
@@ -156,16 +171,24 @@ export function claimAnswerWarnings(adapter: object, scope: AnswerWarningScope):
 
 /** Where a record save toast goes. Structurally satisfied by sonner's `toast`. */
 export interface RecordSaveSink {
-  success(title: string): void;
+  success(title: string, options?: { description?: string }): void;
   warning(title: string, options?: { description?: string }): void;
 }
 
 /**
- * The one toast of a record save: the surface's record-named message, carrying
- * its write's advisory warnings one per line on the warning variant when there
- * are any.
+ * The one toast of a record save: the surface's record-named message as its
+ * title, and under it the write's notice and then its advisory warnings, one
+ * per line. Any warning puts it on the warning variant; a notice alone keeps
+ * it a success, because a notice reports an outcome, never a problem.
  */
-export function toastRecordSave(sink: RecordSaveSink, message: string, warnings: readonly string[] = []): void {
-  if (warnings.length > 0) sink.warning(message, { description: warnings.join('\n') });
+export function toastRecordSave(
+  sink: RecordSaveSink,
+  message: string,
+  feedback: Partial<RecordSaveFeedback> = {},
+): void {
+  const warnings = feedback.warnings ?? [];
+  const lines = feedback.notice ? [feedback.notice, ...warnings] : [...warnings];
+  if (warnings.length > 0) sink.warning(message, { description: lines.join('\n') });
+  else if (lines.length > 0) sink.success(message, { description: lines.join('\n') });
   else sink.success(message);
 }

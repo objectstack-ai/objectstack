@@ -197,6 +197,19 @@ export interface ActionDef {
    */
   disabled?: SpecActionInput['disabled'];
   /**
+   * Pressed-state predicate — the button is drawn already pressed for this
+   * reader (`aria-pressed="true"` and the pressed face) while it holds.
+   *
+   * Derived from the spec field. Unlike {@link ActionDef.disabled} it has no
+   * boolean arm: the spec refuses a literal, because a constant is a style and
+   * not the reader's state. Display only — the runner never reads it, and a
+   * pressed action stays runnable. Drawn by the record header
+   * (`PageHeaderActions`) and the declared actions bar
+   * (`DeclaredActionButton`); a predicate that cannot be evaluated draws the
+   * plain, unpressed button.
+   */
+  pressed?: SpecActionInput['pressed'];
+  /**
    * API endpoint (string URL or complex config).
    *
    * @deprecated objectui dialect — the spec spells an `api` action's endpoint

@@ -37,6 +37,11 @@ export {
   type SettingsActionHandler,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
+  // ADR-0144 D4 — the write-side rule a package registers on one key.
+  type SettingsWritePredicate,
+  type SettingsWritePredicateInput,
+  type SettingsWriteRefusal,
+  type SettingsDisplayOptions,
   SETTINGS_LIVE_STATUS_BANNER_ID,
   type SettingsAuditSink,
   type SettingsContext,

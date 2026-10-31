@@ -1805,6 +1805,11 @@
           "type": "array",
           "of": "object",
           "description": "Explicit stage definitions [{ value, label }] (else derived from field metadata)"
+        },
+        {
+          "name": "allowStageChange",
+          "type": "boolean",
+          "description": "Let the reader change the record's stage by pressing a stage on the path (default: off, a read-only progress rail). Each press asks for confirmation, then saves `statusField` through the record's ordinary update, guarded by the record's version, so the object's state machine and validation rules decide; a refused move is shown under the path. Stages are pressable only for a reader who may edit `statusField` on this record, and not while the record's inline edit holds unsaved changes."
         }
       ]
     },
