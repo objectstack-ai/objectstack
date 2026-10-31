@@ -388,8 +388,11 @@ export type ConnectorInstanceAppCredentialAuth = z.input<typeof ConnectorInstanc
  * canonical-request algorithm, implemented in the automation service's signer
  * registry, so nothing about the canonicalisation is authored.
  */
-export const ConnectorSigningSchemeSchema = z.enum(['aliyun-acs3-hmac-sha256'])
-  .describe('Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature).');
+export const ConnectorSigningSchemeSchema = z.enum(['aliyun-acs3-hmac-sha256', 'tencentcloud-tc3-hmac-sha256'])
+  .describe(
+    'Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature) or '
+      + '`tencentcloud-tc3-hmac-sha256` (Tencent Cloud API 3.0 signature v3).',
+  );
 export type ConnectorSigningScheme = z.input<typeof ConnectorSigningSchemeSchema>;
 
 /**
@@ -432,6 +435,33 @@ export const ConnectorInstanceSignedAliyunAcs3AuthSchema = lazySchema(() => stri
 export type ConnectorInstanceSignedAliyunAcs3Auth = z.input<typeof ConnectorInstanceSignedAliyunAcs3AuthSchema>;
 
 /**
+ * `signed` with `scheme: 'tencentcloud-tc3-hmac-sha256'` — Tencent Cloud's API
+ * 3.0 signature v3 (ADR-0143 Q4). Every request carries an `Authorization:
+ * TC3-HMAC-SHA256 Credential=<SecretId>/<date>/<service>/tc3_request,
+ * SignedHeaders=content-type;host, Signature=…` header, an HMAC-SHA256 over the
+ * canonical request with a key derived from the SecretKey, the date and the
+ * service; the signer also sets the `X-TC-Timestamp` it signs with. The service
+ * is the first label of the endpoint host (`cvm.tencentcloudapi.com` → `cvm`),
+ * as the vendor names it, so nothing about it is authored. The request names
+ * its API with the `X-TC-Action`, `X-TC-Version` and `X-TC-Region` headers.
+ */
+export const ConnectorInstanceSignedTencentCloudTc3AuthSchema = lazySchema(() => strictObject({
+  surface: "this `signed` connector auth (`scheme: 'tencentcloud-tc3-hmac-sha256'`)",
+  history: 'This shape is strict from birth — the `signed` instance kind had no earlier spelling, so an unknown key here was never accepted.',
+  guidance: SIGNED_GUIDANCE,
+  // Tencent Cloud's own word for the key id.
+  aliases: { secretId: 'keyId' },
+}, {
+  type: z.literal('signed'),
+  scheme: z.literal('tencentcloud-tc3-hmac-sha256').describe('Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256).'),
+  keyId: z.string().min(1).describe('The SecretId (not a secret); sent in the `Credential` of every signature.'),
+  credentialRef: z.string().min(1).describe(
+    'Secrets-layer reference resolved to the SecretKey every request\'s signing key is derived from. Never an inline secret.',
+  ),
+}));
+export type ConnectorInstanceSignedTencentCloudTc3Auth = z.input<typeof ConnectorInstanceSignedTencentCloudTc3AuthSchema>;
+
+/**
  * Per-request signing auth for a provider-bound instance (ADR-0143 D2.3): no
  * token exists — the platform signs every outgoing request with the key
  * `credentialRef` names, by the vendor's canonical-request algorithm. One
@@ -444,6 +474,7 @@ export type ConnectorInstanceSignedAliyunAcs3Auth = z.input<typeof ConnectorInst
  */
 export const ConnectorInstanceSignedAuthSchema = lazySchema(() => z.discriminatedUnion('scheme', [
   ConnectorInstanceSignedAliyunAcs3AuthSchema,
+  ConnectorInstanceSignedTencentCloudTc3AuthSchema,
 ], {
   // The refusal names the scheme it got and the ones that ship, rather than
   // zod's bare "invalid discriminator": a scheme is a vendor algorithm, and
