@@ -4347,12 +4347,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       </span>
     </nav>
   );
-  // objectstack#27058, Target 3 — the top bar on a phone: one link,
+  // objectstack#27058, Target 3 — the top bar on a phone: one link that
+  // returns where the page came from. A top-level page reads
   // 「‹ <object plural>」, the breadcrumb's object half (the record's name is
-  // the header title directly below). It returns where the page came from: a
-  // page pushed from a related row or a lookup goes back to its parent, in
-  // the history, so the parent comes back where it was scrolled; any other
-  // page returns to the list it was opened from, or to the object's list.
+  // the header title directly below), and returns to the list it was opened
+  // from, or to the object's list. A page one level down (Target 8) is named
+  // by where it returns, its parent record (「‹ Acme Corp」): pushed from a
+  // related row or a lookup it goes back in the history, so the parent comes
+  // back where it was scrolled; reached by a `?from=` link it follows the
+  // trail's way back.
   // Right, the counter and ↓ ↑ when the page knows its siblings. No ⊟ (the
   // stack has no right column), no ⤡ (there is no drawer to collapse to).
   const phonePushed = phonePage && isRecordPagePushed(location.state);
@@ -4360,9 +4363,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const phoneBack = phonePage ? (() => {
     const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
-    const label = phonePushed || pageTrail.length > 0 || !originFromState?.pathname || originIsObjectList
-      ? plural
-      : originFromState.label ?? plural;
+    const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
+    const label = parent
+      ? parent.t || shortRecordId(parent.i)
+      : phonePushed || (originFromState?.pathname && !originIsObjectList)
+        ? originFromState?.label ?? plural
+        : plural;
     const face = (
       <>
         <ChevronLeft className="h-5 w-5 shrink-0" aria-hidden="true" />

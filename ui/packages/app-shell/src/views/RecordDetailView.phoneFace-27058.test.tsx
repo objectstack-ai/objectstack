@@ -10,18 +10,23 @@
  * objectstack#27058 — the record page on a phone, from a real
  * `RecordDetailView` mount at 390 px (the `topBar-27524` harness):
  *
- *  - Target 3, the top bar: one way back, 「‹ <object plural>」, to the list
- *    the page came from; the counter and ↓ ↑ when the page knows its rows;
- *    no ⊟ (the stack has no right column), no ⤡ (no drawer to collapse to);
+ *  - Target 3, the top bar: one way back, 「‹ <object plural>」 on a top-level
+ *    page, to the list the page came from; the counter and ↓ ↑ when the page
+ *    knows its rows; no ⊟ (the stack has no right column), no ⤡ (no drawer
+ *    to collapse to);
  *  - Target 4, the header: the subtitle from the first two declared text
  *    highlights, then at most four highlights;
  *  - Target 7, the bottom bar: the header's actions drawn below the body, in
  *    their bar face — the primary, one more and the `⋯`; with a declared
  *    second action the host's Edit folds into the `⋯`, with one it takes the
  *    second slot; the header draws no action row of its own;
- *  - Target 8, a page pushed from its parent's related row: its 「‹」 and the
- *    path row's parent go back in the history, to the parent;
- *  - a page under a `?from=` trail opened from a link goes back by link;
+ *  - Target 8, a page pushed from its parent's related row: its 「‹」 names
+ *    where it returns, the parent record (「‹ Mira Costa」), and it and the
+ *    path row's parent go back in the history, to the parent, whose own 「‹」
+ *    reads the object plural again;
+ *  - a page under a `?from=` trail opened from a link goes back by link,
+ *    its 「‹」 named by the parent too (its short id when the trail has no
+ *    title);
  *  - control: at 1440 px the page keeps its desktop bar (⊟) and the header
  *    its own action row, and no bottom bar is mounted.
  */
@@ -317,7 +322,7 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(buttons.length).toBeLessThanOrEqual(3);
   });
 
-  it('a page pushed from its parent\'s related row: 「‹ Tasks」 and the path row\'s parent go back to the parent', async () => {
+  it('a page pushed from its parent\'s related row: 「‹ Mira Costa」 goes back to the parent, whose 「‹」 reads 「Leads」', async () => {
     const trail = encodeURIComponent(JSON.stringify([{ o: LEAD, i: 'L-1', t: 'Mira Costa' }]));
     const parent = `/apps/${APP}/${LEAD}/record/L-1`;
     const pushed = {
@@ -330,11 +335,15 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(path.textContent).toBe('Lead Mira CostaTask');
     const back = pageBar()!.querySelector('[data-record-crumb-back]') as HTMLElement;
     expect(back.tagName).toBe('BUTTON');
-    expect(back.textContent).toBe('Tasks');
+    // One level down the way back is named by where it returns (Target 8).
+    expect(back.textContent).toBe('Mira Costa');
     expect(pageBar()!.querySelector('[data-record-top-bar-position]')?.textContent).toBe('1 / 3');
 
     fireEvent.click(back);
     await waitFor(() => expect(where()).toBe(parent));
+    // Back on the top-level parent page, Target 3's object plural.
+    await waitFor(() => expect(screen.queryByTestId('record-page-path')).toBeNull());
+    expect(pageBar()!.querySelector('[data-record-crumb-back]')!.textContent).toBe('Leads');
   });
 
   it('the path row\'s parent of a pushed page goes back too', async () => {
@@ -353,7 +362,7 @@ describe('the record page on a phone (objectstack#27058)', () => {
     await waitFor(() => expect(where()).toBe(parent));
   });
 
-  it('a ?from= page opened from a link: 「‹ Tasks」 and the path row link to the parent page', async () => {
+  it('a ?from= page opened from a link: 「‹ Mira Costa」 and the path row link to the parent page', async () => {
     const trail = encodeURIComponent(JSON.stringify([{ o: LEAD, i: 'L-1', t: 'Mira Costa' }]));
     mountPage([`/apps/${APP}/${TASK}/record/T-1?from=${trail}`]);
     const path = await screen.findByTestId('record-page-path', undefined, { timeout: 5000 });
@@ -361,8 +370,16 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(ancestor.getAttribute('href')).toBe(`/apps/${APP}/${LEAD}/record/L-1`);
     const back = pageBar()!.querySelector('[data-record-crumb-back]') as HTMLAnchorElement;
     expect(back.tagName).toBe('A');
-    expect(back.textContent).toBe('Tasks');
+    expect(back.textContent).toBe('Mira Costa');
     expect(back.getAttribute('href')).toBe(`/apps/${APP}/${LEAD}/record/L-1`);
+  });
+
+  it('a ?from= trail with no title: the 「‹」 names the parent by its short id', async () => {
+    const trail = encodeURIComponent(JSON.stringify([{ o: LEAD, i: 'L-1' }]));
+    mountPage([`/apps/${APP}/${TASK}/record/T-1?from=${trail}`]);
+    await screen.findByTestId('record-page-path', undefined, { timeout: 5000 });
+    const back = pageBar()!.querySelector('[data-record-crumb-back]') as HTMLAnchorElement;
+    expect(back.textContent).toBe('#L-1');
   });
 
   it('control: at 1440 px the desktop bar (⊟) and the header\'s own action row, no bottom bar', async () => {
