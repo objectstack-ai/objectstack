@@ -41,9 +41,14 @@ function tables(): Record<string, any[]> {
   };
 }
 
+/** Equality, `$in` and a NULL column; every other shape refused loudly. */
 function matchesWhere(row: any, where: any): boolean {
   return Object.entries(where ?? {}).every(([field, cond]) => {
-    if (cond !== null && typeof cond === 'object' && Array.isArray((cond as any).$in)) return (cond as any).$in.includes(row[field]);
+    if (field.startsWith('$')) throw new Error(`fixture where-matcher: unsupported combinator '${field}'`);
+    if (cond !== null && typeof cond === 'object') {
+      if (!Array.isArray((cond as any).$in)) throw new Error(`fixture where-matcher: unsupported operator on '${field}'`);
+      return (cond as any).$in.includes(row[field]);
+    }
     if (cond === null) return (row[field] ?? null) === null;
     return row[field] === cond;
   });
@@ -55,7 +60,8 @@ function rig() {
     registerMiddleware: () => undefined,
     getSchema: () => undefined,
     async find(object: string, q: any = {}) {
-      return (t[object] ?? []).filter((r) => matchesWhere(r, q?.where));
+      const rows = (t[object] ?? []).filter((r) => matchesWhere(r, q?.where));
+      return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async findOne(object: string, q: any = {}) {
       assertEngineFindOnePredicate(object, q);

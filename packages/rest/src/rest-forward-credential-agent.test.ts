@@ -45,6 +45,14 @@ const RAW_API_KEY = 'osk_6071_rest_face';
  */
 const makeQl = () => bindTestSecurityCatalog({
     find: async (object: string, opts: any) => {
+        const rows = rowsFor(object, opts);
+        return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+    },
+}, { permissions: [{ name: 'admin_full_access' }, { name: 'member_default' }] });
+
+/** The rows the fake engine holds for `object`, filtered by `opts.where`. */
+function rowsFor(object: string, opts: any): any[] {
+    {
         const where = opts?.where ?? {};
         if (object === 'sys_api_key') {
             const row = { id: 'k1', key: hashApiKey(RAW_API_KEY), revoked: false, user_id: 'member1', expires_at: FUTURE };
@@ -68,8 +76,8 @@ const makeQl = () => bindTestSecurityCatalog({
             ].filter(Boolean);
         }
         return [];
-    },
-}, { permissions: [{ name: 'admin_full_access' }, { name: 'member_default' }] });
+    }
+}
 
 /** A fake auth service whose session is keyed off the request's `cookie` header. */
 const makeAuth = () => ({
@@ -164,21 +172,6 @@ async function request(headers: Record<string, string>, auth?: unknown) {
     } as any, out.res);
     return { ctx: seen[0], out, protocol };
 }
-
-/**
- * [#7280] The envelope `computeExecCtx` actually produces, read directly.
- *
- * Needed because a GATED session never reaches `findData`: `enforceAuth` answers
- * 403 first, which is the whole point of the gate — so the wire-capture helper
- * above cannot observe the envelope for exactly the case under test.
- */
-async function execCtx(headers: Record<string, string>) {
-    const { rest } = boot();
-    return await (rest as any).computeExecCtx(undefined, {
-        method: 'GET', params: { object: 'task' }, query: {}, headers,
-    });
-}
-
 
 const AGENT = { userId: 'member1', clientId: 'client_agent', scopes: ['actions:execute', 'data:read', 'data:write'] };
 const bindForward = (method = 'GET', path = '/api/v1/data/task') =>
