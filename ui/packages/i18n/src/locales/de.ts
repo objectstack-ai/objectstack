@@ -185,6 +185,7 @@ const de = {
     dialogDescriptionFallback: "Füllen Sie die Formularfelder aus und senden Sie ab oder brechen Sie ab.",
     deniedDescription: "Sie haben keinen Bearbeitungszugriff auf dieses Feld.",
     serverDefaultHint: "Wird beim Speichern automatisch gesetzt.",
+    requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",
     maxFileSize: "Maximale Größe: {{size}}",
     masterDetail: {
       loadingColumns: "Spalten werden geladen…",

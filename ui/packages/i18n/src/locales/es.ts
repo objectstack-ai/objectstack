@@ -192,6 +192,7 @@ const es = {
     dialogDescriptionFallback: "Complete los campos del formulario y luego envíe o cancele.",
     deniedDescription: "No tienes permiso para editar este campo.",
     serverDefaultHint: "Se establece automáticamente al guardar.",
+    requiredForAction: "Obligatorio para ejecutar «{{action}}».",
     maxFileSize: "Tamaño máximo: {{size}}",
     masterDetail: {
       loadingColumns: "Cargando columnas…",

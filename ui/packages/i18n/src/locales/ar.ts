@@ -199,6 +199,7 @@ const ar = {
     dialogDescriptionFallback: "املأ حقول النموذج ثم أرسل أو ألغِ.",
     deniedDescription: "ليس لديك إذن لتعديل هذا الحقل.",
     serverDefaultHint: "يُعيَّن تلقائيًا عند الحفظ.",
+    requiredForAction: "مطلوب لتنفيذ «{{action}}».",
     maxFileSize: "الحجم الأقصى: {{size}}",
     masterDetail: {
       loadingColumns: "جارٍ تحميل الأعمدة…",

@@ -193,6 +193,7 @@ const zh = {
     dialogDescriptionFallback: '填写表单字段,然后提交或取消。',
     deniedDescription: '您没有此字段的编辑权限。',
     serverDefaultHint: '保存时自动设置。',
+    requiredForAction: '执行「{{action}}」时必填。',
     maxFileSize: '最大文件大小：{{size}}',
     masterDetail: {
       loadingColumns: '正在加载列…',
