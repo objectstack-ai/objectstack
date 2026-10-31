@@ -25,7 +25,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField } from '@object-ui/types';
 import { resolveFieldScale } from '@objectstack/spec/data';
-import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -78,6 +78,7 @@ import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActi
 import { partitionBulkRows } from './bulkEligibility';
 import { formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
+import { RowContextMenuItems, SelectionContextMenuItems } from './components/RowContextMenu';
 import { BulkActionDialog } from './components/BulkActionDialog';
 import type { BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
@@ -698,6 +699,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#27545 — the face a record pane beside this list narrowed it
   // to: `full` under no pane.
   const listFace = useRecordListFace();
+  // objectstack#28434 — the record URL a row links to, for its context menu's
+  // "Open in new tab": the host's own builder, the one `LinkCell` draws the
+  // row's anchor from.
+  const recordLinkHost = useRelatedRecordActions();
   const [refreshKey, setRefreshKey] = useState(0);
   // Optimistic concurrency for the default inline-edit saves (objectui#12292).
   // Per record, the version this grid's last landed write returned — see
@@ -1663,6 +1668,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // The Actions column and the pinned column sets (`./objectGridActionsColumn`).
   const {
+    rowActionMenuProps, rowOffersAction,
     columnsWithActions, hasActions, hasPinnedColumns, hasUserPinnedColumns, pinnedLeftCols,
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   } = resolveObjectGridActionsColumn({
@@ -2593,6 +2599,55 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return (orderedColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
   })();
 
+  /**
+   * objectstack#28434 — what a right-click (or the context-menu key) on a row
+   * opens; `data-table` owns the menu and calls this for its items.
+   *
+   * - A row inside a selection of two or more: the selection's menu — the
+   *   bulk actions `BulkActionBar` offers, through the bar's own resolver and
+   *   the bar's own dispatchers, plus count and Clear. Never a single-record
+   *   action.
+   * - Any other row: Open (the row click), Open in new tab (the record URL
+   *   the row's link cell draws, when the host publishes one), then every
+   *   action the row's "⋮" cell offers, from the props that cell renders with.
+   * - A row with no action, on a grid whose rows cannot be selected, keeps the
+   *   browser's menu: the menu is a second way to reach the row's actions, not
+   *   a new surface.
+   */
+  const renderRowContextMenu = (row: any, context: { selected: boolean }): React.ReactNode => {
+    if (context.selected && selectedRows.length >= 2) {
+      return (
+        <SelectionContextMenuItems
+          selectedRows={selectedRows}
+          actions={effectiveBulkActions ?? []}
+          actionDefs={bulkActionDefs}
+          objectFields={objectSchema?.fields}
+          allMatchingSelected={selectAllMatching}
+          totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
+          onAction={dispatchBulkAction}
+          onActionDef={dispatchBulkActionDef}
+          onClearSelection={resetSelection}
+        />
+      );
+    }
+    if (!rowOffersAction(row) && !selectionMode) return null;
+    const recordId = rowRecordId(row);
+    const newTabHref =
+      schema.objectName && recordId != null && recordId !== '' && recordLinkHost?.recordHref
+        ? recordLinkHost.recordHref(schema.objectName, recordId)
+        : null;
+    // Open is what a click on the row does: a host's `onRowClick` owns it
+    // outright, otherwise the navigation config does, and `none` opens nothing.
+    const opens = !!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation);
+    return (
+      <RowContextMenuItems
+        menu={rowActionMenuProps(row)}
+        onOpen={opens ? () => navigation.handleClick(row) : undefined}
+        newTabHref={newTabHref}
+      />
+    );
+  };
+
   const dataTableSchema: ObjectGridDataTableSchema = {
     type: 'data-table',
     // The deprecated `title` fallback resolves like `label` (objectui#10993):
@@ -2795,6 +2850,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     },
     selectionResetKey,
     onRowClick: navigation.handleClick,
+    renderRowContextMenu,
     onCellChange: onCellChange,
     // Install a dataSource-backed default only when the consumer did NOT wire
     // its own handler, so declarative `editable: true` views still persist.
