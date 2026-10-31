@@ -84,7 +84,7 @@ describe('Esc on an open face inside the record pane (objectstack#27524)', () =>
     render(pane({ setIsOpen }));
     expect(document.querySelector('[role="dialog"]')?.contains(face())).toBe(true);
 
-    escape(face()!.querySelector('[data-related-enlarged-back]')!);
+    escape(face()!);
     expect(face()).toBeNull();
     expect(pageColumns()).not.toBeNull();
     expect(setIsOpen).not.toHaveBeenCalled();
