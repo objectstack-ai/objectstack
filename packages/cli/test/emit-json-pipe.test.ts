@@ -1,4 +1,5 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: six children, one per shape — four tsx harnesses that each write through emitJson and end a different way, the console.log control, and one source-CLI `os validate --json` over the 900-issue config — plus the in-process import of format.ts and the spec barrel it reads; slowest CI reading 13.5 s (run 41271604267) of the five scheduled ci.yml runs 41199450735 to 41271604267 (slice 23's offender table), x 1.25, rounded up
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile, spawn } from 'node:child_process';
@@ -201,7 +202,9 @@ describe('os validate --json over a pipe', () => {
     const { stdout, code } = await (async () => {
       try {
         const { stdout } = await execFileP(
-          TSX,
+          // The source entry, spawned with this node binary rather than
+          // through the `tsx` wrapper the harnesses above need.
+          process.execPath,
           [resolve(REPO_CLI, 'bin/run-dev.js'), 'validate', join(configDir, 'objectstack.config.ts'), '--json'],
           { maxBuffer: 64 * 1024 * 1024, cwd: REPO_CLI, env: childEnv() },
         );
