@@ -150,6 +150,7 @@ import {
     PackageInstallBodySchema,
     PackageInstallManifestSchema,
     PackageInstallRequestSchema,
+    PublishPackageDraftsRequestSchema,
 } from '@objectstack/spec/api';
 
 /**
@@ -1914,6 +1915,38 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (packageIsUnknown(registry, id)) {
                     return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
                 }
+                // [#28452] The note is parsed with the declaration's own
+                // member, `PublishPackageDraftsRequestSchema.shape.message`,
+                // and a note it refuses (a number, an object, an array,
+                // `null`) is refused here `400` (`VALIDATION_ERROR`, derived
+                // from the status as the install door's legs derive it) before
+                // anything is published. It used to be dropped, so the publish
+                // went ahead and every history row recorded the default note,
+                // and the caller never learnt its note was ignored.
+                //
+                // ⛔ Only `message` is judged here. `backfill` keeps its one
+                // refusal, the protocol's shape judgement below (same status,
+                // code and `issues[]` as before); parsing it here too would be a
+                // second judge with a second sentence. Unknown keys are not
+                // read at all, so a body `actor` (the SDK's deprecated
+                // `opts.actor`) still publishes. Placed beside that backfill
+                // judgement, after the 404, so both body-member refusals sit at
+                // one point of the door's order.
+                const declaredMessage = PublishPackageDraftsRequestSchema.shape.message.safeParse(body?.message);
+                if (!declaredMessage.success) {
+                    const located = declaredMessage.error.issues
+                        .map((issue) => `message: ${issue.message}`)
+                        .join('; ');
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Invalid publish-drafts body — ${located}. Nothing was published: \`message\` is the `
+                            + 'change note every history row of this publish records; send it as a string, or leave '
+                            + 'it out to record the sentence naming the package.',
+                            400,
+                        ),
+                    };
+                }
                 try {
                     // [ADR-0146 D1] Who published: the identity this request
                     // was authorized as, never a name the body supplies — see
@@ -1924,9 +1957,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         ...(actor !== undefined ? { actor } : {}),
                         // [ADR-0146 D1] The author's change note: the package
                         // commit and every item history row this publish writes
-                        // carry it. A string, as the single-item publish door
-                        // reads `message`; anything else sends no note.
-                        ...(typeof body?.message === 'string' ? { message: body.message } : {}),
+                        // carry it. The parsed value: a string, or absent.
+                        ...(declaredMessage.data !== undefined ? { message: declaredMessage.data } : {}),
                         // [#24253] Passed through as sent: the protocol judges
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.
