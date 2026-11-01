@@ -2,12 +2,12 @@
 
 // [#22161] Every `data-model-rules.ts` finding's `fix` is one remedy line of at
 // most 200 characters. `os lint --fix` prints it as the `→ fix:` line, and the
-// three ADR-0120 uniqueness ids carry it as the `hint` `os validate` and
-// `os build` print. What the hints used to explain is `os explain` text.
+// three ADR-0120 uniqueness ids and the two roll-up ids carry it as the `hint`
+// `os validate`, `os build` and the publish door print. What the hints used to
+// explain is `os explain` text.
 //
-// The four `lintDataModel` sweep ids (`object/missing-name-field`,
-// `field/select-missing-options`, `rollup/non-numeric-aggregand`,
-// `field/embedded-sub-fields`) are never
+// The three `lintDataModel` sweep ids (`object/missing-name-field`,
+// `field/select-missing-options`, `field/embedded-sub-fields`) are never
 // adapted into an `AuthoringFinding`, so a census that reads `hint` never sees
 // them. This file reads `fix` directly, over every arm each rule has, with long
 // object and field names where a name is interpolated.
@@ -18,9 +18,11 @@ import {
   FIELD_EMBEDDED_SUB_FIELDS,
   lintDataModel,
   lintLegacyOrganizationComposites,
+  lintSummaryRollups,
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   ROLLUP_NON_NUMERIC_AGGREGAND,
+  ROLLUP_UNKNOWN_CHILD_OBJECT,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
@@ -38,6 +40,7 @@ const IDS = [
   MISSING_NAME_FIELD,
   SELECT_MISSING_OPTIONS,
   ROLLUP_NON_NUMERIC_AGGREGAND,
+  ROLLUP_UNKNOWN_CHILD_OBJECT,
   FIELD_EMBEDDED_SUB_FIELDS,
 ];
 
@@ -192,17 +195,31 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
   });
 
   it('rollup/non-numeric-aggregand: one line naming the child type, not the parent', () => {
-    expect(fixOf(record(lintDataModel(rollup('datetime', LONG_OBJECT))), ROLLUP_NON_NUMERIC_AGGREGAND)).toBe(
+    expect(fixOf(record(lintSummaryRollups(rollup('datetime', LONG_OBJECT))), ROLLUP_NON_NUMERIC_AGGREGAND)).toBe(
       "Aggregate a numeric or boolean child field, or use function: 'count'; a roll-up cannot store a " +
         'datetime, so declare a datetime field and maintain it from a flow.',
     );
     for (const type of ['date', 'time', 'text', 'select', 'multiselect', 'lookup', 'json', 'autonumber', 'textarea']) {
-      for (const fn of ['min', 'max']) record(lintDataModel(rollup(type, LONG_OBJECT, fn)));
+      for (const fn of ['min', 'max', 'sum', 'avg']) record(lintSummaryRollups(rollup(type, LONG_OBJECT, fn)));
     }
+    record(lintSummaryRollups(rollup('percent', LONG_OBJECT, 'sum')));
+  });
+
+  it('rollup/unknown-child-object: one line naming the parent the child points at', () => {
+    const parentOnly = rollup('number', LONG_OBJECT, 'sum').slice(0, 1);
+    expect(
+      fixOf(
+        record(lintSummaryRollups(parentOnly, { deployedObjectNames: new Set([LONG_OBJECT]) })),
+        ROLLUP_UNKNOWN_CHILD_OBJECT,
+      ),
+    ).toBe(
+      `Name the child object whose lookup or master_detail field points at "${LONG_OBJECT}", or publish ` +
+        'that object first if it is still a draft.',
+    );
   });
 
   it('every fix the cases above fired is one line of at most 200 characters', () => {
-    // The coverage control first: all seven ids fired.
+    // The coverage control first: all eight ids fired.
     expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
     for (const f of fired) {
       expect(f.fix, f.rule).toBeTruthy();

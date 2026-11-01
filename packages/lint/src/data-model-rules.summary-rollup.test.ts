@@ -28,7 +28,12 @@ import {
   isAggregateCompatibleWithFieldType,
 } from '@objectstack/spec/data';
 
-import { lintDataModel as lintDataModelUnrecorded, ROLLUP_NON_NUMERIC_AGGREGAND } from './data-model-rules.js';
+import {
+  lintDataModel,
+  lintSummaryRollups as lintSummaryRollupsUnrecorded,
+  ROLLUP_NON_NUMERIC_AGGREGAND,
+  ROLLUP_UNKNOWN_CHILD_OBJECT,
+} from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
 
 const RULE = 'rollup/non-numeric-aggregand';
@@ -39,8 +44,8 @@ const RULE = 'rollup/non-numeric-aggregand';
 // of at most 200 characters — every child type this suite refuses, not a
 // chosen few. Run the whole file: those cases read what the cases above fired.
 const fired: Array<{ rule: string; message: string }> = [];
-const lintDataModel: typeof lintDataModelUnrecorded = (...args) => {
-  const issues = lintDataModelUnrecorded(...args);
+const lintSummaryRollups: typeof lintSummaryRollupsUnrecorded = (...args) => {
+  const issues = lintSummaryRollupsUnrecorded(...args);
   fired.push(...issues);
   return issues;
 };
@@ -67,7 +72,7 @@ const model = (childType: string | undefined, fn = 'max', overrides: Record<stri
   },
 ];
 
-const findings = (objects: unknown[]) => lintDataModel(objects as any[]).filter((i) => i.rule === RULE);
+const findings = (objects: unknown[]) => lintSummaryRollups(objects as any[]).filter((i) => i.rule === RULE);
 
 describe('rollup/non-numeric-aggregand — refuses a min/max roll-up whose answer cannot fit the column', () => {
   it('refuses the card\'s own example: max over a datetime child field', () => {
@@ -153,11 +158,94 @@ describe('rollup/non-numeric-aggregand — discriminates from the analytics tabl
   });
 });
 
+describe('rollup/non-numeric-aggregand — sum / avg judged by the table the engine\'s aggregate door asks', () => {
+  // A roll-up recompute is an `engine.aggregate` call, and the engine's
+  // aggregate door refuses every pair the aggregate × field-type table refuses
+  // — after the child write has committed, on every write of the child. So the
+  // sum / avg arms ARE that table, never a second list: the authoring verdict
+  // and the recompute verdict cannot disagree.
+  it('refuses the card\'s own example: sum over a text child field, naming the field and the route', () => {
+    const found = findings(model('text', 'sum'));
+    expect(found).toHaveLength(1);
+    const issue = found[0]!;
+    expect(issue.severity).toBe('error');
+    expect(issue.path).toBe('objects[0].fields.rolled_up.summaryOperations.field');
+    expect(issue.message).toBe(
+      'summary field "invoice.rolled_up" rolls up sum(invoice_line.shipped_at), a text field the engine ' +
+        'does not sum: every recompute is refused',
+    );
+    expect(issue.fix).toBe(
+      'Aggregate a child field of type number, currency, rating, slider, progress, summary, boolean or ' +
+        "toggle, or use function: 'count'.",
+    );
+  });
+
+  it('refuses avg over a text child field, with avg\'s own accepted set (percent included)', () => {
+    const [issue] = findings(model('text', 'avg'));
+    expect(issue?.message).toContain('avg(invoice_line.shipped_at), a text field the engine does not average');
+    expect(issue?.fix).toBe(
+      'Aggregate a child field of type number, currency, percent, rating, slider, progress, summary, ' +
+        "boolean or toggle, or use function: 'count'.",
+    );
+  });
+
+  it('accepts sum over a number child field (the control)', () => {
+    expect(findings(model('number', 'sum'))).toEqual([]);
+    expect(findings(model('number', 'avg'))).toEqual([]);
+  });
+
+  it('refuses exactly the pairs the table refuses, over every declared FieldType, for both functions', () => {
+    for (const fn of ['sum', 'avg']) {
+      const refused = FieldType.options.filter((t) => findings(model(t, fn)).length > 0);
+      expect(refused.sort(), fn).toEqual(
+        FieldType.options.filter((t) => !isAggregateCompatibleWithFieldType(fn, t)).sort(),
+      );
+      // A floor, so a rule that stops firing cannot make the equality vacuous.
+      expect(refused.length, fn).toBeGreaterThan(10);
+    }
+  });
+
+  it('refuses sum over percent and accepts avg over it — a rate averages but does not add', () => {
+    expect(findings(model('percent', 'sum'))).toHaveLength(1);
+    expect(findings(model('percent', 'avg'))).toEqual([]);
+  });
+});
+
+describe('rollup/unknown-child-object — a roll-up from an object the deployment does not have', () => {
+  const unknownChild = (objects: unknown[], deployed?: string[]) =>
+    lintSummaryRollups(objects as any[], deployed ? { deployedObjectNames: new Set(deployed) } : {})
+      .filter((i) => i.rule === ROLLUP_UNKNOWN_CHILD_OBJECT);
+  const parentOnly = () => model('number', 'sum').slice(0, 1);
+
+  it('refuses a child named nowhere in the deployment, at the object key', () => {
+    const found = unknownChild(parentOnly(), ['invoice']);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.severity).toBe('error');
+    expect(found[0]!.path).toBe('objects[0].fields.rolled_up.summaryOperations.object');
+    expect(found[0]!.message).toBe(
+      'summary field "invoice.rolled_up" rolls up from "invoice_line", which names no object in this ' +
+        'deployment: the roll-up reads nothing',
+    );
+  });
+
+  it('admits a child the deployment has outside the walked objects (a package outside the closure)', () => {
+    expect(unknownChild(parentOnly(), ['invoice', 'invoice_line'])).toEqual([]);
+  });
+
+  it('admits a child the walked objects carry, whatever the deployment set says', () => {
+    expect(unknownChild(model('number', 'sum'), [])).toEqual([]);
+  });
+
+  it('is silent when the deployment\'s object names are not stated — the CLI, one app', () => {
+    expect(unknownChild(parentOnly())).toEqual([]);
+  });
+});
+
 describe('rollup/non-numeric-aggregand — stays silent where it cannot resolve, and outside its scope', () => {
   // "A consumer that cannot resolve a field's type must NOT call the predicate
   // with a guess" — `aggregate-field-type-compatibility.ts`. A refusal fired on
   // a partially-loaded model would redden an app over metadata never seen.
-  it('is silent when the child object is not in the pass\'s object set', () => {
+  it('is silent on the aggregand when the child object is not in the pass\'s object set', () => {
     const objects = model('datetime').slice(0, 1); // parent only — no `invoice_line`
     expect(findings(objects)).toEqual([]);
   });
@@ -178,23 +266,21 @@ describe('rollup/non-numeric-aggregand — stays silent where it cannot resolve,
     expect(findings(model('datetime', 'max', { object: '' }))).toEqual([]);
   });
 
-  it('is scoped to min/max — count reads no value off the field', () => {
-    expect(findings(model('datetime', 'count'))).toEqual([]);
-  });
-
-  // `sum` / `avg` over a non-numeric child is a different shape, whose accept
-  // set the analytics table's own rows already exclude, and is deliberately not
-  // this rule's. (Nothing in this tree consults that table — an open gap
-  // reported with this change, not one this rule silently absorbs.)
-  it('does not fire for sum or avg', () => {
-    expect(findings(model('datetime', 'sum'))).toEqual([]);
-    expect(findings(model('datetime', 'avg'))).toEqual([]);
+  it('never judges count — count reads no value off the field', () => {
+    for (const childType of ['datetime', 'text', 'json']) {
+      expect(findings(model(childType, 'count')), childType).toEqual([]);
+    }
   });
 
   it('is silent for a field that is not a summary at all', () => {
     const objects = model('datetime') as any[];
     objects[0].fields.rolled_up.type = 'number';
     expect(findings(objects)).toEqual([]);
+  });
+
+  it('is no longer `lintDataModel`\'s — the gate entry reports it under `os lint`, once', () => {
+    expect(lintDataModel(model('datetime') as any[]).filter((i) => i.rule.startsWith('rollup/'))
+      .filter((i) => i.rule !== 'rollup/missing-summary')).toEqual([]);
   });
 });
 
@@ -232,7 +318,20 @@ describe('[#22161] one-line verdicts — rollup/non-numeric-aggregand', () => {
       'analytics aggregate table',
       '`count` reads no value',
       'does not resolve in this stack',
+      'after the child write has committed',
+      '`sum` over a `percent`',
+      '`valid: false`',
     ]) {
+      expect(text, `explanation names ${fact}`).toContain(fact);
+    }
+  });
+
+  it('`os explain rollup/unknown-child-object` says where it is judged and why the CLI does not', () => {
+    expect(ROLLUP_UNKNOWN_CHILD_OBJECT).toBe('rollup/unknown-child-object');
+    const entry = explainRule(ROLLUP_UNKNOWN_CHILD_OBJECT);
+    expect(entry, 'no `os explain rollup/unknown-child-object` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of ['publish gate only', 'still exists', 'judge one app', 'publish it first']) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
   });
