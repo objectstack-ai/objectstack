@@ -5,7 +5,7 @@
 
 fix(console): Create User left without an email marks the Email input as required, in the user's language
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Create User with neither an email nor a phone number answers `400 VALIDATION_FAILED` with one `required` entry per input that would satisfy it on `error.fields`. The Console showed only the server's English sentence above the dialog's buttons and marked no input.
