@@ -532,9 +532,16 @@ function collectSitesFromSchema(
     singular: ReadonlyMap<string, string>,
     plural: ReadonlyMap<string, string>,
     into: Map<string, ReferenceSite>,
+    sharedWalks?: SharedWalkCache,
 ): void {
     const defs = (root.$defs as Record<string, JsonSchemaNode> | undefined) ?? {};
     const visited = new Set<string>();
+    // Lazily, and once per root: the `$defs` a property's `$ref`s resolve
+    // through are part of what the property means.
+    let defsKey: string | undefined;
+    // The bindings found below the root property being walked, so its walk
+    // can be replayed under another source type.
+    let frame: Array<readonly [string, string]> | undefined;
 
     const walk = (node: unknown, trail: string, depth: number): void => {
         if (depth > 12) return;
@@ -548,11 +555,13 @@ function collectSitesFromSchema(
                     if (target && carriesNames(child, defs, pluralTarget !== undefined)) {
                         const site: ReferenceSite = { fromType, property: key, target };
                         into.set(`${fromType}|${key}|${target}`, site);
+                        frame?.push([key, target]);
                     }
                     const branch = `${trail}.${key}`;
                     if (visited.has(branch)) continue;
                     visited.add(branch);
-                    walk(child, branch, depth + 1);
+                    if (depth === 0) walkRootProperty(child, branch);
+                    else walk(child, branch, depth + 1);
                 }
             }
             if (alt.items) walk(alt.items, `${trail}[]`, depth + 1);
@@ -562,8 +571,54 @@ function collectSitesFromSchema(
         }
     };
 
+    // [#28574] A root property's walk, done once per derivation for every
+    // source type that declares the same property. `object` and
+    // `object_extension` declare the same `fields` record and `validations`
+    // array, and the `validations` walk alone is most of a type's cost; the
+    // second source type replays the bindings the first walk found. The key
+    // is everything the walk below the property reads: the property's schema
+    // less its prose (`description` and `title` text, which no step reads and
+    // which is all that tells the two `validations` apart), its trail and the
+    // root's `$defs`. No branch below a root property's trail is visited
+    // before its walk starts (every such branch extends it), so a replay
+    // records exactly what a walk would.
+    const walkRootProperty = (child: unknown, branch: string): void => {
+        if (!sharedWalks) {
+            walk(child, branch, 1);
+            return;
+        }
+        defsKey ??= JSON.stringify(defs, withoutProse);
+        const cacheKey = `${branch}|${defsKey}|${JSON.stringify(child, withoutProse)}`;
+        const replay = sharedWalks.get(cacheKey);
+        if (replay) {
+            for (const [key, target] of replay) {
+                into.set(`${fromType}|${key}|${target}`, { fromType, property: key, target });
+            }
+            return;
+        }
+        frame = [];
+        try {
+            walk(child, branch, 1);
+            sharedWalks.set(cacheKey, frame);
+        } finally {
+            frame = undefined;
+        }
+    };
+
     walk(root, '', 0);
 }
+
+/**
+ * A `JSON.stringify` replacer dropping a schema's prose. Only a string-valued
+ * `description` or `title` is prose: a property NAMED `description` maps to a
+ * schema object and is kept.
+ */
+function withoutProse(key: string, value: unknown): unknown {
+    return (key === 'description' || key === 'title') && typeof value === 'string' ? undefined : value;
+}
+
+/** One derivation's root-property walks ({@link collectSitesFromSchema}); never shared across derivations. */
+type SharedWalkCache = Map<string, ReadonlyArray<readonly [string, string]>>;
 
 /**
  * Build the reference-site index from the metadata type schemas.
@@ -586,6 +641,7 @@ export function deriveReferenceSites(): ReferenceSiteIndex {
 
     const sites = new Map<string, ReferenceSite>();
     const unwalkable: string[] = [];
+    const sharedWalks: SharedWalkCache = new Map();
 
     // Limb 1 — every declared type's own schema.
     for (const type of declaredTypes) {
@@ -601,7 +657,7 @@ export function deriveReferenceSites(): ReferenceSiteIndex {
             unwalkable.push(type);
             continue;
         }
-        collectSitesFromSchema(type, json, singular, plural, sites);
+        collectSitesFromSchema(type, json, singular, plural, sites, sharedWalks);
     }
 
     // Limb 2 — flow node configs. See the module header: `FlowSchema` declares
