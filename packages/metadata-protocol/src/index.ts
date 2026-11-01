@@ -244,6 +244,12 @@ export type { ServedOverrideRow } from './served-override.js';
 export type { ServedOverrideEntry } from './protocol-served-overrides.js';
 export type { PackagelessOverlayCensus, PackagelessOverlayMigration } from './protocol-packageless-overlay-migration.js';
 
+// [#28412, ADR-0146 D9 item 1] The `package_id` column of the stored row a
+// registry body was hydrated from, recorded by the protocol's hydration and
+// read by the automation boot pull, which judges a flow override on the
+// column (`isServedOverrideRowOf`), ⛔ never on the body's `_packageId`.
+export { bindStoredRow, storedRowBindingOf } from './stored-row-binding.js';
+
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
 // function `importUnmanagedPackage` raises, exported so the install door
 // (`@objectstack/cloud-connection` install-local) answers it with the same
