@@ -32,7 +32,8 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import type { IDataEngine, IMetadataService, ExecutionContext } from '@objectstack/spec/contracts';
+import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withEarnedAnswer } from '@objectstack/types';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
