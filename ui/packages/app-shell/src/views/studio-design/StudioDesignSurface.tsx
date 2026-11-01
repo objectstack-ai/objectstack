@@ -5180,13 +5180,15 @@ export function InterfacesPillar({
         // objectui#11799 — the baseline is read only when it is used, for a
         // leaf with no pending draft. An unsaved leaf always has one, so it
         // never asks `/layers`, which answers 404 for a name with no layer.
-        // ADR-0048 — read at this package, the leaf's owner: a layered read
-        // naming no package is refused for a name two packages hold. On a
-        // read-only base that is the base, whose read serves its declared
-        // override (ADR-0146 D8).
+        // ADR-0048 — read at the leaf's owner: a layered read naming no
+        // package is refused for a name two packages hold. That is the pair
+        // for an item the pair adds; else this package, whose read on a
+        // read-only base serves its declared override (ADR-0146 D8).
         const lay = body
           ? null
-          : await client.layered<Record<string, unknown>>(current.type, current.name, { packageId });
+          : await client.layered<Record<string, unknown>>(current.type, current.name, {
+              packageId: current.addedIn ?? packageId,
+            });
         if (cancelled) return;
         const baseline = ((lay as { effective?: unknown; code?: unknown } | null)?.effective ??
           (lay as { code?: unknown } | null)?.code ??
@@ -5245,8 +5247,8 @@ export function InterfacesPillar({
     if (!publishedPending || !currentType || !currentName) return;
     const key = leafKey;
     let cancelled = false;
-    // ADR-0048 — at this package, as the leaf's load reads its baseline.
-    client.layered<Record<string, unknown>>(currentType, currentName, { packageId }).then(
+    // ADR-0048 — at the leaf's owner, as the leaf's load reads its baseline.
+    client.layered<Record<string, unknown>>(currentType, currentName, { packageId: leafPackageId }).then(
       (lay) => {
         if (cancelled) return;
         const doc = ((lay as { effective?: unknown; code?: unknown } | null)?.effective ??
@@ -5262,7 +5264,7 @@ export function InterfacesPillar({
     return () => {
       cancelled = true;
     };
-  }, [publishedPending, client, currentType, currentName, leafKey, packageId]);
+  }, [publishedPending, client, currentType, currentName, leafKey, leafPackageId]);
   const servedWidgets = React.useMemo(
     () =>
       currentType === 'dashboard' && leafPublished.key === leafKey && leafPublished.read

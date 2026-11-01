@@ -429,3 +429,32 @@ describe('CONTROL: a base with no pair is unchanged (objectstack#28572)', () => 
     expect(rowOf(ifRail(), 'dashboard', 'wins')).toBeNull();
   });
 });
+
+describe('an item the pair adds reads its layers at the pair (objectstack#28584)', () => {
+  // A layered read naming no package is refused (409) for a name two packages
+  // hold, and a read naming the base finds nothing the base does not hold: the
+  // pair's own item is read at the pair, its owner.
+  const layersOf = (type: string, name: string) =>
+    srv.reads.filter((r) => r.startsWith(`/api/v1/meta/${type}/${name}/layers`));
+
+  it('the Data pillar reads the pair’s object at the pair', async () => {
+    renderAt(`/studio/${BASE}/data`);
+    await waitFor(() => expect(within(dataRail()).getByText('Survey')).toBeInTheDocument(), { timeout: 8000 });
+    fireEvent.click(within(dataRail()).getByText('Survey').closest('button')!);
+    await waitFor(() => expect(layersOf('object', 'hotcrm_custom_survey')).not.toEqual([]), { timeout: 8000 });
+    for (const read of layersOf('object', 'hotcrm_custom_survey')) {
+      expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
+    }
+  });
+
+  it('the Interfaces pillar reads the pair’s dashboard at the pair', async () => {
+    renderAt(`/studio/${BASE}/interfaces`);
+    await interfacesReady();
+    fireEvent.click(rowOf(ifRail(), 'dashboard', 'wins')!);
+    await waitFor(() => expect(screen.getByTestId('board-label')).toHaveTextContent('Wins'), { timeout: 8000 });
+    await waitFor(() => expect(layersOf('dashboard', 'wins')).not.toEqual([]), { timeout: 8000 });
+    for (const read of layersOf('dashboard', 'wins')) {
+      expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
+    }
+  });
+});
