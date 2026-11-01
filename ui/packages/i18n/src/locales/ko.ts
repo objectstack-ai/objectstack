@@ -3613,11 +3613,7 @@ const ko = {
     redirecting: "{{seconds}}초 후 리디렉션됩니다…",
     redirectPending: "리디렉션 중…",
     loading: "양식 로딩 중…",
-    requiredHint: "* 필수 필드",
     requiredFields: "필수 항목: {{fields}}",
-    consentRequired: "계속하려면 개인정보 처리방침에 동의하세요.",
-    rateLimited: "제출하기 전에 잠시 답변을 검토하세요.",
-    redirectBlocked: "제출이 수락되었지만 보안상의 이유로 리디렉션 URL이 차단되었습니다.",
   },
   connectAgent: {
     disabled: {

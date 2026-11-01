@@ -3805,11 +3805,7 @@ const zh = {
     redirecting: '将在 {{seconds}} 秒后跳转…',
     redirectPending: '正在跳转…',
     loading: '正在加载表单…',
-    requiredHint: '* 为必填项',
     requiredFields: '必填项：{{fields}}',
-    consentRequired: '请先勾选同意隐私政策。',
-    rateLimited: '请再花点时间核对一下您的填写内容,再点击提交。',
-    redirectBlocked: '提交成功,但出于安全考虑,跳转链接已被阻止。',
   },
   connectAgent: {
     disabled: {

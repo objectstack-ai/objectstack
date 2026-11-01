@@ -61,7 +61,7 @@ export {
   // name is a second thing to hard-code. Not a second reporter — the emit,
   // the dedupe `Set` and the reset above are still the only ones.
   UNRESOLVABLE_ENABLEMENT_PREFIX,
-  __resetVisibilityPredicateWarnings,
+  // `__resetVisibilityPredicateWarnings` is test-only and stays off the barrel
 } from './utils/visibilityDiagnostic.js';
 // The per-surface scope hint those two take (objectui#6487). Exported because
 // `@object-ui/app-shell` — a caller in another package — has to name its tier,
