@@ -20,6 +20,10 @@
 //  (e) #28384: a row that still reads `pending` after its `expires_at` has
 //      passed is refused 409 (the declaration hides it there too, pinned in
 //      platform-objects), while Resend still answers for it.
+//  (f) #28540: an invitation that issues a new row retires the same person's
+//      expired pending rows in that organization (status `expired`), so the
+//      Pending list holds one row per person; a resend that renews an
+//      unexpired row keeps its id, and a refused call retires nothing.
 //
 // Every invitation is issued, resent, canceled and accepted through the
 // vendor's own routes on a real `AuthManager` over the installed better-auth,
@@ -411,6 +415,92 @@ describe('#28384 (e) — copy_invitation_link refuses a pending invitation past 
     expect(resent.status, resent.text).toBe(200);
     const answered = String(resent.body.id);
     expect((await copyLink(answered, owner.userId)).acceptUrl).toContain(`/accept-invitation/${answered}`);
+  });
+});
+
+describe('#28540 (f) — a new invitation replaces the same person\'s expired pending one', () => {
+  /** Move a pending row's `expires_at` into the past, leaving its status as it is. */
+  const expire = (row: Record<string, any>) => {
+    row.expires_at = new Date(Date.now() - 60_000);
+  };
+  const rowsFor = (engine: any, email: string, organizationId = ACME_ORG) =>
+    (engine.tables.get('sys_invitation') ?? []).filter(
+      (r: any) => r.email === email && r.organization_id === organizationId,
+    ) as Record<string, any>[];
+  const pendingIds = (engine: any, email: string, organizationId = ACME_ORG) =>
+    rowsFor(engine, email, organizationId).filter((r) => r.status === 'pending').map((r) => String(r.id));
+
+  it('a resend on an expired pending row leaves one pending row, and the expired one reads expired', async () => {
+    const { engine, invite, invitationRow } = await stage();
+    const stale = String((await invite('bob.builder@acme.test')).body.id);
+    expire(invitationRow(stale));
+
+    const resent = await invite('bob.builder@acme.test', { resend: true });
+    expect(resent.status, resent.text).toBe(200);
+    const fresh = String(resent.body.id);
+    expect(fresh).not.toBe(stale);
+    expect(pendingIds(engine, 'bob.builder@acme.test')).toEqual([fresh]);
+    expect(invitationRow(stale).status).toBe('expired');
+  });
+
+  it('a resend on an unexpired pending row renews that row: one row, the same id, a later expiry', async () => {
+    const { engine, invite, invitationRow } = await stage();
+    const id = String((await invite('bob.builder@acme.test')).body.id);
+    const soon = new Date(Date.now() + 60_000);
+    invitationRow(id).expires_at = soon;
+
+    const resent = await invite('bob.builder@acme.test', { resend: true });
+    expect(resent.status, resent.text).toBe(200);
+    expect(String(resent.body.id)).toBe(id);
+    expect(rowsFor(engine, 'bob.builder@acme.test').map((r) => [String(r.id), r.status])).toEqual([[id, 'pending']]);
+    expect(new Date(invitationRow(id).expires_at).getTime()).toBeGreaterThan(soon.getTime());
+  });
+
+  it('a plain invite after the earlier invitation expired leaves one pending row too', async () => {
+    const { engine, invite, invitationRow } = await stage();
+    const stale = String((await invite('bob.builder@acme.test')).body.id);
+    expire(invitationRow(stale));
+
+    const again = await invite('bob.builder@acme.test');
+    expect(again.status, again.text).toBe(200);
+    expect(pendingIds(engine, 'bob.builder@acme.test')).toEqual([String(again.body.id)]);
+    expect(invitationRow(stale).status).toBe('expired');
+  });
+
+  it('a plain invite for a new address changes no other row: another person and another organization keep theirs', async () => {
+    const { engine, invite, invitationRow, direct, owner } = await stage();
+    const other = String((await invite('carol.other@acme.test')).body.id);
+    expire(invitationRow(other));
+    const elsewhere = await direct(
+      'POST',
+      '/organization/invite-member',
+      { email: 'bob.builder@acme.test', role: 'member', organizationId: DEFAULT_ORG },
+      owner.cookie,
+    );
+    expect(elsewhere.status, await elsewhere.clone().text()).toBe(200);
+    const elsewhereId = String((await elsewhere.json()).id);
+    expire(invitationRow(elsewhereId));
+
+    const fresh = await invite('bob.builder@acme.test');
+    expect(fresh.status, fresh.text).toBe(200);
+    expect(pendingIds(engine, 'bob.builder@acme.test')).toEqual([String(fresh.body.id)]);
+    expect(invitationRow(other).status).toBe('pending');
+    expect(invitationRow(elsewhereId).status).toBe('pending');
+  });
+
+  it('a refused resend retires nothing: the expired row still reads pending', async () => {
+    const { engine, direct, invite, member, invitationRow } = await stage();
+    const stale = String((await invite('bob.builder@acme.test')).body.id);
+    expire(invitationRow(stale));
+
+    const refused = await direct(
+      'POST',
+      '/organization/invite-member',
+      { email: 'bob.builder@acme.test', role: 'member', organizationId: ACME_ORG, resend: true },
+      member.cookie,
+    );
+    expect(refused.status).toBe(403);
+    expect(rowsFor(engine, 'bob.builder@acme.test').map((r) => [String(r.id), r.status])).toEqual([[stale, 'pending']]);
   });
 });
 
