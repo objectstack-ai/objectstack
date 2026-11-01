@@ -117,7 +117,7 @@ toggles the user combines at runtime:
 
 ```typescript
 userFilters: {
-  element: 'dropdown',              // 'dropdown' | 'tabs' | 'toggle'
+  element: 'dropdown',              // 'dropdown' | 'tabs' ('toggle' is deprecated)
   fields: [
     { field: 'status' },            // options/labels inferred from field def
     { field: 'priority', showCount: true },
@@ -125,7 +125,7 @@ userFilters: {
 },
 
 // Runtime visualization whitelist (Airtable "Appearance → Visualizations"):
-appearance: { allowedVisualizations: ['grid', 'kanban', 'gallery'] },
+appearance: { allowedVisualizations: ['grid', 'kanban', 'gallery'] },  // one entry = locked, no switcher
 ```
 
 Rules:
@@ -150,11 +150,6 @@ Rules:
   so most views need no filter elements at all.
 - `userFilters: { element: 'dropdown' }` (no `fields`) is valid shorthand:
   the renderer fills the field list from the object's select/boolean fields.
-- `element` is `dropdown` or `tabs`; `toggle` is **deprecated** (ADR-0047 §3.4a)
-  — it stays in the enum for back-compat rendering, but author `dropdown`/`tabs`.
-- The visualization switcher renders as a compact dropdown in the toolbar's
-  right cluster. Authors only control the `allowedVisualizations` whitelist;
-  a single-entry whitelist locks the visualization (no switcher).
 
 ### Toolbar Search (`searchableFields`, ADR-0061)
 
@@ -272,7 +267,8 @@ top-level `groupBy`**. The top-level `columns` is required on every list view
   data: { provider: 'object', object: 'project_task' },
   columns: ['title', 'assignee', 'priority'],       // required on every list view
   kanban: {
-    groupByField: 'status',                // one board column per select option
+    groupByField: 'status',                // a select field — one lane per option
+    lanes: ['todo', 'in_progress', 'review'],   // option VALUES to draw, in this order
     summarizeField: 'estimate_hours',      // optional — summed at the top of each column
     columns: ['title', 'assignee', 'priority'],   // fields shown on each card
   },
@@ -280,8 +276,10 @@ top-level `groupBy`**. The top-level `columns` is required on every list view
 }
 ```
 
-> **Key rule:** `kanban.groupByField` should be a `select` type with
-> well-defined options. Each option becomes a column on the board.
+> `lanes` chooses the lanes and their order, not the records: a record whose
+> value is unlisted lands in `Uncategorized`, so filter the view to keep records
+> off the board. Omit it to draw every option in its own order; a value that is
+> not one of the field's inline options, or listed twice, fails `os validate`.
 
 ---
 

@@ -46,7 +46,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationPackageId } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -2790,6 +2790,19 @@ const EXTENDED_OBJECTS_LISTED = 5;
  * in registration order — and the prescription names every extending package,
  * so one answer is the whole way out rather than the first step of several.
  *
+ * [#28408, ADR-0146 D3] …and the uninstall refusal of a base whose paired
+ * customization package is installed: `<base>.custom`, the id
+ * {@link customizationPackageId} derives, held by this registry. That package
+ * holds every customization of the base, so uninstalling the base under it
+ * would strand them all, with nothing serving them and nothing saying why.
+ * ADR-0146 puts this refusal in this family and this shape, so it is this
+ * class rather than a sibling: one refusal, decided by the same method and
+ * raised at the same doors. When both causes hold, the ONE refusal carries
+ * both, and its prescription is the whole way out — uninstall the extenders
+ * and delete the pair. The pair is named by id, with the way to keep what it
+ * holds before it is deleted: its own export door. The class keeps its name
+ * because ADR-0141 and ADR-0146 cite it as the anchor of this family.
+ *
  * ⛔ Unexported, like its siblings: a consumer compares `code`, never
  * `instanceof` (see the note over the `*_CODE` constants).
  */
@@ -2804,25 +2817,53 @@ class PackageUninstallExtendedError extends Error {
   readonly extendedObjects: readonly ExtendedObjectOfUninstall[];
   /** Every extending package, once each, in the order the objects name them. */
   readonly extenders: readonly string[];
+  /**
+   * [#28408, ADR-0146 D3] The base's paired customization package, when this
+   * registry holds it — `undefined` when that is not a cause of this refusal.
+   */
+  readonly customizationPackageId: string | undefined;
 
-  constructor(packageId: string, extendedObjects: readonly ExtendedObjectOfUninstall[]) {
+  constructor(
+    packageId: string,
+    extendedObjects: readonly ExtendedObjectOfUninstall[],
+    customizationPackage?: string,
+  ) {
     const extenders = [...new Set(extendedObjects.flatMap((o) => o.extenders))];
     const listed = extendedObjects
       .slice(0, EXTENDED_OBJECTS_LISTED)
       .map((o) => `object "${o.objectName}" is extended by ${o.extenders.join(', ')}`);
     const more = extendedObjects.length - listed.length;
+    const extendersStep = extendedObjects.length === 0 ? undefined :
+      `the ${extenders.length === 1 ? 'package that extends' : 'packages that extend'} ` +
+      `${extendedObjects.length === 1 ? 'an object' : 'objects'} of "${packageId}"`;
+    const extendersFact = extendedObjects.length === 0 ? undefined :
+      `${listed.join('; ')}${more > 0 ? `; and ${more} more extended object${more === 1 ? '' : 's'}` : ''}`;
+    // The pair's step names its own export door, so "export it or delete it"
+    // is one instruction: export to keep what it holds, then delete it.
+    const pairStep = customizationPackage === undefined ? undefined :
+      `the customization package "${customizationPackage}" first (to keep its customizations, export it ` +
+      `before that: GET /api/v1/packages/${customizationPackage}/export)`;
+    const extendersReason = 'a package cannot be uninstalled while another package extends an object it owns ' +
+      '(objectExtensions, ADR-0029)';
+    const pairReason = 'while its paired customization package is installed, which would strand every ' +
+      'customization it holds (ADR-0146 D3)';
     super(
-      `Uninstall the ${extenders.length === 1 ? 'package that extends' : 'packages that extend'} ` +
-        `${extendedObjects.length === 1 ? 'an object' : 'objects'} of "${packageId}" first ` +
-        `(${extenders.join(', ')}), then uninstall "${packageId}" again: a package cannot be ` +
-        `uninstalled while another package extends an object it owns (objectExtensions, ADR-0029). ` +
-        `Cannot uninstall package "${packageId}": ${listed.join('; ')}` +
-        `${more > 0 ? `; and ${more} more extended object${more === 1 ? '' : 's'}` : ''}.`,
+      extendersStep !== undefined && pairStep !== undefined
+        ? `Uninstall ${extendersStep} (${extenders.join(', ')}) and delete ${pairStep}, then uninstall ` +
+          `"${packageId}" again: ${extendersReason}, nor ${pairReason}. Cannot uninstall package ` +
+          `"${packageId}": ${extendersFact}; and its customization package "${customizationPackage}" is installed.`
+        : pairStep !== undefined
+          ? `Delete ${pairStep}, then uninstall "${packageId}" again: a package cannot be uninstalled ` +
+            `${pairReason}. Cannot uninstall package "${packageId}": its customization package ` +
+            `"${customizationPackage}" is installed.`
+          : `Uninstall ${extendersStep} first (${extenders.join(', ')}), then uninstall "${packageId}" again: ` +
+            `${extendersReason}. Cannot uninstall package "${packageId}": ${extendersFact}.`,
     );
     this.name = 'PackageUninstallExtendedError';
     this.packageId = packageId;
     this.extendedObjects = extendedObjects;
     this.extenders = extenders;
+    this.customizationPackageId = customizationPackage;
   }
 }
 
@@ -5631,13 +5672,23 @@ export class SchemaRegistry {
    * its prescription is the whole way out. The decision is unchanged: the
    * package is refused exactly when the first such object exists.
    *
+   * [#28408, ADR-0146 D3] It also refuses while this registry holds the
+   * package's paired customization package — the id
+   * {@link customizationPackageId} derives from `packageId`, so the pair is
+   * found by id alone, whichever door created or installed it. The same
+   * refusal, carrying both causes when both hold. Uninstalling the pair itself
+   * asks nothing of this kind: a `.custom` id derives no pair of its own. An
+   * id that derives no valid pair id (`@acme/crm`) cannot have one installed,
+   * so it is not asked either.
+   *
    * ⛔ ONE predicate: {@link unregisterObjectsByPackage} calls this method
    * rather than keeping its own copy, so the question asked ahead and the
    * refusal raised by the uninstall cannot disagree. `force` is not a
    * parameter here: forcing means not asking, and stays the caller's choice.
    *
    * @throws PackageUninstallExtendedError (`RESOURCE_CONFLICT` / 409) if the
-   *   package owns an object another package extends (ADR-0029)
+   *   package owns an object another package extends (ADR-0029), or its
+   *   paired customization package is installed (ADR-0146 D3)
    */
   assertPackageUninstallable(packageId: string): void {
     const extended: ExtendedObjectOfUninstall[] = [];
@@ -5654,7 +5705,11 @@ export class SchemaRegistry {
         extended.push({ objectName: fqn, extenders: otherExtenders.map(c => String(c.packageId)) });
       }
     }
-    if (extended.length > 0) throw new PackageUninstallExtendedError(packageId, extended);
+    const pair = customizationPackageId(packageId);
+    const installedPair = pair.ok && this.getPackage(pair.value) !== undefined ? pair.value : undefined;
+    if (extended.length > 0 || installedPair !== undefined) {
+      throw new PackageUninstallExtendedError(packageId, extended, installedPair);
+    }
   }
 
   /**
@@ -5668,7 +5723,8 @@ export class SchemaRegistry {
    * its own mutations.
    *
    * @throws PackageUninstallExtendedError (`RESOURCE_CONFLICT` / 409) if trying
-   *   to uninstall an owner that has extenders — {@link assertPackageUninstallable}'s
+   *   to uninstall an owner that has extenders, or a base whose paired
+   *   customization package is installed — {@link assertPackageUninstallable}'s
    */
   unregisterObjectsByPackage(packageId: string, force: boolean = false): void {
     // [#7970] REFUSAL PASS — see {@link assertPackageUninstallable}, which holds

@@ -112,6 +112,8 @@ const READS: Record<string, Fn> = {
     getDiscovery: async () => ({ version: 'v0', routes: {} }),
     getMetaTypes: async () => [],
     getMetaItems: async (req: { type?: string }) => (req?.type === 'view' ? [FORM_VIEW] : [SCHEMA]),
+    // [#28409] The form doors' withdrawal layer beside the effective list.
+    getMetaItemsPerPackage: async (req: { type?: string }) => (req?.type === 'view' ? [FORM_VIEW] : []),
     getMetaItem: async () => SCHEMA,
     findData: async () => ({ records: [] }),
     getData: async () => ({ record: { id: 'r1' } }),
