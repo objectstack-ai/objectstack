@@ -237,6 +237,7 @@ export type { PackageWritabilityEngine } from './package-writability.js';
 // spelling.
 export { isServedOverrideRowOf } from './served-override.js';
 export type { ServedOverrideRow } from './served-override.js';
+export type { ServedOverrideEntry } from './protocol-served-overrides.js';
 
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
 // function `importUnmanagedPackage` raises, exported so the install door

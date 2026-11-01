@@ -66,8 +66,14 @@ import { childEnv } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * The source entry is spawned by this process's own `node`, as the `os migrate` family's other
+ * spawners (`plan.boot-parity`, `object-scope`, `unmapped-columns`) spawn it. Not through the `tsx`
+ * binary: the entry, its `src/` and its pinned `NODE_ENV=development` are the same either way, and
+ * the wrapper only adds a second process and its own transform, ~3.4 s of every spawn (#23181
+ * slice 12: `tsx bin/run-dev.js --version` 8.28-8.44 s, `node` 4.93-4.99 s).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** A tracker id as author-shown prose must not carry it: `#` and four or five digits. */
 const TRACKER_ID = /#\d{4,5}\b/;
@@ -381,7 +387,7 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'objectstack.config.ts'), FAMILY_FIXTURE);
   const toMajor = Math.max(...FAMILY.map((e) => e.toMajor));
   const run = await execFileP(
-    TSX,
+    process.execPath,
     [CLI, 'migrate', 'meta', '--from', String(MIGRATION_SUPPORT_FLOOR), '--to', String(toMajor), '--all'],
     { cwd: dir, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
   );

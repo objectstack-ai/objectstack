@@ -550,6 +550,10 @@ type ConnectionStateOfInstance =
         readonly reconnectRequired: readonly string[];
         /** The organization whose connection is the oldest standing one: see {@link discoveryOrganizationOf}. */
         readonly discovery?: string;
+        /** When that connection was made: a refusal of its token marks it only while it is still that connect. */
+        readonly discoveryConnectedAt?: string;
+        /** The reason the first `reconnect_required` connection records, the platform's sentence. */
+        readonly reconnectRequiredReason?: string;
     }
     | { readonly kind: 'unreadable' };
 
@@ -574,6 +578,21 @@ function discoveryOrganizationOf(rows: readonly ConnectorConnectionRecord[]): st
         if (a < b || (a === b && row.organizationId < pick.organizationId)) pick = row;
     }
     return pick?.organizationId;
+}
+
+/**
+ * ADR-0143 D4 — why the discovery organization's connection needs
+ * reconnecting: the upstream refused the token borrowed from it while the
+ * instance listed its tools (ruled B on #26702). The refusal is the
+ * connection's grant, not the instance's client secret, so it is recorded on
+ * the connection, and a reconnect there lists again. The platform's sentence,
+ * never the upstream's text.
+ */
+function discoveryTokenRefusedReason(connector: string, organizationId: string, status: number): string {
+    return `connector instance '${connector}' needs to be reconnected for organization '${organizationId}': its MCP server `
+        + `refused the token of this connection while it listed its tools (HTTP ${status}), so the grant does not reach what `
+        + 'the server serves. Reconnect required: an administrator connects it again, granting what the server asks for, and '
+        + 'the instance lists its tools with the new connection (ADR-0143 D4)';
 }
 
 /**
@@ -2506,11 +2525,17 @@ export class AutomationServicePlugin implements Plugin {
             let state: ConnectionStateOfInstance;
             try {
                 const rows = await this.connectorConnectionStoreOrNone().listFor(name);
+                const reconnectRequired = rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort();
+                const discovery = discoveryOrganizationOf(rows);
+                const discoveryConnectedAt = rows.find((r) => r.organizationId === discovery)?.connectedAt;
+                const reconnectRequiredReason = rows.find((r) => r.organizationId === reconnectRequired[0])?.statusReason;
                 state = {
                     kind: 'read',
                     connected: rows.filter((r) => r.status === 'connected').map((r) => r.organizationId).sort(),
-                    reconnectRequired: rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort(),
-                    discovery: discoveryOrganizationOf(rows),
+                    reconnectRequired,
+                    ...(discovery === undefined ? {} : { discovery }),
+                    ...(discoveryConnectedAt === undefined ? {} : { discoveryConnectedAt }),
+                    ...(reconnectRequiredReason === undefined ? {} : { reconnectRequiredReason }),
                 };
             } catch (err) {
                 state = { kind: 'unreadable' };
@@ -2699,6 +2724,8 @@ export class AutomationServicePlugin implements Plugin {
             // The handle the provider is given while it materializes an `mcp`
             // `authorization_code` instance: see `askingDuringMaterializationAs`.
             let materializingHandle: ReturnType<typeof askingDuringMaterializationAs> | undefined;
+            // Its connection, when the provider lists in its name: a refusal of that token is the connection's.
+            let discoveryConnection: { organizationId: string; connectedAt?: string } | undefined;
             if (entry.auth?.type === 'signed') {
                 try {
                     requestSigner = createConnectorRequestSigner(name, entry.auth, {
@@ -2740,17 +2767,21 @@ export class AutomationServicePlugin implements Plugin {
                             signature,
                             existing,
                             reason: state && state.reconnectRequired.length > 0
-                                ? reconnectRequiredReason(name, state.reconnectRequired[0])
+                                ? state.reconnectRequiredReason ?? reconnectRequiredReason(name, state.reconnectRequired[0])
                                 : notConnectedReason(name),
                         });
                         continue;
                     }
                 }
                 credentialHandle = this.createGrantHandle(ctx, name, entry, entry.auth, credential?.value);
-                const discovery = entry.auth.grant === 'authorization_code' && provider === 'mcp'
-                    ? (() => { const state = connectionStates.get(name); return state?.kind === 'read' ? state.discovery : undefined; })()
-                    : undefined;
-                if (discovery !== undefined) materializingHandle = askingDuringMaterializationAs(credentialHandle, discovery);
+                const state = entry.auth.grant === 'authorization_code' && provider === 'mcp' ? connectionStates.get(name) : undefined;
+                if (state?.kind === 'read' && state.discovery !== undefined) {
+                    materializingHandle = askingDuringMaterializationAs(credentialHandle, state.discovery);
+                    discoveryConnection = {
+                        organizationId: state.discovery,
+                        ...(state.discoveryConnectedAt === undefined ? {} : { connectedAt: state.discoveryConnectedAt }),
+                    };
+                }
             } else if (entry.auth?.type === 'app-credential') {
                 // ADR-0143 D2.2 — the vendor exchange the closed `vendor` names,
                 // run from the app secret its `credentialRef` resolved to; the
@@ -2839,6 +2870,24 @@ export class AutomationServicePlugin implements Plugin {
                 // echoes the credential back must not carry it into the husk's
                 // reason, a log record or the thrown boot error.
                 const thrown = withoutCredentialThrown(err, credentialForms(credential?.value, basicUsernameOf(entry.auth)));
+                // ADR-0143 D4 — the upstream refused the token borrowed from the
+                // discovery organization's connection while the instance listed
+                // its tools: that connection's grant, not the client secret the
+                // instance's `credentialRef` names, so the connection is marked
+                // and the secret left alone (#26702).
+                if (isConnectorCredentialRejected(thrown) && discoveryConnection !== undefined) {
+                    await this.holdConnectorForRefusedConnection(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        hasLive: existing !== undefined,
+                        connection: discoveryConnection,
+                        status: typeof (thrown as { status?: unknown }).status === 'number' ? (thrown as { status: number }).status : 403,
+                        cause: thrown,
+                    });
+                    continue;
+                }
                 // [#27237] The upstream refused the credential (ruling on
                 // #27237, comment 6470087293): degrade the instance and mark a
                 // stored credential `rejected` — never a failed boot, never a
@@ -3222,6 +3271,88 @@ export class AutomationServicePlugin implements Plugin {
             },
             ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
         });
+    }
+
+    /**
+     * ADR-0143 D4 — the upstream refused the token an `mcp` instance borrowed
+     * from its discovery organization's connection (ruled B on #26702) while
+     * it listed its tools. That organization's connection is marked
+     * `reconnect_required`, with the platform's sentence, and the client
+     * secret the instance's `credentialRef` names is left as it is: it is not
+     * what the upstream refused. The connection's change moves the
+     * instance's signature, so the reconcile queued here lists as the next
+     * connected organization, or holds the instance "reconnect required"
+     * until a reconnect, which lists again.
+     *
+     * The connection is marked only while it is still the connect whose token
+     * was sent (same `connected_at`); a reconnect that landed since keeps its
+     * fresh grant. When the connection could not be marked, the instance is
+     * degraded on the #3017 backoff instead, so the refusal is retried rather
+     * than held on a key that nothing moves. A live connector keeps serving,
+     * as on every failed re-materialization.
+     */
+    private async holdConnectorForRefusedConnection(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            hasLive: boolean;
+            connection: { organizationId: string; connectedAt?: string };
+            status: number;
+            cause: unknown;
+        },
+    ): Promise<void> {
+        const { name, connection } = info;
+        const reason = discoveryTokenRefusedReason(name, connection.organizationId, info.status);
+        let marked = false;
+        try {
+            const store = this.connectorConnectionStoreOrNone();
+            const record = await store.read(connection.organizationId, name);
+            if (record && record.status === 'connected' && record.connectedAt === connection.connectedAt) {
+                await store.markReconnectRequired(record, reason);
+                marked = true;
+            }
+        } catch (err) {
+            ctx.logger.warn(
+                `[Automation] connector instance '${name}': the connection of organization '${connection.organizationId}' `
+                    + 'could not be marked to be reconnected; the instance retries.',
+                describeThrownForLog(err),
+            );
+        }
+        if (!marked) {
+            this.degradeConnectorInstance(engine, ctx, {
+                name,
+                entry: info.entry,
+                provider: info.provider,
+                signature: info.signature,
+                hasLive: info.hasLive,
+                reason: `connector instance '${name}': its MCP server refused the token of organization `
+                    + `'${connection.organizationId}' while it listed its tools (HTTP ${info.status}); it retries`,
+                cause: info.cause,
+            });
+            return;
+        }
+        this.degradedInstances.set(name, { attempts: 1, signature: info.signature, reason, held: true });
+        if (!info.hasLive) {
+            try {
+                engine.registerDegradedConnector(this.buildDegradedHuskDef(name, info.entry), reason, 'declarative', info.cause, { kind: 'connection' });
+            } catch (err) {
+                ctx.logger.warn(
+                    `[Automation] could not register degraded husk for '${name}' — the instance stays absent from the `
+                        + 'connector registry until it is reconnected.',
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        ctx.logger.warn(
+            `[Automation] connector instance '${name}' (provider '${info.provider}'): its MCP server refused the token of `
+                + `organization '${connection.organizationId}' while it listed its tools (HTTP ${info.status}); that connection `
+                + 'needs to be reconnected (ADR-0143 D4).',
+        );
+        void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch(() => { /* logged by the reconcile */ });
     }
 
     /**

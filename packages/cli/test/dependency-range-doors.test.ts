@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: five spawns of the source CLI, each a distinct (command, fixture) pair (`os validate --json` and `os build --json` over the unreadable-range artifact, `os validate --json` and `os lint --json` over the unmet-range artifact, `os validate --json` over the met-range control); slowest CI reading 27.6 s (run 41199450735, over the five scheduled ci.yml runs 41199450735 to 41271604267) x 1.25, rounded up
 
 /**
  * ADR-0141 D2, author side — `os validate`, `os build` and `os lint` report

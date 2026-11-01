@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — spawns the real producer once per single-cause fixture: four spawns of the source CLI in one beforeAll, each a distinct (face, generator) pair (`os lint --eval --json --generator ""`, the same on the human face, and both faces over an unresolvable path); the same-door case reads the two machine-face runs the cases above read instead of spawning them again (six spawns before); slowest CI reading 35.7 s (run 41217827347, over the five scheduled ci.yml runs 41199450735 to 41271604267) x 1.25, rounded up
 
 /**
  * [#16359] `os lint --eval --generator ""` printed TWO spaces after our own
@@ -94,6 +95,23 @@ interface Run {
 }
 
 let dir: string;
+/** The unresolvable path every negative-control run names; under `dir`, so it never exists. */
+let missing: string;
+
+/**
+ * The four distinct runs this file reads, each spawned ONCE in `beforeAll`.
+ *
+ * The same-door case used to spawn the two machine-face runs a second time,
+ * with the same command, flags and fixture as the cases above; it now reads
+ * the very runs they read. The pair it compares is unchanged, and so is every
+ * assertion: only the duplicate spawns are gone.
+ */
+const runs = {} as {
+  emptyJson: Run;
+  emptyHuman: Run;
+  missingJson: Run;
+  missingHuman: Run;
+};
 
 function runLint(args: string[]): Promise<Run> {
   return new Promise((resolvePromise) => {
@@ -139,39 +157,45 @@ function payloadOf(run: Run, label: string): { error?: string } {
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-lint-eval-separator-'));
-});
+  missing = join(dir, 'does-not-exist.mjs');
+  // Sequential on purpose: one source-CLI child at a time, as the cases ran.
+  runs.emptyJson = await runLint(['--json', '--generator', '']);
+  runs.emptyHuman = await runLint(['--generator', '']);
+  runs.missingJson = await runLint(['--json', '--generator', missing]);
+  runs.missingHuman = await runLint(['--generator', missing]);
+  // The old per-case allowance, once per spawn.
+}, 4 * 120_000);
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
 describe('os lint --eval --generator "" — one space after our separator, on both faces', () => {
-  it('the machine face carries the message BYTE-EXACTLY', async () => {
-    const run = await runLint(['--json', '--generator', '']);
+  it('the machine face carries the message BYTE-EXACTLY', () => {
+    const run = runs.emptyJson;
     const payload = payloadOf(run, 'empty generator — machine face');
 
     expect(run.code).toBe(1);
     // The whole composed message, not a fragment: two spaces fail this line.
     expect(payload.error).toBe('Failed to load generator "": is not a valid JS file');
-  }, 120_000);
+  });
 
-  it('the human face carries the same message, byte for byte', async () => {
-    const run = await runLint(['--generator', '']);
+  it('the human face carries the same message, byte for byte', () => {
+    const run = runs.emptyHuman;
 
     expect(run.code).toBe(1);
     // `printError` -> `errorLine` -> `  ✗ ${msg}`, uncoloured under NO_COLOR.
     expect(humanLine(run, 'empty generator — human face')).toBe(
       '  ✗ Failed to load generator "": is not a valid JS file',
     );
-  }, 120_000);
+  });
 });
 
 describe('os lint --eval — the non-empty detail is untouched [negative control]', () => {
-  it('an unresolvable path still answers with exactly one space, on the machine face', async () => {
-    const missing = join(dir, 'does-not-exist.mjs');
-    const run = await runLint(['--json', '--generator', missing]);
+  it('an unresolvable path still answers with exactly one space, on the machine face', () => {
+    const run = runs.missingJson;
     const payload = payloadOf(run, 'unresolvable path — machine face');
 
     expect(run.code).toBe(1);
@@ -180,32 +204,33 @@ describe('os lint --eval — the non-empty detail is untouched [negative control
     expect(payload.error).toContain(`"${missing}": Build failed with 1 error:`);
     // ⛔ and the detail is not otherwise re-flowed.
     expect(payload.error).toContain(`error: Could not resolve "${missing}"`);
-  }, 120_000);
+  });
 
-  it('an unresolvable path still answers with exactly one space, on the human face', async () => {
-    const missing = join(dir, 'does-not-exist.mjs');
-    const run = await runLint(['--generator', missing]);
+  it('an unresolvable path still answers with exactly one space, on the human face', () => {
+    const run = runs.missingHuman;
 
     expect(run.code).toBe(1);
     expect(humanLine(run, 'unresolvable path — human face')).toBe(
       `  ✗ Failed to load generator "${missing}": Build failed with 1 error:`,
     );
-  }, 120_000);
+  });
 });
 
 describe('os lint --eval — the empty string and an unresolvable path answer through the SAME door [#16161]', () => {
-  it('same exit code, same envelope, same message shape', async () => {
-    const empty = await runLint(['--json', '--generator', '']);
-    const missing = await runLint(['--json', '--generator', join(dir, 'does-not-exist.mjs')]);
+  it('same exit code, same envelope, same message shape', () => {
+    // The two machine-face runs the cases above read: the same command, flags
+    // and fixture this case used to spawn a second time.
+    const empty = runs.emptyJson;
+    const unresolvable = runs.missingJson;
 
     const emptyPayload = payloadOf(empty, 'same door — empty');
-    const missingPayload = payloadOf(missing, 'same door — unresolvable');
+    const missingPayload = payloadOf(unresolvable, 'same door — unresolvable');
 
     // ⛔ The property #16161 ruled on, and the one a "special-case the empty
     // value" repair would break while still satisfying every spacing
     // assertion above. The empty string is a path that names no module, not a
     // separate error class.
-    expect(empty.code).toBe(missing.code);
+    expect(empty.code).toBe(unresolvable.code);
     expect(empty.code).toBe(1);
     expect(Object.keys(emptyPayload)).toEqual(Object.keys(missingPayload));
     expect(Object.keys(emptyPayload)).toEqual(['error']);
@@ -216,5 +241,5 @@ describe('os lint --eval — the empty string and an unresolvable path answer th
     ] as const) {
       expect(message, label).toMatch(/^Failed to load generator "[^]*?": \S/);
     }
-  }, 120_000);
+  });
 });

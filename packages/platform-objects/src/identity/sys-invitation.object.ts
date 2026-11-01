@@ -145,7 +145,12 @@ export const SysInvitation = ObjectSchema.create({
       // carried over from the row. invite-member renews a pending invitation
       // with its stored role whatever role is sent, and another email would
       // invite a different person, so neither is the user's to edit here.
-      description: 'Resend the invitation to {{ record.email }}? Its expiry date starts over.',
+      // [#28540] True for both rows Resend is offered on: an unexpired
+      // invitation is renewed, and an expired one is replaced by a new
+      // invitation while the old row moves to `expired` (plugin-auth's
+      // `invitation-expired-supersede.ts`), so one pending row remains.
+      description:
+        'Resend the invitation to {{ record.email }}? The expiry date starts over, and an invitation that has already expired is replaced by a new one.',
       icon: 'send',
       variant: 'secondary',
       locations: ['list_item'],
@@ -170,7 +175,7 @@ export const SysInvitation = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Send a pending invitation (the record) again (params: its email and role, copied from the invitation; the stored role is kept). Its expiry date starts over. Use when the invitee lost the invitation or never received it.',
+          'Send a pending invitation (the record) again (params: its email and role, copied from the invitation; the stored role is kept). The expiry date starts over, and an invitation that has already expired is replaced by a new one. Use when the invitee lost the invitation or never received it.',
       },
     },
     {
