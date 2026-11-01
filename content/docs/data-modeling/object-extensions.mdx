@@ -63,7 +63,7 @@ check that spelling first.
 | Key | Merge behaviour |
 |:---|:---|
 | `fields` | **Additive.** Merged into the target's field map. A name the target already has is **replaced**, not merged. |
-| `fieldPatches` | **Applied, field by field.** Changes the *display* of one of the target's own fields without replacing it — [below](#relabelling-a-vendor-field). |
+| `fieldPatches` | **Applied, field by field.** Changes the *display* of one of the target's own fields — never one an extension adds — without replacing it — [below](#relabelling-a-vendor-field). |
 | `validations` | **Concatenated.** Your rules run alongside the owner's; neither replaces the other. |
 | `indexes` | **Concatenated**, same as validations. |
 | `label` | Replaces the target's label — with one exception, [below](#extensions-and-tenant-customization). |
@@ -124,12 +124,15 @@ applying and stored values never change; any other key is refused by name with t
 reason.
 
 - **Every read serves it.** The patch is applied in the same merge as the other keys,
-  after the additive ones — so it can also reach a field a lower-priority extension
-  added — and the list, the by-name read and the layered view agree. Uninstalling the
-  extension serves the owner's text again.
+  after the additive ones, and the list, the by-name read and the layered view agree.
+  Uninstalling the extension serves the owner's text again.
+- **It reaches the owner's own fields only.** A field another extension adds — or one
+  your own extension adds in `fields` — is not a patch target, whatever the
+  priorities: set that field's text where it is declared. The install door and
+  `os validate` refuse such a patch, and at boot it is not applied and is named once.
 - **Conflicts resolve like `label`.** Two extensions patching the same key: the higher
   `priority` wins. A tenant who has edited that text keeps their own, [below](#extensions-and-tenant-customization).
-- **A patch must name something real.** A field the target does not have, or an option
+- **A patch must name something real.** A field the target does not declare, or an option
   value its field does not have, is refused when the package installs and by
   `os validate` when the target is in the same stack. A field whose options come from a
   shared picklist has no option labels of its own to patch. At boot, an unmatched patch

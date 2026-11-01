@@ -2128,21 +2128,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // 2e. [ADR-0146 D10, second rule] ⭐ THE FIELD-PATCH TARGET CHECK,
         //     beside the override gate and before any write: a patch naming a
         //     field its target does not have, or an option value its field does
-        //     not have, would change nothing and say nothing. Refused `400
-        //     VALIDATION_ERROR` on both branches, every refusal located in
-        //     `details.refusals`. The target is the registry's resolved object
-        //     (ADR-0141 D2 admitted the base first) or one this artifact
-        //     delivers.
+        //     not have, would change nothing and say nothing. Refused
+        //     `VALIDATION_ERROR` with this door's body-refusal status
+        //     (`UNRUNNABLE_REFUSAL_STATUS`, 422, as 1c'' answers) on both
+        //     branches, every refusal located in `details.refusals`. The target
+        //     is the OWNER's declaration (ADR-0141 D2 admitted the base first)
+        //     or one this artifact delivers: a patch reaches the owner's own
+        //     fields only, so a field another installed extension adds is
+        //     refused here as the fold would skip it.
         const patchTargetRefusals = this.fieldPatchTargetRefusalsOf(ctx, converted);
         if (patchTargetRefusals.length > 0) {
             return c.json({
                 success: false,
                 error: {
-                    code: 'VALIDATION_ERROR',
+                    code: UNRUNNABLE_REFUSAL_CODE,
                     message: fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals),
                     details: { refusals: patchTargetRefusals },
                 },
-            }, 400);
+            }, UNRUNNABLE_REFUSAL_STATUS);
         }
 
         // 3. Hot-register FIRST so a malformed inline manifest fails the
@@ -3292,10 +3295,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * `objectExtensions[].fieldPatches` entry the converted body carries —
      * each `packages[]` entry's, or the body's own — judged against its target
      * by `@objectstack/metadata-core`'s `fieldPatchTargetRefusals`. A target
-     * this artifact delivers is read off its body; any other is the registry's
-     * resolved object. A target neither knows is not judged here: the
-     * extension then registers against an owner that is not loaded, which the
-     * registry already reports.
+     * this artifact delivers is read off its body; any other is the owner's
+     * declaration the registry holds (`getFieldPatchTarget`), never the
+     * resolved object: that one carries every installed extension's fields,
+     * and a patch reaches the owner's own fields only (ADR-0146 D10). A target
+     * neither knows is not judged here: the extension then registers against
+     * an owner that is not loaded, which the registry already reports.
      */
     private fieldPatchTargetRefusalsOf = (ctx: PluginContext, converted: Record<string, any>): FieldPatchTargetRefusal[] => {
         const multi = Array.isArray(converted.packages);
@@ -3312,9 +3317,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
             for (const object of list) if (isPlainObject(object) && typeof object.name === 'string') delivered.set(object.name, object);
         }
-        let registry: { getObject?(name: string): unknown } | undefined;
+        let registry: { getFieldPatchTarget?(name: string): unknown } | undefined;
         try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered targets are known */ }
-        const getTarget = (name: string): unknown => delivered.get(name) ?? registry?.getObject?.(name);
+        const getTarget = (name: string): unknown => delivered.get(name) ?? registry?.getFieldPatchTarget?.(name);
         return bodies.flatMap(({ body, prefix }) => fieldPatchTargetRefusals(body.objectExtensions, getTarget, prefix));
     };
 
