@@ -185,6 +185,16 @@ describe('#28726 — an app nav `visible` over the CEL parse budget is refused a
     });
   }
 
+  it('[#22161] the nav verdict and its remedy are each one line of at most 200 characters, at every site', () => {
+    for (const site of SITES) {
+      const [f] = overBudget(gateApp(site.app(OVER)).errors);
+      for (const line of [f!.message, f!.hint!]) {
+        expect(line, site.name).not.toContain('\n');
+        expect(line.length, `${site.name}: ${line}`).toBeLessThanOrEqual(200);
+      }
+    }
+  });
+
   it('the `{ dialect: \'cel\' }` envelope of the same source is refused too; another dialect is not judged', () => {
     expect(overBudget(gateApp(topLevelApp({ dialect: 'cel', source: OVER })).errors).map((f) => f.path))
       .toEqual(['apps[0].navigation[0].visible']);

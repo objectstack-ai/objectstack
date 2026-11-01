@@ -1677,10 +1677,11 @@ function navOverBudgetFinding(refusal: CelBoundsFault, where: string, path: stri
     message:
       `visibility predicate is syntactically valid CEL but overruns ${boundName(refusal.overrun)}` +
       `${named ? '' : ` (${refusal.overrun.summary})`}, ${NAV_SURFACE.consequence}`,
+    // [#22161] One remedy line of at most 200 characters, so one example; the
+    // single-permission-check alternative is `os explain` for this id.
     hint:
       'Make the predicate smaller: collapse an `||` chain into one list test, e.g. ' +
-      "`current_user.positions.exists(p, p in ['a', 'b', …])`, or gate the entry on one " +
-      "permission check such as `current_user.can('OBJECT', 'read')`",
+      "`current_user.positions.exists(p, p in ['a', 'b', …])`",
   };
 }
 
