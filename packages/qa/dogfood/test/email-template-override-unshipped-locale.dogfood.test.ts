@@ -35,6 +35,8 @@ const PAIR = 'com.example.showcase.custom';
 /** The template the showcase ships, in `en-US` only. */
 const NAME = 'showcase_task_done_email';
 const DECLARATION = { package: BASE, basedOn: '0.1.0' } as const;
+/** The refusal's code — the save door answers it beside a string `error`, an enveloped door inside `error`. */
+const codeOf = (json: any): unknown => json?.code ?? json?.error?.code;
 
 describe('[#28746] a declared override of an email template locale the base does not ship (showcase)', () => {
     let stack: VerifyStack | undefined;
@@ -87,7 +89,7 @@ describe('[#28746] a declared override of an email template locale the base does
     it('the save door refuses an `fr-FR` override declared from the pair, and nothing is served for `fr-FR`', async () => {
         const saved = await saveDraft(body('fr-FR', 'Tâche terminée : {{title}}', { overrides: { ...DECLARATION } }));
         expect(saved.status, JSON.stringify(saved.json)).toBe(403);
-        expect(saved.json?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(codeOf(saved.json)).toBe('NOT_OVERRIDABLE');
         expect(await pairRows()).toEqual([]);
         expect((await served('fr-FR')).status).toBe(404);
     });
@@ -107,7 +109,7 @@ describe('[#28746] a declared override of an email template locale the base does
 
         const published = await publish('fr-FR');
         expect(published.status, JSON.stringify(published.json)).toBe(403);
-        expect(published.json?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(codeOf(published.json)).toBe('NOT_OVERRIDABLE');
         expect(await pairRows()).toEqual([['fr-FR', 'draft']]);
         expect((await served('fr-FR')).status).toBe(404);
     });

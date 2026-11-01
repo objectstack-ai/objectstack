@@ -34,7 +34,7 @@ export type { MetadataAuthoringChannel } from './protocol.js';
 // [ADR-0146 D2, #28410] The override write gate's one rule, exported for the
 // two gate points outside this package — `os validate` and the marketplace
 // managed install — so all three doors ask one judgement and cannot drift.
-export { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteSubject, type OverrideWriteClosure, type OverrideWriteRule, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+export { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteSubject, type OverrideWriteClosure, type OverrideWriteRule, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge,
 // exported for the doors outside this package — `os validate` and the
 // marketplace install — so every door that lets a field in asks one judgement.
