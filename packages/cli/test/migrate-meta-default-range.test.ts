@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 60 — spawns the real producer once per single-cause fixture: four spawns of the source CLI's os migrate meta, each run once and shared by every case that reads it (the tombstone's --from N in its --json and human faces and the empty --from N --to N range, all on the retired-key stack; the oldest supported range on the canonical stack), every one a distinct triple; slowest CI reading 46.3 s (run 41271604267, on the tsx-binary spawn this file no longer takes) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * `os migrate meta` — the DEFAULT `--to`, and what an empty range is allowed to
@@ -83,8 +84,14 @@ import { childEnv } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * The source entry is spawned by this process's own `node`, as the `os migrate` family's other
+ * spawners (`plan.boot-parity`, `object-scope`, `unmapped-columns`) spawn it. Not through the `tsx`
+ * binary: the entry, its `src/` and its pinned `NODE_ENV=development` are the same either way, and
+ * the wrapper only adds a second process and its own transform, ~3.4 s of every spawn (#23181
+ * slice 12: `tsx bin/run-dev.js --version` 8.28-8.44 s, `node` 4.93-4.99 s).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const RENAME_CONVERSION = 'dashboard-refresh-interval-to-refresh-interval-seconds';
 
@@ -144,7 +151,7 @@ function runMeta(args: string[], cwd: string): Promise<Run> {
   const key = `${cwd}::${args.join(' ')}`;
   const hit = runs.get(key);
   if (hit) return hit;
-  const started = execFileP(TSX, [CLI, 'migrate', 'meta', ...args], {
+  const started = execFileP(process.execPath, [CLI, 'migrate', 'meta', ...args], {
     cwd,
     maxBuffer: 64 * 1024 * 1024,
     env: childEnv({ NO_COLOR: '1' }),
