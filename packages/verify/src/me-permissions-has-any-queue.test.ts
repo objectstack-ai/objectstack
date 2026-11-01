@@ -78,7 +78,7 @@ const stackWithDeclaredQueue = () =>
 async function hasAnyQueueAs(stack: VerifyStack, token: string): Promise<unknown> {
   const res = await stack.apiAs(token, 'GET', '/auth/me/permissions');
   expect(res.status).toBe(200);
-  const body = await res.json();
+  const body = (await res.json()) as { authenticated?: unknown; hasAnyQueue?: unknown };
   expect(body.authenticated).toBe(true);
   return body.hasAnyQueue;
 }
@@ -87,8 +87,8 @@ async function hasAnyQueueAs(stack: VerifyStack, token: string): Promise<unknown
 async function expectSysQueueRefused(stack: VerifyStack, token: string): Promise<void> {
   const res = await stack.apiAs(token, 'GET', '/data/sys_queue');
   expect(res.status).toBe(403);
-  const body = await res.json();
-  expect(body?.code, JSON.stringify(body)).toBe('PERMISSION_DENIED');
+  const body = (await res.json()) as { code?: unknown };
+  expect(body.code, JSON.stringify(body)).toBe('PERMISSION_DENIED');
 }
 
 describe('[#28508] a plain member\'s /auth/me/permissions answers hasAnyQueue (no declared queue)', () => {
