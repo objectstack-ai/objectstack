@@ -1002,7 +1002,7 @@ describe('[#28251] a save_notice node tells the person who made the triggering w
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
     await kernel.bootstrap();
-    const objectql = kernel.getService('objectql') as any;
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
     const automation = kernel.getService<AutomationEngine>('automation');
     await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('snw'), 'test', 'test');
@@ -1031,7 +1031,7 @@ describe('[#28251] a save_notice node tells the person who made the triggering w
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
     await kernel.bootstrap();
-    const objectql = kernel.getService('objectql') as any;
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
     const automation = kernel.getService<AutomationEngine>('automation');
     await attachSqlite(objectql);
     objectql.registry.registerObject(objectDef('snx'), 'test', 'test');
