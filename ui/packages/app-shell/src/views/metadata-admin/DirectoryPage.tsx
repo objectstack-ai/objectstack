@@ -263,7 +263,7 @@ export function MetadataDirectoryPage() {
           <p className="text-sm text-muted-foreground mt-1" data-testid="directory-customizations-total">
             {tFormat('engine.directory.customizations.total', locale, {
               customized: customizationTotal(customizations.read),
-              base: customizations.baseName,
+              baseName: customizations.baseName,
             })}
           </p>
         )}

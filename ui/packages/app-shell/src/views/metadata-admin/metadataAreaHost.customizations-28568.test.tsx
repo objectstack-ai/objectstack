@@ -185,7 +185,7 @@ describe('the All metadata lists mark a base\'s customizations (objectstack#2856
   it('the translation list marks the served override "Customized (HotCRM)", and the filter shows it alone', async () => {
     mountList(area(BASE), 'translation', `?package=${BASE}`);
     const only = await screen.findByTestId('metadata-only-customizations');
-    expect(marksOf('crm_en')).toEqual([`customized:${tFormat('engine.customizationMark.customized', 'en-US', { base: 'HotCRM' })}`]);
+    expect(marksOf('crm_en')).toEqual([`customized:${tFormat('engine.customizationMark.customized', 'en-US', { baseName: 'HotCRM' })}`]);
     expect(marksOf('crm_en')).toEqual(['customized:Customized (HotCRM)']);
     // CONTROL: the base's item the read does not list carries no mark.
     expect(marksOf('crm_de')).toEqual([]);
@@ -240,7 +240,7 @@ describe('the All metadata lists mark a base\'s customizations (objectstack#2856
     mountList(area(null), 'permission', '?scope=environment');
     await screen.findByTestId('metadata-row-crm_rep_plus');
     expect(marksOf('crm_rep_plus')).toEqual([
-      `customizationOf:${tFormat('engine.customizationMark.customizationOf', 'en-US', { base: BASE })}`,
+      `customizationOf:${tFormat('engine.customizationMark.customizationOf', 'en-US', { baseName: BASE })}`,
     ]);
     // CONTROL: the base's own item names no base.
     expect(marksOf('crm_rep')).toEqual([]);
@@ -253,7 +253,7 @@ describe('the All metadata directory counts a base\'s customizations (objectstac
     mountDirectory(area(BASE));
     const total = await screen.findByTestId('directory-customizations-total');
     expect(total).toHaveTextContent(
-      tFormat('engine.directory.customizations.total', 'en-US', { customized: 3, base: 'HotCRM' }),
+      tFormat('engine.directory.customizations.total', 'en-US', { customized: 3, baseName: 'HotCRM' }),
     );
     expect(screen.getByTestId('directory-tile-customized-object')).toHaveTextContent(
       tFormat('engine.directory.customizations.tile', 'en-US', { customized: 1 }),

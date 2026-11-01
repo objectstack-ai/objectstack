@@ -54,9 +54,9 @@ export function CustomizationMark({
   const label =
     kind === 'added'
       ? t('engine.customizationMark.added', locale)
-      : tFormat(`engine.customizationMark.${kind}`, locale, { base });
+      : tFormat(`engine.customizationMark.${kind}`, locale, { baseName: base });
   const title = pairId
-    ? tFormat(`engine.customizationMark.${kind}Title`, locale, { base, pair: pairId })
+    ? tFormat(`engine.customizationMark.${kind}Title`, locale, { baseName: base, pair: pairId })
     : undefined;
   return (
     <span
