@@ -197,18 +197,22 @@ function noPairNamespaceClause(baseId: string, baseNamespace: unknown, reason: C
  * dependency check refuses the install anyway (`DEPENDENCY_MISSING`), so only
  * the presence of both is asked here.
  *
+ * `getInstalled` answers the installed row for an id — a registry's
+ * `getPackage` — and is read only as far as `manifest.namespace`, so a caller
+ * passes its lookup as it is typed.
+ *
  * Pure over the manifest and one registry lookup; it writes nothing.
  */
 export function customizationPairManifestRefusal(
     manifest: unknown,
-    getInstalled: (id: string) => PairPackageRow | undefined,
+    getInstalled: (id: string) => unknown,
 ): string | undefined {
     const m = manifest as PairPackageRow['manifest'] | null | undefined;
     const baseId = customizationBasePackageId(m?.id);
     if (baseId === null) return undefined;
     const pairId = m!.id as string;
 
-    const base = getInstalled(baseId);
+    const base = getInstalled(baseId) as PairPackageRow | null | undefined;
     const expected = base ? customizationNamespace(base.manifest?.namespace) : undefined;
     const lacks: string[] = [];
     const namespace = m?.namespace;
