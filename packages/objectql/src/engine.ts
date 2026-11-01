@@ -9328,6 +9328,13 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.warn('Skipping viewItems entry without a derivable name', { id: ownerId });
                   continue;
               }
+              // [#28534] The owner-stamp refusal, judged on the PARSED body. No
+              // {@link noteRegistrationStamp} follows the `registerItem` below, on
+              // purpose: what it stamps is `parsed.data`, the parse's own new
+              // object, never the caller's entry, so this site leaves no in-place
+              // stamp on anything a later registration could be handed
+              // (`collection-item-owner-stamp.test.ts` pins the caller's entry
+              // unstamped).
               const ownerStamp = collectionItemOwnerStampRefusal(body, 'view', itemName, ownerId);
               if (ownerStamp) throw ownerStamp;
               const toRegister = body.name === itemName ? body : { ...body, name: itemName };

@@ -136,6 +136,37 @@ describe('[#28534] a stamp a REGISTRATION wrote onto the caller\'s object is not
     });
 });
 
+describe('[#28534] the `viewItems:` channel stamps its parse output, never the caller\'s object', () => {
+    const viewItem = (stamp?: unknown) => ({
+        name: 'account.hot',
+        object: 'account',
+        viewKind: 'list',
+        config: { type: 'grid', columns: [{ field: 'name' }] },
+        ...(stamp === undefined ? {} : { _packageId: stamp }),
+    });
+
+    it('a registered entry leaves the caller\'s object unstamped — so there is no in-place stamp to record there', () => {
+        const entry = viewItem();
+        const engine = new ObjectQL();
+        engine.registerApp({ id: PKG, name: 'probe', viewItems: [entry] } as any);
+        expect(engine.registry.listItems('view').find((v: any) => v?.name === 'account.hot')).toMatchObject({ _packageId: PKG });
+        expect((entry as { _packageId?: unknown })._packageId, 'the parse output was stamped, not the caller\'s entry').toBeUndefined();
+        // …so the same object registers again under another package, unjudged by an earlier stamp.
+        expect(() => new ObjectQL().registerApp({ id: HOST, name: 'host', viewItems: [entry] } as any)).not.toThrow();
+    });
+
+    it('an entry arriving with another package\'s `_packageId` is refused there too', () => {
+        let error: any;
+        try {
+            new ObjectQL().registerApp({ id: PKG, name: 'probe', viewItems: [viewItem(HOST)] } as any);
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(error.message).toContain("from view 'account.hot'");
+    });
+});
+
 // ── the residual door and its owner record ─────────────────────────────────
 
 type ManifestService = { register(m: unknown, options?: { source?: 'code' | 'marketplace' }): void | Promise<void> };
