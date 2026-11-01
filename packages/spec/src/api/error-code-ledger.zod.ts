@@ -1232,6 +1232,13 @@ export const ERROR_CODE_LEDGER = {
     // the code `@objectstack/cloud-connection` already registers — one
     // condition, one vocabulary; provenance, not identity (see above).
     'ENVIRONMENT_NOT_FOUND',
+    // [#28410, ADR-0146 D2] `os validate` refuses an item the override write
+    // gate refuses (`utils/override-declarations.ts`, step 3a-iii): each row on
+    // `errors` (`--json`, exit 1) carries this code, the one the publish doors
+    // answer the same item with. `door: 'none'`: a CLI exit, no HTTP boundary.
+    // Registered under `@objectstack/metadata-protocol`, so this row is
+    // provenance, not identity.
+    'NOT_OVERRIDABLE',
     // [#20367 ruling B] `os validate` / `os build` refuse a config whose default
     // export no stack producer built (`hasStackProvenance`, `@objectstack/spec`)
     // — right after load, before any other judgement, through each command's
@@ -1280,6 +1287,12 @@ export const ERROR_CODE_LEDGER = {
     'MARKETPLACE_STORAGE_FAILED',    // install-record read/write failed
     'MARKETPLACE_UNAVAILABLE',
     'NOTHING_TO_PURGE',              // package declares no seed datasets
+    // [#28410, ADR-0146 D2] install-local refused a managed install whose items
+    // the override write gate refuses (step 2d, `marketplace-install-local-plugin.ts`),
+    // 403, by the plugin's OWN Hono route, before any write; `details.refusals`
+    // names each item. The code the publish doors answer the same item with,
+    // registered under `@objectstack/metadata-protocol`: provenance, not identity.
+    'NOT_OVERRIDABLE',
     'PLUGIN_INSTALL_FAILED',
     'PLUGIN_MANIFEST_INVALID',
     'PLUGIN_REGISTER_FAILED',

@@ -2,6 +2,7 @@
 '@objectstack/metadata-protocol': minor
 '@objectstack/cli': minor
 '@objectstack/cloud-connection': minor
+'@objectstack/spec': patch
 ---
 
 **BREAKING** feat(metadata-protocol)!: the override write gate — only a base's paired `<base>.custom` package declares an override, and a dependent's item under a base item's name is refused (ADR-0146 D2, #28410)
@@ -31,3 +32,5 @@ A dependent package used to be able to ship, publish or install an item under th
 **The sealed sentence.** A write over a sealed item of a type a declared override can replace now ends "To change it, declare an override from '<base>.custom' (overrides: { package: '<base>', basedOn }), or rename the item." in place of naming no route.
 
 `@objectstack/metadata-protocol` exports the gate's rule, `judgeOverrideWrite`, and its item walk, `overrideWriteItemsOf`, so the three doors ask one judgement.
+
+`@objectstack/spec` records the two new emitters of `NOT_OVERRIDABLE` in its error-code provenance ledger (`api/error-code-ledger.zod.ts`, under `@objectstack/cli` and `@objectstack/cloud-connection`). The code was already registered, so the union, casing and every schema are unchanged.
