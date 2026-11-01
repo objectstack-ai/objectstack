@@ -99,9 +99,7 @@ export const WarehouseApi = defineConnector({
 // connector_action { connectorId: 'warehouse_api', actionId: 'request',
 //   input: { method: 'GET', path: '/v1/stock/low' } } → create_record `stock_alert`
 //   fields: { lines: { dialect: 'cel', source: 'low.body' } }.
-// Optional — let an agent run the sweep on request (objectstack-ai § Actions as AI Tools):
-// { name: 'refresh_low_stock', label: 'Refresh low stock', type: 'flow', target: 'low_stock_sweep',
-//   ai: { exposed: true, description: 'Pull the current low-stock lines from the warehouse API into stock_alert rows.' } }
+// To let an agent run the sweep on request: objectstack-ai § Actions as AI Tools.
 ```
 
 ## 4 · Vendor callback — an `api` flow with `secretRef`
@@ -144,15 +142,37 @@ export const LegacyErp = defineConnector({
 // connector_action { connectorId: 'legacy_erp', actionId: 'listOpenOrders', input: {} }
 ```
 
-Each `operationId` is a named action in the flow palette and to agents;
 `provider: 'rest'` instead when the path is per call.
 
-## Not yet — declare the rest, mark the integration blocked, write no plugin
+## 6 · OAuth or vendor-app token — the server runs the grant
 
-- **OAuth-protected vendor** (DocuSign, Salesforce, Google): `auth` declares
-  `oauth2` (`authorization_code` / `client_credentials`) and `app-credential`
-  (`feishu` / `dingtalk` / `wecom`), but no server runs the grant yet: the
-  instance is held degraded, calling no upstream. Do not park a short-lived
-  token behind a `bearer` ref. Blocked on the outbound-OAuth card.
+Recipe 1's shape with a grant-bearing `auth`, served on `rest`, `openapi` and
+`mcp` (`http` only; a `stdio` server's credentials ride `transport.env`): the
+token is fetched per dispatch, kept in memory, refreshed before expiry and once
+on a `401`; no metadata key holds it.
+
+```ts
+// A user grants access once (PKCE always on); the ref is the client secret, omitted for a public client.
+auth: { type: 'oauth2', grant: 'authorization_code', authorizationUrl: 'https://account.docusign.com/oauth/auth',
+        tokenUrl: 'https://account.docusign.com/oauth/token', scopes: ['signature'],
+        clientId: 'objectstack-prod', credentialRef: 'DOCUSIGN_CLIENT_SECRET' }
+// Server to server: grant: 'client_credentials' with tokenUrl, clientId, credentialRef (`resource` optional).
+// Vendor app (Feishu bearer, DingTalk `x-acs-dingtalk-access-token`, WeCom `access_token` query):
+auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialRef: 'FEISHU_APP_SECRET' }
+```
+
+`client_credentials` and `app-credential` dispatch once the ref is set.
+`authorization_code` is degraded "not connected" until an administrator holding
+`manage_connector_connections` (organization admins by default) connects it,
+once per organization, from a signed-in session (an agent or API key is refused):
+`POST /api/v1/automation/connectors/:name/connection` answers `{ authorizationUrl }`
+for the admin to open; the vendor redirects to `GET …/connectors/oauth/callback`.
+`GET …/:name/connection` reads `not_connected` / `connected` / `reconnect_required`
+(the vendor refused the grant: connect again); `DELETE` revokes. Endpoints are
+`https://`; on `mcp` they and `clientId` may be omitted, discovered at connect.
+Still never park a short-lived token behind a `bearer` ref.
+
+## Not yet — declare it, mark the integration blocked, write no plugin
+
 - **WeChat Pay**: no `signed` scheme yet (Alipay's is `alipay-v3`, which also
   verifies responses).
