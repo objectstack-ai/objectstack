@@ -1602,9 +1602,9 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
    *     the bundle does not hold, and settles once that is in hand. A package
    *     object outside the bundle that no reader asked by name composes from a
    *     list already in hand, and asks for none: a reader of its views names it.
-   *   - The bundle still loading: a list already in hand answers, so a scope
-   *     never unsettles because an app was entered after it; otherwise the
-   *     scope waits for the bundle.
+   *   - The bundle still loading, or the app about to be entered in this
+   *     commit: a list already in hand answers, so a scope never unsettles
+   *     because an app was entered after it; otherwise the scope waits.
    *   - No bundle (no app entered, or a host without one): the list, as before.
    */
   const viewsForObjects = useCallback(
@@ -1624,7 +1624,9 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         return { views: bundledWithListed(fromBundle, bundledObjects, list), settled: status === 'ready' || status === 'error' };
       }
       if (listed.status === 'ready') return { views: listed.items, settled: true };
-      if (peek?.status === 'pending') return { views: NO_VIEWS, settled: false };
+      // `none` here is an app not entered YET: `peekBundle` answers null once
+      // the commit has settled without one.
+      if (peek) return { views: NO_VIEWS, settled: false };
       const views = readType('view');
       const status = getEntry('view').status;
       return { views, settled: status === 'ready' || status === 'error' };
