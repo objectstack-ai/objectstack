@@ -20,8 +20,8 @@ const OWNER = 'com.example.release';
 const pickedField = (picklist: string) => ({ status: { type: 'select', label: 'Status', picklist } });
 
 /** A residual with these top-level picklists (at `picklists[i]`) and objects. */
-const residual = (lists: string[], objects: unknown[] = [], ownerId: string | undefined = OWNER): ResidualPicklistInput => ({
-  ownerId,
+const residual = (lists: string[], objects: unknown[] = []): ResidualPicklistInput => ({
+  ownerId: OWNER,
   items: [
     ...lists.map((name, index) => ({ field: 'picklists', index, type: 'picklist', item: { name, label: name, options: [] } })),
     ...objects.map((item, index) => ({ field: 'objects', index, type: 'object', item })),
@@ -82,6 +82,6 @@ describe('unreferencedResidualPicklists — the words, for both doors', () => {
   });
 
   it('a stack with no id is named as `<none>`', () => {
-    expect(unreferencedResidualPicklists(residual(['solo'], [], undefined), [])?.owner).toBe('<none>');
+    expect(unreferencedResidualPicklists({ ...residual(['solo']), ownerId: undefined }, [])?.owner).toBe('<none>');
   });
 });
