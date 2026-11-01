@@ -654,6 +654,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
               value={value}
               field={enrichedField as unknown as FieldMetadata}
               deadlineSettled={isDeadlineSettled(enrichedField, data, { scope: predicateScope, fields: objectSchema?.fields })}
+              // A record page writes every date one way. The highlights strip
+              // above writes the year on a current-year date (objectui#13331),
+              // so a section row does too: "Dec 31, 2026" in the strip beside
+              // "Oct 2" in a section was two formats on one page. Grid cells
+              // keep the shared face that drops it.
+              alwaysShowYear
             />
           );
         }

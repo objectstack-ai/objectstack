@@ -621,7 +621,10 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               item={item}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
-              bodyClassName="text-sm whitespace-pre-wrap break-words text-muted-foreground"
+              // The body is what the author wrote, so it reads in the
+              // foreground colour, as a reply's body does; the muted grey
+              // belongs to the meta line above it (objectstack#27520 row 14).
+              bodyClassName="text-sm whitespace-pre-wrap break-words text-foreground"
             />
 
             {/* Drill to source rich entity (ADR-0052 ActivityPointer) */}
