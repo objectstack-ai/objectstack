@@ -35,6 +35,9 @@ const NAME = 'task_done_email';
 /** Shipped in `fr-FR` only: a bundle with no canonical member. */
 const FR_ONLY = 'task_late_email';
 const TYPE = 'email_template';
+/** A non-bundle type's item the base ships, for the control: its identity is its name alone. */
+const VIEW = 'showcase_task.default';
+const BASE_COLUMNS = ['title', 'status'];
 
 const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata',
@@ -143,6 +146,21 @@ function baseManifest(): Record<string, unknown> {
         version: '1.0.0',
         namespace: 'showcase',
         emailTemplates: [template(NAME, 'en-US', 'Base EN'), template(FR_ONLY, 'fr-FR', 'Base late FR')],
+        objects: [{
+            name: 'showcase_task',
+            label: 'Task',
+            sharingModel: 'private',
+            fields: Object.fromEntries(BASE_COLUMNS.map((f) => [f, { name: f, label: f, type: 'text' }])),
+        }],
+        views: [{
+            object: 'showcase_task',
+            list: {
+                label: 'All Tasks',
+                type: 'grid',
+                data: { provider: 'object', object: 'showcase_task' },
+                columns: BASE_COLUMNS.map((field) => ({ field })),
+            },
+        }],
     };
 }
 
@@ -217,6 +235,12 @@ const listed = async (protocol: ObjectStackProtocolImplementation, name: string,
 const executing = async (protocol: ObjectStackProtocolImplementation, name: string) =>
     rowsOf(((await protocol.getMetaItemsForExecution({ type: TYPE })) as any).items, name);
 
+/** The control's view items of a list, as `[_packageId, columns]`. */
+const listedViews = async (protocol: ObjectStackProtocolImplementation, packageId?: string) =>
+    (((await protocol.getMetaItems({ type: 'view', ...(packageId ? { packageId } : {}) })) as any).items as any[])
+        .filter((i) => i?.name === VIEW)
+        .map((i) => [i._packageId, (i?.config?.columns ?? i?.columns ?? []).map((c: any) => c?.field ?? c)]);
+
 const BASE_EN = ['en-US', BASE, 'Base EN'];
 const PAIR_FR = ['fr-FR', PAIR, 'Pair FR'];
 
@@ -274,6 +298,38 @@ describe('[#28802] a bundle member on the base\'s address, at member grain', () 
         expect(await byName(protocol, FR_ONLY)).toEqual(['Base late FR', 'fr-FR', BASE]);
         expect(await byName(protocol, FR_ONLY, 'en-US', BASE)).toBe(404);
         expect(await byName(protocol, FR_ONLY, 'en-US', DEPENDENT)).toEqual(['Dependent late EN', 'en-US', DEPENDENT]);
+    });
+
+    it('control: a non-bundle type keeps name grain: a pair\'s and a dependent\'s same-named view stay out of the base\'s lists', async () => {
+        const { protocol } = await boot();
+        await install(protocol, PAIR);
+        await install(protocol, DEPENDENT);
+        // Rows the override write gate refuses today (an undeclared pair row, a
+        // dependent's row under the name the base ships), laid down as stored before it.
+        for (const [packageId, columns] of [[PAIR, ['title']], [DEPENDENT, ['status']]] as const) {
+            const item = {
+                name: VIEW, object: 'showcase_task', viewKind: 'list', label: 'All Tasks',
+                config: { type: 'grid', data: { provider: 'object', object: 'showcase_task' }, columns: columns.map((field) => ({ field })) },
+            };
+            const gated = protocol as any;
+            gated.overrideWriteVerdict = () => ({ verdict: 'not_concerned' });
+            try {
+                await protocol.saveMetaItem({ type: 'view', name: VIEW, item, mode: 'draft', packageId } as any);
+                await protocol.publishMetaItem({ type: 'view', name: VIEW, packageId } as any);
+            } finally {
+                delete gated.overrideWriteVerdict;
+            }
+        }
+        // The rows reach the list read: the per-package layer carries all three bodies.
+        const perPackage = (((await (protocol as any).getMetaItemsPerPackage({ type: 'view' })) as any).items as any[])
+            .filter((i) => i?.name === VIEW)
+            .map((i) => (i?.config?.columns ?? []).map((c: any) => c?.field ?? c).join(','))
+            .sort();
+        expect(perPackage).toEqual(['status', 'title', 'title,status']);
+        expect(await listedViews(protocol)).toEqual([[BASE, BASE_COLUMNS]]);
+        expect(await listedViews(protocol, BASE)).toEqual([[BASE, BASE_COLUMNS]]);
+        // Beside it, the bundle's members on the same reads are untouched by the view rows.
+        expect(await listed(protocol, NAME)).toEqual([BASE_EN]);
     });
 
     it('control: the pair\'s declared override of the base\'s member is served as the base\'s; the pair\'s own member beside it too', async () => {
