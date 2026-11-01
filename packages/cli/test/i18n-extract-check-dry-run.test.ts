@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: seven spawns of the source CLI's `os i18n extract`, the one real extract that writes the in-sync tree each seeded case copies, then six distinct (flags, `--out` state) runs (`--check` and `--check --dry-run` over an empty `--out`, `--check --dry-run` over a stale bundle and over the in-sync tree, `--dry-run` with an empty `--out` and with none); slowest CI reading 19.3 s (run 41217827347, over the five scheduled ci.yml runs 41199450735 to 41271604267) x 1.25, rounded up
 
 /**
  * `os i18n extract --check --dry-run` COMPARES, and says what it found (#16480).

@@ -1953,6 +1953,32 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 // `opts.actor`) still publishes. Placed beside that backfill
                 // judgement, after the 404, so both body-member refusals sit at
                 // one point of the door's order.
+                //
+                // [#28541] A body that is present and is not a JSON object (an
+                // array, a string, a number, a boolean) has no member to read,
+                // so it used to publish with the default note. It is refused
+                // first, with the declaration's own whole-body issue and the
+                // same status as the note refusal. "No body" stays a publish
+                // with no note: the transport hands an absent or empty body as
+                // `{}`, and an in-process caller or a JSON `null` as
+                // `undefined` / `null`, and none of those is refused here.
+                if (body !== undefined && body !== null && (typeof body !== 'object' || Array.isArray(body))) {
+                    const declaredBody = PublishPackageDraftsRequestSchema.safeParse(body);
+                    if (!declaredBody.success) {
+                        const located = declaredBody.error.issues
+                            .map((issue) => `${issue.path.map(String).join('.') || '(body)'}: ${issue.message}`)
+                            .join('; ');
+                        return {
+                            handled: true,
+                            response: deps.error(
+                                `Invalid publish-drafts body — ${located}. Nothing was published: the body is a JSON `
+                                + 'object, { "message"?: string, "backfill"?: [...] }; send one, or send no body to '
+                                + 'publish with the sentence naming the package as the note.',
+                                400,
+                            ),
+                        };
+                    }
+                }
                 const declaredMessage = PublishPackageDraftsRequestSchema.shape.message.safeParse(body?.message);
                 if (!declaredMessage.success) {
                     const located = declaredMessage.error.issues
