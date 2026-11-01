@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // narrower (two carriers, one position) and the shared schema does not move.
 export const entry: SemanticMigration = {
   id: 'dataset-filter-nested-relation-equality-array-refused-at-save',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'ui.Dataset filter and ui.DatasetMeasure filter — an ARRAY as an EQUALITY comparand on a '
     + 'field INSIDE a nested-relation condition, now refused when the dataset is PARSED: the '

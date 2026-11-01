@@ -7,12 +7,19 @@
  *
  * `useAuth()` doesn't expose bootstrap-status, so we call the REST
  * endpoint directly. Org rename uses `useAuth().updateOrganization()`.
+ *
+ * The owner account goes through the same `/sign-up/email` door as every
+ * other registration, so when the server's auth config serves
+ * `features.turnstileSiteKey` (the opt-in Turnstile challenge) this page
+ * renders the widget too and sends its token; without it, the first owner
+ * could not be created on a deployment that turned the challenge on.
  */
 
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useAuth } from '@object-ui/auth';
+import { useAuth, TurnstileWidget } from '@object-ui/auth';
+import { signUpCaptchaFailedMessage } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Button,
@@ -73,6 +80,7 @@ export function SetupPage() {
     updateOrganization,
     createOrganization,
     switchOrganization,
+    getAuthConfig,
   } = useAuth();
 
   const [name, setName] = useState('');
@@ -81,6 +89,25 @@ export function SetupPage() {
   const [orgName, setOrgName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [bootstrapped, setBootstrapped] = useState<boolean | null>(null);
+  // The opt-in Turnstile challenge: the site key the server serves, the
+  // widget's single-use token, and the counter that discards a spent one.
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState<string | undefined>(undefined);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAuthConfig()
+      .then((cfg) => {
+        if (!cancelled) setTurnstileSiteKey(cfg?.features?.turnstileSiteKey);
+      })
+      // An unreadable config draws no widget; a server that does require a
+      // token then refuses the submit, which says so below.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [getAuthConfig]);
 
   // Probe bootstrap-status on mount. If an owner already exists, bounce
   // to /login — this page must never be reachable in a normal deployment.
@@ -124,7 +151,7 @@ export function SetupPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await signUp(name, email, password);
+      await signUp(name, email, password, undefined, turnstileSiteKey ? captchaToken ?? undefined : undefined);
 
       // The server bootstraps the owner's organization (plugin-auth's
       // default-org bootstrap in single-org mode; org-scoping's in
@@ -182,12 +209,18 @@ export function SetupPage() {
 
       window.location.assign(withConsoleBase(POST_BOOTSTRAP_EXIT));
     } catch (err) {
+      // The Turnstile refusals (token missing or rejected) read as the
+      // challenge's retry message, never as the provider's own text.
+      const code = (err as Error & { code?: string }).code;
+      const captchaRefusal = code === 'MISSING_RESPONSE' || code === 'VERIFICATION_FAILED';
       toast.error(
         t('auth.setup.failed', { defaultValue: 'Setup failed' }),
-        { description: (err as Error).message },
+        { description: captchaRefusal ? signUpCaptchaFailedMessage(t) : (err as Error).message },
       );
     } finally {
       setSubmitting(false);
+      // A token is single-use whatever the server answered.
+      if (turnstileSiteKey) setCaptchaResetKey((n) => n + 1);
     }
   };
 
@@ -273,7 +306,22 @@ export function SetupPage() {
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-              <Button type="submit" className="mt-2 w-full" disabled={submitting}>
+              {turnstileSiteKey && (
+                <TurnstileWidget
+                  siteKey={turnstileSiteKey}
+                  onToken={setCaptchaToken}
+                  resetKey={captchaResetKey}
+                  labels={{
+                    failed: signUpCaptchaFailedMessage(t),
+                    retry: t('auth.register.captchaRetry', { defaultValue: 'Retry' }),
+                  }}
+                />
+              )}
+              <Button
+                type="submit"
+                className="mt-2 w-full"
+                disabled={submitting || (Boolean(turnstileSiteKey) && !captchaToken)}
+              >
                 {submitting
                   ? t('auth.setup.submitting', { defaultValue: 'Setting up…' })
                   : t('auth.setup.submit', { defaultValue: 'Create owner account' })}

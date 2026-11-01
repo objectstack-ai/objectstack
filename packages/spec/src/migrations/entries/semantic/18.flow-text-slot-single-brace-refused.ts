@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // kept.
 export const entry: SemanticMigration = {
   id: 'flow-text-slot-single-brace-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'flows[].nodes[].config of a notify node (title, message, actionUrl), a screen node (title, description), an end node '
     + '(message) and an http node (url, and each value of the headers map) — a string, or the source of a '

@@ -22,6 +22,30 @@ import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import type { FormField, ObjectFormSection } from '@object-ui/types';
 
 /**
+ * A runtime `FormField` carrying its object field's group membership.
+ *
+ * `group` is written by the HOST, never authored on a form field: the
+ * object-bound form copies it from the object field (`Field.group`, the key of
+ * one of the object's `fieldGroups`) and {@link deriveFieldGroupSections} reads
+ * it back. So it is typed here, where its producer and consumer live, and not
+ * on the `FormField` authoring face (ui AGENTS.md #0.1, objectstack#25923).
+ */
+export type FormFieldWithGroup = FormField & { group?: string };
+
+/**
+ * A `section-divider` row as {@link projectSectionDivider} writes it: a
+ * runtime `FormField` plus the disclosure control the HOST resolves for it
+ * (`resolveSectionCollapse`). The form renderer's divider branch reads the
+ * three keys off the row; none of them is authored on a form field, so they
+ * stay off the `FormField` authoring face (ui AGENTS.md #0.1, objectstack#25923).
+ */
+type SectionDividerRow = FormField & {
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
+};
+
+/**
  * Derive form sections from an object's declared `fieldGroups` and each
  * rendered field's `group`.
  *
@@ -49,7 +73,7 @@ export function deriveFieldGroupSections(
     // Pseudo-def over the rendered fields: membership is the only input the
     // derivation needs per field.
     fields: Object.fromEntries(
-      fields.map((f) => [f.name, { group: (f as { group?: unknown }).group }]),
+      fields.map((f) => [f.name, { group: (f as FormFieldWithGroup).group }]),
     ),
   });
   if (!derived) return null;
@@ -135,7 +159,7 @@ export interface SectionDividerSource {
   /** The authored blurb (spec `FormSection.description`). */
   description?: string;
   /** ADR-0089 `FormSection.visibleWhen` (#6111), unevaluated. */
-  visibleWhen?: unknown;
+  visibleWhen?: FormField['visibleWhen'];
   /**
    * The fault direction of {@link visibleWhen}, copied onto the row unchanged
    * (`ObjectFormSection.visibleWhenFault`, objectui#13055).
@@ -335,11 +359,11 @@ export function projectSectionDivider(source: SectionDividerSource): FormField[]
         ...(visibleWhenFault !== undefined ? { visibleWhenFault } : {}),
         fields: members,
         colSpan: DIVIDER_COL_SPAN,
-      } as unknown as FormField,
+      } satisfies SectionDividerRow,
     ];
   }
 
-  const row: Record<string, unknown> = {
+  const row: SectionDividerRow = {
     name: `__section_${key}`,
     label: title,
     type: 'section-divider',
@@ -355,5 +379,5 @@ export function projectSectionDivider(source: SectionDividerSource): FormField[]
     row.collapsed = collapse.collapsed;
     row.onToggle = collapse.onToggle;
   }
-  return [row as FormField];
+  return [row];
 }

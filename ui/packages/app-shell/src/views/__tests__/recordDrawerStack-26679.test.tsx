@@ -168,7 +168,10 @@ describe('a related row opens in the same drawer, one level down (ruling 5)', ()
   it('pushes the task, shows ← and the path, and ← returns to the lead', () => {
     mountList();
     expect(body()).toBe('crm_lead/L-1');
-    expect(screen.getByTestId('record-drawer-leading').textContent).toBe('');
+    // objectstack#27524, Target 7 — at the root the bar's left end is the
+    // breadcrumb 「对象 › 记录名」, not ← and a path.
+    expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('Lead#L-1');
+    expect(trail()).toBeNull();
 
     fireEvent.click(button('open task row'));
     expect(body()).toBe('crm_task/T-1');
@@ -345,8 +348,9 @@ describe('on the record page, a related row opens a drawer over the page (target
     fireEvent.click(screen.getAllByRole('button', { name: 'open task row' })[0]);
     expect(dialogBody()).toBe('crm_task/T-1');
     expect(where()).toBe(`/apps/${APP}/crm_lead/record/L-1`);
-    // The drawer's root is the task: nothing on the left, ↑ ↓ over the rows.
-    expect(screen.getByTestId('record-drawer-leading').textContent).toBe('');
+    // The drawer's root is the task: its breadcrumb on the left
+    // (objectstack#27524), ↑ ↓ over the rows.
+    expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('Task#T-1');
     fireEvent.click(button('Next record'));
     expect(dialogBody()).toBe('crm_task/T-2');
     fireEvent.click(screen.getByTitle('Close'));

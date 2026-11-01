@@ -12,7 +12,7 @@
  * them with ↑ ↓ at its root.
  *
  * Answered where `onTotalChange` is: a paged grid that draws the rows it
- * fetched. A kind with no single row order (here a board) answers with no
+ * fetched. A kind with no single row order (here a calendar) answers with no
  * rows, so a host never steps through a stale set.
  */
 import React from 'react';
@@ -32,6 +32,7 @@ const objectDef = {
       name: 'status', type: 'select', label: 'Status',
       options: [{ value: 'new', label: 'New' }, { value: 'won', label: 'Won' }],
     },
+    created_at: { name: 'created_at', type: 'datetime', label: 'Created' },
   },
 };
 const ROWS = [
@@ -77,13 +78,15 @@ describe('ListView onRowsChange (objectstack#26679)', () => {
     await waitFor(() => expect(lastIds(onRowsChange)).toEqual(['l_3', 'l_1', 'l_2']));
   });
 
-  it('control: a board has no single row order and reports no rows', async () => {
+  // A board reports its rows lane by lane since objectstack#28461
+  // (`ListView.rowGroups-28461.test.tsx`); a calendar still has no row order.
+  it('control: a calendar has no single row order and reports no rows', async () => {
     const { dataSource, onRowsChange } = mount({
-      viewType: 'kanban',
-      options: { kanban: { groupBy: 'status' } },
+      viewType: 'calendar',
+      options: { calendar: { startDateField: 'created_at' } },
     });
     await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
     await waitFor(() => expect(onRowsChange).toHaveBeenCalled());
-    expect(onRowsChange.mock.calls.every(([rows]) => rows.length === 0)).toBe(true);
+    expect(onRowsChange.mock.calls.every(([rows, groups]) => rows.length === 0 && groups === undefined)).toBe(true);
   });
 });

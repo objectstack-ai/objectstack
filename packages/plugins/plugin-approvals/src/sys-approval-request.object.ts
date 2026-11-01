@@ -267,7 +267,7 @@ export const SysApprovalRequest = ObjectSchema.create({
     }),
 
     record_id: Field.text({
-      label: 'Record ID',
+      label: 'Record',
       required: true,
       maxLength: 100,
       // [#11386] The id half of this object's pointer pair (ADR-0052 §5),

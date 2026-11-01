@@ -155,6 +155,28 @@ export interface RouteLedgerEntry {
    */
   responseSchema?: string;
   /**
+   * Name of the `@objectstack/spec/api` export declaring the JSON BODY this
+   * route READS — the request-side twin of {@link responseSchema}, under the
+   * same rules: a NAME (this module stays import-free), resolved against the
+   * live spec exports by `packages/client/src/route-ledger-response-schema.test.ts`,
+   * and ABSENT MEANS "UNDECLARED", never a defect.
+   *
+   * What a filled row claims: the named schema's members are exactly the body
+   * members the handler reads, with the shapes it reads them in. It does NOT
+   * by itself claim the handler REFUSES a body the schema refuses — whether
+   * and where a violating body is refused is a per-member fact, pinned by the
+   * row's conformance suite. (This is NOT the REST catalog's `requestSchema`
+   * in `@objectstack/spec/api` `plugin-rest-api.zod.ts`, whose ratchet demands
+   * the route refuse every violating body; the dispatcher's `/packages`
+   * family is not in that catalog.)
+   *
+   * ⛔ DO NOT FILL A ROW THAT HAS NO CONFORMANCE COVERAGE: a suite that drives
+   * THIS handler, shows each declared member reaching the producer as sent and
+   * an undeclared member not reaching it, and asserts this row names the
+   * schema it parses with.
+   */
+  requestSchema?: string;
+  /**
    * The AUTHORIZATION posture this route has been REVIEWED to have, named by
    * the `authz-conformance.matrix.ts` row that classifies it (ADR-0056 D10).
    *
@@ -279,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 109 rows.
+ * CENSUS (generated): this list holds 113 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -499,8 +521,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     responseSchema: 'PackagePublishResultSchema',
     note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — `MetadataManager.publishPackage`\'s declared return, whose exact schema already existed in spec `system/metadata-persistence.zod.ts` and is re-exported into `/api`, never declared there a second time. Conformance: spec `api/package-lifecycle.test.ts`' },
   { route: 'POST /packages/:id/publish-drafts', domain: '/packages', disposition: 'sdk', client: 'packages.publishDrafts',
+    requestSchema: 'PublishPackageDraftsRequestSchema',
     responseSchema: 'PublishPackageDraftsResponseSchema',
-    note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — the protocol result AFTER the door\'s own mutations (seedApplied back-fill, ADR-0045 unhiddenApps/unhideError, rebindError). Fillable because packages-publish-drafts-response-conformance.test.ts drives THIS handler and parses the payload it answers; the producer half is pinned in objectql\'s publish-package-drafts-response-conformance.test.ts. `probes` is deliberately opaque in the declaration, upgraded to a modeled schema only when a consumer needs a field of it' },
+    note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — the protocol result AFTER the door\'s own mutations (seedApplied back-fill, ADR-0045 unhiddenApps/unhideError, rebindError). Fillable because packages-publish-drafts-response-conformance.test.ts drives THIS handler and parses the payload it answers; the producer half is pinned in objectql\'s publish-package-drafts-response-conformance.test.ts. `probes` is deliberately opaque in the declaration, upgraded to a modeled schema only when a consumer needs a field of it. `requestSchema` is the body the door reads (`message`, `backfill`; a body `actor` is ignored, so the schema strips unknown keys rather than refusing them), filled because packages-publish-drafts-request-conformance.test.ts drives THIS handler and pins what each body member does' },
   { route: 'POST /packages/:id/discard-drafts', domain: '/packages', disposition: 'sdk', client: 'packages.discardDrafts',
     responseSchema: 'DiscardPackageDraftsResponseSchema',
     note: 'Enveloped — the named schema is the `data`: `discardPackageDrafts`\'s declared return, transcribed describe-only. Conformance: spec `api/package-lifecycle.test.ts`' },
@@ -542,6 +565,18 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: "Store the value for one declared reference, then reconcile: every instance naming it re-materializes without a restart. Body is the closed `{ value }`. Answers the reference's listing entry after the reconcile, never the value. Refused, before anything is written: an undeclared reference 404 `RESOURCE_NOT_FOUND`, one an environment variable of the same name supplies 409 `RESOURCE_CONFLICT` (env wins in the chain, so a stored value would never be read), an empty or oversized value, one starting with `secret:` (the data engine would store it as a handle to another secret) or an unknown body key 400 `VALIDATION_ERROR`, and no crypto provider 503 `SERVICE_UNAVAILABLE`. Writes in one process run one at a time, with their reconcile; a concurrent first write from another replica answers 409 `RESOURCE_CONFLICT`. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-credential-door.test.ts`" },
   { route: 'DELETE /automation/connectors/credential-refs/:ref', domain: '/automation', disposition: 'server-only',
     note: "Remove the stored value for one reference, then reconcile: every instance naming it is torn down and registered degraded, naming the reference. 404 `RESOURCE_NOT_FOUND` when nothing is stored for it. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-credential-door.test.ts`" },
+  // ADR-0143 D5 — the connector connection door: a holder of the organization-
+  // scoped `manage_connector_connections` connects an `oauth2`
+  // `authorization_code` instance for their organization (Q1 = A). The
+  // store is `sys_connector_connection`, whose refresh token is a `Field.secret`.
+  { route: 'GET /automation/connectors/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: "The caller's organization's connection of one declared `oauth2` `authorization_code` instance: `status` (`not_connected` / `connected` / `reconnect_required`), its reason, the granted scopes, the access token's expiry and who connected it. ⛔ Never a token. Refused: an undeclared instance 404 `RESOURCE_NOT_FOUND`; one whose auth is not that grant, or a caller with no organization, 400 `VALIDATION_ERROR`. ⚑ `manage_connector_connections`, the organization-scoped capability (ADR-0143 D5), fail-closed, only `isSystem` bypassing; the platform-scoped `manage_metadata` does not admit a caller. No walled refusal, since a connection belongs to its organization. Closed query set: none. NOT JS-SDK surface on this leg: the driver is the Console's Connect / Reconnect flow (ADR-0143 S4). Pinned in `domains/automation-connector-connection-door.test.ts`" },
+  { route: 'POST /automation/connectors/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: "Begin connecting (or reconnecting) the instance for the caller's organization: answers `{ authorizationUrl, expiresAt }`, the vendor URL carrying a fresh `state` and an `S256` PKCE challenge. Nothing is written to the connection record until the callback completes; the pending authorization (verifier included) waits ten minutes in the cluster KV, or in process on a single node, sealed (AES-256-GCM) under a key derived from the raw `state`, which the server keeps only as a digest. The redirect URI is the deployment's (`OS_AUTH_URL` / `OS_BASE_URL`, or the plugin option), never the request's — 503 `SERVICE_UNAVAILABLE` when there is none. No body. Same refusals, gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-connection-door.test.ts`" },
+  { route: 'DELETE /automation/connectors/:name/connection', domain: '/automation', disposition: 'server-only',
+    note: "Revoke the caller's organization's connection: the row is removed, the cached access token dropped, and the instance re-judged — its next dispatch there is refused 'not connected'. ⚑ Local only: no RFC 7009 revocation is sent to the vendor, because no revocation endpoint is known for the instance (the auth declares none; ADR-0143 S2 discovery would supply one), so the refresh token stays valid at the vendor until it expires or is revoked there. 404 `RESOURCE_NOT_FOUND` when it was not connected; 503 `SERVICE_UNAVAILABLE` when the connection store cannot be read. Same gates and SDK posture as the GET row above. Pinned in `domains/automation-connector-connection-door.test.ts`" },
+  { route: 'GET /automation/connectors/oauth/callback', domain: '/automation', disposition: 'server-only',
+    note: "The authorization server's redirect (ADR-0143 D5). Closed query set: `code`, `state`, `error`, `error_description`, `error_uri`, `iss`; an unknown or repeated one is 400 `VALIDATION_ERROR`. The `state` is taken once and must have been begun by the same user in the same organization, else 400 before any code is exchanged; an `error` answer is 400 naming its registered code only. The code is exchanged with the PKCE verifier and the connection stored; answers the connection's status. 503 when the token endpoint cannot be reached. Same capability gate as the rows above (`manage_connector_connections`): the browser landing here is the administrator's. Pinned in `domains/automation-connector-connection-door.test.ts`" },
   { route: 'GET /automation/_status', domain: '/automation', disposition: 'sdk', client: 'automation.getRuntimeStatus' },
   { route: 'POST /automation/:name/trigger', domain: '/automation', disposition: 'sdk', client: 'automation.execute' },
   { route: 'POST /automation/:name/toggle', domain: '/automation', disposition: 'sdk', client: 'automation.toggle',

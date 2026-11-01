@@ -385,6 +385,9 @@ export const ObjectGallery: React.FC<ObjectGalleryProps> = (props) => {
         // The author's digit-grouping hint rides beside `scale`, whose scale-0
         // heuristic it overrides in the number cell (objectui#11026).
         if (def.useGrouping !== undefined) enriched.useGrouping = def.useGrouping;
+        // A percent field's read-only face: `plain` drops the percent cell's
+        // progress bar on a card as in the grid (objectstack#28255).
+        if (def.percentDisplay !== undefined) enriched.percentDisplay = def.percentDisplay;
         // A percent field's declared `max` is its STORAGE statement: the percent
         // cell reads it through the spec's `percentScaleOf` (a fraction unless
         // `max` is above 1) instead of guessing from the value. Dropped here, a

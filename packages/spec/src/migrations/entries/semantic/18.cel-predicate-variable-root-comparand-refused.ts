@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // rewrites is a different comparand, with a different replacement.
 export const entry: SemanticMigration = {
   id: 'cel-predicate-variable-root-comparand-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
     + 'CEL predicate comparing with != or == against the bare current_user root, the variable with '

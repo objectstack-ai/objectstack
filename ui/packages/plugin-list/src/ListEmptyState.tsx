@@ -27,7 +27,7 @@
 
 import * as React from 'react';
 import { Button, DataEmptyState, EmptyStateLink } from '@object-ui/components';
-import { Inbox, Plus, type LucideIcon } from 'lucide-react';
+import { Inbox, Plus, X, type LucideIcon } from 'lucide-react';
 import type { ListViewSchema } from '@object-ui/types';
 // The spec's own resolver for an `I18nLabel` (a plain string or an inline
 // locale map), under the name `ListView` gives it.
@@ -118,6 +118,13 @@ export interface ListEmptyStateProps {
   mayCreate?: boolean;
   /** Draws the add-record action when supplied; omitted, no action is drawn. */
   onAddRecord?: () => void;
+  /**
+   * Draws "Clear search" when supplied (objectstack#27520): the caller hands
+   * it only while a search the user typed is applied. The search persists
+   * across navigation, so a user can come back to a list their own search
+   * emptied, and this is the way out from where they land.
+   */
+  onClearSearch?: () => void;
   /** The caller's `list.*` translation function. */
   t: (key: string) => string;
   /** The locale an authored `I18nLabel` map is resolved against. */
@@ -134,6 +141,7 @@ export function ListEmptyState({
   baseFilterNamesCurrentUser = false,
   mayCreate,
   onAddRecord,
+  onClearSearch,
   t,
   displayLocale,
 }: ListEmptyStateProps) {
@@ -198,6 +206,20 @@ export function ListEmptyState({
       {t('list.addRecord')}
     </Button>
   ) : undefined;
+  const clearSearchAction = onClearSearch ? (
+    <Button
+      variant="outline"
+      size="sm"
+      data-testid="empty-state-clear-search"
+      onClick={() => onClearSearch()}
+    >
+      <X className="h-4 w-4 mr-1.5" />
+      {t('list.clearSearch')}
+    </Button>
+  ) : undefined;
+  // One action draws bare, as before; two or more (or the authored link,
+  // which always sat in this row) share one wrapping row.
+  const grouped = !!link || (!!clearSearchAction && !!addRecordAction);
   return (
     <DataEmptyState
       data-testid="empty-state"
@@ -206,12 +228,13 @@ export function ListEmptyState({
       iconWrapperClassName="mb-3"
       title={title}
       description={description}
-      action={link ? (
+      action={grouped ? (
         <div className="flex flex-wrap items-center justify-center gap-2">
+          {clearSearchAction}
           {addRecordAction}
-          <EmptyStateLink link={link} displayLocale={displayLocale} />
+          {link && <EmptyStateLink link={link} displayLocale={displayLocale} />}
         </div>
-      ) : addRecordAction}
+      ) : (clearSearchAction ?? addRecordAction)}
     />
   );
 }

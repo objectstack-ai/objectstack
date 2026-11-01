@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // because the surface an author rewrites is a CEL predicate string.
 export const entry: SemanticMigration = {
   id: 'rls-predicate-stored-list-ordering-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'security.PermissionSet rowLevelSecurity[].check, and .using where it stands in as the check — '
     + 'a CEL predicate ordering a field against a bound (>, >=, <, <=) where the field holds a list '

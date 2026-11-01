@@ -29,7 +29,6 @@ import { UnpublishedAppBar } from '../preview/UnpublishedAppBar.js';
 import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
 import { AppHeader } from './AppHeader.js';
-import { MobileViewSwitcherProvider } from './MobileViewSwitcherContext.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
@@ -212,7 +211,6 @@ export function ConsoleLayout({
     // One shared, URL-addressable command-palette open state for both the
     // AppHeader trigger (navbar) and the CommandPalette (children) — ADR-0054.
     <CommandPaletteProvider>
-    <MobileViewSwitcherProvider>
     {/* objectui#13130 — first in the DOM, so it is the first Tab stop. */}
     <SkipToContentLink targetRef={mainContentRef} />
     <AppShell
@@ -339,7 +337,6 @@ export function ConsoleLayout({
         />
       )}
     </AppShell>
-    </MobileViewSwitcherProvider>
     </CommandPaletteProvider>
   );
 }

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { PageHeaderProps, RecordRelatedListProps } from '@objectstack/spec/ui';
+import { PageHeaderProps, RecordQuickActionsProps, RecordRelatedListProps } from '@objectstack/spec/ui';
 
 import stack from '../objectstack.config.js';
 import { Task } from '../src/data/objects/task.object.js';
@@ -156,5 +156,46 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
       const result = RecordRelatedListProps.safeParse(props);
       expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
     });
+  });
+
+  describe('record_section — the Task Detail quick-actions bar (objectstack#27520 row 9)', () => {
+    const bars = taskPage ? allComponents(taskPage).filter((c) => c.type === 'record:quick_actions') : [];
+    const names = (bars[0]?.properties?.actionNames ?? []) as unknown[];
+    const headerIds = (taskPage
+      ? (allComponents(taskPage).find((c) => c.type === 'page:header')?.properties?.actions ?? [])
+      : []) as unknown[];
+
+    it('composes one quick-actions bar at record_section that parses against the spec row', () => {
+      expect(bars).toHaveLength(1);
+      expect(bars[0]?.properties?.location).toBe('record_section');
+      const result = RecordQuickActionsProps.safeParse(bars[0]?.properties);
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    });
+
+    it('names the task\'s whole record_section set, each declaring record_section', () => {
+      expect(names.length).toBeGreaterThan(0);
+      const sectionSet = taskActions.filter(declares('record_section')).map((a) => a.name as string);
+      expect([...names].sort()).toEqual([...sectionSet].sort());
+    });
+
+    it('draws each action once: nothing the bar names is also drawn by the header', () => {
+      // Control: both lists are populated, so an empty overlap is a reading.
+      expect(names.length).toBeGreaterThan(0);
+      expect(headerIds.length).toBeGreaterThan(0);
+      expect(names.filter((n) => headerIds.includes(n))).toEqual([]);
+      // And by declaration: no task action is placed both in the header's
+      // locations and in the bar's, so a synthesized page cannot double it either.
+      const doubled = taskActions
+        .filter(declares('record_section'))
+        .filter((a) => declares('record_header')(a) || declares('record_more')(a))
+        .map((a) => a.name);
+      expect(doubled).toEqual([]);
+    });
+  });
+
+  it('every record location keeps a stock host for a task action', () => {
+    for (const location of ['record_header', 'record_more', 'record_related', 'record_section']) {
+      expect(taskActions.filter(declares(location)).length, location).toBeGreaterThan(0);
+    }
   });
 });

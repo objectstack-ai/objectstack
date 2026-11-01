@@ -85,16 +85,16 @@ export function isRuntimeDefault(v: unknown): boolean {
 
 /**
  * A runtime `FormField` as far as this module is concerned: the resolved
- * object-field metadata stash, and whatever else the field carries.
+ * object-field metadata stash.
  *
  * Stated structurally rather than as `@object-ui/types`' `FormField` so the
- * one key this module reads is visible in the signature — and with an index
- * signature so a caller (or a test) may hand over an object literal carrying
- * the rest of the field without tripping TypeScript's excess-property check.
+ * one key this module reads is visible in the signature. No index signature:
+ * `FormField` declares its keys and carries none (objectstack#25923), and an
+ * interface without one is not assignable to a type that has one — a
+ * `FormField` value is accepted here because it declares this `field` slot.
  */
 export interface FieldWithDeclaredDefault {
   field?: { defaultValue?: unknown } | null;
-  [key: string]: unknown;
 }
 
 /**

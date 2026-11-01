@@ -118,7 +118,8 @@ name reaches one thing only:
   permissions (`allowCreate`, `allowRead`, …) are not read on this path, so they
   neither grant nor limit the insert.
 - **The visitor never sees that record.** The submit answers with the new
-  record's `id` only (section 4). Register a `guest_portal` set only if you want
+  record's `id`, plus only the engine-generated fields its thank-you panel
+  names (section 4). Register a `guest_portal` set only if you want
   fields masked on the record the route gets back; nothing else needs one.
 - **No object hook can read it.** A hook's `ctx.session` and `ctx.user` carry
   neither `permissions` nor `anonymous`, and on a public submission both are
@@ -213,6 +214,14 @@ Response on success (HTTP `201 Created`) — the created record's id, and nothin
 { "id": "r7p8cUZoBJbFWudt" }
 ```
 
+The one addition: when the form's `thank-you` panel names fields of the record as `{{record.field_name}}`, the answer also carries `fields`, holding the stored values of exactly those fields. A panel may name only a field the engine generates on insert (an `autonumber` field, such as a case number) — the `thank-you-record-field` rule refuses any other at `os validate` and at publish, and the route re-checks each name's type when it answers, so a field retyped after publish is left out:
+
+```json
+{ "id": "r7p8cUZoBJbFWudt", "fields": { "case_number": "CASE-0042" } }
+```
+
+Any other value the insert stored never reaches the visitor: a `beforeInsert` / `afterInsert` hook may have derived it from records the anonymous grant cannot read. The body's shape is `PublicFormSubmitResponseSchema` (`@objectstack/spec/api`).
+
 The anonymous caller is never shown the stored row. It already knows what it submitted, and everything else on the row — a `defaultValue`, a field a `beforeInsert` / `afterInsert` hook stamped, a value an elevated hook derived from existing records — belongs to readers the form grants nothing. So the whitelist-stripped `status` and the hook defaults in the example above land on the row but are not in the answer. A host that needs the stored record reads it through an authenticated read (`GET /api/v1/data/:object/:id`) with a principal allowed to see it.
 
 Errors:
@@ -276,7 +285,7 @@ async function submit(slug: string, payload: Record<string, unknown>) {
     body:    JSON.stringify(payload),
   });
   if (!r.ok) throw new Error(await r.text());
-  return r.json(); // { id } — the created record's id only
+  return r.json(); // { id, fields? } — the created id, plus the panel-named engine-generated fields
 }
 ```
 
@@ -375,6 +384,12 @@ formViews: {
 | `redirect` | Navigate in-app to `url`, its `{{record.…}}` tokens substituted and URL-escaped, after `delayMs` (defaults to 0) — see below. |
 | `continue` | Re-read prefill values and reset state — user can submit another response without reload. |
 | `next-record` | Stub for queue contexts; falls back to thank-you when no queue is wired. |
+
+On the public path, a `thank-you` panel's `title` and `message` may name the record just submitted as `{{record.field_name}}`, and the Console replaces each token with the value the submit answer carries for it, drawn as plain text; only an engine-generated field (an `autonumber` field, such as a case number) may be named, and a token with no value in the answer shows as empty:
+
+```ts
+submitBehavior: { kind: 'thank-you', title: 'Case opened', message: 'Your case number is {{record.case_number}}.' }
+```
 
 ### What a `redirect` `url` may be
 

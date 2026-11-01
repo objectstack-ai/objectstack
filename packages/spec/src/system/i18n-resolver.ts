@@ -16,6 +16,7 @@
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
  *   objects.<object>._actions.<action_name>.disabledReason
+ *   objects.<object>._actions.<action_name>.submitText
  *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -47,8 +48,8 @@
  * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .disabledReason / .outcomeMessages.<outcome> /
- *     .params.<param_name>.* / .resultDialog.*
+ *     .successMessage / .disabledReason / .submitText /
+ *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.*
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
  * translations are for object-less actions. A `globalActions` entry that names
@@ -211,10 +212,11 @@ export interface ActionLike {
   label?: string;
   /**
    * `ActionSchema.description` — the explanatory line under the title in the
-   * action's param dialog. Narrowed to `string` for the same reason `label` is:
-   * a resolver answers with ONE locale's string.
+   * action's param dialog. A `template` slot (#27948) like `confirmText`: the
+   * bare string, or the parsed envelope a served action carries; a
+   * translation replaces either with the bundle's sentence.
    */
-  description?: string;
+  description?: string | { dialect: 'template'; source: string };
   /**
    * `template` slots (#24814): the bare string, or the parsed
    * `{ dialect: 'template', source }` envelope a served action carries. A
@@ -225,14 +227,19 @@ export interface ActionLike {
   successMessage?: string | { dialect: 'template'; source: string };
   /**
    * `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
-   * action shows. Narrowed to `string` for the same reason `description` is.
+   * action shows. Narrowed to `string` for the same reason `label` is.
    */
   disabledReason?: string;
   /**
-   * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
-   * narrowed to `string` values for the same reason `successMessage` is.
+   * `ActionSchema.submitText` (#27944) — the param dialog's submit button
+   * label. Narrowed to `string` for the same reason `label` is.
    */
-  outcomeMessages?: Record<string, string>;
+  submitText?: string;
+  /**
+   * `ActionSchema.outcomeMessages` — success copy per handler `outcome`, each
+   * entry a `template` slot like `successMessage` (#27948).
+   */
+  outcomeMessages?: Record<string, string | { dialect: 'template'; source: string }>;
   /** `ActionSchema.params` — the param dialog's own copy. */
   params?: ActionParamLike[];
   /** When omitted, the action is treated as global. */
@@ -259,8 +266,11 @@ export interface ActionParamLike {
   /** `ActionParamSchema.field` — the translation key when `name` is omitted. */
   field?: string;
   label?: string;
-  /** An ACTION param spells its hint `helpText`; a BULK param spells it `help`. */
-  helpText?: string;
+  /**
+   * An ACTION param spells its hint `helpText`; a BULK param spells it `help`.
+   * A `template` slot (#27948): the bare string or the parsed envelope.
+   */
+  helpText?: string | { dialect: 'template'; source: string };
   placeholder?: string;
   /**
    * `ActionParamSchema.options[]` is an ARRAY of entries while the translation
@@ -657,7 +667,7 @@ function actionTranslationNode(
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason',
+  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason' | 'submitText',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -800,12 +810,12 @@ function resolveActionOutcomeMessages(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): Record<string, string> | undefined {
+): ActionLike['outcomeMessages'] {
   const declared = action.outcomeMessages;
   if (!declared || typeof declared !== 'object') return undefined;
   if (!bundle) return declared;
   const chain = localeChain(opts);
-  let out: Record<string, string> | undefined;
+  let out: NonNullable<ActionLike['outcomeMessages']> | undefined;
   for (const outcome of Object.keys(declared)) {
     for (const code of chain) {
       const candidate = actionTranslationNode(pickData(bundle, code), action)?.outcomeMessages?.[outcome];
@@ -1535,8 +1545,9 @@ export function translateView<T extends ViewLike>(
 /**
  * Apply the active locale to an action metadata document by overwriting
  * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
- * each declared `outcomeMessages` entry, the `params[]` copy and the
- * `resultDialog` copy with translated values when available. The
+ * `submitText` (for an action that declares `params`), each declared
+ * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy
+ * with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
  *
  * ## Why `description` and `params` are overlaid HERE
@@ -1568,6 +1579,14 @@ export function translateAction<T extends ActionLike>(
   // [#26619] Display-only copy, overlaid exactly like `description`: the
   // bundle's sentence when there is one, else the authored value as written.
   const disabledReason = lookupActionField(bundle, action, 'disabledReason', opts) ?? action.disabledReason;
+  // [#27944] The param dialog's button, overlaid like `description` — but only
+  // for an action that opens that dialog, a non-empty `params`, the way
+  // `resolveActionResultDialog` reads nothing for an action with no dialog.
+  // `ActionSchema` refuses the key anywhere else, so the guard only decides
+  // whether a bundle can give a button to a dialog that never opens: never.
+  const submitText = Array.isArray(action.params) && action.params.length > 0
+    ? lookupActionField(bundle, action, 'submitText', opts) ?? action.submitText
+    : action.submitText;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
@@ -1578,6 +1597,7 @@ export function translateAction<T extends ActionLike>(
     ...(confirmText !== undefined ? { confirmText } : {}),
     ...(successMessage !== undefined ? { successMessage } : {}),
     ...(disabledReason !== undefined ? { disabledReason } : {}),
+    ...(submitText !== undefined ? { submitText } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),

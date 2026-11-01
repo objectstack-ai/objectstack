@@ -16,6 +16,7 @@
  */
 
 import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
@@ -73,6 +74,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
+import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -1411,27 +1413,108 @@ export function buildApiActionRequest(
 /**
  * Is this forward `path` an identity route — one under the auth mount
  * (`/api/v1/auth/…`)? That mount reads its caller from its OWN signed-in
- * session (a session bearer or cookie) and admits no API key, so a principal
- * the door admitted by key reaches it as nobody. Read once, here, for the two
- * rules that depend on it: the `organizationId` stamp in
- * {@link buildApiActionRequest} and the key refusal in {@link forwardApiAction}.
+ * session (a session bearer or cookie) and admits no API key and no OAuth
+ * access token. Read for the `organizationId` stamp in
+ * {@link buildApiActionRequest} and for the target-door column of
+ * {@link API_FORWARD_DOOR_ACCEPTS}.
  */
 function isIdentityRouteTarget(path: string): boolean {
     return /\/api\/v1\/auth\//.test(path);
 }
 
 /**
- * The refusal a door answers, before any forward, when an API-key caller runs
- * an action whose `target` is an identity route ({@link isIdentityRouteTarget}).
+ * The credential that admitted the caller at the action door, by kind:
+ * `oauth` when the principal was resolved from an OAuth access token (the
+ * envelope carries its `oauthScopes`; such a token is honoured on the MCP
+ * endpoint alone), else what the door's admission recorded — `api_key` or
+ * `session`. `undefined` when the door recorded nothing (an anonymous caller,
+ * whom the door's own floor answers first).
+ */
+export type ApiForwardCredentialKind = 'session' | 'api_key' | 'oauth';
+
+/** Which kind of door an api action's `target` is served by, for the forward. */
+export type ApiForwardTargetDoor = 'identity' | 'mcp' | 'platform';
+
+/**
+ * THE TABLE: which caller credentials each kind of target door accepts, so
+ * which ones the forward can carry across. The forward hands the target the
+ * caller's own credentials and the target authorizes them itself, so a
+ * credential its door cannot read reaches it as nobody — and the door refuses
+ * that call by name instead of forwarding it ({@link apiForwardCredentialRefusal}).
  *
- * The forward carries the caller's own credentials so the target authorizes
- * the SAME principal the door admitted. An identity route cannot read a key,
- * so it would authorize no one: the request would leave the door and come
- * back as the target's anonymous 401 ("Sign in first"), telling a caller who
- * did authenticate to sign in. This says what actually happened. Which
- * credentials the identity route accepts is unchanged: a signed-in session
- * still reaches it through the door exactly as before, and a key still
- * reaches every other target.
+ * - `identity` — the auth mount reads its own signed-in session only.
+ * - `mcp` — the MCP endpoint, the one door that honours an OAuth access token.
+ * - `platform` — every other same-origin route (the data door, declared
+ *   endpoints, plugin routes): a session or an API key, never an OAuth token.
+ *
+ * Read by `run_action` and the REST action door (the refusal, before any
+ * forward) and by `list_actions` (the same refusal, carried on the listing as
+ * the action's `unavailable` mark), so the listing and the run door cannot
+ * disagree. ⛔ This table states what each door accepts today; it changes no
+ * door. Letting an OAuth-connected agent reach a door that does not accept its
+ * token is a separate decision (a server-built forward credential), never a
+ * new cell here.
+ */
+const API_FORWARD_DOOR_ACCEPTS: Readonly<Record<ApiForwardTargetDoor, ReadonlySet<ApiForwardCredentialKind>>> = {
+    identity: new Set<ApiForwardCredentialKind>(['session']),
+    mcp: new Set<ApiForwardCredentialKind>(['session', 'api_key', 'oauth']),
+    platform: new Set<ApiForwardCredentialKind>(['session', 'api_key']),
+};
+
+/** The door a forward `path` (or an action's declared `target`) is served by. */
+function apiForwardTargetDoor(path: string): ApiForwardTargetDoor {
+    if (isIdentityRouteTarget(path)) return 'identity';
+    // The dispatcher's own OAuth reading (`acceptOAuthAccessToken`), on the
+    // full path: the plain and `/environments/:environmentId`-scoped forms.
+    if (/^\/api\/v1(?:\/environments\/[^/]+)?\/mcp(?:[/?]|$)/.test(path)) return 'mcp';
+    return 'platform';
+}
+
+/** The kind of credential that admitted this request's caller (see {@link ApiForwardCredentialKind}). */
+export function apiForwardCredentialKind(requestContext: HttpProtocolContext | undefined): ApiForwardCredentialKind | undefined {
+    if (Array.isArray(requestContext?.executionContext?.oauthScopes)) return 'oauth';
+    return requestContext?.admission?.credential;
+}
+
+/** A forward refusal: the status and standard code the target would have answered, and the sentence that says why. */
+export type ApiForwardCredentialRefusal = { status: 401; code: string; message: string };
+
+/**
+ * The refusal for running `action` by forward with this caller's credential —
+ * `null` when the target's door accepts it ({@link API_FORWARD_DOOR_ACCEPTS}),
+ * or when the action is not a same-origin `type: 'api'` action at all.
+ *
+ * `target` is the forward's path, which decides the door; the listing passes
+ * the declared `target`, whose door prefix is the same before its tokens are
+ * filled. The sentence names the DECLARED `target` (`action.target`) when there
+ * is one, so the listing's mark and the run door's refusal are the same
+ * sentence, whatever record the run names. The status is
+ * the target's own `401`, with the standard code: the call fails exactly as
+ * the forward would have, but before anything is sent and with the reason
+ * the target could not give.
+ */
+export function apiForwardCredentialRefusal(
+    requestContext: HttpProtocolContext | undefined,
+    action: any,
+    target: string = typeof action?.target === 'string' ? action.target : '',
+): ApiForwardCredentialRefusal | null {
+    if (action?.type !== 'api' || !isSameOriginApiTarget(target)) return null;
+    const kind = apiForwardCredentialKind(requestContext);
+    if (!kind) return null;
+    const door = apiForwardTargetDoor(target);
+    if (API_FORWARD_DOOR_ACCEPTS[door].has(kind)) return null;
+    const path = (typeof action?.target === 'string' ? action.target : target).split('?')[0]!;
+    const message = kind === 'api_key'
+        ? apiActionIdentityRouteKeyRefusal(action, path)
+        : apiActionOAuthForwardRefusal(action, path, door);
+    return { status: 401, code: standardErrorCodeForHttpStatus(401), message };
+}
+
+/**
+ * The sentence for an API-key caller of an identity-route action (the table's
+ * `api_key` × `identity` cell). Which credentials the identity route accepts
+ * is unchanged: a signed-in session still reaches it through the door, and a
+ * key still reaches every platform target.
  */
 export function apiActionIdentityRouteKeyRefusal(action: any, target: string): string {
     return (
@@ -1439,6 +1522,28 @@ export function apiActionIdentityRouteKeyRefusal(action: any, target: string): s
         `signed-in session only, and this request was authenticated with an API key, which that endpoint ` +
         `cannot read. The action was not run. Run it from a signed-in session (a session token or the ` +
         `Console's sign-in cookie) instead of an API key.`
+    );
+}
+
+/**
+ * The sentence for a caller connected with an OAuth access token (an AI agent
+ * connected to MCP over OAuth) whose action forwards to a door that does not
+ * honour that token (the table's `oauth` row). An OAuth access token is
+ * honoured on the MCP endpoint alone, so the target would read the agent as
+ * nobody. The prescription follows the target's door: an identity endpoint
+ * takes a signed-in session only, every other endpoint also takes an API key.
+ */
+export function apiActionOAuthForwardRefusal(action: any, target: string, door: ApiForwardTargetDoor): string {
+    const accepts = door === 'identity'
+        ? 'an identity endpoint (\'' + target + '\') that accepts a signed-in session only'
+        : 'an endpoint (\'' + target + '\') that accepts a signed-in session or an API key';
+    const instead = door === 'identity'
+        ? 'A person signed in to the app can run it.'
+        : 'Connect with an API key to run it, or ask a person signed in to the app to run it.';
+    return (
+        `Action '${action?.name ?? 'unknown'}' forwards to ${accepts}, and this request was authenticated ` +
+        `with an OAuth access token, which is honoured on the MCP endpoint only. The action was not run. ` +
+        instead
     );
 }
 
@@ -1550,8 +1655,8 @@ export function apiActionForwardLoopError(action: any, mark: string): string {
  * ({@link API_FORWARD_HEADER_ALLOWLIST}); `Content-Length` / `Host` are the
  * injector's to set. The forward is marked ({@link API_FORWARD_MARK_HEADER})
  * so a door reached by it refuses instead of looping.
- * One caller is never forwarded: an API-key caller of an identity route,
- * which cannot read a key ({@link apiActionIdentityRouteKeyRefusal}).
+ * A caller whose credential the target's door cannot read is never
+ * forwarded ({@link apiForwardCredentialRefusal}).
  *
  * Relayed back: the status, the JSON body, and the credential-rotation
  * headers a target like `/admin/impersonate-user` emits — `set-auth-token` /
@@ -1566,23 +1671,19 @@ export async function forwardApiAction(
     inject: (url: string, init: RequestInit) => Promise<Response>,
     requestContext: HttpProtocolContext,
     req: ApiActionRequest,
-    mark: { objectName: string; actionName: string },
+    mark: { objectName: string; actionName: string; target?: string },
 ): Promise<ApiActionForwardAnswer> {
-    // An API-key caller cannot be carried to an identity route (see
-    // {@link apiActionIdentityRouteKeyRefusal}): refused here, before the
-    // target is called, with the status the target would have answered and
-    // the sentence that says why. Both doors relay it as they relay a target's
-    // refusal.
-    if (requestContext?.admission?.credential === 'api_key' && isIdentityRouteTarget(req.path)) {
+    // A caller whose credential the target's door cannot read (the table,
+    // {@link API_FORWARD_DOOR_ACCEPTS}) is refused here, before the target is
+    // called, with the status the target would have answered and the sentence
+    // that says why. Both doors relay it as they relay a target's refusal.
+    const refusal = apiForwardCredentialRefusal(
+        requestContext, { type: 'api', name: mark.actionName, target: mark.target }, req.path,
+    );
+    if (refusal) {
         return {
-            status: 401,
-            body: {
-                success: false,
-                error: {
-                    code: standardErrorCodeForHttpStatus(401),
-                    message: apiActionIdentityRouteKeyRefusal({ name: mark.actionName }, req.path.split('?')[0]!),
-                },
-            },
+            status: refusal.status,
+            body: { success: false, error: { code: refusal.code, message: refusal.message } },
             headers: {},
         };
     }
@@ -2394,7 +2495,10 @@ export function summarizeActionParams(deps: ActionExecutionDeps, action: any, ob
         if (!name) continue;
         const type = jsonTypeOf(deps, p?.type ?? field?.type);
         const label = typeof p?.label === 'string' ? p.label : field?.label;
-        const help = p?.helpText ?? field?.description;
+        // A param's `helpText` is a `template` slot (#27948, ruling A): the
+        // parsed value is `{ dialect: 'template', source }`, so the tool
+        // schema reads its text, never the object.
+        const help = templateSlotSource(p?.helpText) ?? field?.description;
         const description = [label, help].filter(Boolean).join(' — ') || undefined;
         const optionSource = p?.options ?? field?.options;
         const enumVals = Array.isArray(optionSource)
@@ -3516,6 +3620,62 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // `/actions` door emit the same `recordLoadDenied` signal to handlers.
     const subject = await loadActionSubjectRecord(objectName, recordId, () =>
         callData('get', { object: objectName, id: recordId }, driver, envId, ec));
+
+    // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW.
+    // Every call that cleared the gates above reaches its branch below; one
+    // `action_invocation` row is written for it whether the branch answers or
+    // throws (the subject-record verdict, a target's refusal, a body's throw),
+    // naming this door (`surface: 'mcp'`, set from the door's identity on a
+    // copy of the caller's envelope; nothing on the request can move it). A
+    // call a gate above refused ran nothing and writes no row. The REST
+    // `/actions` door writes the same row with `surface: 'rest'`. See
+    // `action-invocation-audit.ts`.
+    const invocation = {
+        context: withActionSurface(ec, 'mcp'),
+        actionName: typeof action?.name === 'string' && action.name ? action.name : name,
+        objectName: isObjectLessActionKey(objectName) ? undefined : objectName,
+        recordId,
+        branch: actionInvocationBranch(action, isDeclarativeUpdateAction(action)),
+        target: actionInvocationTarget(action, isDeclarativeUpdateAction(action)), // #28281: the outer row names where an api forward went
+    };
+    let answer: any;
+    try {
+        answer = await dispatchAdmittedBusinessAction(deps, requestContext, name, {
+            action, objectName, recordId, params, subject, ec, driver, envId, callData,
+        });
+    } catch (err) {
+        await recordActionInvocation(deps, requestContext, envId, {
+            ...invocation, outcome: 'failed', ...actionInvocationFailure(err),
+        });
+        throw err;
+    }
+    await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
+    return answer;
+}
+
+/**
+ * The MCP `run_action` dispatch, once every admission gate in
+ * {@link invokeBusinessAction} has passed: the declarative update, the
+ * subject-record verdict, the api forward, the flow dispatch and the
+ * script/body dispatch. Split out so the door can write the invocation row
+ * for whatever this answers or throws (#27908); the code is unchanged.
+ */
+async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    name: string,
+    admitted: {
+        action: any;
+        objectName: string;
+        recordId: string | undefined;
+        params: Record<string, unknown>;
+        subject: ActionSubjectRecordLoad;
+        ec: any;
+        driver: any;
+        envId?: string;
+        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+    },
+): Promise<any> {
+    const { action, objectName, recordId, params, subject, ec, driver, envId, callData } = admitted;
     const record = subject.record;
 
     // ── declarative update ── [#15079] BEFORE the `type` switch below, and
@@ -3569,7 +3729,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         if ('message' in built) {
             throw Object.assign(new Error(built.message), { code: standardErrorCodeForHttpStatus(built.status), status: built.status });
         }
-        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name });
+        const answer = await forwardApiAction(inject, requestContext, built, { objectName, actionName: action.name, target: action.target });
         if (answer.status < 200 || answer.status >= 300) throw apiActionForwardRefusal(action, answer);
         return {
             ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}),

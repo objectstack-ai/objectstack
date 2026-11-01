@@ -14,11 +14,18 @@
  * 「Collapse to drawer」 back to this list with that record open
  * (`drawerRestore`), and from the record header's `⋯` menu
  * (`handleOpenAsPage`), at any level of the stack.
+ *
+ * On a phone (objectstack#27058) none of that applies: the record is always a
+ * page. The spec's own rule says so (`deriveRecordSurface` with
+ * `viewport: 'mobile'` answers `page`), a row tap navigates to the record
+ * route with the list as its origin, and the pane is never mounted, so the
+ * reader's Open records preference and the drawer's `?recordId=` state do not
+ * apply: a `?recordId=` link opened on a phone lands on that record's page.
  */
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
-import { overlayWidthFor } from '@object-ui/plugin-view';
+import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
 import type { ViewNavigationConfig } from '@object-ui/types';
 import { RECORD_DRAWER_PARAM } from '../urlParams.js';
@@ -35,6 +42,53 @@ import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 import type { RecordOpenPreference } from '../utils/recordOpenPreference.js';
+
+/**
+ * The rows a list shows, as the object page holds them (objectstack#26679):
+ * their ids in order, and on a grouped grid or a board the groups they sit in
+ * (objectstack#28461), each with its heading. `key` is the content's key.
+ */
+export interface ListShownRows {
+    key: string;
+    ids: readonly string[];
+    groups: ReadonlyArray<{ label: string; ids: readonly string[] }> | null;
+}
+
+const NO_LIST_ROWS: ListShownRows = { key: '', ids: [], groups: null };
+
+const rowIdsOf = (rows: ReadonlyArray<Record<string, unknown>>): string[] =>
+    rows
+        .map((row) => (row?.id ?? row?._id) as string | number | undefined)
+        .filter((id): id is string | number => id != null && id !== '')
+        .map(String);
+
+/** `ListView`'s `onRowsChange` report, as {@link ListShownRows}. */
+export function listShownRowsOf(
+    rows: ReadonlyArray<Record<string, unknown>>,
+    groups?: ReadonlyArray<{ label: string; rows: ReadonlyArray<Record<string, unknown>> }>,
+): ListShownRows {
+    const ids = rowIdsOf(rows);
+    const held = groups ? groups.map((group) => ({ label: group.label, ids: rowIdsOf(group.rows) })) : null;
+    return { key: JSON.stringify([ids, held]), ids, groups: held };
+}
+
+/**
+ * The set a record's `↑` `↓` step through, and the name its counter's tooltip
+ * says: on a grouped list the rows of the record's own group, named by the
+ * group (objectstack#28461, 「Acme Corporation 中第 1 条，共 3 条」); otherwise
+ * every row the list shows, and no name of its own — the host names the list.
+ * `undefined` when the list does not show the record.
+ */
+export function listSiblingSetOf(
+    rows: ListShownRows,
+    recordId: string,
+): { siblings: readonly string[]; scope?: string } | undefined {
+    if (rows.groups) {
+        const group = rows.groups.find((candidate) => candidate.ids.includes(recordId));
+        return group ? { siblings: group.ids, scope: group.label } : undefined;
+    }
+    return rows.ids.includes(recordId) ? { siblings: rows.ids } : undefined;
+}
 
 type OverlaySizeBucket = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
@@ -63,6 +117,7 @@ export function useObjectViewRecordNavigation({
     unlabelledViewText,
     language,
     recordOpenPreference,
+    phone,
 }: {
     activeView: ReturnType<typeof buildViewTabs>[number];
     objectDef: ConsoleObjectViewProps['objects'][number];
@@ -80,6 +135,8 @@ export function useObjectViewRecordNavigation({
     language: ReturnType<typeof useObjectTranslation>['language'];
     /** The reader's own way of opening a drawer-mode record (objectstack#27545). */
     recordOpenPreference: RecordOpenPreference;
+    /** The console is on a phone (`usePhoneViewport`, objectstack#27058): every record opens as a page. */
+    phone: boolean;
 }) {
     // Navigation overlay for record detail.
     // Priority: activeView.navigation > objectDef.navigation > default drawer.
@@ -94,6 +151,9 @@ export function useObjectViewRecordNavigation({
     // side-by-side pane is the reader's preference, read by `ObjectView`.
     const detailNavigation: ViewNavigationConfig = useMemo(
         () => {
+            // objectstack#27058 — on a phone the spec's rule decides, and it
+            // answers `page` whatever the view or the object declares.
+            if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) };
             const authored = activeView?.navigation ?? objectDef.navigation;
             if (authored) {
                 // Authored config wins. For an overlay, resolve the `size`
@@ -118,7 +178,7 @@ export function useObjectViewRecordNavigation({
             // reader drags and `⤢` widens.
             return { mode: 'drawer', width: overlayWidthFor(recordPaneSize(undefined), objectDef) };
         },
-        [activeView?.navigation, objectDef]
+        [activeView?.navigation, objectDef, phone]
     );
     const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
     // The location as of the latest render, read when a handler runs: the
@@ -127,9 +187,19 @@ export function useObjectViewRecordNavigation({
     // (objectstack#27545) — and the location changes with it.
     const locationRef = useRef(location);
     locationRef.current = location;
+    // The rows the list shows (`handleListRowsChange` below), read when a
+    // handler runs: a page this list opens steps through them
+    // (objectstack#27524, Target 7).
+    const listRowsRef = useRef<ListShownRows>(NO_LIST_ROWS);
+    // The list's name — its view's tab label: what the page's way back says,
+    // and the set the pane's counter names (objectstack#27524, Target 7).
+    const listLabel = useMemo(
+        () => viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
+        [activeView?.id, activeView?.name, activeView?.label, objectDef.name, servedViews, viewLabel, unlabelledViewText, language],
+    );
     // Memoize onNavigate to prevent stale closure in useNavigationOverlay's handleClick
     const handleNavOverlayNavigate = useCallback(
-        (recordId: string | number, action?: string, extraState?: Record<string, unknown>) => {
+        (recordId: string | number, action?: string, extraState?: Record<string, unknown>, replace?: boolean) => {
             if (action === 'new_window') {
                 // Open record detail in a new browser tab with Console-correct URL.
                 // Same builder the list's link column publishes as its href
@@ -152,20 +222,30 @@ export function useObjectViewRecordNavigation({
             // already treated the name and the token identically, which is
             // exactly what made the substitution inaudible on this surface.
             const { pathname, search } = locationRef.current;
+            // The rows the list shows go along when the record is one of
+            // them: the page's top bar counts and steps through them
+            // (objectstack#27524, Target 7).
+            const set = listSiblingSetOf(listRowsRef.current, String(recordId));
+            // The list as the page's origin, without the drawer's
+            // `?recordId=` a phone redirect leaves behind (objectstack#27058).
+            const originParams = new URLSearchParams(search);
+            originParams.delete(RECORD_DRAWER_PARAM);
+            const originSearch = originParams.toString();
             const originState = {
               ...extraState,
               from: {
-                pathname: pathname + (search || ''),
-                label: viewTabLabel({ id: activeView?.id, name: activeView?.name, label: activeView?.label }, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
+                pathname: pathname + (originSearch ? `?${originSearch}` : ''),
+                label: listLabel,
+                ...(set ?? {}),
               },
             };
             if (viewId) {
-                navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState });
+                navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState, replace });
             } else {
-                navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState });
+                navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState, replace });
             }
         },
-        [navigate, viewId, objectDef, activeView?.id, activeView?.name, activeView?.label, viewLabel, unlabelledViewText, servedViews, language]
+        [navigate, viewId, listLabel]
     );
     /**
      * The list surface's half of the record-link mechanism (objectui#4490):
@@ -274,32 +354,40 @@ export function useObjectViewRecordNavigation({
      * The row's `↗` (objectstack#26681): the record's page, handed the way back
      * to this list with that record open — the page's 「Collapse to drawer」
      * (`recordDrawerReturnState`), drawn only for a reader who arrived this
-     * way (objectstack#27545).
+     * way (objectstack#27545) — and the rows the list shows, which that page's
+     * top bar steps through with its counter and ↓ ↑ (objectstack#27524,
+     * Target 7). Read at click time: the handler never changes with the rows.
      */
     const handleOpenRowAsPage = useCallback((recordId: string | number) => {
         const { pathname, search, state } = locationRef.current;
         const back = new URLSearchParams(search);
         back.set(RECORD_DRAWER_PARAM, String(recordId));
+        const set = listSiblingSetOf(listRowsRef.current, String(recordId));
         const returnState = recordDrawerReturnState(
             { pathname, search: `?${back.toString()}`, state },
-            [{ objectName: objectDef.name, recordId: String(recordId) }],
+            [{
+                objectName: objectDef.name,
+                recordId: String(recordId),
+                ...(set ?? {}),
+            }],
         );
         handleNavOverlayNavigate(recordId, undefined, returnState);
     }, [objectDef.name, handleNavOverlayNavigate]);
     /**
      * The rows the list shows, in its order (`ListView`'s `onRowsChange`,
-     * objectstack#26679): the root level's sibling set, which the drawer's
-     * `↑` `↓` step through. Held as the ids' joined key so an equal report
+     * objectstack#26679), and on a grouped grid or a board its groups
+     * (objectstack#28461): the root level's sibling set, which the drawer's
+     * `↑` `↓` step through. Held with its content's key so an equal report
      * changes nothing.
      */
-    const [listRowIds, setListRowIds] = useState<{ key: string; ids: readonly string[] }>({ key: '', ids: [] });
-    const handleListRowsChange = useCallback((rows: ReadonlyArray<Record<string, unknown>>) => {
-        const ids = rows
-            .map((row) => (row?.id ?? row?._id) as string | number | undefined)
-            .filter((id): id is string | number => id != null && id !== '')
-            .map(String);
-        const key = JSON.stringify(ids);
-        setListRowIds((prev) => (prev.key === key ? prev : { key, ids }));
+    const [listRows, setListRows] = useState<ListShownRows>(NO_LIST_ROWS);
+    listRowsRef.current = listRows;
+    const handleListRowsChange = useCallback((
+        rows: ReadonlyArray<Record<string, unknown>>,
+        groups?: ReadonlyArray<{ label: string; rows: ReadonlyArray<Record<string, unknown>> }>,
+    ) => {
+        const next = listShownRowsOf(rows, groups);
+        setListRows((prev) => (prev.key === next.key ? prev : next));
     }, []);
     /** `↑` `↓` at the root: the sibling becomes the row `?recordId=` names. */
     const handleRootStep = useCallback((recordId: string) => {
@@ -318,18 +406,24 @@ export function useObjectViewRecordNavigation({
             ? {
                 objectName: objectDef.name,
                 recordId: drawerRecordId,
-                ...(listRowIds.ids.length > 0 ? { siblings: listRowIds.ids } : {}),
+                ...(listSiblingSetOf(listRows, drawerRecordId) ?? {}),
             }
             : null),
-        [drawerRecordId, objectDef.name, listRowIds],
+        [drawerRecordId, objectDef.name, listRows],
     );
-    // Sync URL-based recordId to overlay state
+    // Sync URL-based recordId to overlay state. On a phone there is no pane to
+    // open: the drawer link is answered by the record's page, in its place in
+    // the history (objectstack#27058).
     useEffect(() => {
+        if (phone) {
+            if (drawerRecordId) handleNavOverlayNavigate(drawerRecordId, undefined, undefined, true);
+            return;
+        }
         if (drawerRecordId && !navOverlay.isOpen) {
             navOverlay.open({ id: drawerRecordId });
         } else if (!drawerRecordId && navOverlay.isOpen) {
             navOverlay.close();
         }
-    }, [drawerRecordId]);
-    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep };
+    }, [drawerRecordId, phone]);
+    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel };
 }

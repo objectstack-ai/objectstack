@@ -36,6 +36,15 @@
  * (`ObjectSchema` in `@objectstack/spec`) — never a name prefix and never a
  * list kept here.
  *
+ * - **Only the package's closure is pickable (objectstack#28240).** Editing a
+ *   package, an object outside its closure — not its own, not a declared
+ *   dependency's, not the platform's — is one the publish gate refuses after
+ *   the author has built on it. Such objects are listed last, disabled, in a
+ *   group that starts collapsed, under the reason and a *Declare a dependency*
+ *   door to the package's edit dialog; a declaration made there re-reads the
+ *   closure and the object becomes pickable. The closure is the gate's own
+ *   (`objectPickerClosure.ts`); where it cannot be read nothing is disabled.
+ *
  * - **At rest it reads as the label (objectui#12303).** While the input does
  *   not have focus, a committed name the catalog knows shows as that object's
  *   label, with the name beneath it as secondary text — smaller, monospace and
@@ -56,6 +65,8 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMetadataClient } from '../useMetadata.js';
 import { usePickerLoad } from '../loadState.js';
 import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../i18n.js';
+import { PackageFormDialog } from '../PackageFormDialog.js';
+import { usePackageObjectClosure } from './objectPickerClosure.js';
 
 /** One object the picker can offer, read off one served list entry. */
 export interface ObjectCatalogEntry {
@@ -150,14 +161,17 @@ function useEditingPackageId(): string | undefined {
   }
 }
 
-type GroupKey = 'package' | 'other' | 'system';
+type GroupKey = 'package' | 'other' | 'system' | 'outside';
 
 /** The catalog before it answered: one stable empty list, not a fresh one per render. */
 const NO_ENTRIES: ObjectCatalogEntry[] = [];
 
 type Row =
-  | { kind: 'option'; id: string; entry: ObjectCatalogEntry }
-  | { kind: 'system-toggle'; id: string };
+  | { kind: 'option'; id: string; entry: ObjectCatalogEntry; disabled?: boolean }
+  | { kind: 'system-toggle'; id: string }
+  | { kind: 'outside-toggle'; id: string }
+  /** The reason the outside group is disabled, and the door to declare a dependency when the package is writable. */
+  | { kind: 'declare'; id: string; enabled: boolean };
 
 interface Section {
   key: GroupKey;
@@ -207,6 +221,7 @@ export function ObjectPicker({
   const locale = localeProp ?? contextLocale;
   const catalog = useObjectCatalog();
   const editingPackageId = useEditingPackageId();
+  const closure = usePackageObjectClosure(editingPackageId);
 
   const inputId = React.useId();
   const listId = React.useId();
@@ -223,21 +238,34 @@ export function ObjectPicker({
   const [typed, setTyped] = React.useState(false);
   const [active, setActive] = React.useState(-1);
   const [systemOpen, setSystemOpen] = React.useState(false);
+  const [outsideOpen, setOutsideOpen] = React.useState(false);
+  const [declaring, setDeclaring] = React.useState(false);
 
   const entries = catalog.status === 'loaded' ? catalog.data : NO_ENTRIES;
   const query = typed ? text.trim().toLowerCase() : '';
+  // objectstack#28240 — the names the edited package's closure admits; `null`
+  // narrows nothing.
+  const admitted = React.useMemo(() => (closure ? closure.admittedNames(entries) : null), [closure, entries]);
 
   const sections = React.useMemo<Section[]>(() => {
     const matches = (e: ObjectCatalogEntry) =>
       !query || e.name.toLowerCase().includes(query) || (e.label?.toLowerCase().includes(query) ?? false);
     const groupOf = (e: ObjectCatalogEntry): GroupKey =>
-      e.isSystem ? 'system' : editingPackageId && e.packageId === editingPackageId ? 'package' : 'other';
+      admitted && !admitted.has(e.name)
+        ? 'outside'
+        : e.isSystem
+          ? 'system'
+          : editingPackageId && e.packageId === editingPackageId
+            ? 'package'
+            : 'other';
     const pick = (g: GroupKey) => entries.filter((e) => groupOf(e) === g).sort(byDisplayName);
 
     const optionRow = (entry: ObjectCatalogEntry): Row => ({ kind: 'option', id: '', entry });
     const own = pick('package').filter(matches).map(optionRow);
     const other = pick('other').filter(matches).map(optionRow);
     const systemAll = pick('system');
+    const outsideAll = pick('outside');
+    const outsideRow = (entry: ObjectCatalogEntry): Row => ({ kind: 'option', id: '', entry, disabled: true });
     const packageName = t('engine.inspector.objectPicker.groupPackage', locale);
     const otherName = t('engine.inspector.objectPicker.groupOther', locale);
     const systemName = t('engine.inspector.objectPicker.groupSystem', locale);
@@ -257,13 +285,34 @@ export function ObjectPicker({
         rows: [{ kind: 'system-toggle', id: '' }, ...(systemOpen ? systemAll.map(optionRow) : [])],
       });
     }
+    // Last, disabled: what this package may not reference (objectstack#28240).
+    const outsideName = t('engine.inspector.objectPicker.groupOutside', locale);
+    const declareRow: Row = { kind: 'declare', id: '', enabled: closure?.pkg.writable === true };
+    if (query) {
+      const found = outsideAll.filter(matches).map(outsideRow);
+      if (found.length) out.push({ key: 'outside', name: outsideName, headed: true, rows: [declareRow, ...found] });
+    } else if (outsideAll.length) {
+      out.push({
+        key: 'outside',
+        name: outsideName,
+        headed: false,
+        rows: [{ kind: 'outside-toggle', id: '' }, ...(outsideOpen ? [declareRow, ...outsideAll.map(outsideRow)] : [])],
+      });
+    }
     let i = 0;
     for (const s of out) for (const r of s.rows) r.id = `${optionIdBase}-${i++}`;
     return out;
-  }, [entries, query, editingPackageId, systemOpen, locale, optionIdBase]);
+  }, [entries, query, editingPackageId, admitted, closure, systemOpen, outsideOpen, locale, optionIdBase]);
 
   const rows = React.useMemo(() => sections.flatMap((s) => s.rows), [sections]);
-  const systemCount = React.useMemo(() => entries.filter((e) => e.isSystem).length, [entries]);
+  const systemCount = React.useMemo(
+    () => entries.filter((e) => e.isSystem && (!admitted || admitted.has(e.name))).length,
+    [entries, admitted],
+  );
+  const outsideCount = React.useMemo(
+    () => (admitted ? entries.filter((e) => !admitted.has(e.name)).length : 0),
+    [entries, admitted],
+  );
   const activeRow = active >= 0 ? rows[active] : undefined;
 
   const activeId = activeRow?.id;
@@ -290,6 +339,18 @@ export function ObjectPicker({
       setSystemOpen((o) => !o);
       return;
     }
+    if (row.kind === 'outside-toggle') {
+      setOutsideOpen((o) => !o);
+      return;
+    }
+    if (row.kind === 'declare') {
+      if (!row.enabled) return;
+      close();
+      setDeclaring(true);
+      return;
+    }
+    // Outside the closure: listed so the author learns why, never committed.
+    if (row.disabled) return;
     commit(row.entry.name);
   };
 
@@ -412,6 +473,60 @@ export function ObjectPicker({
                       </div>
                     );
                   }
+                  if (row.kind === 'outside-toggle') {
+                    const Chevron = outsideOpen ? ChevronDown : ChevronRight;
+                    return (
+                      <div
+                        key={row.id}
+                        id={row.id}
+                        role="option"
+                        aria-selected={isActive}
+                        data-outside-toggle=""
+                        onClick={() => choose(row)}
+                        className={cn(
+                          'flex cursor-pointer items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground',
+                          isActive && 'bg-accent text-accent-foreground',
+                        )}
+                      >
+                        <Chevron className="h-3 w-3 shrink-0" />
+                        {outsideOpen
+                          ? t('engine.inspector.objectPicker.hideOutside', locale)
+                          : tFormat('engine.inspector.objectPicker.showOutside', locale, { count: outsideCount })}
+                      </div>
+                    );
+                  }
+                  if (row.kind === 'declare') {
+                    return (
+                      <div
+                        key={row.id}
+                        id={row.id}
+                        role="option"
+                        aria-selected={isActive}
+                        aria-disabled={row.enabled ? undefined : true}
+                        data-outside-declare=""
+                        onClick={() => choose(row)}
+                        className={cn(
+                          'flex flex-col gap-0.5 rounded-sm px-2 py-1',
+                          row.enabled && 'cursor-pointer',
+                          isActive && 'bg-accent text-accent-foreground',
+                        )}
+                      >
+                        <span data-outside-reason="" className="text-[11px] leading-snug text-muted-foreground">
+                          {tFormat('engine.inspector.objectPicker.outsideReason', locale, {
+                            package: closure?.pkg.name ?? editingPackageId ?? '',
+                          })}
+                        </span>
+                        {row.enabled && (
+                          <>
+                            {' '}
+                            <span className="text-[11px] font-medium text-primary underline-offset-2 hover:underline">
+                              {t('engine.inspector.objectPicker.declareDependency', locale)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    );
+                  }
                   const { entry } = row;
                   return (
                     <div
@@ -419,10 +534,12 @@ export function ObjectPicker({
                       id={row.id}
                       role="option"
                       aria-selected={isActive}
+                      aria-disabled={row.disabled ? true : undefined}
                       data-object-name={entry.name}
                       onClick={() => choose(row)}
                       className={cn(
-                        'flex cursor-pointer flex-col rounded-sm px-2 py-1',
+                        'flex flex-col rounded-sm px-2 py-1',
+                        row.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
                         isActive && 'bg-accent text-accent-foreground',
                         entry.name === value && 'font-medium',
                       )}
@@ -448,6 +565,14 @@ export function ObjectPicker({
                           <span className="truncate font-mono text-[11px] text-muted-foreground">{entry.name}</span>
                         </>
                       )}
+                      {row.disabled && entry.packageId && (
+                        <>
+                          {' '}
+                          <span data-outside-from="" className="truncate text-[10px] text-muted-foreground">
+                            {tFormat('engine.inspector.objectPicker.outsideFrom', locale, { package: entry.packageId })}
+                          </span>
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -460,6 +585,17 @@ export function ObjectPicker({
         <p id={nameLineId} data-object-name-line="" className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
           {value}
         </p>
+      )}
+      {declaring && closure && (
+        <PackageFormDialog
+          mode="edit"
+          open
+          onOpenChange={(next) => {
+            if (!next) setDeclaring(false);
+          }}
+          manifest={closure.pkg.manifest}
+          onSaved={() => setDeclaring(false)}
+        />
       )}
       {catalog.status === 'error' && (
         <p role="status" className="text-[11px] leading-snug text-amber-600 dark:text-amber-300">

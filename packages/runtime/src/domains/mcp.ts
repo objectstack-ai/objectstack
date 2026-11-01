@@ -16,6 +16,7 @@ import type { AIActionConfirmation, IExternalDatasourceService } from '@objectst
 import { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from '@objectstack/rest';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
+import { actionInvocationFailure, recordActionInvocation, withActionSurface } from '../action-invocation-audit.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -859,7 +860,16 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                         flow = undefined; // a registry that cannot answer is not a listing failure
                     }
                 }
-                out.push(actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined));
+                // [#28178] An api action whose target cannot read the caller's
+                // credential (an OAuth-connected agent, an identity target for
+                // an API key) is LISTED, marked with the refusal `run_action`
+                // would answer — the same table, the same sentence — so an
+                // agent can explain the gap instead of discovering it.
+                const refusal = actionExec.apiForwardCredentialRefusal(context, action);
+                out.push({
+                    ...actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined),
+                    ...(refusal ? { unavailable: { code: refusal.code, reason: refusal.message } } : {}),
+                });
             }
             return out;
         },
@@ -1130,9 +1140,61 @@ export async function resumeActionRun(
         );
     }
     const { action, objectName } = admitted;
+    const recordId = typeof trigger?.recordId === 'string' && trigger.recordId !== '' ? trigger.recordId : undefined;
+
+    // [#27908 — ruling 6513869839 on #27681, parameter 3] THE INVOCATION ROW,
+    // as `run_action` writes it: the call cleared steps 1–3, so from here on
+    // one `action_invocation` row is written whether the resume answers or is
+    // refused, naming this door (`surface: 'mcp'`, set from the door's
+    // identity), the admitting flow action, and the run it continued. A
+    // refusal in steps 1–3 resumed nothing and writes no row.
+    const invocation = {
+        context: withActionSurface(ec, 'mcp'),
+        actionName: typeof action?.name === 'string' && action.name ? action.name : String(flowName),
+        objectName: actionExec.isObjectLessActionKey(objectName) ? undefined : objectName,
+        recordId,
+        branch: 'flow' as const,
+        runId,
+    };
+    let answer: any;
+    try {
+        answer = await continueAdmittedRun(deps, automation, runId, values, {
+            action, objectName, recordId, driver, envId, ec, callData,
+        });
+    } catch (err) {
+        await recordActionInvocation(deps, context, envId, {
+            ...invocation, outcome: 'failed', ...actionInvocationFailure(err),
+        });
+        throw err;
+    }
+    await recordActionInvocation(deps, context, envId, { ...invocation, outcome: 'succeeded' });
+    return answer;
+}
+
+/**
+ * `resume_run` steps 4–6 for the run {@link resumeActionRun} admitted: the
+ * subject record read again as the caller, the screen-pause check, and the
+ * resume itself. Split out so the door can write the invocation row for
+ * whatever this answers or throws (#27908); the code is unchanged.
+ */
+async function continueAdmittedRun(
+    deps: DomainHandlerDeps,
+    automation: any,
+    runId: string,
+    values: Record<string, unknown> | undefined,
+    admitted: {
+        action: any;
+        objectName: string;
+        recordId: string | undefined;
+        driver: any;
+        envId?: string;
+        ec: any;
+        callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+    },
+): Promise<any> {
+    const { action, objectName, recordId, driver, envId, ec, callData } = admitted;
 
     // ── 4. the subject record, read again in the caller's own scope ──────────
-    const recordId = typeof trigger?.recordId === 'string' && trigger.recordId !== '' ? trigger.recordId : undefined;
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         callData('get', { object: objectName, id: recordId }, driver, envId, ec));
     actionExec.refuseDeniedSubjectLoad(objectName, recordId, subject);

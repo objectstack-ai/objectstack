@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // `driver-upsert-cross-organization-conflict-refused`.
 export const entry: SemanticMigration = {
   id: 'driver-remote-doors-tenant-scoped',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'IDataDriver find, findOne, count, aggregate, update, delete, bulkUpdate, bulkDelete, '
     + 'updateMany, deleteMany, create and bulkCreate on TursoDriver\'s remote (libSQL) face, '

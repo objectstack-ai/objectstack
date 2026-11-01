@@ -103,10 +103,10 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.new': 'New',
   'detail.noValue': 'No value',
   'detail.activity': 'Activity',
-  // objectstack#27052 — the record page's timeline switch, and the card the
-  // timeline's blocks fold into when the reader switches the column off.
-  'detail.timeline': 'Timeline',
-  'detail.timelineFolded': 'Activity',
+  // objectstack#27524 — 动态 (Activity), the record page's stream, and the
+  // 动态 panel's one-line composer.
+  'detail.timeline': 'Activity',
+  'detail.timelineComposer': 'Write a note… @ to mention',
   'detail.copyRecordId': 'Copy record ID',
   'detail.showEmptyFields': 'Show {{count}} empty fields',
   'detail.showEmptyFields_one': 'Show {{count}} empty field',
@@ -120,6 +120,14 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.previousPage': 'Previous',
   'detail.nextPage': 'Next',
   'detail.pageOf': 'Page {{current}} of {{total}}',
+  // objectstack#27524 — the enlarged related list's toolbar.
+  'detail.relatedFilter': 'Filter {{title}}…',
+  'detail.relatedChips': 'Show',
+  'detail.relatedChipAll': 'All',
+  'detail.relatedChipMine': 'Mine',
+  'detail.relatedChipOverdue': 'Overdue',
+  'detail.relatedExport': 'Export',
+  'detail.relatedRows': '{{count}} rows',
   'detail.sortBy': 'Sort by',
   'detail.filterPlaceholder': 'Filter…',
   'detail.highlightFields': 'Key Fields',

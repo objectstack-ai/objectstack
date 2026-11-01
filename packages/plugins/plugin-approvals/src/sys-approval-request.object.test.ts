@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { templateSlotSource } from '@objectstack/spec/automation';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 
 const actions = (SysApprovalRequest as any).actions as any[];
@@ -134,18 +135,22 @@ describe('sys_approval_request declared actions', () => {
   it('the confirm question rides `description`, not `confirmText`, so one decision opens one dialog (#7278)', () => {
     const reject = byName('approval_reject');
     expect(reject.confirmText).toBeUndefined();
-    expect(reject.description).toBe(
+    // `description` is a `template` slot (#27948): the parsed value is the
+    // envelope, so the sentence is read through the slot's one reader.
+    const rejectText = templateSlotSource(reject.description);
+    expect(rejectText).toBe(
       'Reject this request? A rejection is final for every approver.',
     );
     // the finality warning is the half that must survive the move
-    expect(reject.description).toContain('final for every approver');
+    expect(rejectText).toContain('final for every approver');
 
     const recall = byName('approval_recall');
     expect(recall.confirmText).toBeUndefined();
-    expect(recall.description).toBe(
+    const recallText = templateSlotSource(recall.description);
+    expect(recallText).toBe(
       'Recall this request? Approvers can no longer act on it and the record is unlocked.',
     );
-    expect(recall.description).toContain('can no longer act on it');
+    expect(recallText).toContain('can no longer act on it');
   });
 
   it('no declared action pairs `confirmText` with `params` (#7278 ruling, object-wide)', () => {

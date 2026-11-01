@@ -81,10 +81,14 @@ describe('sys_exchange_rate — declaration (multi-currency M1-1)', () => {
       expect((SysExchangeRate as any).requiredPermissions).toBeUndefined();
     });
 
-    it('offers New / Edit / Delete to whoever holds the grant, and no CSV import until #27190 proves it', () => {
+    it('offers New / Edit / Delete and CSV import to whoever holds the grant', () => {
+      // `system-data` leaves import off by default; this object opts in, because
+      // the generic import door serves it end to end (rest
+      // `import-exchange-rate-csv.test.ts` pins the door on the real object).
       const affordances = resolveCrudAffordances(SysExchangeRate as any);
       expect(SysExchangeRate.managedBy).toBe('system-data');
-      expect(affordances).toMatchObject({ create: true, edit: true, delete: true, import: false });
+      expect(SysExchangeRate.userActions).toEqual({ import: true });
+      expect(affordances).toMatchObject({ create: true, edit: true, delete: true, import: true });
     });
 
     it('exposes the generic data API, so Setup can list and write it', () => {

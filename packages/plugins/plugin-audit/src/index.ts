@@ -10,6 +10,20 @@
 export { AuditPlugin } from './audit-plugin.js';
 export { createFieldPresenceProbe, installAuditWriters } from './audit-writers.js';
 export { createAuthEventAuditSink } from './auth-event-audit.js';
+// [#27908] The `action_invocation` row writer the action doors reach through
+// the `audit` slot (ruling 6513869839 on #27681, parameter 3).
+export {
+  ACTION_INVOCATION_AUDIT_ACTION,
+  buildActionInvocationAuditRow,
+  createActionInvocationAuditWriter,
+} from './action-invocation-audit.js';
+export type {
+  ActionInvocationAuditEvent,
+  ActionInvocationAuditWriter,
+  ActionInvocationAuditWriterOptions,
+  ActionInvocationBranch,
+  ActionInvocationOutcome,
+} from './action-invocation-audit.js';
 export {
   createReadAuditBatcher,
   extractDetailReadId,

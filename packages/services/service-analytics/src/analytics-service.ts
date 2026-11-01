@@ -3245,9 +3245,10 @@ export class AnalyticsService implements IAnalyticsService {
         // from: explicit measure `currency` → the source field's FIXED
         // currency (`sourceFieldMeta().defaultCurrency`, relayed only under
         // `currencyMode: 'fixed'` — #20091) → tenant default (`ctx.currency`).
-        // A measure is monetary if it declares a currency OR aggregates a
-        // `currency`-type field; non-monetary measures (count, avg of a plain
-        // number) never receive a currency code.
+        // A measure is monetary if it declares a currency OR takes an amount
+        // aggregate (`AMOUNT_AGGREGATES`) over a `currency`-type field;
+        // non-monetary measures (a count, over an amount field too, or an avg
+        // of a plain number) never receive a currency code.
         //
         // [ADR-0144 D2] A `record`-mode amount has one currency per ROW, held
         // in its code field, so no single code describes the column and no
@@ -3277,7 +3278,8 @@ export class AnalyticsService implements IAnalyticsService {
             : undefined;
           if (fc.currencyField == null && codeColumn !== undefined) fc.currencyField = codeColumn;
         } else if (fc.currency == null) {
-          const monetary = !!mc.currency || meta?.type === 'currency' || derivedCode !== undefined;
+          const amount = meta?.type === 'currency' && AMOUNT_AGGREGATES.has(m.aggregate ?? '');
+          const monetary = !!mc.currency || amount || derivedCode !== undefined;
           if (monetary) {
             const resolved = mc.currency ?? meta?.defaultCurrency ?? derivedCode ?? context?.currency;
             if (resolved) fc.currency = resolved;

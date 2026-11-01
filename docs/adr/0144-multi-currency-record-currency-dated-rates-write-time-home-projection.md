@@ -320,6 +320,14 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
    workload row M2-1 and #27191 is corrected to required. Workload row M2-1 drafts the names `rateDate` and
    `rateField`; in that draft, `rateDate` is "a `date`/`datetime` field on the same object (⛔ no default)". The design
    record §6 says the document date must not default to `created_at` (「⛔ 不默认 created_at」).
+   *Note (2026-10-31):* settled: the pointers are spelled `rateDate` (the document date) and `rateField` (the rate
+   used), the names workload row M2-1 drafts, landed in PR #28096 (`73b72709`). Beside them `homeAmount.field` names
+   the home field, and all three are required with no default
+   (`packages/spec/src/data/field.zod.ts#HomeAmountSchema`). `rateDate` names a `date` or `datetime` field on the
+   same object (`packages/spec/src/data/object.zod.ts#HOME_AMOUNT_RATE_DATE_TYPES`) and `rateField` a `number` field;
+   both the home and the rate field declare `readonly: true`, and the object judges what each pointer names
+   (`packages/spec/src/data/object.zod.ts#refuseDishonestHomeAmount`). Review: contract review
+   [`6526217217`](https://github.com/objectstack-ai/objectstack/pull/28096#issuecomment-6526217217) on PR #28096.
 2. **Which row counts as "the document date's rate"** (#27192). The ruling says "a platform rate table by effective
    date". Workload row M2-2 and the measurement round read this as the row with the latest `effective_date` on or before
    the document date. The measurement round also rules out a "nearest-future rate". The design record §5 says

@@ -257,10 +257,15 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // unavailable) joined the accepted set, and the sample names it.
         // [#27946] 48 → 49: `pressed` (the reader's pressed-state predicate)
         // joined the accepted set, and the sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(49);
+        // [#27944] 49 → 50: `submitText` (the param dialog's submit button
+        // label) joined the accepted set, and the sample names it.
+        // [#28404] 50 → 51: `overrides` (the ADR-0146 D2 override declaration
+        // a `<base>.custom` item carries) joined the accepted set, and the
+        // sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(51);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'overrides']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
@@ -354,9 +359,15 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // face (the progress bar or the plain percentage).
     // [#27945] `field` 80 → 81: `lookupAutofill`, the fields a pick in a
     // lookup fills.
+    // [#28022] `app` 22 → 23: `landing`, the per-audience landing list.
+    // [#28404] `app` 23 → 24, `dashboard` 20 → 21, `dataset` 16 → 17, `flow`
+    // 22 → 23, `page` 26 → 27, `report` 23 → 24: `overrides`, the ADR-0146 D2
+    // override declaration, on each overridable type. The excluded types
+    // (`agent`, `field`, `hook`, `object`, `position`, `skill`, `tool`) do not
+    // gain it, and their counts stay.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 22, dashboard: 20, dataset: 16, field: 81, flow: 22,
-        hook: 23, object: 49, page: 26, position: 13, report: 23, skill: 16, tool: 14,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 81, flow: 23,
+        hook: 23, object: 49, page: 27, position: 13, report: 24, skill: 16, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

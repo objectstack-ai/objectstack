@@ -205,15 +205,14 @@ export type {
   ObjectDefFieldLike,
   BuildPageOptions,
 } from './synth/buildDefaultPageSchema';
-// objectstack#26678 — the synthesized record page at two widths: the tier a
-// container takes, the page partitioned into its columns, and the columns.
+// objectstack#26678 / objectstack#27524 — the synthesized record page laid
+// out by its width: the tier a container takes, the page partitioned into its
+// details and panels, and the layout.
 export {
-  RECORD_PAGE_THREE_COLUMN_MIN_WIDTH,
+  RECORD_PAGE_WIDE_MIN_WIDTH,
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
   recordPageTierFor,
-  recordPageArrangementFor,
-  recordPageColumnDefaults,
-  recordTimelineDefaultReason,
+  recordPageTierHasRightColumn,
   recordPageColumnOfTab,
   buildDefaultPageColumns,
   bodyTableIdsOf,
@@ -224,10 +223,6 @@ export type {
   RecordPageTier,
   RecordPageColumn,
   DefaultPageColumns,
-  RecordPageColumnSwitches,
-  RecordPageArrangement,
-  RecordPageObjectLike,
-  RecordTimelineDefaultReason,
 } from './synth/recordPageColumns';
 export { useRecordPageTier } from './useRecordPageTier';
 export type { UseRecordPageTierOptions } from './useRecordPageTier';
@@ -241,8 +236,6 @@ export { RecordBodyTablesContext } from './relatedListCompact';
 // the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn, relatedCountTargetOf } from './useRelatedCounts';
 export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts';
-// The tabbed tier's 关联 tab in the reader's arrangement (objectstack#27055).
-export { ArrangedRelatedTab } from './ArrangedRelatedTab';
 // objectstack#27055, Target 3 — the timeline as ONE stream: the host hands
 // the record's field changes over through this context.
 export {

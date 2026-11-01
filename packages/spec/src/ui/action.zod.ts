@@ -27,6 +27,9 @@ import { I18nLabelSchema, InlineLocaleMapSchema } from './i18n.zod';
 import { NON_BLANK_STRING } from '../shared/refinement-projection';
 import {
   ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE,
+  ACTION_DESCRIPTION_TEMPLATE_DESCRIBE,
+  ACTION_OUTCOME_MESSAGE_TEMPLATE_DESCRIBE,
+  ACTION_PARAM_HELP_TEXT_TEMPLATE_DESCRIBE,
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
   actionCopyRefusals,
   actionCopyTemplateSlot,
@@ -46,6 +49,7 @@ import { MEMBERSHIP_REACH_NAMES, lowerRequiresMembershipReach } from '../identit
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { aiJsonSchemaSlot } from '../shared/ai-json-schema-slot';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
@@ -159,6 +163,24 @@ const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =
   + `\`SelectOptionSchema\`. It exists only inside objectui's own `
   + `\`SelectOptionMetadata\` type, which no metadata path populates and no widget reads. An `
   + `action param's options are \`{ label, value, visibleWhen }\`; drop the key.`;
+
+/**
+ * [#24814, ADR-0032 Decisions 2–3] A registered action's `confirmText` /
+ * `successMessage` — a `template` slot over the roots the console's runner
+ * binds, one family with the page action rows' copy keys
+ * (`./action-copy-template.ts`), which also keeps the inline locale map
+ * `I18nLabelSchema` took. The `template` input is built HERE, at the declaring
+ * file, so the expression-surface census sees every position.
+ *
+ * [#27948, ruling A, step 2] The param dialog's `description` and each
+ * `outcomeMessages` entry joined the family with their locale map; a param's
+ * `helpText` joined it without one (it was a plain string, so a map was never
+ * its shape — {@link actionParamHelpText}).
+ */
+const actionCopy = (key: 'confirmText' | 'successMessage' | 'description' | 'outcomeMessages') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
+
+/** [#27948] A param's `helpText`: the copy family's slot, with no locale map (it was a plain string). */
+const actionParamHelpText = () => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals('helpText')), 'helpText');
 
 /**
  * Action Parameter Schema
@@ -368,8 +390,11 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   })).optional().meta({ title: 'Options' }),
   /** Placeholder override. */
   placeholder: z.string().optional().meta({ title: 'Placeholder' }),
-  /** Help/description override. */
-  helpText: z.string().optional().meta({ title: 'Help Text' }),
+  /**
+   * Help/description override — the hint under this input in the param
+   * dialog. A `template` slot over `confirmText`'s roots (#27948).
+   */
+  helpText: actionParamHelpText().optional().meta({ title: 'Help Text' }).describe(`Hint shown under this input in the action's param dialog — ${ACTION_PARAM_HELP_TEXT_TEMPLATE_DESCRIBE}`),
   /**
    * Default value for the dialog input — prefilled into the control when the
    * dialog opens, and SUBMITTED VERBATIM if the user does not touch the field
@@ -879,16 +904,6 @@ const ActionConditionInputSchema = z.union([z.boolean(), EvaluatedExpressionInpu
 });
 
 /**
- * [#24814, ADR-0032 Decisions 2–3] A registered action's `confirmText` /
- * `successMessage` — a `template` slot over the roots the console's runner
- * binds, one family with the page action rows' copy keys
- * (`./action-copy-template.ts`), which also keeps the inline locale map
- * `I18nLabelSchema` took. The `template` input is built HERE, at the declaring
- * file, so the expression-surface census sees both positions.
- */
-const actionCopy = (key: 'confirmText' | 'successMessage') => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key, { localeMap: true })), key, { localeMap: true });
-
-/**
  * [#26619] `disabledReason` — the sentence a greyed action shows to say WHY it
  * is unavailable, beside the `disabled` predicate that greys it.
  *
@@ -916,6 +931,41 @@ const DISABLED_REASON_BLANK =
   + 'approved legal review is required first."), or omit the key to keep the default.';
 const actionDisabledReason = () => z.union([
   z.string().refine(NON_BLANK_STRING, { message: DISABLED_REASON_BLANK }),
+  InlineLocaleMapSchema,
+]);
+
+/**
+ * [#27944] `submitText` — the verb on the submit button of the dialog an action
+ * opens to collect its `params` ("Send", "Log Call"), in place of the dialog's
+ * default "Confirm".
+ *
+ * An I18nLabel (a plain string translated at
+ * `objects.OBJECT._actions.ACTION.submitText`, or an inline locale map), the
+ * route `description` — the same dialog's line under its title — takes. The
+ * name is the protocol's existing word for a submit button's copy:
+ * `object-form`'s `submitText` (`component.zod.ts`), beside its `cancelText`.
+ * `submitLabel` is the spelling the platform retired twice in favour of that
+ * one (the `element:form` prop and the page component-copy translation key),
+ * so it is an alias here, not the key.
+ *
+ * It is not `confirmText`. That one is the MESSAGE of the confirm dialog a
+ * param-LESS action opens; this one is the BUTTON of the param dialog, the
+ * dialog an action with params opens instead. The two never meet on one
+ * registered action: `confirmText` beside a non-empty `params` is refused
+ * below, and so is `submitText` without one — an action with no params opens
+ * no param dialog, so the text would parse clean and never show (ADR-0078).
+ *
+ * A blank string is refused for the reason `disabledReason`'s is: it would
+ * replace the default label with an empty button. Omitting the key keeps
+ * "Confirm". The rule is {@link NON_BLANK_STRING}, so the published JSON Schema
+ * carries it too.
+ */
+const SUBMIT_TEXT_BLANK =
+  'a blank `submitText` would replace the param dialog\'s default button label, "Confirm", with '
+  + 'an empty button. Write the verb the button performs (e.g. "Send", "Log Call"), or omit the '
+  + 'key to keep the default.';
+const actionSubmitText = () => z.union([
+  z.string().refine(NON_BLANK_STRING, { message: SUBMIT_TEXT_BLANK }),
   InlineLocaleMapSchema,
 ]);
 
@@ -953,6 +1003,12 @@ const actionObject = () => strictObject({
     // by the copy keys' `*Message` family.
     disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
     disabledHint: 'disabledReason', disabledText: 'disabledReason',
+    // [#27944] The two spellings of the param dialog's button copy that are
+    // measured on a neighbouring surface: `submitLabel`, the form copy key the
+    // platform retired in favour of `submitText`, and `confirmLabel`, the
+    // spelling of the same button on a view's `bulkActionDefs` dialog. Neither
+    // is reachable by distance from `submitText`.
+    submitLabel: 'submitText', confirmLabel: 'submitText',
     // [#27946] The card's own second spelling (`active`) and the `*When`
     // predicate family's spelling of the pressed-state predicate.
     active: 'pressed', activeWhen: 'pressed', pressedWhen: 'pressed',
@@ -1059,7 +1115,7 @@ const actionObject = () => strictObject({
    * (≥40 chars, required when `ai.exposed`); this one is human-facing dialog
    * copy and is never sent to a model.
    */
-  description: I18nLabelSchema.optional().describe('Explanatory line shown under the title in the action\'s param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing `ai.description`.'),
+  description: actionCopy('description').optional().describe(`Explanatory line shown under the title in the action's param dialog. Carries the confirm question for an action that collects params (one dialog, not two). Not the LLM-facing \`ai.description\`. It is ${ACTION_DESCRIPTION_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence.`),
 
   /** Target object this action belongs to (optional, snake_case) */
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe('Target object this action belongs to. When set, the action is auto-merged into the object\'s actions array by defineStack().'),
@@ -1373,6 +1429,12 @@ const actionObject = () => strictObject({
         : undefined
     ),
   }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
+
+  /**
+   * The submit button label of the dialog `params` opens — the contract is
+   * on {@link actionSubmitText}.
+   */
+  submitText: actionSubmitText().optional().describe('Label of the submit button in the action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"), in place of the default "Confirm" — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action). Only on an action with a non-empty `params`: without one no param dialog opens, so it is refused. Not `confirmText`, which is the message of a param-less action\'s confirm dialog. A blank label is refused.'),
   
   /** Visual Style */
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'link']).optional().describe('Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent)'),
@@ -1436,13 +1498,18 @@ const actionObject = () => strictObject({
    *
    * **Selection** (the console's, after an `api` or `script` action
    * succeeds): the success payload's top-level `outcome` — the payload
-   * `${result.*}` reads, i.e. `${result.outcome}` — names the entry; failing
+   * `{{ result.* }}` reads, i.e. `{{ result.outcome }}` — names the entry; failing
    * a match, `successMessage`; failing that, the runner's default text.
    *
-   * **Interpolation**: each message, like `successMessage`, may interpolate
-   * `${result.X}` — the scope `onSuccess.navigate` declares
-   * (for `type: 'api'` the `target` call's response body, for
-   * `type: 'script'` the handler's return value). No second dialect.
+   * **Interpolation**: each message is a `template` slot like
+   * `successMessage` (#27948, ruling A): its `{{ }}` holes read `result` —
+   * for `type: 'api'` the `target` call's response body, for
+   * `type: 'script'` the handler's return value — and `record`. One dialect:
+   * a `${…}` token is refused at the doors. Stored copy is rewritten to
+   * `{{ }}` by hand: the semantic migration entry
+   * `action-dialog-outcome-copy-template-holes` (`os migrate meta` lists it)
+   * names the edit and registers no conversion, since a `${…}` token can hold
+   * an expression with no mechanical `{{ }}` spelling.
    *
    * **Where it is refused** (`refuseInertOutcomeMessages`, and the
    * declarative-update table): on a type with no server response to report
@@ -1460,10 +1527,10 @@ const actionObject = () => strictObject({
    * (objectui#11344) and is `live` now; the reader — the action runner picks
    * `outcomeMessages[outcome]` off the handler's return value, falls back to
    * `successMessage` and then to the runner's default text, and fills
-   * `${result.*}` in whichever it shows — is recorded by symbol in
+   * the holes of whichever it shows — is recorded by symbol in
    * `packages/spec/liveness/action.json`, row `outcomeMessages`.
    */
-  outcomeMessages: z.record(SnakeCaseIdentifierSchema, I18nLabelSchema).optional().describe("Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case `outcome` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message may interpolate ${result.*}, the scope `onSuccess.navigate` declares. An outcome with no entry here falls back to `successMessage`, then to the default text. Not allowed beside `resultDialog` (which suppresses the success toast) or `operation: 'update'` (no handler, so no outcome)."),
+  outcomeMessages: z.record(SnakeCaseIdentifierSchema, actionCopy('outcomeMessages')).optional().describe(`Success copy per handler outcome, for type:'api' and type:'script' actions: keys are the snake_case \`outcome\` values the handler returns in its success payload (e.g. archived, already_archived), values the message shown for that outcome. Each message is ${ACTION_OUTCOME_MESSAGE_TEMPLATE_DESCRIBE} An inline locale map ({ en, "zh-CN" }) is accepted too, each value such a sentence. An outcome with no entry here falls back to \`successMessage\`, then to the default text. Not allowed beside \`resultDialog\` (which suppresses the success toast) or \`operation: 'update'\` (no handler, so no outcome).`),
   // Runtime (ActionRunner) already honours this — declared here so authors can
   // set a friendly failure toast instead of surfacing the raw error string.
   errorMessage: I18nLabelSchema.optional().describe('Error message to show when the action fails (overrides the raw error).'),
@@ -1952,6 +2019,8 @@ const actionObject = () => strictObject({
   // parse. This is the LAST name on the undeclared-envelope debt list the
   // structural walk opened with eight of.
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 });
 
 /**
@@ -2193,6 +2262,24 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
     + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
   path: ['confirmText'],
+}).refine((data) => {
+  // [#27944] The mirror of the rule above, for the param dialog's button copy.
+  // The console's action runner opens the param dialog only for a non-empty
+  // `params` array (objectui `ActionRunner.execute`), so `submitText` on any
+  // other action parses clean and is never drawn — the ADR-0078 shape. Scoped
+  // by schema boundary like the rule above: `InlineActionSchema` does not pick
+  // the key at all.
+  if (data.submitText != null && !(Array.isArray(data.params) && data.params.length > 0)) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    '`submitText` labels the submit button of the dialog an action opens to collect its `params`, '
+    + 'and this action declares no `params`, so it opens no such dialog and the label would never '
+    + 'show. Declare the `params` the dialog collects, or drop `submitText`. A param-less action '
+    + 'that asks first opens a confirm dialog instead, whose message is `confirmText`.',
+  path: ['submitText'],
 }).superRefine((data, ctx) => {
   // #9566/#9474 — `onSuccess` is scoped to the action types whose success
   // carries a result for `${result.*}` to read: `api` (the `target` call's

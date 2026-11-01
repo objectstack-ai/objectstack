@@ -645,10 +645,11 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
     void (await scoped.packages.get('com.acme.crm')).package;
 }
 
-// A SERVED row is the registry record plus the read door's own verdict,
-// `writable` (#23972 declared it on the served row, not on the record).
-declare const authoringRow: InstalledPackage & { writable: boolean };
-declare const assembledRow: AssembledInstalledPackage & { writable: boolean };
+// A SERVED row is the registry record plus the read door's own verdicts,
+// `writable` (#23972 declared it on the served row, not on the record) and
+// `disableable` (#28318, declared beside it).
+declare const authoringRow: InstalledPackage & { writable: boolean; disableable: boolean };
+declare const assembledRow: AssembledInstalledPackage & { writable: boolean; disableable: boolean };
 
 /**
  * [#17536] The four `/packages` READ members declare the stage the DOOR is

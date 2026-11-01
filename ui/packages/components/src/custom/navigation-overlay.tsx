@@ -65,7 +65,7 @@
  */
 
 import React from 'react';
-import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   Sheet,
@@ -83,6 +83,7 @@ import {
   recordListFaceFor,
   type RecordListFace,
 } from './record-list-face';
+import { RecordTopBar, RecordTopBarButton, useRecordStepKeys, type RecordTopBarStepper } from './record-top-bar';
 
 /**
  * English defaults for every string this overlay renders as chrome
@@ -265,76 +266,31 @@ export interface NavigationOverlayProps {
    */
   onBack?: () => void;
   /**
-   * The path drawn after the `←` control (drawer and split,
-   * objectstack#26679) — the host's ancestors of the record shown, each one a
-   * control that returns to it. Nothing is drawn at the left of the bar when
-   * neither this nor {@link onBack} is passed: the bar names no object and no
-   * position (maintainer rulings 2 and 3 on objectstack#26679).
+   * The left end of the bar after the `←` control (drawer and split): the
+   * host's breadcrumb — 「对象 › 记录名」 at the root of a record pane, and one
+   * level down the ancestors of the record shown, each one a control that
+   * returns to it (objectstack#26679, objectstack#27524 Target 7). Nothing is
+   * drawn at the left of the bar when neither this nor {@link onBack} is
+   * passed.
    */
   trail?: React.ReactNode;
   /**
    * Previous / next record (drawer and split, objectstack#26679). When passed
-   * the bar draws the `↑` `↓` pair, and `↑` / `↓` / `k` / `j` step through the
-   * host's sibling set while no text input, menu or grid has the keyboard.
-   * A missing handler draws its control disabled — the ends of the set.
+   * the bar draws the counter 「3 / 21」 (with `position`; its tooltip names
+   * `scope`) and the `↓` `↑` pair (objectstack#27524, Target 7), and `↑` /
+   * `↓` / `k` / `j` step through the host's sibling set while no text input,
+   * menu or grid has the keyboard. A missing handler draws its control
+   * disabled — the ends of the set.
    */
-  stepper?: {
-    onPrevious?: () => void;
-    onNext?: () => void;
-  };
+  stepper?: RecordTopBarStepper;
+  /**
+   * The host's panel switches — the record's right-column ⊟ — drawn in the
+   * bar after the step pair and before `⤢` / `✕` (objectstack#27524, Target
+   * 7). The pane draws whatever it is handed; whether a switch applies is the
+   * host's to decide.
+   */
+  toggles?: React.ReactNode;
 }
-
-/**
- * Whether a key event belongs to the element it was typed in rather than to
- * the drawer's own shortcuts: a text field, an editable region, or a
- * composite widget that already moves with the arrow keys (a menu, a list
- * box, a grid, a tab strip).
- */
-function keyEventOwnedByTarget(target: EventTarget | null): boolean {
-  if (!target || !(target instanceof Element)) return false;
-  if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) {
-    return true;
-  }
-  return !!target.closest(
-    '[role="menu"], [role="menubar"], [role="listbox"], [role="combobox"], [role="grid"], [role="treegrid"], [role="tree"], [role="tablist"], [role="radiogroup"], [role="slider"], [role="spinbutton"]',
-  );
-}
-
-/**
- * The drawer's previous / next shortcuts (objectstack#26679): `ArrowUp` / `k`
- * and `ArrowDown` / `j`, on the document while the drawer is open, never with
- * a modifier and never while the event belongs to its target
- * ({@link keyEventOwnedByTarget}).
- */
-function useStepperKeys(
-  active: boolean,
-  onPrevious: (() => void) | undefined,
-  onNext: (() => void) | undefined,
-) {
-  const handlers = React.useRef({ onPrevious, onNext });
-  handlers.current = { onPrevious, onNext };
-  React.useEffect(() => {
-    if (!active || typeof document === 'undefined') return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (keyEventOwnedByTarget(e.target)) return;
-      let step: (() => void) | undefined;
-      if (e.key === 'ArrowUp' || e.key === 'k') step = handlers.current.onPrevious;
-      else if (e.key === 'ArrowDown' || e.key === 'j') step = handlers.current.onNext;
-      else return;
-      // The key is the drawer's even at an end of the set, so the body does
-      // not scroll under a disabled control.
-      e.preventDefault();
-      step?.();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [active]);
-}
-
-/** The bar's icon-button face, shared by every control on it. */
-const BAR_BUTTON_CLASS =
-  'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
 
 /**
  * The one `storageKey` spelling every record overlay uses, keyed by object.
@@ -433,15 +389,17 @@ function useElementWidth(el: HTMLElement | null): number | null {
 
 /**
  * Whether an `Esc` belongs to the element it was pressed in rather than to the
- * split pane: a text field, or an open menu, list box or dialog (which closes
- * itself first and marks the event handled).
+ * pane: a text field, or an open menu, list box or dialog (which closes itself
+ * first and marks the event handled). `pane` is the pane's own dialog — the
+ * drawer's sheet — which never owns the key it is asking about.
  */
-function escapeOwnedByTarget(target: EventTarget | null): boolean {
+function escapeOwnedByTarget(target: EventTarget | null, pane?: Element | null): boolean {
   if (!target || !(target instanceof Element)) return false;
   if (target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) {
     return true;
   }
-  return !!target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
+  const owner = target.closest('[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"]');
+  return !!owner && owner !== pane;
 }
 
 /**
@@ -599,6 +557,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   onBack,
   trail,
   stepper,
+  toggles,
 }) => {
   // Every chrome string below is locale-driven (objectstack#5430 for the two
   // close affordances, objectstack#5506 for the rest). Must stay above the
@@ -637,7 +596,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   const maximized = !!maximizable && shown && maximizedState;
   const sidebarWidth = useLiveSidebarWidth();
   const handleInteractOutside = usePopperAwareInteractOutside();
-  useStepperKeys(paneMode && shown && !!stepper, stepper?.onPrevious, stepper?.onNext);
+  useRecordStepKeys(paneMode && shown, stepper);
   // `Esc`: from maximized it restores, below the stack's root it goes back one
   // level, at the root it closes. The drawer's dialog layer asks the same
   // through `onEscapeKeyDown` below.
@@ -647,6 +606,18 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
     else close();
   };
   useSplitEscape(hasList && face === 'split' && shown, handleEscape);
+  // The drawer's dialog layer hears `Esc` on the document in the capture
+  // phase, before any field in the record does, so it asks the split pane's
+  // question itself: a key already handled, or pressed where a field or a
+  // menu owns it, is not the pane's. It still holds the sheet open — left
+  // unprevented, the layer would dismiss the whole drawer on it.
+  const sheetRef = React.useRef<HTMLDivElement>(null);
+  const handleDrawerEscape = (e: KeyboardEvent) => {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    if (escapeOwnedByTarget(e.target, sheetRef.current)) return;
+    handleEscape();
+  };
 
   // Non-overlay modes draw no record (the hook navigates); only the list.
   if (!paneMode && !hasList) {
@@ -695,86 +666,48 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // panel's close, as it always was.
   const closeLabel = hasList && face === 'split' ? t('common.closePanel') : t('common.close');
 
-  /* The bar (objectstack#26679, maintainer rulings 2-5): the left side holds
-     only the in-place path — `←` and the ancestors — and is empty at the root;
-     the right side holds ↑ ↓, ⤢ / ⤡ and ✕. No object name and no position. */
-  const barControls = (
-    <>
-      <div className="flex min-w-0 flex-1 items-center gap-1" data-testid="record-drawer-leading">
-        {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label={t('detail.goBack')}
-            title={t('detail.goBack')}
-            className={BAR_BUTTON_CLASS}
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {trail}
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5">
-        {stepper && (
-          <>
-            <button
-              type="button"
-              onClick={stepper.onPrevious}
-              disabled={!stepper.onPrevious}
-              aria-label={t('detail.previousRecord')}
-              title={t('detail.previousRecord')}
-              className={BAR_BUTTON_CLASS}
+  /* The bar — the record's top bar (objectstack#27524, Target 7, after
+     objectstack#26679): the left end holds `←` and the host's breadcrumb; the
+     right end the counter and ↓ ↑, the host's panel switches, then ↗, ⤢ / ⤡
+     and ✕. */
+  const bar = (
+    <RecordTopBar
+      leadingTestId="record-drawer-leading"
+      leading={
+        <>
+          {onBack && (
+            <RecordTopBarButton label={t('detail.goBack')} onClick={onBack}>
+              <ArrowLeft className="h-3.5 w-3.5" />
+            </RecordTopBarButton>
+          )}
+          {trail}
+        </>
+      }
+      stepper={stepper}
+      toggles={toggles}
+      frame={
+        <>
+          {onExpand && (
+            <RecordTopBarButton label={resolvedExpandLabel} onClick={() => onExpand()}>
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </RecordTopBarButton>
+          )}
+          {maximizable && (
+            <RecordTopBarButton
+              label={maximized ? t('detail.restoreSize') : t('detail.maximize')}
+              onClick={() => setMaximized((was) => !was)}
+              data-testid="record-pane-maximize"
             >
-              <ChevronUp className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={stepper.onNext}
-              disabled={!stepper.onNext}
-              aria-label={t('detail.nextRecord')}
-              title={t('detail.nextRecord')}
-              className={BAR_BUTTON_CLASS}
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-          </>
-        )}
-        {onExpand && (
-          <button
-            type="button"
-            onClick={() => onExpand()}
-            aria-label={resolvedExpandLabel}
-            title={resolvedExpandLabel}
-            className={BAR_BUTTON_CLASS}
-          >
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {maximizable && (
-          <button
-            type="button"
-            onClick={() => setMaximized((was) => !was)}
-            aria-label={maximized ? t('detail.restoreSize') : t('detail.maximize')}
-            title={maximized ? t('detail.restoreSize') : t('detail.maximize')}
-            className={BAR_BUTTON_CLASS}
-            data-testid="record-pane-maximize"
-          >
-            {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={close}
-          aria-label={closeLabel}
-          title={closeLabel}
-          className={BAR_BUTTON_CLASS}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </>
+              {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </RecordTopBarButton>
+          )}
+          <RecordTopBarButton label={closeLabel} onClick={close}>
+            <X className="h-3.5 w-3.5" />
+          </RecordTopBarButton>
+        </>
+      }
+    />
   );
-  const barClass = 'shrink-0 flex-row items-center justify-between gap-2 space-y-0 px-4 py-2 border-b bg-muted/30';
 
   // --- Drawer (Sheet) ---
   // Over a list the host handed over, non-modal and undimmed
@@ -801,8 +734,10 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         onOpenAutoFocus={(e) => e.preventDefault()}
         // objectstack#27545 — from maximized, `Esc` restores; objectstack#26679
         // — below the root of an in-place stack, `Esc` goes back one level.
-        // Only the root's `Esc` closes.
-        onEscapeKeyDown={maximized || onBack ? (e) => { e.preventDefault(); handleEscape(); } : undefined}
+        // Only the root's `Esc` closes. objectstack#28156 — a field's `Esc`
+        // stays the field's ({@link escapeOwnedByTarget}).
+        onEscapeKeyDown={maximized || onBack ? handleDrawerEscape : undefined}
+        ref={sheetRef}
         className={cn(
           // Mobile: full width (no inline cap, no max-w from base sheet).
           // sm+: honor the pane width via the `--ov-w` CSS var. The host's
@@ -818,14 +753,14 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         data-maximized={maximized ? '' : undefined}
       >
         {resizeHandle}
-        <SheetHeader className={barClass}>
+        <SheetHeader className="shrink-0 gap-0 space-y-0 p-0 text-left">
           {/* The title and description stay for assistive technology only
               (Radix requires the title). */}
           <SheetTitle className="sr-only">{resolvedTitle}</SheetTitle>
           <SheetDescription className="sr-only">
             {description || overlayDescription}
           </SheetDescription>
-          {barControls}
+          {bar}
         </SheetHeader>
         <div className="flex-1 min-h-0 overflow-y-auto">
           {renderContent(selectedRecord)}
@@ -877,7 +812,7 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
                 data-maximized={maximized ? '' : undefined}
               >
                 {resizeHandle}
-                <div className={cn('flex', barClass)}>{barControls}</div>
+                {bar}
                 <div className="flex-1 min-h-0 overflow-y-auto">
                   {renderContent(selectedRecord)}
                 </div>

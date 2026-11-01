@@ -794,39 +794,59 @@ shared draft (`InlineEditProvider` from `@object-ui/react`), committed by
 - 🤝 [Contributing Guide](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md)
 - 🗺️ [Roadmap](https://github.com/objectstack-ai/objectstack/blob/main/ROADMAP.md)
 
-## One record page at two widths
+## One record page, laid out by its width
 
 The synthesized default record page (`buildDefaultPageSchema`, and a slotted
 page that keeps the default tab strip) is laid out by the width of the view it
-occupies — the drawer, the split pane or the full page — never by the
-viewport:
+occupies — the full page, the split pane, the overlay drawer, the maximized
+pane, a phone — by one rule, never by the viewport:
 
 | Container width | Layout |
 |---|---|
-| 1280 px and up | Three resident columns: details · timeline (one stream: the composer on top, then the discussion, the activity and, with `enable.trackHistory`, the field changes, filtered by All / Activity / Discussion / Changes) · related (each related list as a card, Approvals, Attachments, the provenance footer) |
-| 1024 – 1279 px | Details · timeline; the related column folds into a rail opened from a **Related (N)** toggle above the columns |
-| below 1024 px, or embedded (drawer / split pane) | The tab strip, exactly as before |
+| 1120 px and up | Details · the right column (380 px). A details section takes up to three field columns; the 动态 panel shows five entries |
+| 760 – 1119 px | Details · the right column (320 px). A details section takes up to two field columns; the 动态 panel shows three entries |
+| below 760 px | One column: the details sections, then the right column's panels in their order |
 
-The related column loads counts first and rows on demand (`RelatedCardStack`).
-Every card's count is asked in one request set, through the same count store
-the tab strip's badges read, and each card is a placeholder until the set has
-answered. A card counted at 0 is its title row alone and reads no rows. A card
-above 0 reads its first three rows, projected to the name field and one status
-or date field, once it is in view (`IntersectionObserver`). The details column
-never waits for any of it. `RecordPageColumns` takes `relatedFieldsOf`, the
-child objects' field definitions the host already holds, so the counts read no
-child schema first; `prefetchRelatedCounts` and `relatedCountTargetsIn` warm
-another record's counts, which the console's drawer does for the record `↑` /
-`↓` would show next.
+The right column holds the panels, each the same shape (a title and a count;
+the header row opens the panel's whole face, the host's `?related=`): first
+**动态** (Activity) — one stream of the discussion, the activity and, with
+`enable.trackHistory`, the field changes, shown as a one-line composer, the
+newest entries and 「查看全部 N 条 →」, which opens the stream in full with its
+All / Activity / Discussion / Changes chips and paging (`?related=timeline`) —
+then each related list in the reader's arrangement, then Approvals and
+Attachments. The reader's ⊟ (`rightColumn`) takes the right column out of the
+two-column tiers; there is no tabbed tier.
+
+A tab row closes the record header in every tier (`RecordTabRow`): 「概览」
+(Overview), then 动态, then one tab per related panel in the reader's
+arrangement, each with its count. A tab is its panel's whole face: choosing it
+draws the full list (every column, paging, sort, inline edit) or the full
+stream below the row, with the header unchanged, and the URL carries it
+(`?related=<object>.<field>`, `?related=timeline`); 「概览」 or Esc returns. The
+row shows as many tabs as its own width fits, measured on every resize, and
+folds the rest into 「+N ▾」, which lists them with their counts and ends with
+the hidden panels' tabs. 「概览」, at least one more tab and the active tab are
+always on the row.
+
+The related panels load counts first and rows on demand (`RelatedCardStack`).
+Every panel's count is asked in one request set, and each panel is a
+placeholder until the set has answered. A panel counted at 0 reads no rows. A
+panel above 0 reads its first three rows, projected to the name field and one
+status or date field, once it is in view (`IntersectionObserver`). The details
+column never waits for any of it. `RecordPageColumns` takes `relatedFieldsOf`,
+the child objects' field definitions the host already holds, so the counts
+read no child schema first; `prefetchRelatedCounts` and
+`relatedCountTargetsIn` warm another record's counts, which the console's
+drawer does for the record `↑` / `↓` would show next.
 
 One header (title, actions, highlights, stage path) serves every tier, and
-the page description stays the tabbed one: the columns are read off it by
-each tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create
+the page description stays the tabbed one: its blocks are read off it by each
+tab's stable `value` (`buildDefaultPageColumns`), so Studio's page-create
 seed, a slotted page and the running page never disagree, and no metadata key
-or node type says "columns". `?tab=` addresses the strip, so it is honoured
-in the tabbed tier and ignored in the column tiers. An authored record page
-(`kind: 'full'`) is drawn as authored at every width; a slotted page keeps the
-synthesized strip, so it takes the tiers.
+or node type says "columns". An authored record page (`kind: 'full'`) is drawn
+as authored at every width, and so is a page whose strip the partition cannot
+read; `?tab=` addresses those strips. A slotted page keeps the synthesized
+strip, so it takes the tiers.
 
 A host wires it with three exports:
 
@@ -838,18 +858,18 @@ import type { ObjectDefLike } from '@object-ui/plugin-detail';
 
 declare const objectDef: ObjectDefLike;
 
-export function RecordPage({ embedded }: { embedded: boolean }) {
+export function RecordPage() {
   // The element the record page occupies: its width picks the tier.
   const [root, setRoot] = React.useState<HTMLDivElement | null>(null);
   const page = buildDefaultPageSchema(objectDef);
   // `null` until the first reading lands, so nothing is drawn for that one commit.
   // Pass `enabled: false` for an authored page, which is drawn as authored.
-  const tier = useRecordPageTier(root, { embedded, enabled: true });
-  const columns = tier === 'two-column' || tier === 'three-column' ? buildDefaultPageColumns(page) : null;
+  const tier = useRecordPageTier(root, { enabled: true });
+  const columns = buildDefaultPageColumns(page);
   return (
     <div ref={setRoot}>
-      {tier === null ? null : columns && (tier === 'two-column' || tier === 'three-column') ? (
-        <RecordPageColumns tier={tier} columns={columns} />
+      {columns ? (
+        tier === null ? null : <RecordPageColumns tier={tier} columns={columns} />
       ) : (
         <SchemaRenderer schema={page} />
       )}
@@ -862,8 +882,8 @@ export function RecordPage({ embedded }: { embedded: boolean }) {
 
 The "Reference Rail" is a right-hand column of summary cards for related
 collections, drawn by the `record:reference_rail` component. The synthesized
-default page never emits it: its related column already shows every related
-list as a compact card (see *One record page at two widths* above). The
+default page never emits it: its right column already shows every related
+list as a compact panel (see *One record page, laid out by its width* above). The
 `buildDefaultPageSchema` options that used to opt into the rail
 (`showReferenceRail`, `hideReferenceRail`, `hideRelatedTab`) and the `rightRail`
 slot were removed with the other surface hints ADR-0085 does not admit

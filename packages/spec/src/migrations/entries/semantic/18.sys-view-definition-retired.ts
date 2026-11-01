@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // verdict is cited in the reason.
 export const entry: SemanticMigration = {
   id: 'sys-view-definition-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the sys_view_definition platform object (SysViewDefinitionObject, exported by '
     + '@objectstack/metadata-core and re-exported by @objectstack/platform-objects and its '

@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // this entry does not perform.
 export const entry: SemanticMigration = {
   id: 'sys-setting-global-rung-moved',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_setting.scope global — the settings cascade global rung left the tenant-scoped settings '
     + 'table: a value for a key declared at global scope is stored in the new tenant-less object '

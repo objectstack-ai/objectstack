@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'system-cache-durations-unit-in-key',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface: 'the two cache durations whose name carried no unit: CacheTier.ttl and '
     + 'CacheAvalanchePrevention.circuitBreaker.resetTimeout (system/cache.zod.ts)',
   replacement: 'ttlSeconds and resetTimeoutSeconds — rename each key; both values, the 300 '

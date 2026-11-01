@@ -99,14 +99,16 @@ type Route =
     /** The member hands the row to its callers, and each of them calls `then`, which calls the write-through. */
     | { readonly handedTo: 'callers'; readonly then: 'runPublishSideEffects' };
 
+// [#28355] A door's write lives in its `…Unaudited` body; the public door of the same name
+// only wraps it with the refusal audit, so the member is the body's name.
 const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; readonly route: Route }> = [
-    { member: 'saveMetaItem', verb: 'repo.put(', route: { sameMember: 'applyRegistryWriteThrough' } },
+    { member: 'saveMetaItemUnaudited', verb: 'repo.put(', route: { sameMember: 'applyRegistryWriteThrough' } },
     { member: 'promoteDraftForPublish', verb: 'repo.promoteDraft(', route: { handedTo: 'callers', then: 'runPublishSideEffects' } },
     { member: 'revertCommit', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'revertCommit', verb: 'repo.restoreVersion(', route: { sameMember: 'applyRegistryWriteThrough' } },
-    { member: 'rollbackMetaItem', verb: 'repo.restoreVersion(', route: { sameMember: 'applyRegistryWriteThrough' } },
-    { member: 'deleteMetaItem', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
-    { member: 'deleteMetaItem', verb: 'this.engine.delete(\'sys_metadata\'', route: { sameMember: 'restoreArtifactRegistryView' } },
+    { member: 'rollbackMetaItemUnaudited', verb: 'repo.restoreVersion(', route: { sameMember: 'applyRegistryWriteThrough' } },
+    { member: 'deleteMetaItemUnaudited', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
+    { member: 'deleteMetaItemUnaudited', verb: 'this.engine.delete(\'sys_metadata\'', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'reassignOrphanedMetadata', verb: 'this.engine.update(\'sys_metadata\'', route: { sameMember: 'applyRegistryWriteThrough' } },
 ];
 

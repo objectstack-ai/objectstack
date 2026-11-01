@@ -63,6 +63,9 @@ import {
   omitInternalFieldsFromWriteResponse,
 } from '@objectstack/core';
 import { TenantLayer0VerdictSchema } from '@objectstack/spec/security';
+// [#27884] The one row of capability-gated stored metadata types — the row the
+// `/meta` type gate and the engine's stored-row read gate read.
+import { isCapabilityGatedStoredMetadataType } from '@objectstack/metadata-core';
 import { resolveTenantFieldName, carriesOrganization } from './tenancy/system-write-organization.js';
 import type { ObjectQL } from './engine.js';
 
@@ -131,7 +134,9 @@ function eventRecordBody(value: unknown): Record<string, unknown> | undefined {
  *
  * `fullRow` is the whole written record (`input.after`), read for the `type`
  * column that selects the redactor — a `changes` patch need not carry it. A
- * body the redactor cannot judge is DROPPED from the event (fail-closed): the
+ * body of a capability-gated type (`isCapabilityGatedStoredMetadataType`,
+ * #27884) is DROPPED for every subscriber. A body the redactor cannot judge is
+ * DROPPED from the event (fail-closed): the
  * key is omitted rather than published raw. A non-record body, and every object
  * outside the set, pass through unchanged. Pure: the event body is a fresh
  * object, never the stored row.
@@ -149,7 +154,13 @@ function redactEventMetadataBody(
       : (fullRow && typeof fullRow === 'object' && !Array.isArray(fullRow)
           ? (fullRow as Record<string, unknown>)[STORED_METADATA_TYPE_COLUMN]
           : undefined);
-  const outcome = redactStoredMetadataBody(type, body[STORED_METADATA_BODY_COLUMN]);
+  // [#27884] A document of a capability-gated type (a datasource's connection
+  // configuration and secret handle) is served only to holders of the type's
+  // read capability, and the event's subscribers are not known here — so its
+  // body is withheld from every subscriber, the fail-closed arm below.
+  const outcome = isCapabilityGatedStoredMetadataType(type)
+    ? ({ ok: false } as const)
+    : redactStoredMetadataBody(type, body[STORED_METADATA_BODY_COLUMN]);
   if (outcome.ok) {
     if (outcome.body === body[STORED_METADATA_BODY_COLUMN]) return body;
     return { ...body, [STORED_METADATA_BODY_COLUMN]: outcome.body };

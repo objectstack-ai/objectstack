@@ -43,7 +43,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Objeto"
       },
       record_id: {
-        label: "ID de registro"
+        label: "Registro"
       },
       submitter_id: {
         label: "Solicitante"

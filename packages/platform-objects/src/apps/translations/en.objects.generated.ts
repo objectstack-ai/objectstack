@@ -141,8 +141,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitation sent to ${result.email}",
-          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          sent: "Invitation sent to {{ result.email }}",
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
         },
         params: {
           role: {
@@ -581,8 +581,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitation sent to ${result.email}",
-          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          sent: "Invitation sent to {{ result.email }}",
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
         },
         params: {
           role: {
@@ -673,8 +673,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitation sent to ${result.email}",
-          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          sent: "Invitation sent to {{ result.email }}",
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
         },
         params: {
           role: {
@@ -700,10 +700,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       update_member_role: {
         label: "Change Role",
-        description: "Choose the new organization role for ${record.user_id?.name ?? 'this member'}.",
+        description: "Choose the new organization role for {{ record.user_id.name | default:'this member' }}.",
         successMessage: "Member role updated",
         outcomeMessages: {
-          permission_set_granted: "Member role updated. The new role also granted the permission set ${result.grantedPermissionSet.label}."
+          permission_set_granted: "Member role updated. The new role also granted the permission set {{ result.grantedPermissionSet.label }}."
         },
         params: {
           role: {
@@ -721,7 +721,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "Make the selected member an owner of this organization? They get every owner privilege, including deleting the organization. You stay an owner too; to step down, use Change Role on your own membership.",
         successMessage: "Member is now an owner",
         outcomeMessages: {
-          permission_set_granted: "Member is now an owner. The new role also granted the permission set ${result.grantedPermissionSet.label}."
+          permission_set_granted: "Member is now an owner. The new role also granted the permission set {{ result.grantedPermissionSet.label }}."
         }
       }
     }
@@ -825,8 +825,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
         successMessage: "Invitation sent to {{ result.email }}",
         outcomeMessages: {
-          sent: "Invitation sent to ${result.email}",
-          link_only: "Invitation created for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          sent: "Invitation sent to {{ result.email }}",
+          link_only: "Invitation created for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
         },
         params: {
           role: {
@@ -848,11 +848,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Resend Invitation",
-        description: "Resend the invitation to ${record.email}? Its expiry date starts over.",
+        description: "Resend the invitation to {{ record.email }}? Its expiry date starts over.",
         successMessage: "Invitation resent",
         outcomeMessages: {
-          sent: "Invitation resent to ${result.email}",
-          link_only: "Invitation renewed for ${result.email}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
+          sent: "Invitation resent to {{ result.email }}",
+          link_only: "Invitation renewed for {{ result.email }}. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it."
         }
       },
       copy_invitation_link: {

@@ -21,6 +21,7 @@
  */
 
 import type { SchemaFormIssue } from './SchemaForm.js';
+import type { SchemaIssueDetail } from './i18n.js';
 import { lintCelPredicate } from './celAuthoring.js';
 import { readFields } from './previews/object-fields-io.js';
 
@@ -48,6 +49,12 @@ type ZodLikeIssue = {
    * can list several retired aliases in a single `keys` array.
    */
   keys?: string[];
+  /** `too_small` / `invalid_format` parameters, carried to the render as `detail`. */
+  origin?: string;
+  minimum?: number | bigint;
+  inclusive?: boolean;
+  format?: string;
+  pattern?: string;
 };
 
 type ZodLikeSchema = {
@@ -1027,6 +1034,32 @@ function annotateRetiredFormulaKeyIssues(issues: ZodLikeIssue[], draft: unknown)
   });
 }
 
+/**
+ * The issue codes `translateSchemaIssue` picks a reader's-locale text by. Only
+ * these carry a `detail`: every other issue keeps the plain `{ path, message }`
+ * it had, so a code that no rendering reads adds nothing to the door's answer.
+ */
+const LOCALIZED_ISSUE_CODES: ReadonlySet<string> = new Set(['too_small', 'invalid_format']);
+
+/**
+ * The issue's code and parameters, so the page renders it in the reader's
+ * locale by WHAT it is (`translateSchemaIssue`) instead of by its English.
+ * PRESENTATION ONLY, like the two passes above: the message stays the spec's,
+ * and the verdict is already decided.
+ */
+function issueDetail(issue: ZodLikeIssue): SchemaIssueDetail | undefined {
+  if (typeof issue.code !== 'string' || !LOCALIZED_ISSUE_CODES.has(issue.code)) return undefined;
+  const minimum = typeof issue.minimum === 'bigint' ? Number(issue.minimum) : issue.minimum;
+  return {
+    code: issue.code,
+    ...(typeof issue.origin === 'string' ? { origin: issue.origin } : {}),
+    ...(typeof minimum === 'number' ? { minimum } : {}),
+    ...(typeof issue.inclusive === 'boolean' ? { inclusive: issue.inclusive } : {}),
+    ...(typeof issue.format === 'string' ? { format: issue.format } : {}),
+    ...(typeof issue.pattern === 'string' ? { pattern: issue.pattern } : {}),
+  };
+}
+
 // Keyed by mode AND type — `view` resolves to a different schema per mode, so
 // caching by type alone would hand the create gate whichever mode asked first.
 const SCHEMA_CACHE = new Map<string, ZodLikeSchema | null>();
@@ -1167,10 +1200,14 @@ export async function validateMetadataDraft(
         ? annotateRetiredFormulaKeyIssues(rawIssues, draft)
         : rawIssues;
   const issues: SchemaFormIssue[] = [
-    ...renderable.map((issue) => ({
-      path: (issue.path ?? []).map((seg) => String(seg)).join('.'),
-      message: issue.message,
-    })),
+    ...renderable.map((issue) => {
+      const detail = issueDetail(issue);
+      return {
+        path: (issue.path ?? []).map((seg) => String(seg)).join('.'),
+        message: issue.message,
+        ...(detail ? { detail } : {}),
+      };
+    }),
     ...celIssues,
   ];
   return { ok: false, issues };

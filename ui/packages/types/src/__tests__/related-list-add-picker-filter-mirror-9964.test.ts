@@ -64,7 +64,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { z } from 'zod';
 import { RecordRelatedListProps } from '@objectstack/spec/ui';
-import type { ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement, ViewFilterOrGroup, ViewFilterRule } from '@objectstack/spec/ui';
 import type { RecordRelatedListComponentProps } from '../record-components';
 
 /* ── Type-level legs (compiled by `tsc -p tsconfig.test.json`, erased by vitest) ── */
@@ -94,15 +94,22 @@ type SpecPickerFilter = NonNullable<z.input<typeof RecordRelatedListProps>['add'
  * ⭐ The card, in type form: the two declarations of one key agree, and the
  * expectation comes from the protocol rather than from this file.
  */
+/**
+ * objectstack#28020 put an any-of group (`{ or: [rule, ...] }`) beside the flat
+ * rule in the contract's element, and objectstack#28462 widened this face to
+ * carry it, so the face is the contract again — no gap is withheld.
+ */
 export type _MirrorAgreesWithTheContract = Expect<Equal<MirrorPickerFilter, SpecPickerFilter>>;
+/** …and the contract's element is exactly the rule or the group, so the pair cannot agree on something looser. */
+export type _TheContractTakesRuleOrGroup = Expect<Equal<NonNullable<SpecPickerFilter>[number], ViewFilterRule | ViewFilterOrGroup>>;
 
 /**
- * …and the shape they agree on is the rule ARRAY. Stated separately from the
+ * …and the shape they agree on is the element ARRAY (rule or `{ or }` group). Stated separately from the
  * derivation above so a spec that loosened its own key could not make the pair
  * agree on nothing — that would satisfy the leg above while putting `unknown`
  * back on the authoring face.
  */
-export type _AndThatShapeIsTheRuleArray = Expect<Equal<MirrorPickerFilter, ViewFilterRule[] | undefined>>;
+export type _AndThatShapeIsTheRuleArray = Expect<Equal<MirrorPickerFilter, ViewFilterElement[] | undefined>>;
 
 // @ts-expect-error objectui#9964 — the PRE-FIX declaration, asserted to be WRONG: `unknown` must not satisfy this pin. This directive going unused (TS2578) means the mirror went back to `unknown`.
 type _UnknownIsNotTheContract = Expect<Equal<MirrorPickerFilter, unknown>>;
@@ -127,9 +134,11 @@ const CASES: readonly Case[] = [
   // The consumer's own prop type, satisfied straight from the authoring face.
   // This is the TS2322 the four `(schema as any).add` casts were hiding.
   {
-    what: 'the declared filter is assignable to the consumer’s `ViewFilterRule[]`',
+    // objectstack#28462 moved the consumer's prop to the contract's element
+    // (`ViewFilterElement[]`, rule or `{ or }` group) together with this face.
+    what: 'the declared filter is assignable to the consumer’s `ViewFilterElement[]`',
     rejected: false,
-    code: `const rules: ViewFilterRule[] | undefined = block.add?.picker.filter; void rules;`,
+    code: `const rules: ViewFilterElement[] | undefined = block.add?.picker.filter; void rules;`,
   },
   // ── What the tightened face must now REFUSE ───────────────────────────────
   {
@@ -211,7 +220,7 @@ function erroringLines(preamble: string): Set<number> {
 
 const IMPORTS =
   `import type { RecordRelatedListComponentProps } from '${MIRROR_IMPORT}';\n` +
-  `import type { ViewFilterRule } from '@objectstack/spec/ui';\n`;
+  `import type { ViewFilterElement, ViewFilterRule } from '@objectstack/spec/ui';\n`;
 
 /** The real mirror, under the name the cases annotate against. */
 const REAL_PREAMBLE =
@@ -258,7 +267,7 @@ describe('objectui#9964 — the mirror declares the contract’s rule array', ()
  * and prove nothing about this change on their own.
  *
  *   0     — the assignability the four `as any` casts were hiding: TS2322 with
- *           `unknown`, clean with the rule array.
+ *           `unknown`, clean with the element array.
  *   1,2,3 — the three wrong shapes: `unknown` accepts all of them.
  *   4     — the canonical form: accepted on both legs (the narrowing is not too
  *           narrow, which is the half a rejection-only pin cannot state).

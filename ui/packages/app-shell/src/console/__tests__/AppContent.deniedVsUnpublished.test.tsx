@@ -212,6 +212,9 @@ function makeAdapter() {
     if (url.includes('/api/v1/discovery')) {
       return json(200, { success: true, data: { version: 'v0', routes: {}, capabilities: {} } });
     }
+    // objectstack#27627 — entering an app loads its metadata bundle; that is
+    // not the by-name read this file asks about, and it answers as refused.
+    if (/\/api\/v1\/meta\/app\/[^/?]+\/bundle$/.test(url)) return json(404, ABSENT_BODY);
     const item = /\/api\/v1\/meta\/app\/([^/?]+)/.exec(url);
     if (item) {
       metaItemRequests.push(url);

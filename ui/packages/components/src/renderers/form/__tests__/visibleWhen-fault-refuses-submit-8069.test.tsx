@@ -98,7 +98,13 @@ function renderForm(
 }
 
 const submit = () => fireEvent.click(screen.getByRole('button', { name: /create/i }));
-const lastToast = () => String(toastError.mock.calls.at(-1)?.[0] ?? '');
+/**
+ * The refusal as the form says it: its banner, the one message a refused
+ * submit raises; a toast repeating it is none of its business any more
+ * (objectstack-ai/objectstack#27520), so any toast call reads as a mismatch.
+ */
+const refusalText = () =>
+  toastError.mock.calls.length > 0 ? '(toasted)' : (screen.queryByRole('alert')?.textContent ?? '');
 
 /** A predicate the engine cannot parse: a fault whatever the record holds. */
 const BROKEN = 'record.stage ==';
@@ -116,7 +122,7 @@ describe('objectui#8069 — a faulted visibleWhen refuses the submit', () => {
 
     submit();
 
-    await waitFor(() => expect(lastToast()).toMatch(/visibleWhen rule of Discount could not be evaluated/));
+    await waitFor(() => expect(refusalText()).toMatch(/visibleWhen rule of Discount could not be evaluated/));
     expect(screen.getByText(/visibleWhen rule of Discount could not be evaluated/)).toBeTruthy();
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -133,7 +139,7 @@ describe('objectui#8069 — a faulted visibleWhen refuses the submit', () => {
 
     submit();
 
-    await waitFor(() => expect(lastToast()).toMatch(/visibleWhen rule of Discount/));
+    await waitFor(() => expect(refusalText()).toMatch(/visibleWhen rule of Discount/));
     expect(toastError.mock.calls.some((c: unknown[]) => /check the highlighted fields/.test(String(c[0])))).toBe(false);
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -153,7 +159,7 @@ describe('objectui#8069 — a faulted visibleWhen refuses the submit', () => {
     renderForm(base({ visibleWhen: '' }), onSubmit);
     expect(screen.getByLabelText('Discount')).toBeTruthy();
     submit();
-    await waitFor(() => expect(lastToast()).toMatch(/visibleWhen rule of Discount could not be evaluated/));
+    await waitFor(() => expect(refusalText()).toMatch(/visibleWhen rule of Discount could not be evaluated/));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(warn.mock.calls.some((c: unknown[]) => String(c[0]).includes('[blank]'))).toBe(true);
   });
@@ -184,7 +190,7 @@ describe('objectui#8069 — a faulted visibleWhen refuses the submit', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     renderForm(base({ visibleWhen: "previous.stage == 'won'" }), onSubmit);
     submit();
-    await waitFor(() => expect(lastToast()).toMatch(/visibleWhen rule of Discount/));
+    await waitFor(() => expect(refusalText()).toMatch(/visibleWhen rule of Discount/));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 

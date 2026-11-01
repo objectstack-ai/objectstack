@@ -87,13 +87,14 @@
  *   objects.<name>._actions.<action>.confirmText
  *   objects.<name>._actions.<action>.successMessage
  *   objects.<name>._actions.<action>.disabledReason
+ *   objects.<name>._actions.<action>.submitText      (only beside a non-empty `params`)
  *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
- *                          / .disabledReason
+ *                          / .disabledReason / .submitText (beside a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
@@ -720,8 +721,10 @@ function pushDerived(
 }
 
 /**
- * [#24814] An action's `confirmText` / `successMessage` is a `template` slot
- * that also takes an inline locale map: a bare string, the parsed
+ * [#24814, #27948] An action's `confirmText` / `successMessage` /
+ * `description` / `outcomeMessages` entry is a `template` slot that also takes
+ * an inline locale map, and a param's `helpText` one without it: a bare
+ * string, the parsed
  * `{ dialect: 'template', source }` envelope, or the map. The envelope and the
  * string are the same authored sentence, so the envelope is read through the
  * template judge's one reader and seeded like the string; anything else (the
@@ -746,6 +749,25 @@ function pushOptional(
   const evidence = authoredEvidence(value);
   if (evidence.inline !== undefined) pushEntry(out, path, evidence.inline, source, extra);
   else out.push({ path, ...evidence, source, ...extra });
+}
+
+/**
+ * Emit `submitText`, the param dialog's submit button label, under an action's
+ * translation root — OPTIONAL-not-derived like `description` (an action that
+ * names no verb shows the console's own "Confirm"), and only for an action with
+ * a non-empty `params`: that is the only action `translateAction` overlays the
+ * key onto, because no other action opens the dialog the button sits in. A
+ * paramless action gets no slot, so a translation filed there stays dangling.
+ */
+function pushActionSubmitText(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  source: ExpectedEntry['source'],
+  objectName: string | undefined,
+): void {
+  if (!Array.isArray(action?.params) || action.params.length === 0) return;
+  pushOptional(out, [...actionRoot, 'submitText'], action.submitText, source, { objectName });
 }
 
 /**
@@ -781,7 +803,7 @@ function pushActionParams(
     } else {
       pushDerived(out, [...base, 'label'], literalLabel ?? pname, param.label, kind, { objectName });
     }
-    pushOptional(out, [...base, 'helpText'], param.helpText, kind, { objectName });
+    pushOptional(out, [...base, 'helpText'], actionCopy(param.helpText), kind, { objectName });
     pushOptional(out, [...base, 'placeholder'], param.placeholder, kind, { objectName });
     if (Array.isArray(param.options)) {
       for (const opt of param.options) {
@@ -819,7 +841,7 @@ function pushActionOutcomeMessages(
   const messages = action?.outcomeMessages;
   if (!messages || typeof messages !== 'object' || Array.isArray(messages)) return;
   for (const [outcome, message] of Object.entries<unknown>(messages)) {
-    pushOptional(out, [...actionRoot, 'outcomeMessages', outcome], message, kind, { objectName });
+    pushOptional(out, [...actionRoot, 'outcomeMessages', outcome], actionCopy(message), kind, { objectName });
   }
 }
 
@@ -1502,10 +1524,11 @@ export function collectExpectedEntries(
         const aname = action.name as string;
         const aroot = ['objects', objectName, '_actions', aname];
         pushDerived(out, [...aroot, 'label'], inlineText(action.label) ?? aname, action.label, 'action', { objectName });
-        pushOptional(out, [...aroot, 'description'], action.description, 'action', { objectName });
+        pushOptional(out, [...aroot, 'description'], actionCopy(action.description), 'action', { objectName });
         pushOptional(out, [...aroot, 'confirmText'], actionCopy(action.confirmText), 'action', { objectName });
         pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
         pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
+        pushActionSubmitText(out, aroot, action, 'action', objectName);
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1596,13 +1619,14 @@ export function collectExpectedEntries(
     // string when the action declares none, so an undeclared description is
     // not an i18n gap to seed (`pushDerived` would invent an English source
     // string nothing authored). #7367.
-    pushOptional(out, [...root, 'description'], action.description, kind, { objectName });
+    pushOptional(out, [...root, 'description'], actionCopy(action.description), kind, { objectName });
     pushOptional(out, [...root, 'confirmText'], actionCopy(action.confirmText), kind, { objectName });
     pushOptional(out, [...root, 'successMessage'], actionCopy(action.successMessage), kind, { objectName });
     // [#26619] OPTIONAL-not-derived like `description`: an action that gives no
     // reason shows the console's own default sentence, so there is no gap to
     // seed for it.
     pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
+    pushActionSubmitText(out, root, action, kind, objectName);
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);

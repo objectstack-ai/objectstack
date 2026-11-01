@@ -56,6 +56,26 @@ export function useRecordPane(): RecordPaneApi | null {
 }
 
 /**
+ * The pane's top bar, as the record drawn in it reaches it (objectstack#27524,
+ * Target 7): the bar's slot for the record's panel switches — the right
+ * column's ⊟, which only the record knows applies — and where the record says
+ * its title for the bar's breadcrumb 「对象 › 记录名」. `null` outside a pane.
+ */
+export interface RecordPaneBarApi {
+  /** The bar's element the record portals its panel switches into; `null` until it mounts. */
+  toggleSlot: HTMLElement | null;
+  /** The title of the record `recordId` names, once its row has loaded. */
+  reportTitle(recordId: string, title: string | undefined): void;
+}
+
+export const RecordPaneBarContext = createContext<RecordPaneBarApi | null>(null);
+
+/** The top bar of the pane the record is drawn in, or `null` on its own page. */
+export function useRecordPaneBar(): RecordPaneBarApi | null {
+  return useContext(RecordPaneBarContext);
+}
+
+/**
  * Whether a record of this object opens in the drawer: its object's own way
  * of opening, the drawer unless it declares another (objectstack#26677 — the
  * spec's `NavigationModeSchema` defaults to `drawer`; `page`, `new_window` and

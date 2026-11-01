@@ -10,7 +10,7 @@ import type { FilterBuilderOperator, FilterBuilderRowGroup, SortItem } from '@ob
 // `@object-ui/fields` dependency — and does not gain one here — so it reads
 // the gate from its home in `@object-ui/core`, which `fields` re-exports
 // verbatim. One table, one dedupe set, no new package edge.
-import { isRetiredFieldType, reportRetiredFieldType } from '@object-ui/core';
+import { builderRulesOfSpecFilter, isRetiredFieldType, reportRetiredFieldType } from '@object-ui/core';
 import { VIEW_FILTER_OPERATORS, VIEW_FILTER_OPERATOR_ALIASES } from '@objectstack/spec/ui';
 import type { ViewFilterOperator } from '@objectstack/spec/ui';
 
@@ -165,9 +165,24 @@ function parseSingleOrNested(item: any): Array<{ id: string; field: string; oper
     return [];
 }
 
+/**
+ * A stored filter as a builder group.
+ *
+ * A spec view filter list that is one any-of group (`[{ or: rules }]`) reads
+ * back as an OR group of its rules, so an OR group the builder saved returns
+ * as the OR group it was ({@link builderRulesOfSpecFilter}). A list the builder
+ * cannot show — a group beside other elements — reads as its flat rules only;
+ * a caller that would SAVE what the builder holds asks
+ * {@link builderRulesOfSpecFilter} first and does not offer it for editing.
+ */
 export function parseSpecFilter(raw: any): { logic: 'and' | 'or'; conditions: Array<{ id: string; field: string; operator: string; value: any }> } {
     if (!Array.isArray(raw) || raw.length === 0) {
         return { logic: 'and', conditions: [] };
+    }
+
+    const asOrGroup = builderRulesOfSpecFilter(raw);
+    if (asOrGroup?.logic === 'or') {
+        return { logic: 'or', conditions: asOrGroup.rules.flatMap((item: any) => parseSingleOrNested(item)) };
     }
 
     // Detect ['and', ...conditions] or ['or', ...conditions]

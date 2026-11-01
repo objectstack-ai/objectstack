@@ -14,7 +14,7 @@ import { RelatedCardChromeContext, RelatedCardCountContext, type RelatedCardChro
 import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
 import { useRelatedArrangement } from './useRelatedArrangement';
 import { useDetailTranslation } from './useDetailTranslation';
-import { relatedCountTargetOf, useRelatedCounts, type RelatedCountTarget } from './useRelatedCounts';
+import { relatedCountTargetOf, useRelatedCounts, type RelatedCountTarget, type RelatedCounts } from './useRelatedCounts';
 
 export interface RelatedCardStackProps {
   /**
@@ -38,6 +38,12 @@ export interface RelatedCardStackProps {
    * schema read first (`useRelatedCounts`). Absent: the counts read it.
    */
   fieldsOf?: (objectName: string) => FieldContainerLike;
+  /**
+   * The panels' counts when the host asks them itself — the record page,
+   * whose tab row reads the same set (objectstack#27524, Target 8). Absent:
+   * the stack counts the panels it shows.
+   */
+  counts?: RelatedCounts;
 }
 
 type PageNode = Record<string, any>;
@@ -113,6 +119,7 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
   onArrangementChange,
   onEnlarge,
   fieldsOf,
+  counts: hostCounts,
 }) => {
   const { t } = useDetailTranslation();
   const ctx = useRecordContext();
@@ -139,13 +146,16 @@ export const RelatedCardStack: React.FC<RelatedCardStackProps> = ({
     onDragEnd: endDrag,
   });
   // The panels the reader sees are counted in one set; a hidden panel is not
-  // drawn, so not asked.
+  // drawn, so not asked. A host that counts them itself asks nothing here.
   const countTargets: RelatedCountTarget[] = [];
-  for (const id of resolved.order) {
-    const target = relatedCountTargetOf(cards.get(id));
-    if (target) countTargets.push(target);
+  if (!hostCounts) {
+    for (const id of resolved.order) {
+      const target = relatedCountTargetOf(cards.get(id));
+      if (target) countTargets.push(target);
+    }
   }
-  const counts = useRelatedCounts(countTargets, { parentId: ctx?.recordId, dataSource: ctx?.dataSource, fieldsOf });
+  const ownCounts = useRelatedCounts(countTargets, { parentId: ctx?.recordId, dataSource: ctx?.dataSource, fieldsOf });
+  const counts = hostCounts ?? ownCounts;
 
   // ── Drag (desktop) ────────────────────────────────────────────────────
   const anchorRef = React.useRef<HTMLSpanElement>(null);

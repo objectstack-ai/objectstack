@@ -4,7 +4,8 @@
  * #24814 (ruling A) — an action's person-facing copy is an ADR-0032 `template`
  * slot over a CLOSED scope: `confirmText`, `successMessage` and `errorMessage`
  * on the page action rows, `confirmText` and `successMessage` on
- * `ActionSchema`. These pins hold each slot's accept set — a bare string is
+ * `ActionSchema` — and, since #27948, `ActionSchema.description`, each
+ * `params[].helpText` and each `outcomeMessages` entry. These pins hold each slot's accept set — a bare string is
  * shorthand for the envelope, a holeless sentence still parses, a blank one
  * still parses (the arm is kept so a stored one loads; the doors refuse it,
  * #25680), and `ActionSchema` keeps its
@@ -14,6 +15,7 @@
  * `@objectstack/lint`'s `validate-action-copy-templates` pins the doors.
  */
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   ACTION_CONFIRM_PARAMS_ROOT,
@@ -95,6 +97,60 @@ describe('ActionSchema confirmText / successMessage are template slots that keep
 
   it('errorMessage is NOT in this family on ActionSchema: it stays an I18nLabel, a string parsed as itself', () => {
     expect(parsed({ errorMessage: 'Failed' }).errorMessage).toBe('Failed');
+  });
+});
+
+describe('ActionSchema description / params[].helpText / outcomeMessages joined the family (#27948)', () => {
+  const base = { name: 'pause', label: 'Pause', type: 'api', target: '/api/v1/pause' } as const;
+  const parse = (patch: Record<string, unknown>) => ActionSchema.safeParse({ ...base, ...patch });
+  const parsed = (patch: Record<string, unknown>) => {
+    const r = parse(patch);
+    if (!r.success) throw new Error(r.error.issues.map((i) => i.message).join('\n'));
+    return r.data as Record<string, any>;
+  };
+  /** Each slot: how to write a value into it, how to read it back, its refusal's slot name, and whether it keeps a locale map. */
+  const SLOTS = [
+    ['description', (v: unknown) => ({ description: v }), (d: Record<string, any>) => d.description, "An action's `description`", true],
+    ['params[].helpText', (v: unknown) => ({ params: [{ name: 'reason', type: 'text', helpText: v }] }), (d: Record<string, any>) => d.params[0].helpText, "An action param's `helpText`", false],
+    ['outcomeMessages entry', (v: unknown) => ({ outcomeMessages: { paused: v } }), (d: Record<string, any>) => d.outcomeMessages.paused, "An action's `outcomeMessages` entry", true],
+  ] as const;
+
+  for (const [slot, write, read, name, localeMap] of SLOTS) {
+    it(`${slot}: string → envelope, envelope taken, blank string unchanged; a \${…} sentence still parses`, () => {
+      expect(read(parsed(write('Pause {{ record.name }}?')))).toEqual({ dialect: 'template', source: 'Pause {{ record.name }}?' });
+      expect(read(parsed(write({ dialect: 'template', source: 'Paused' })))).toEqual({ dialect: 'template', source: 'Paused' });
+      // Stored copy written before the migration still loads; the doors refuse it.
+      expect(read(parsed(write('Pause ${record.name}?')))).toEqual({ dialect: 'template', source: 'Pause ${record.name}?' });
+      expect(read(parsed(write('')))).toBe('');
+    });
+
+    it(`${slot}: ${localeMap ? 'keeps' : 'takes no'} inline locale map; a foreign dialect is refused with the slot's own sentence`, () => {
+      const map = { en: 'Paused', 'zh-CN': '已暂停' };
+      if (localeMap) expect(read(parsed(write(map)))).toEqual(map);
+      else expect(parse(write(map)).success).toBe(false);
+      const r = parse(write({ dialect: 'cel', source: 'record.name' }));
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const messages = r.error.issues.map((i) => i.message).join('\n');
+      expect(messages).toContain(`${name} is a template-typed slot`);
+      expect(messages.includes('or an inline locale map')).toBe(localeMap);
+    });
+  }
+
+  it('the describes an author reads in Studio teach `{{ }}`, never `${…}`', () => {
+    const json = z.toJSONSchema(ActionSchema, { unrepresentable: 'any', io: 'input' }) as {
+      properties: Record<string, any>;
+    };
+    const describes = {
+      description: json.properties.description.description as string,
+      outcomeMessages: json.properties.outcomeMessages.description as string,
+    };
+    for (const [key, text] of Object.entries(describes)) {
+      expect(text, key).toContain('`template` slot');
+      expect(text, key).toContain('{{ ');
+      expect(text, key).not.toMatch(/may interpolate \$\{/);
+    }
+    expect(describes.outcomeMessages).toContain('{{ result.email }}');
   });
 });
 

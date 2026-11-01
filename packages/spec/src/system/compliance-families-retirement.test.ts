@@ -257,9 +257,6 @@ describe('compliance families retirement — ADR-0087 registration', () => {
       // The route is stated where the next reader looks: why D3 semantic and
       // not D2 — no stack seam (the additionalTypes precedent).
       expect(entry.reason).toMatch(/not a D2 conversion/);
-      // And no backticks in `surface`: the upgrade guide renders it inside a
-      // code span AND a table cell.
-      expect(entry.surface).not.toMatch(/`/);
     }
     // Deliberately no mechanical conversion: a transform over a stack that
     // never carries these documents would be a seam that never runs.

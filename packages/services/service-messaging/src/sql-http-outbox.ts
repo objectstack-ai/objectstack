@@ -29,6 +29,7 @@ import {
     type HttpDelivery,
     type HttpDeliveryStatus,
     type HttpReapOptions,
+    type HttpDueWorkOptions,
     type IHttpOutbox,
     type RedeliverOptions,
     type UndeliverableHttpInput,
@@ -110,9 +111,9 @@ interface DeliveryRow {
  * **No UPDATE here writes `updated_at`** (#4765) — same rule, same reason as
  * {@link SqlNotificationOutbox}: the platform's `sys_stamp_audit_update` hook
  * owns that column, a caller-supplied value is stripped as `readonly` (#2948)
- * with a WARN per call, and the visibility-timeout reap is an unconditional
- * UPDATE that runs on every dispatcher tick (`reap()`, or `claim()` unless told
- * `skipReap`) — so writing it turned an idle dev server into a console firehose
+ * with a WARN per call, and the visibility-timeout reap was an unconditional
+ * UPDATE that ran on every dispatcher tick (`reap()`, or `claim()` unless told
+ * `skipReap`; #28383 now reads first) — so writing it turned an idle dev server into a console firehose
  * while changing nothing about the stored row.
  */
 export class SqlHttpOutbox implements IHttpOutbox {
@@ -224,6 +225,25 @@ export class SqlHttpOutbox implements IHttpOutbox {
         await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs);
     }
 
+    /**
+     * [#28383] One read across every partition: is any `pending` row due? The
+     * predicate is {@link claim}'s with its partition term dropped, so it
+     * answers `true` exactly when at least one of the `partitionCount` probes
+     * an idle tick used to issue would have found a row.
+     */
+    async hasDueWork(opts: HttpDueWorkOptions): Promise<boolean> {
+        const now = opts.now ?? Date.now();
+        const due = await this.engine.find(this.objectName, {
+            where: {
+                status: 'pending',
+                $or: [{ next_retry_at: null }, { next_retry_at: { $lte: now } }],
+            },
+            fields: ['id'],
+            limit: 1,
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
+        return due.length > 0;
+    }
+
     async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {
         const now = opts.now ?? Date.now();
 
@@ -293,16 +313,22 @@ export class SqlHttpOutbox implements IHttpOutbox {
      * the whole table by construction.
      */
     private async reapExpired(now: number, claimTtlMs: number): Promise<void> {
+        // [#28383] Asked first, written only when there is something to reap —
+        // the reasoning is `SqlNotificationOutbox.reapExpired`'s, verbatim.
+        const expired = { status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } };
+        const any = await this.engine.find(
+            this.objectName,
+            { where: expired, fields: ['id'], limit: 1 },
+            { context: DISPATCHER_SYSTEM_CONTEXT },
+        );
+        if (any.length === 0) return;
         await this.engine.update(
             this.objectName,
             { status: 'pending', claimed_by: null, claimed_at: null },
             // Environment-wide by design: recovers rows a crashed node abandoned,
             // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
             {
-                ...dispatcherSweepOptions({
-                    status: 'in_flight',
-                    claimed_at: { $lt: now - claimTtlMs },
-                }),
+                ...dispatcherSweepOptions(expired),
                 context: DISPATCHER_SYSTEM_CONTEXT,
             },
         );

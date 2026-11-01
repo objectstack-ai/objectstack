@@ -616,6 +616,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Use Grouping",
         helpText: "Digit grouping (thousands separators) in displayed values. Unset: the renderer decides; an untouched switch writes nothing, so it reads off even where the renderer groups. Off: never grouped, e.g. a year or an ID. On: always grouped."
       },
+      percentDisplay: {
+        label: "Percent Display",
+        helpText: "How the value is shown read-only, in list cells and on the record page. Unset: a progress bar beside the percentage. Bar: always the progress bar, for progress. Plain: the percentage alone, for a rate or a probability."
+      },
       currencyConfig: {
         label: "Currency Config",
         helpText: "Which currency this field is in — a currency field, or a formula whose return type is Currency. Unset: dynamic mode. The value is a bare number in every mode."
@@ -1803,6 +1807,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Description",
         helpText: "Explanatory line under the title of this action's param dialog. On an action that collects params, the confirm question goes here rather than in confirmText — one dialog, not two. Not ai.description, which is the text an AI agent reads."
       },
+      submitText: {
+        label: "Submit button label",
+        helpText: "Label of the submit button in this action's param dialog, the verb the button performs (e.g. \"Send\", \"Log Call\"). Only for an action that collects params. Leave empty to show \"Confirm\"."
+      },
       confirmText: {
         label: "Confirm Text",
         helpText: "Confirmation message (e.g., \"Are you sure?\")"
@@ -1817,7 +1825,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       outcomeMessages: {
         label: "Outcome Messages",
-        helpText: "Success message per handler outcome, as JSON: each key is a snake_case `outcome` value the handler returns in its success payload, and each value is the label shown for that outcome, e.g. {\"archived\": \"Archived\", \"already_archived\": \"Already archived\"}. A label may interpolate ${result.*}. An outcome with no entry shows the success message; a key the handler never returns is never shown. Not allowed beside a result dialog or `operation: 'update'`."
+        helpText: "Success message per handler outcome, as JSON: each key is a snake_case `outcome` value the handler returns in its success payload, and each value is the label shown for that outcome, e.g. {\"archived\": \"Archived\", \"already_archived\": \"Already archived\"}. A label may hold {{ result.* }} holes. An outcome with no entry shows the success message; a key the handler never returns is never shown. Not allowed beside a result dialog or `operation: 'update'`."
       },
       onSuccess: {
         label: "On Success",

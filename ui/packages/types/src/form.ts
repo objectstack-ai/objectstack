@@ -1940,10 +1940,6 @@ export interface FormField {
    */
   field?: Record<string, any>;
   /**
-   * Additional field-specific props
-   */
-  [key: string]: any;
-  /**
    * Column span for grid layouts (1-4). Legacy — prefer `span`.
    * Aligns with @objectstack/spec FormField.colSpan. The renderer clamps it to
    * the current (per-surface derived) column count so it can never overflow.

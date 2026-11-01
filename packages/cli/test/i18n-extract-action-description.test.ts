@@ -169,8 +169,10 @@ describe('one fixture action, all three surfaces (#7367 end-to-end)', () => {
     // 1. The producer accepts it.
     const parsed = ActionSchema.safeParse(authored);
     expect(parsed.success).toBe(true);
+    // `description` is a `template` slot (#27948): a bare string parses to the
+    // envelope, whose `source` is the sentence as written.
     expect(parsed.success && parsed.data.description)
-      .toBe('Reject this request? The requester sees your reason.');
+      .toEqual({ dialect: 'template', source: 'Reject this request? The requester sees your reason.' });
     expect(parsed.success && parsed.data.confirmText).toBeUndefined();
 
     // 2. The extractor emits the address objectui's resolver reads

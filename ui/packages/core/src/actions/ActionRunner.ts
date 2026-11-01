@@ -24,7 +24,7 @@
 import type { ActionContext, ActionResult, RunnableActionType, UIActionSchema } from '@object-ui/types';
 import type { Action as SpecActionInput } from '@objectstack/spec/ui';
 import { ExpressionEvaluator } from '../evaluator/ExpressionEvaluator.js';
-import { actionCopySource, fillTemplateHoles, hasTemplateHoles, type ActionCopyTemplate } from './actionCopyTemplate.js';
+import { actionCopySource, actionCopyText, fillTemplateHoles, fillTransitionalCopy, hasTemplateHoles, type ActionCopyTemplate } from './actionCopyTemplate.js';
 import { hasDeclaredPredicate } from '../evaluator/declaredPredicate.js';
 import { globalUndoManager } from './UndoManager.js';
 import { warnOnDeprecatedObjectParams, warnOnUnknownActionKeys } from './actionKeys.js';
@@ -150,6 +150,16 @@ export interface ActionDef {
    * it — the two TS2353s the deletion produced repo-wide were both this key.
    */
   description?: UIActionSchema['description'];
+  /**
+   * Label of the submit button in the param-collection dialog — the verb the
+   * button performs ("Send", "Log Call"), in place of the dialog's default
+   * "Confirm". Derived from the spec field: an `I18nLabel`, a string or an
+   * inline per-locale map. Display copy only — the runner never reads it; the
+   * console's param-collection handlers resolve it (the translation bundle's
+   * `_actions.ACTION.submitText` first, then the authored text collapsed to the
+   * active language) and the param dialog draws it.
+   */
+  submitText?: SpecActionInput['submitText'];
   /**
    * Confirmation text — shows a confirm dialog before executing. The ONE
    * confirm spelling: `@objectstack/spec`'s action surface and the
@@ -506,8 +516,11 @@ export interface ActionDef {
    * fact and this map holds the sentence for each, keyed by the snake_case
    * outcome name. Read by `handlePostExecution` → `composeSuccessMessage`, the
    * success toast's FIRST rung: the entry named by the payload's top-level
-   * `outcome` (the payload `${result.*}` reads), then {@link successMessage},
-   * then the runner's own default text.
+   * `outcome` (the payload `{{ result.* }}` reads), then {@link successMessage},
+   * then the runner's own default text. An entry's `{{ }}` holes are filled
+   * over `result` and `record`, as `successMessage`'s are; an entry with none
+   * keeps its `${result.*}` reading until the spec closes the slot
+   * (objectstack#27948, ruling A, step 1).
    *
    * Derived, so an entry is an `I18nLabel` — a string or an inline per-locale
    * map. The runner composes from strings only: the host's localizer
@@ -634,7 +647,8 @@ export type ToastHandler = (message: string, options?: {
  * An author's `outcomeMessages` / `successMessage` / `errorMessage` and an
  * action's own error are never in this table: the host localizes authored copy
  * before dispatch, and the runner only fills in their holes (`{{ }}` in
- * `successMessage`, `${result.*}` in `outcomeMessages`).
+ * `successMessage`; `{{ }}`, or in a sentence with none `${result.*}`, in
+ * `outcomeMessages`).
  */
 const RUNNER_TEXT = {
   completedSuccessfully: {
@@ -676,10 +690,13 @@ export type NavigationHandler = (url: string, options?: {
  * for collecting ActionParam values before action execution.
  * Returns collected values, or null if cancelled.
  *
- * `interpolate` fills the `${...}` holes of the dialog's authored copy (the
- * action's `description`, each param's `helpText`) in the same template scope
- * the runner reads `confirmText` in — for a row dispatch, the row is `record`
- * (see `templateEvaluatorFor`). The runner cannot fill them itself before the
+ * `interpolate` fills the holes of the dialog's authored copy (the action's
+ * `description`, each param's `helpText`) over the record `confirmText` reads
+ * — for a row dispatch, the row is `record` (see `templateEvaluatorFor`). A
+ * sentence with a `{{ }}` hole is filled by the template engine over `record`
+ * and `params`, exactly as `confirmText` is; one with none keeps its `${...}`
+ * reading until the spec closes the slot (objectstack#27948, ruling A, step 1;
+ * see `dialogCopyFiller`). The runner cannot fill them itself before the
  * call: the handler localizes that copy AFTER it receives it (a translation
  * bundle entry or an inline per-locale map), so the hole has to be filled on
  * the text the user will actually read (objectui#12967).
@@ -1694,12 +1711,14 @@ export class ActionRunner {
 
           // The dialog's `description` / `helpText` read the dispatch's record
           // as `record`: a row dispatch binds none in the runner's context
-          // (objectui#12967).
-          const templates = this.templateEvaluatorFor(action);
+          // (objectui#12967). Both are `template` slots, so a served value may
+          // be the envelope: the handler is handed their TEXT
+          // (`dialogCopyOf`), as it localizes a string or a locale map.
+          const dialogCopy = dialogCopyOf(action, paramDefs);
           const collected = await this.paramCollectionHandler(
-            paramDefs,
-            action,
-            (text: string) => String(templates.evaluate(text) ?? ''),
+            dialogCopy.params,
+            dialogCopy.action,
+            this.dialogCopyFiller(action),
             run,
           );
           if (lastRun) {
@@ -1891,8 +1910,8 @@ export class ActionRunner {
    * (`ActionSchema.outcomeMessages`, objectui#11344):
    *
    * 1. `outcomeMessages[outcome]`, where `outcome` is the top-level `outcome`
-   *    of the handler's return value — the payload `${result.*}` reads, so it
-   *    is the same fact an author writes as `${result.outcome}`;
+   *    of the handler's return value — the payload `{{ result.* }}` reads, so
+   *    it is the same fact an author writes as `{{ result.outcome }}`;
    * 2. `successMessage`;
    * 3. the runner's own default text, in its translator's language.
    *
@@ -1901,10 +1920,14 @@ export class ActionRunner {
    * before dispatch — and both read the same payload,
    * `readActionPayload(result.data)`, as `result`.
    *
-   * Rung 1 has its `${result.*}` tokens filled in here, through the one token
-   * grammar and scope `onSuccess.navigate` reads (`substituteScopeTokens`).
-   * Only the sink differs: a toast is text, so a value is inserted as-is, where
-   * a URL position percent-encodes it.
+   * Rung 1 is in transition to the `template` dialect (objectstack#27948,
+   * ruling A, step 1), one dialect per sentence (`fillTransitionalCopy`): a
+   * sentence with a `{{ }}` hole is filled by the template engine over the
+   * same two roots as rung 2, `result` and `record`; one with none keeps its
+   * `${result.*}` tokens, filled through the one token grammar and scope
+   * `onSuccess.navigate` reads (`substituteScopeTokens`). Only the sink
+   * differs there: a toast is text, so a value is inserted as-is, where a URL
+   * position percent-encodes it.
    *
    * Rung 2 is a `template` slot (objectui#13367, the renderer half of
    * objectstack#24814): a string or the `{ dialect: 'template', source }`
@@ -1937,18 +1960,19 @@ export class ActionRunner {
       && Object.prototype.hasOwnProperty.call(outcomeMessages, outcome)
       ? (outcomeMessages as Record<string, unknown>)[outcome]
       : undefined;
-    if (typeof outcomeCopy === 'string' && outcomeCopy.trim() !== '') {
-      return substituteScopeTokens(outcomeCopy, { result: payload }, (value) => value);
+    const resultRoots = { result: payload, record: this.dispatchRecord(action) };
+    const outcomeText = actionCopySource(outcomeCopy);
+    if (outcomeText !== undefined && outcomeText.trim() !== '') {
+      return fillTransitionalCopy(
+        outcomeText,
+        (source) => fillTemplateHoles(source, resultRoots, this.displayLocale?.(), this.tenantCurrency?.()),
+        (source) => substituteScopeTokens(source, { result: payload }, (value) => value),
+      );
     }
     const successCopy = actionCopySource(action.successMessage);
     if (successCopy !== undefined && successCopy.trim() !== '') {
       return hasTemplateHoles(successCopy)
-        ? fillTemplateHoles(
-          successCopy,
-          { result: payload, record: this.dispatchRecord(action) },
-          this.displayLocale?.(),
-          this.tenantCurrency?.(),
-        )
+        ? fillTemplateHoles(successCopy, resultRoots, this.displayLocale?.(), this.tenantCurrency?.())
         : successCopy;
     }
     return this.runnerText(RUNNER_TEXT.completedSuccessfully);
@@ -1979,15 +2003,41 @@ export class ActionRunner {
     const text = actionCopySource(declared);
     if (text === undefined) return '';
     if (!hasTemplateHoles(text)) return text;
+    return fillTemplateHoles(text, this.recordCopyRoots(action), this.displayLocale?.(), this.tenantCurrency?.());
+  }
+
+  /**
+   * The roots a dispatch's pre-run copy fills its `{{ }}` holes over —
+   * `confirmText`, and the param dialog's `description` / `helpText`: `record`,
+   * the record the action runs against (`dispatchRecord`), and `params`, the
+   * action's static params object when it has one, without the row stash (the
+   * dialog's collected values do not exist yet).
+   */
+  private recordCopyRoots(action: ActionDef): Record<string, unknown> {
     const params = action.params;
     const staticParams = params && typeof params === 'object' && !Array.isArray(params)
       ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== '_rowRecord'))
       : undefined;
-    return fillTemplateHoles(
+    return { record: this.dispatchRecord(action), params: staticParams };
+  }
+
+  /**
+   * The `interpolate` a param-collection handler receives: it fills the
+   * dialog's `description` and each param's `helpText`, on the text the user
+   * reads (the handler localizes first). Both slots are in transition to the
+   * `template` dialect (objectstack#27948, ruling A, step 1), one dialect per
+   * sentence (`fillTransitionalCopy`): a sentence with a `{{ }}` hole is
+   * filled by the template engine over `recordCopyRoots`, exactly as
+   * `confirmText` is — so the confirm question an author moves from
+   * `confirmText` to `description` reads the same — and one with none keeps
+   * its `${…}` reading through `templateEvaluatorFor` (objectui#12967).
+   */
+  private dialogCopyFiller(action: ActionDef): (text: string) => string {
+    const templates = this.templateEvaluatorFor(action);
+    return (text: string) => fillTransitionalCopy(
       text,
-      { record: this.dispatchRecord(action), params: staticParams },
-      this.displayLocale?.(),
-      this.tenantCurrency?.(),
+      (source) => fillTemplateHoles(source, this.recordCopyRoots(action), this.displayLocale?.(), this.tenantCurrency?.()),
+      (source) => String(templates.evaluate(source) ?? ''),
     );
   }
 
@@ -2986,8 +3036,9 @@ export class ActionRunner {
     // there would widen the authorable surface with nothing behind it and
     // silently blank the token instead of leaving the author's mistake visible.
     //
-    // The success toast's `outcomeMessages` copy is the one other caller of the
-    // grammar, through `substituteScopeTokens` directly (`composeSuccessMessage`):
+    // The success toast's holeless `outcomeMessages` copy is the one other
+    // caller of the grammar, through `substituteScopeTokens` directly
+    // (`composeSuccessMessage`, until objectstack#27948's step 2 retires it):
     // `result` only, because that is the one scope the contract declares for the
     // copy, and no encoding, because a toast is text.
     const scopes: Record<string, unknown> = { param: params, ctx: this.buildInterpolationContext() };
@@ -3037,10 +3088,11 @@ export class ActionRunner {
   }
 
   /**
-   * The evaluator a dispatch's authored copy is read through: the param
-   * dialog's `description` / `helpText`, via the handler's `interpolate`
-   * argument. (`confirmText` reads `{{ }}` holes only, over `dispatchRecord`,
-   * the same record this binds — see `confirmMessage`.)
+   * The evaluator a dispatch's authored `${…}` copy is read through: the
+   * param dialog's `description` / `helpText` in a sentence with no `{{ }}`
+   * hole, via the handler's `interpolate` argument (`dialogCopyFiller`).
+   * (`confirmText` reads `{{ }}` holes only, over `dispatchRecord`, the same
+   * record this binds — see `confirmMessage`.)
    *
    * One rule for every door (objectui#12967): the record the action runs
    * against is `record`. The record header binds it in the runner's context
@@ -3187,9 +3239,37 @@ export function readOnSuccessNavigation(value: unknown): OnSuccessNavigation | n
 }
 
 /**
+ * The action and param list a param-collection handler is handed, with the
+ * two `template` slots the dialog draws — the action's `description` and each
+ * param's `helpText` (objectstack#27948, ruling A) — reduced from the
+ * envelope to its text (`actionCopyText`). The handler localizes them (a
+ * bundle entry over the literal, `pickLocalized` over a locale map) before
+ * `interpolate` fills their holes, and both take a string: an envelope handed
+ * on would localize to nothing and reach the dialog as an object. A string or
+ * a locale map is handed on as written, and so is everything else on the
+ * action. Copies only what changes: the runner's own `action` is the one the
+ * collected values are merged onto.
+ */
+function dialogCopyOf(
+  action: ActionDef,
+  params: ActionParamDef[],
+): { action: ActionDef; params: ActionParamDef[] } {
+  const description = actionCopyText(action.description);
+  const dialogAction = description === action.description
+    ? action
+    : { ...action, description: description as ActionDef['description'] };
+  const dialogParams = params.map((param) => {
+    const helpText = actionCopyText(param.helpText as unknown);
+    return helpText === param.helpText ? param : { ...param, helpText: helpText as string | undefined };
+  });
+  return { action: dialogAction, params: dialogParams };
+}
+
+/**
  * The runner's ONE `${scope.path}` token grammar — the substitution behind
  * `interpolateTarget` (url / api targets and the `onSuccess.navigate` hop) and
- * behind the success toast's `outcomeMessages` copy (`composeSuccessMessage`).
+ * behind the success toast's holeless `outcomeMessages` copy
+ * (`composeSuccessMessage`).
  *
  * The scope MAP defines the vocabulary: the pattern is built from its keys, so
  * a token naming a scope the caller did not pass is left in the text exactly as

@@ -7,8 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // entry, so this one covers both doors rather than only the second.
 export const entry: SemanticMigration = {
   id: 'filter-between-field-reference-endpoint-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'either endpoint of a $between range, authored as a { $field } column reference, in any filter '
     + 'this platform stores or executes. The carriers split in two, because they are DETECTED '

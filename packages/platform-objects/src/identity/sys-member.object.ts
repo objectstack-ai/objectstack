@@ -218,8 +218,9 @@ export const SysMember = ObjectSchema.create({
       label: 'Change Role',
       // Names the member: a list row carries `user_id` expanded to the user
       // record wherever the list shows that column (the organization page's
-      // Members list); a row without it reads "this member".
-      description: "Choose the new organization role for ${record.user_id?.name ?? 'this member'}.",
+      // Members list); a row without it reads "this member" (the `default`
+      // formatter, which also covers an empty name).
+      description: "Choose the new organization role for {{ record.user_id.name | default:'this member' }}.",
       icon: 'shield',
       mode: 'edit',
       locations: ['list_item'],
@@ -235,7 +236,7 @@ export const SysMember = ObjectSchema.create({
       // the member row (plugin-auth `role-change-granted-set.ts`).
       outcomeMessages: {
         permission_set_granted:
-          'Member role updated. The new role also granted the permission set ${result.grantedPermissionSet.label}.',
+          'Member role updated. The new role also granted the permission set {{ result.grantedPermissionSet.label }}.',
       },
       refreshAfter: true,
       params: [
@@ -307,7 +308,7 @@ export const SysMember = ObjectSchema.create({
       // [#27862] The same answer as `update_member_role` (the same route).
       outcomeMessages: {
         permission_set_granted:
-          'Member is now an owner. The new role also granted the permission set ${result.grantedPermissionSet.label}.',
+          'Member is now an owner. The new role also granted the permission set {{ result.grantedPermissionSet.label }}.',
       },
       refreshAfter: true,
     },

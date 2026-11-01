@@ -80,7 +80,8 @@ import type { FieldWidgetComponentProps } from './types.js';
  *    `field?.dependsOn ?? dependsOnProp` in all four option widgets.
  *  - `emptyHint`: the host's value wins when supplied (objectui#3231).
  *  - `onCreateNew`: the prop wins over `field.onCreateNew`; `onSelectRecord`
- *    has no metadata carrier at all, so the prop is its ONLY one.
+ *    and `onAutofill` have no metadata carrier at all, so the prop is their
+ *    ONLY one.
  *
  * Resolving any of that HERE would give each key a second author — the
  * `field || schema` shape objectui#3233 spent a release removing. One key, one
@@ -120,6 +121,7 @@ const HOST_PLUMBING_KEYS = [
   'dependsOnLabels',
   'emptyHint',
   'onSelectRecord',
+  'onAutofill',
   'onCreateNew',
 ] as const;
 

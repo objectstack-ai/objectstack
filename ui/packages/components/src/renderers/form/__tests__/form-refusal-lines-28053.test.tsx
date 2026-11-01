@@ -80,20 +80,13 @@ function bannerLines(container: HTMLElement): string[] {
   return items.length > 0 ? items.map((li) => li.textContent ?? '') : [banner.textContent ?? ''];
 }
 
-/** The toast's content, drawn, as text lines. */
-function toastLines(): string[] {
-  const content = toastErrorSpy.mock.calls.at(-1)![0] as React.ReactNode;
-  if (typeof content === 'string') return [content];
-  const { container } = render(<>{content}</>);
-  return Array.from(container.querySelectorAll('li')).map((li) => li.textContent ?? '');
-}
 
 const AMOUNT = 'Amount must be positive.';
 const NAME = 'Name is required for a forecast.';
 const BEST = 'Best case must be at least the amount.';
 
 describe('form renderer — one entry per failed validation rule (#28053)', () => {
-  it('two record-level rules: two banner lines and two toast lines, no joined summary', async () => {
+  it('two record-level rules: two banner lines, no joined summary, and no toast repeating them', async () => {
     const onSubmit = vi.fn().mockRejectedValue(
       ruleRefusal([{ field: '_record', message: AMOUNT }, { field: '_record', message: NAME }]),
     );
@@ -103,7 +96,8 @@ describe('form renderer — one entry per failed validation rule (#28053)', () =
 
     await waitFor(() => expect(container.querySelector('[role="alert"]')).toBeTruthy());
     expect(bannerLines(container)).toEqual([AMOUNT, NAME]);
-    expect(toastLines()).toEqual([AMOUNT, NAME]);
+    // The banner is the refusal's one message (objectstack-ai/objectstack#27520).
+    expect(toastErrorSpy).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain('; ');
   });
 
@@ -119,7 +113,7 @@ describe('form renderer — one entry per failed validation rule (#28053)', () =
     await waitFor(() => expect(bestWrap.textContent).toContain(BEST));
     expect(bestWrap.querySelector('[aria-invalid="true"]')).toBeTruthy();
     expect(bannerLines(container)).toEqual([AMOUNT]);
-    expect(toastLines()).toEqual([AMOUNT]);
+    expect(toastErrorSpy).not.toHaveBeenCalled();
   });
 
   it('a single record-level rule is unchanged: its message, once', async () => {
@@ -128,9 +122,9 @@ describe('form renderer — one entry per failed validation rule (#28053)', () =
 
     submit();
 
-    await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
-    expect(toastErrorSpy.mock.calls[0][0]).toBe(AMOUNT);
+    await waitFor(() => expect(container.querySelector('[role="alert"]')).toBeTruthy());
     expect(bannerLines(container)).toEqual([AMOUNT]);
+    expect(toastErrorSpy).not.toHaveBeenCalled();
     expect(container.querySelector('[aria-invalid="true"]')).toBeNull();
   });
 });

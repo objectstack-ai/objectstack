@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // registry where a dropped entry produces no error anywhere.
 export const entry: SemanticMigration = {
   id: 'audit-log-action-restore-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     "sys_audit_log.action — the value 'restore' left the select enum declared by "
     + 'plugin-audit (packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts). '

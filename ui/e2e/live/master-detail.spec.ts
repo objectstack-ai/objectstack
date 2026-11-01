@@ -20,6 +20,12 @@ import { selectOption, fillLookup } from './helpers';
  * server half, which a request-only assertion reads green when the batch is
  * refused, stores only the parent, or drops the child's parent reference.
  *
+ * Each test also checks the header still holds the typed name before it
+ * clicks Create (objectstack#28471). A keystroke the form dropped used to
+ * surface 15 s later as "no batch request": the click was refused by the
+ * required-field check on a name the user had typed. The check names that
+ * half at the line where it broke.
+ *
  * Auth: the page writes with the bearer token global-setup puts in the app
  * origin's localStorage; the read-back goes through the `request` fixture,
  * which carries the better-auth session cookie of the same storageState.
@@ -75,6 +81,7 @@ test('Create stores the populated parent through one atomic batch', async ({ pag
   await fillLookup(page, 'account', 'North');
   await selectOption(page, 'status', 'planned');
   await expect(page.getByText('Northwind', { exact: false })).toBeVisible();
+  await expect(page.locator('input[name="name"]')).toHaveValue(name);
 
   const response = await submitBatch(page);
 
@@ -101,6 +108,7 @@ test('Create with a task line stores the child referencing the parent', async ({
   // the only one the select offers.
   await selectOption(page, 'status', 'planned');
   await expect(page.getByText('Northwind', { exact: false })).toBeVisible();
+  await expect(page.locator('input[name="name"]')).toHaveValue(name);
 
   // `showcase_task` is a rich child, so its relationship smart-default resolves
   // to the per-row `form` factor: "Add task" opens the child's full form

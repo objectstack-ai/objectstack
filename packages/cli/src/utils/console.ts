@@ -838,10 +838,16 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  * - `frame-ancestors 'self'`, except on the public form page: the Console's
  *   public-forms screen hands authors an `<iframe>` snippet to embed that page
  *   on their own site, so it keeps loading in any frame.
+ * - {@link TURNSTILE_ORIGIN} in `script-src` and `frame-src` only while the
+ *   opt-in Turnstile challenge on sign-up is on (`readTurnstileEnabled`): the
+ *   sign-up form loads Cloudflare's script, which draws the challenge in a
+ *   frame from the same origin. With the challenge off, neither is listed and
+ *   `frame-src` is left to `default-src 'self'`, exactly as before.
  */
 function consoleContentSecurityPolicy(input: {
   nonce: string;
   reactPages: boolean;
+  turnstile: boolean;
   errorReportingOrigin: string | undefined;
   mapStyleOrigin: string | undefined;
   storageUploadOrigin: string | undefined;
@@ -850,6 +856,7 @@ function consoleContentSecurityPolicy(input: {
 }): string {
   const scriptSrc = ["'self'", `'nonce-${input.nonce}'`, "'wasm-unsafe-eval'"];
   if (input.reactPages) scriptSrc.push("'unsafe-eval'");
+  if (input.turnstile) scriptSrc.push(TURNSTILE_ORIGIN);
   const connectSrc = ["'self'", DEFAULT_MAP_STYLE_ORIGIN];
   if (input.mapStyleOrigin !== undefined) connectSrc.push(input.mapStyleOrigin);
   if (input.errorReportingOrigin !== undefined) connectSrc.push(input.errorReportingOrigin);
@@ -864,8 +871,25 @@ function consoleContentSecurityPolicy(input: {
     ['object-src', "'none'"],
     ['base-uri', "'self'"],
   ];
+  if (input.turnstile) directives.push(['frame-src', "'self'", TURNSTILE_ORIGIN]);
   if (!input.embeddable) directives.push(['frame-ancestors', "'self'"]);
   return directives.map((directive) => directive.join(' ')).join('; ');
+}
+
+/** Cloudflare Turnstile's origin: its loader script and its challenge frame. */
+const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+
+/**
+ * Whether the opt-in Turnstile challenge on sign-up is on: BOTH variables set
+ * and non-blank, the rule `@objectstack/plugin-auth` mounts the challenge and
+ * serves `features.turnstileSiteKey` by (its `turnstile-sign-up.ts`). The two
+ * names are spelled here rather than imported because this module is behind
+ * the published `./console` subpath, which imports Node built-ins only. Only
+ * presence is read; the values never reach the policy.
+ */
+function readTurnstileEnabled(): boolean {
+  const set = (name: string) => String(process.env[name] ?? '').trim() !== '';
+  return set('OS_TURNSTILE_SITE_KEY') && set('OS_TURNSTILE_SECRET_KEY');
 }
 
 /** The variable a deployment sets to turn the `kind:'react'` page tier on. */
@@ -1085,6 +1109,7 @@ export function createConsoleStaticPlugin(distPath: string, options?: { isDev?: 
         const policy = consoleContentSecurityPolicy({
           nonce,
           reactPages,
+          turnstile: readTurnstileEnabled(),
           errorReportingOrigin: shell?.errorReportingOrigin,
           mapStyleOrigin,
           storageUploadOrigin: await readStorageUploadOrigin(ctx, reportStorageUploadOriginFailure),

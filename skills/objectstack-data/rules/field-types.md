@@ -50,7 +50,7 @@ fields: {
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
-| `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency) |
+| `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency, currencyField, homeAmount) |
 | `percent` | Percentage values (0-100) | `min`, `max`, `precision` |
 
 ## Date & Time
@@ -170,16 +170,17 @@ Stored as JSON on the parent row — no separate table / FK:
 `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
 (default), the tenant `localization.currency`, else a plain number (never
 `$`); `'record'`, each record's code in the `text` field `currencyField`
-names (by convention `currency_code`), with `valueDomain: 'iso_4217_currency'`. A
-dataset measure's own `currency` wins over a `'dynamic'` field; over a `'fixed'` one
-it may only restate the code, else `DATASET_INVALID` (objectstack-ui →
+names, with `valueDomain: 'iso_4217_currency'`. A
+dataset measure's own `currency` wins over a `'dynamic'` field; over a `'fixed'` one,
+or a derived sum/difference over one `'fixed'` code, it may only restate that code,
+else `DATASET_INVALID`: delete it, and the column takes the code (objectstack-ui →
 Dashboards). A `'fixed'` code is not judged against the tenant's. Switched a
 stored field to `'record'`? Backfill: `os migrate record-currency-codes`.
 
 `homeAmount` (`'record'` only, all three required): the engine stores the
 home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
-(`date`) rate, and that rate in `rateField` (`number`), both `readonly: true`.
-Cross-currency totals sum `field`.
+(`date`/`datetime`) rate, and that rate in `rateField` (`number`), both
+`readonly: true`. Cross-currency totals sum `field`.
 
 ### Select with Default
 

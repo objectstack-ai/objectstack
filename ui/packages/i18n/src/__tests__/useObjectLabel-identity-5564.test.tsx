@@ -173,11 +173,13 @@ describe('useObjectLabel identity (objectui#5564)', () => {
     // (the name of an object's list), taking it to 28. objectui#11389 retired
     // `widgetSubCaption` with the metric sub-caption (ruling C), taking it to
     // 27. objectstack#26619 added `actionDisabledReason` (the reason a greyed
-    // action gives), taking it to 28. A new resolver must land
+    // action gives), taking it to 28. objectstack#28158 added
+    // `actionSubmitText` (the verb on an action's param-dialog submit button),
+    // taking it to 29. A new resolver must land
     // on both paths at once, because there is only one path — and a retired one
     // leaves both at once for the same reason, which is what the equality above
     // measures and this count anchors to an absolute.
-    expect(Object.keys(unbound.seen[0])).toHaveLength(28);
+    expect(Object.keys(unbound.seen[0])).toHaveLength(29);
     expect(Object.keys(unbound.seen[0])).not.toContain('widgetSubCaption');
     expect(typeof unbound.seen[0].objectLabel).toBe('function');
     expect(unbound.seen[0].objectLabel({ name: 'lead', label: 'Lead' })).toBe('Lead');

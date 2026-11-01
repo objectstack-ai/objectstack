@@ -7,8 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // Every earlier call shape breaks, so it is registered with its prescription.
 export const entry: SemanticMigration = {
   id: 'registry-install-package-source-argument',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'SchemaRegistry.installPackage(manifest, settings?, scope?) in @objectstack/objectql and '
     + 'EngineSchemaRegistryView.installPackage(manifest, settings?) in @objectstack/spec/contracts, now '

@@ -230,9 +230,10 @@ export type EngineFilterJudgement =
  * guarded call into a `possibly undefined` error and push code back toward the
  * `any` this contract exists to remove.
  *
- * Two members are optional by ruling, not by this default: {@link judgeFilter}
- * (#19995 ruling C) and {@link getDisabledActions} (#27842 ruling letter B,
- * the `getFlowRegistration?` shape). Their callers must work with an engine
+ * Three members are optional by ruling, not by this default: {@link judgeFilter}
+ * (#19995 ruling C), {@link getDisabledActions} (#27842 ruling letter B,
+ * the `getFlowRegistration?` shape) and {@link getCascadeDeleteObjects}
+ * (#28001, that shape again). Their callers must work with an engine
  * that lacks them, so the optional mark states that requirement in the type.
  */
 export interface IObjectQLEngine extends IDataEngine {
@@ -350,6 +351,31 @@ export interface IObjectQLEngine extends IDataEngine {
      * declare it, and the read then serves no key rather than a guess.
      */
     getDisabledActions?(): string[] | undefined;
+
+    /**
+     * The objects a delete of a record of `objectName` can cascade into, by
+     * name: every object holding a relation into it whose resolved delete
+     * behaviour is `cascade` (a `master_detail` by default, a `lookup` or
+     * `tree` that declares `deleteBehavior: 'cascade'`), and transitively the
+     * objects that cascade into those, each once, in the order the delete's
+     * own walk first reaches them. `objectName` itself is named only when a
+     * cascading relation leads back to it. A `restrict` or `set_null`
+     * relation removes nothing and is not named. `undefined` when the engine
+     * does not hold `objectName`.
+     *
+     * [#28001] Declared for the metadata read, which serves it beside an
+     * object as `cascadeDeleteObjects` (`GetMetaItemResponseSchema`,
+     * `api/protocol.zod.ts`) so a delete confirmation can name what the
+     * delete also removes. Read from the rule the delete runs, never from a
+     * copy of it, and object-level: it reads no row, so it never says which
+     * records or how many. The metadata protocol reads it through the
+     * kernel's service table by name (`objectql`), as it reads
+     * {@link getDisabledActions}.
+     *
+     * Optional, as {@link getDisabledActions} is: the read serves no key
+     * where the engine does not declare it.
+     */
+    getCascadeDeleteObjects?(objectName: string): string[] | undefined;
 
     // ── Hook / middleware seams ──────────────────────────────────────────
     /**
