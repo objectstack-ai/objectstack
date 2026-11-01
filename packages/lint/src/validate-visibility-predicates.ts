@@ -756,6 +756,64 @@ function quoteSource(source: string): string {
 const NEVER_EVALUATES = 'so it never evaluates and the element always renders';
 
 /**
+ * [#28663] What a syntax verdict says depends on the surface it is read on, in
+ * exactly two places: what a faulting predicate DOES there, and the example the
+ * remedy line spells. A view/page element falls open (it renders); an app
+ * navigation entry falls closed — the console's nav gate hides the entry from
+ * every viewer — and binds no `record`, so a `record.`-rooted example would
+ * prescribe a read that resolves to nothing there.
+ */
+interface SyntaxSurface {
+  /** The clause the verdict ends with. */
+  consequence: string;
+  /** A predicate that parses on this surface, quoted in the remedy line. */
+  example: string;
+}
+
+const ELEMENT_SURFACE: SyntaxSurface = {
+  consequence: NEVER_EVALUATES,
+  example: "record.status == 'open'",
+};
+
+const NAV_SURFACE: SyntaxSurface = {
+  consequence: 'so it never evaluates and the entry is hidden from every viewer',
+  // The spec's own example on the nav `visible` key (`app.zod.ts`).
+  example: "'org_admin' in current_user.positions",
+};
+
+/**
+ * The one `visibility-predicate-syntax` finding, for every surface that carries
+ * a predicate (#6253; app navigation since #28663). One builder, so the id's
+ * wording cannot drift between a page component and a nav entry: only the
+ * {@link SyntaxSurface} differs.
+ */
+function syntaxFinding(
+  source: string,
+  refusal: CelSyntaxFault,
+  where: string,
+  path: string,
+  surface: SyntaxSurface,
+): VisibilityFinding {
+  return {
+    severity: 'error',
+    rule: VISIBILITY_PREDICATE_SYNTAX,
+    where,
+    path,
+    message:
+      `visibility predicate is not valid CEL — ${refusal.detail} ` +
+      `(predicate: \`${quoteSource(source)}\`), ${surface.consequence}`,
+    // [#22161] One remedy line; the other-language spellings CEL does not
+    // parse are `os explain visibility-predicate-syntax`.
+    hint: refusal.token
+      ? `\`${refusal.token.wrote}\` is not a CEL operator — CEL spells it ` +
+        `\`${refusal.token.cel}\`. Replace \`${refusal.token.wrote}\` with ` +
+        `\`${refusal.token.cel}\`, e.g. \`${refusal.token.example}\`.`
+      : `Visibility predicates are bare CEL, e.g. \`${surface.example}\`: fix the syntax ` +
+        `error the verdict quotes`,
+  };
+}
+
+/**
  * The canonical front end's refusal of `source`, or `null` when it parses.
  *
  * Two things are deliberately NOT done here (see the module note's §Syntax):
@@ -1285,23 +1343,7 @@ function checkElement(
     });
   }
   if (source && refusal?.kind === 'syntax') {
-    findings.push({
-      severity: 'error',
-      rule: VISIBILITY_PREDICATE_SYNTAX,
-      where,
-      path,
-      message:
-        `visibility predicate is not valid CEL — ${refusal.detail} ` +
-        `(predicate: \`${quoteSource(source)}\`), ${NEVER_EVALUATES}`,
-      // [#22161] One remedy line; the other-language spellings CEL does not
-      // parse are `os explain visibility-predicate-syntax`.
-      hint: refusal.token
-        ? `\`${refusal.token.wrote}\` is not a CEL operator — CEL spells it ` +
-          `\`${refusal.token.cel}\`. Replace \`${refusal.token.wrote}\` with ` +
-          `\`${refusal.token.cel}\`, e.g. \`${refusal.token.example}\`.`
-        : `Visibility predicates are bare CEL, e.g. \`record.status == 'open'\`: fix the syntax ` +
-          `error the verdict quotes`,
-    });
+    findings.push(syntaxFinding(source, refusal, where, path, ELEMENT_SURFACE));
   }
 
   // (3) #13594 — the predicate calls a function the CEL environment does not
@@ -1576,5 +1618,73 @@ export function validateVisibilityPredicates(
     }
   }
 
+  // ── Apps: every navigation entry's `visible` (#28663) ────────────────
+  //
+  // The syntax verdict only, at the same severity as everywhere else: a nav
+  // `visible` the CEL front end refuses never evaluates, and the console's nav
+  // gate falls CLOSED on a fault, so the entry vanishes for every viewer with
+  // nothing said to its author. The family's other judgments are not run here,
+  // and that is measured, not skipped: they judge references against the roots
+  // a view or page binds (`record`, `current_user`, `page`), while a nav entry
+  // binds `current_user`, `user`, `ctx.user`, `os.user`, `features` (and `data`
+  // beside a `dataSource`) — so `features.cloudManaged != true`, which the
+  // console evaluates, would be refused as an unbound root. Whether a
+  // predicate PARSES is the one question every surface answers alike.
+  for (const { rec: app, path: appPath } of collectionEntries(stack.apps, 'apps')) {
+    const appName = typeof app.name === 'string' ? app.name : appPath;
+    walkNavPredicates(app.navigation, `${appPath}.navigation`, appName, findings);
+    for (const { rec: area, path: areaPath } of collectionEntries(app.areas, `${appPath}.areas`)) {
+      walkNavPredicates(area.navigation, `${areaPath}.navigation`, appName, findings);
+    }
+  }
+
   return findings;
+}
+
+/**
+ * [#28663] A nav entry's `visible` as CEL source, or `undefined` when it is not
+ * a CEL predicate. A bare string is CEL by the spec's shorthand
+ * (`EvaluatedExpressionInputSchema`) and the console reads it so since #27457;
+ * a `{ dialect: 'cel', source }` envelope is the parse's own spelling of the
+ * same. An envelope of any other dialect — or of none — is the console's legacy
+ * reading, not CEL, so this rule has no verdict on it; a boolean is not a
+ * predicate at all.
+ */
+function navPredicateSource(v: unknown): string | undefined {
+  if (typeof v === 'string') return v;
+  if (v && typeof v === 'object' && (v as AnyRec).dialect === 'cel' && typeof (v as AnyRec).source === 'string') {
+    return (v as AnyRec).source as string;
+  }
+  return undefined;
+}
+
+/**
+ * Walk one navigation list — `navigation` or an area's `navigation` — and the
+ * `children` of every entry in it (a `group` and an `object` entry both carry
+ * them), judging each entry's `visible`. The finding is located at the key
+ * (`….visible`) because a nav entry's predicate key is not the family's
+ * `visibleWhen`, so the element path alone would not say which key to fix.
+ */
+function walkNavPredicates(
+  items: unknown,
+  basePath: string,
+  appName: string,
+  findings: VisibilityFinding[],
+): void {
+  if (!Array.isArray(items)) return;
+  for (let i = 0; i < items.length; i++) {
+    const nav = items[i];
+    if (!nav || typeof nav !== 'object' || Array.isArray(nav)) continue;
+    const entry = nav as AnyRec;
+    const navPath = `${basePath}[${i}]`;
+    const source = navPredicateSource(entry.visible);
+    const refusal = source ? celRefusal(source) : null;
+    if (source && refusal?.kind === 'syntax') {
+      const label = typeof entry.id === 'string' ? entry.id
+        : typeof entry.label === 'string' ? entry.label
+          : `#${i}`;
+      findings.push(syntaxFinding(source, refusal, `app "${appName}" · nav "${label}"`, `${navPath}.visible`, NAV_SURFACE));
+    }
+    walkNavPredicates(entry.children, `${navPath}.children`, appName, findings);
+  }
 }
