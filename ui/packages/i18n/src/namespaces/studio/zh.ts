@@ -2843,6 +2843,12 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.customize.restoreBody': '本部署对「{item}」的自定义会被删除，重新使用 {package} 的版本。',
   'engine.studio.customize.restoreDraft': '会先丢弃它未发布的草稿。',
   'engine.studio.customize.restoreDone': '「{item}」已恢复为 {package} 的版本',
+  // objectstack#28572 — 只读基础包与其定制包合为一个界面。
+  'engine.studio.customize.addedIn': '位于 {pair}',
+  'engine.studio.customize.addedInTitle': '此项由本部署的定制包 {pair} 新增，并保存在其中。',
+  'engine.studio.pkg.withPair': '含 {pair}',
+  'engine.studio.if.addInPairTitle': '新建到 {baseName} 的定制',
+  'engine.studio.interfaces.create.descriptionInPair': '存为本部署对 {baseName} 定制的草稿，并在画布上打开。{baseName} 的导航保持安装时的样子。',
   'engine.studio.app.scaffoldNav': '将本包的对象添加为菜单项',
   'engine.studio.landing.title': '应用构建',
   'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用环境覆盖进行定制。',
