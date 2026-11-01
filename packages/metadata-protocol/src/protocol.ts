@@ -22028,7 +22028,30 @@ export class ObjectStackProtocolImplementation implements
         // surfaced as a 409.
         // [ADR-0146 D2] The override write gate's undeclared-same-name
         // refusal (see the gate above): the last refusal before the store.
-        if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
+        //
+        // A save naming no package was judged above as package-less (`not
+        // concerned` for an undeclared item), but its address may have given
+        // it a package since: the row it lands in, as the package-less address
+        // resolved it (publish) or the draft address names it (draft). Judged
+        // again here for THAT package, so a package-less save cannot write a
+        // dependent's undeclared same-named row the same save naming the
+        // dependent is refused. A declaration never reaches this re-judgement:
+        // a package-less declaration was refused above.
+        let lateOverrideVerdict = overrideVerdict;
+        if (
+            namedNoPackage
+            && overrideVerdict.verdict === 'not_concerned'
+            && request.source === undefined
+            && request.writeFace !== 'package-duplicate'
+        ) {
+            const inheritedPackage = mode === 'draft'
+                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                : request.packageId ?? null;
+            if (typeof inheritedPackage === 'string' && inheritedPackage.length > 0) {
+                lateOverrideVerdict = this.overrideWriteVerdict({ ...request, packageId: inheritedPackage });
+            }
+        }
+        if (lateOverrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(lateOverrideVerdict);
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
         // [ADR-0146 D2] An admitted declared override writes the pair's own
