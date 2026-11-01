@@ -62,7 +62,10 @@ const OWNED_SET = { name: 'own_reader', label: 'Own Reader', objects: { account:
 /** An environment-authored set that grants on a platform object only. */
 const SYS_ONLY_SET = { name: 'sys_only', label: 'Sys Only', objects: { sys_user: { allowRead: true } } };
 
-const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET, OWNED_SET, SYS_ONLY_SET] };
+/** A set `crm` ships that grants on a platform object only: its package is the one thing out of an island's reach. */
+const CRM_SYS_SET = { name: 'crm_user_reader', label: 'CRM User Reader', objects: { sys_user: { allowRead: true } }, _packageId: 'crm' };
+
+const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET, OWNED_SET, SYS_ONLY_SET, CRM_SYS_SET] };
 
 /**
  * The package registry the door reads: `crm` is a booted CODE package
@@ -407,6 +410,9 @@ describe('the permission-set clone door — refusals', () => {
     it('a given writable target that cannot reach the source\'s package is 409, with no save', async () => {
         const res = await refusal({}, PACKAGED.name, { name: 'x_copy', label: 'X', package: 'com.acme.island' }, 409, 'RESOURCE_CONFLICT');
         expect(String((res as any).response.body.error.message)).toContain("'crm'");
+        // The source-package limb alone: every object this set grants on is a
+        // platform object, so only its package is out of the island's reach.
+        await refusal({}, CRM_SYS_SET.name, { name: 'y_copy', label: 'Y', package: 'com.acme.island' }, 409, 'RESOURCE_CONFLICT');
     });
 
     it('a given target that cannot reach an object the set grants on is 409, even for an environment-authored source', async () => {
