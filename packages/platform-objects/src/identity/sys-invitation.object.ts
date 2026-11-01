@@ -190,10 +190,13 @@ export const SysInvitation = ObjectSchema.create({
       target: 'copy_invitation_link',
       // The gates of `resend_invitation` (the organization capability and the
       // grades that reach invite-member), hidden while cloud-managed as the
-      // invite mirrors are, and offered on a pending row only. `has()` opens
-      // the status operand for the sparse `list_item` face (#8990), as on the
-      // recipient-side actions below.
-      visible: "features.cloudManaged != true && has(record.status) && record.status == 'pending'",
+      // invite mirrors are, and offered on a pending row only, before its
+      // `expires_at`: a row can still read `pending` after it expires, and
+      // its link admits no one (the handler refuses it too). `has()` opens
+      // each operand for the sparse `list_item` face (#8990), as on the
+      // recipient-side actions below; `expires_at` is compared by ordering,
+      // so it also needs its `!= null` half (`materializeDeclaredFields`).
+      visible: "features.cloudManaged != true && has(record.status) && record.status == 'pending' && has(record.expires_at) && record.expires_at != null && datetime(record.expires_at) > now()",
       requiresFeature: 'organization',
       requiresMembershipReach: 'invite_member',
       resultDialog: {

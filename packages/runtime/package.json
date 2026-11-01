@@ -17,6 +17,16 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./compiled-plugin-manifest-file": {
+      "import": {
+        "types": "./dist/compiled-plugin-manifest-file.d.ts",
+        "default": "./dist/compiled-plugin-manifest-file.js"
+      },
+      "require": {
+        "types": "./dist/compiled-plugin-manifest-file.d.cts",
+        "default": "./dist/compiled-plugin-manifest-file.cjs"
+      }
     }
   },
   "scripts": {

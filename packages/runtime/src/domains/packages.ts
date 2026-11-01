@@ -57,6 +57,9 @@ import {
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
 import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+// [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
+// at `POST /packages` too, ahead of both its install limbs.
+import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
 import { declaredDependencyIds } from '@objectstack/core';
@@ -150,6 +153,7 @@ import {
     PackageInstallBodySchema,
     PackageInstallManifestSchema,
     PackageInstallRequestSchema,
+    PublishPackageDraftsRequestSchema,
 } from '@objectstack/spec/api';
 
 /**
@@ -217,6 +221,12 @@ export type PackagesDomainProtocol =
          * declare is a compile error.
          */
         revertStoredPackage?: ObjectStackProtocolImplementation['revertStoredPackage'];
+        /**
+         * [ADR-0146 D3] The ensure door of a base's paired `.custom` package,
+         * typed from the producer's method signature — its request and answer
+         * are the published `EnsureCustomizationPackage*Schema` pair.
+         */
+        ensureCustomizationPackage?: ObjectStackProtocolImplementation['ensureCustomizationPackage'];
         /**
          * [#28409] The per-package layer the export reads, typed from the
          * producer's own signature as above.
@@ -1635,6 +1645,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // `overwrite` set or not — answers as before.
             const readOnly = requireWritablePackage(deps, qlService, pkgId, overwrite ? 'overwrite' : 'install');
             if (readOnly) return readOnly;
+            // [ADR-0146 D3] A paired customization package id (`<base>.custom`)
+            // installs only with what its ensure door writes — the base's pair
+            // namespace, explicit, and the dependency on the base — or it is
+            // refused `400` naming that door. Asked here, ahead of BOTH limbs,
+            // because the no-protocol fallback never reaches the primitive,
+            // which asks the same predicate; ⛔ never a second copy of the rule.
+            // An exported pair declaring both installs, and ADR-0141 D2 judges
+            // its range below.
+            const pairRefusal = customizationPairManifestRefusal(manifest, (id) => registry.getPackage(id));
+            if (pairRefusal !== undefined) {
+                return { handled: true, response: deps.error(pairRefusal, 400) };
+            }
             // ⚠️ The MANIFEST handed on is the one the caller sent, ⛔ not the
             // parsed copy. `ManifestSchema` applies defaults at parse time
             // (`scope`, `defaultDatasource`), and this door has always stored
@@ -1914,6 +1936,38 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (packageIsUnknown(registry, id)) {
                     return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
                 }
+                // [#28452] The note is parsed with the declaration's own
+                // member, `PublishPackageDraftsRequestSchema.shape.message`,
+                // and a note it refuses (a number, an object, an array,
+                // `null`) is refused here `400` (`VALIDATION_ERROR`, derived
+                // from the status as the install door's legs derive it) before
+                // anything is published. It used to be dropped, so the publish
+                // went ahead and every history row recorded the default note,
+                // and the caller never learnt its note was ignored.
+                //
+                // ⛔ Only `message` is judged here. `backfill` keeps its one
+                // refusal, the protocol's shape judgement below (same status,
+                // code and `issues[]` as before); parsing it here too would be a
+                // second judge with a second sentence. Unknown keys are not
+                // read at all, so a body `actor` (the SDK's deprecated
+                // `opts.actor`) still publishes. Placed beside that backfill
+                // judgement, after the 404, so both body-member refusals sit at
+                // one point of the door's order.
+                const declaredMessage = PublishPackageDraftsRequestSchema.shape.message.safeParse(body?.message);
+                if (!declaredMessage.success) {
+                    const located = declaredMessage.error.issues
+                        .map((issue) => `message: ${issue.message}`)
+                        .join('; ');
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Invalid publish-drafts body — ${located}. Nothing was published: \`message\` is the `
+                            + 'change note every history row of this publish records; send it as a string, or leave '
+                            + 'it out to record the sentence naming the package.',
+                            400,
+                        ),
+                    };
+                }
                 try {
                     // [ADR-0146 D1] Who published: the identity this request
                     // was authorized as, never a name the body supplies — see
@@ -1924,9 +1978,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                         ...(actor !== undefined ? { actor } : {}),
                         // [ADR-0146 D1] The author's change note: the package
                         // commit and every item history row this publish writes
-                        // carry it. A string, as the single-item publish door
-                        // reads `message`; anything else sends no note.
-                        ...(typeof body?.message === 'string' ? { message: body.message } : {}),
+                        // carry it. The parsed value: a string, or absent.
+                        ...(declaredMessage.data !== undefined ? { message: declaredMessage.data } : {}),
                         // [#24253] Passed through as sent: the protocol judges
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.
@@ -2512,6 +2565,65 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
                 return { handled: true, response: deps.errorFromThrown(e, 500) };
+            }
+        }
+
+        // POST /packages/:id/ensure-customization → ensure the base's paired
+        // customization package `<id>.custom` (ADR-0146 D3): answer it, creating
+        // it when absent — `201` when this call created it, `200` when it was
+        // already there. The body is the protocol's
+        // (`ensureCustomizationPackage`, `@objectstack/metadata-protocol`),
+        // which judges the packages; this door judges the caller, exactly as
+        // the install door does — `manage_metadata` under `single`, the
+        // platform operator alone under a wall (a tenant administrator is
+        // refused `403`) — and the request shape, all before the protocol runs.
+        if (parts.length === 2 && parts[1] === 'ensure-customization' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            const id = decodeURIComponent(parts[0]);
+            // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
+            const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Ensuring the customization package of "${id}"`);
+            if (walled) return walled;
+            // AGENTS.md route rule 5: the measured closed query set is EMPTY —
+            // the door reads the path and the session, no query parameter.
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
+            // The door reads NO body: the base is the path's `:id`, and the
+            // pair's id, namespace and dependency are derived from it, never
+            // requested. A body carrying keys is refused rather than ignored,
+            // so a caller who meant to name a namespace or a range learns that
+            // nothing was read.
+            if (body !== undefined && body !== null
+                && (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length > 0)) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        'The ensure-customization door reads no body: the base is the path\'s package id, and the '
+                        + 'pair\'s id, namespace and dependency range are derived from it (ADR-0146 D3). Send no '
+                        + 'body, or an empty object.',
+                        400,
+                    ),
+                };
+            }
+            const protocol = await resolveProtocol(deps, _context);
+            if (!protocol || typeof protocol.ensureCustomizationPackage !== 'function') {
+                return { handled: true, response: deps.error('Customization package ensure not supported', 501) };
+            }
+            try {
+                const result = await protocol.ensureCustomizationPackage({ basePackageId: id });
+                const res = deps.success(result);
+                if (result.created) res.status = 201;
+                return { handled: true, response: res };
+            } catch (err) {
+                // ADR-0141 D2's refusal of the pair's own install (a base at a
+                // prerelease version, which the dependency check does not
+                // admit) keeps its per-entry facts, as at the install door.
+                if (isDependencyMissingError(err)) {
+                    const answer = dependencyMissingAnswer(err);
+                    return {
+                        handled: true,
+                        response: deps.error(answer.message, answer.status, { code: answer.code, ...answer.details }),
+                    };
+                }
+                return { handled: true, response: deps.errorFromThrown(err, 500) };
             }
         }
 

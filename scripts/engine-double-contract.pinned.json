@@ -1372,6 +1372,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.packageless-layered-read-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-layered-read-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.packageless-layered-read-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4308,6 +4323,21 @@
     },
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-layers-ambiguous-package.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-layers-ambiguous-package.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-layers-ambiguous-package.test.ts",
       "verb": "update",
       "pinned": 1
     },

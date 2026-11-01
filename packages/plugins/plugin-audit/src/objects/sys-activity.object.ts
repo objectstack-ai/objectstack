@@ -196,7 +196,7 @@ export const SysActivity = ObjectSchema.create({
     // registered-but-broken with the ActivityPointer lookup the read path
     // assumes (ADR-0052 §5) silently absent.
     record_id: Field.text({
-      label: 'Record ID',
+      label: 'Record',
       required: false,
       readonly: true,
       searchable: true,

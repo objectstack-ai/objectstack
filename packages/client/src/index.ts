@@ -128,6 +128,7 @@ import {
   PackageExportManifest,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
+  EnsureCustomizationPackageResponse,
   ValidateDataIssue,
 } from '@objectstack/spec/api';
 // [#17536] The element the two `/packages` READ doors are declared to serve.
@@ -3143,6 +3144,30 @@ export class ObjectStackClient {
             body: JSON.stringify({ targetPackageId, ...(opts ?? {}) }),
         });
         return this.unwrapResponse<DuplicatePackageResponse>(res);
+    },
+
+    /**
+     * ADR-0146 D3: ensure the paired customization package `<id>.custom` of
+     * the installed, read-only base `id` — the one creation path of the pair.
+     * The server answers the pair, creating it when absent (`created: true`,
+     * HTTP 201) or returning it unchanged (`created: false`, HTTP 200); its
+     * namespace (`<base namespace>_custom`) and its dependency range on the
+     * base are derived by the server, never sent. Customer changes to the base
+     * are then authored into `packageId`.
+     *
+     * Refused, with nothing written: a base that is not installed (404), a
+     * writable base — customize it directly — or one with no pair namespace,
+     * and an installed `<id>.custom` that lacks the namespace or the
+     * dependency (409); another package owning the namespace (422
+     * `NAMESPACE_CONFLICT`). Under a walled tenancy posture only the platform
+     * operator may call it.
+     */
+    ensureCustomization: async (id: string): Promise<EnsureCustomizationPackageResponse> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/ensure-customization`, {
+            method: 'POST',
+        });
+        return this.unwrapResponse<EnsureCustomizationPackageResponse>(res);
     },
   };
 

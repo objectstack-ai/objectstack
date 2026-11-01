@@ -24,6 +24,10 @@
  *  - The active tab is always shown: where it would have fallen into the
  *    dropdown, it takes the row's last slot and the tab it displaced goes
  *    into the dropdown instead.
+ *
+ * Which tabs are candidates for the row at all is {@link arrangeRecordTabRow}'s
+ * answer (objectstack#28469): the related lists with records come first, and
+ * the empty ones wait in the dropdown.
  */
 export interface RecordTabRowLayoutInput {
   /** Each tab's width, in the row's order; index 0 is 「概览」. */
@@ -81,4 +85,52 @@ export function layoutRecordTabRow(input: RecordTabRowLayoutInput): RecordTabRow
   const shown = Array.from(chosen).sort((a, b) => a - b);
   const overflow = all.filter((index) => !chosen.has(index));
   return { shown, overflow };
+}
+
+/** What the arrangement reads of a tab: its id and its count. */
+export interface ArrangedRecordTab {
+  id: string;
+  /** The panel's count; absent or `null` while it is not known. */
+  count?: number | null;
+}
+
+/**
+ * The related panels' tabs split by whether their list has records
+ * (objectstack#28469, Target 1) — the rule the right column already applies to
+ * its panels (objectstack#27524, Target 2), so the two surfaces agree on the
+ * same lists.
+ *
+ * A stable partition of the reader's arrangement: every panel whose count is
+ * not `0` keeps its relative order (a reader's drag still decides among them),
+ * then every panel whose count is `0`, in the same order. A count that is not
+ * known yet (loading, or a refused read) is not `0`: that tab stays where the
+ * arrangement puts it. Computed when the row is drawn and never written back
+ * into the stored arrangement.
+ */
+export function partitionRecordTabsByRecords<T extends ArrangedRecordTab>(
+  panels: readonly T[],
+): { withRecords: T[]; empty: T[] } {
+  const withRecords: T[] = [];
+  const empty: T[] = [];
+  for (const panel of panels) (panel.count === 0 ? empty : withRecords).push(panel);
+  return { withRecords, empty };
+}
+
+/**
+ * The tabs the row may show and the empty tabs its dropdown lists
+ * (objectstack#28469, Targets 1 and 3).
+ *
+ * An empty list's tab never takes a slot on the row, even when the row has
+ * room for it — except the active one: a link that opens an empty list (a
+ * `?related=` deep link) keeps that tab on the row, after every other
+ * candidate, so {@link layoutRecordTabRow} draws it in the row's last slot.
+ */
+export function arrangeRecordTabRow<T extends ArrangedRecordTab>(
+  tabs: readonly T[],
+  emptyTabs: readonly T[],
+  activeId: string,
+): { row: T[]; empty: T[] } {
+  const active = emptyTabs.find((tab) => tab.id === activeId);
+  if (!active) return { row: [...tabs], empty: [...emptyTabs] };
+  return { row: [...tabs, active], empty: emptyTabs.filter((tab) => tab !== active) };
 }

@@ -5,7 +5,9 @@ import { defineConfig } from 'tsup';
 import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // `compiled-plugin-manifest-file` is its own import-free entry, so the CLI
+  // reads the manifest filename without loading the root entry (#28080).
+  entry: ['src/index.ts', 'src/compiled-plugin-manifest-file.ts'],
   splitting: false,
   sourcemap: true,
   clean: true,

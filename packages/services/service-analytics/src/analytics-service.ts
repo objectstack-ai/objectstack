@@ -98,7 +98,7 @@ import {
   NO_DATETIME_COLUMNS,
 } from './strategies/filter-normalizer.js';
 import { findCrossFieldComparand } from './comparand-shape.js';
-import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
+import { compileDataset, unbackedRelationshipPath, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { measureCurrencyResolver, type DeclaredCurrency } from './measure-currency-coherence.js';
 import { bindDatasetFiltersToObjectFields } from './dataset-filter-field-binding.js';
 import { drillWindowBounds } from './drill-window.js';
@@ -1838,6 +1838,17 @@ export class AnalyticsService implements IAnalyticsService {
       query.cube ? reads.getDatasetScope(query.cube) : undefined,
       context,
     );
+    // [#28258] …and a dotted dimension through a relationship path the
+    // compiled dataset does not declare: `INVALID_FIELD` / 400, on every
+    // strategy and the SQL echo. After the admission verdicts, so a path
+    // naming an object the caller may not read keeps that object's 403
+    // (#20933); before any strategy, so the native allowlist's
+    // `DATASET_INVALID` no longer answers it.
+    this.assertDimensionJoinsBacked(
+      query,
+      query.cube ? scope.getCube(query.cube) : undefined,
+      query.cube ? scope.getCompiledDataset(query.cube)?.allowedRelationships : undefined,
+    );
     // [#21267] …and the order-key door: an `order` key must name a member this
     // query selects, or the query is refused `INVALID_FIELD` / 400
     // (`order-key-door.ts`). On this seam because it is the one `query()` and
@@ -2800,6 +2811,12 @@ export class AnalyticsService implements IAnalyticsService {
             // carries the same `internal` fields the published ones do.
             this.assertNoInternalFieldsQueried(q, cube, previewScope);
             await this.assertFieldsReadable(q, cube, previewScope, context);
+            // [#28258] …and, after the admission verdicts as `callCtx` asks it,
+            // a dotted dimension through a relationship path the dataset does
+            // not declare is refused with the live faces' one answer, where the
+            // evaluator, which joins nothing, grouped every row under one
+            // `null` key.
+            this.assertDimensionJoinsBacked(q, cube, compiled.allowedRelationships);
             return evaluateAnalyticsQueryOverRows(
               q,
               cube,
@@ -4033,6 +4050,62 @@ export class AnalyticsService implements IAnalyticsService {
       err.param = param;
       err.dimension = member;
       throw err;
+    }
+  }
+
+  /**
+   * [#28258] Refuse a selected dimension spelled through a relationship path the
+   * compiled dataset does not declare in its `include` — `INVALID_FIELD` / 400,
+   * naming the member as the request spelled it and the first unbacked path —
+   * before either strategy compiles it, and on the draft preview.
+   *
+   * A dotted member no dimension declares is the strategies' synthetic relation
+   * traversal ({@link declaredMemberEntry}'s last case), which
+   * {@link assertDimensionFields} deliberately leaves alone. Measured on
+   * `origin/main` `eeec88d14` (real SQLite), `os28258_deal.bogus` and
+   * `account.name` over a dataset with no `include` got three answers: the
+   * native strategy's join allowlist refused `DATASET_INVALID`, the ObjectQL
+   * strategy refused the first from the driver and SERVED the second by joining
+   * a relationship the dataset never declared, and the draft preview grouped
+   * every row under one `null` key. The verdict is about one `dimensions` entry,
+   * so it is the member-level envelope ({@link invalidMemberError}), the shape
+   * the other dimension and measure gates answer.
+   *
+   * - Only `dimensions`. A dotted `timeDimensions` entry already answers one
+   *   `INVALID_FIELD` on both live strategies, and a `where` member keeps the
+   *   native strategy's `DATASET_INVALID`.
+   * - Only on a compiled dataset (`allowed` defined): a hand-authored cube's
+   *   configured hook stays the strategy's to enforce, as it was.
+   * - Only a member that resolves to no declared dimension and is a dotted
+   *   identifier path: `<cube>.region` and `<object>.region` resolve to the
+   *   declared `region`, and an expression registers no join.
+   * - The native strategy's own allowlist stays, unchanged, behind this gate
+   *   (a `runtimeFilter` member, and a hand-authored cube, still reach it).
+   *
+   * Asked in {@link callCtx} after the object, body, internal-field and
+   * field-level verdicts, and at the same point on the draft preview: a path
+   * through an object the caller may not read keeps that object's 403
+   * (#20933, which a gate in `ensureCube` would have pre-empted).
+   */
+  private assertDimensionJoinsBacked(
+    query: AnalyticsQuery,
+    cube: Cube | undefined,
+    allowed: ReadonlySet<string> | undefined,
+  ): void {
+    if (!cube || !allowed) return;
+    for (const member of query.dimensions ?? []) {
+      if (declaredMemberEntry(cube, member, 'dimension')) continue;
+      if (!IDENTIFIER_PATH.test(member)) continue;
+      const path = unbackedRelationshipPath(member, allowed);
+      if (path === null) continue;
+      const declared = [...allowed].map((alias) => alias.replace(/__/g, '.')).sort();
+      throw invalidMemberError(
+        `Dimension '${member}' on cube '${cube.name}' traverses relationship path '${path}', which the ` +
+          `dataset does not declare in its \`include\`. Only fields along a declared relationship path are ` +
+          `joinable — declared paths: ${declared.join(', ') || '(none)'}. ` +
+          `Valid dimensions: ${Object.keys(cube.dimensions).join(', ') || '(none)'}.`,
+        { member, param: 'dimensions', cube: cube.name },
+      );
     }
   }
 

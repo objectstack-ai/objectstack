@@ -110,6 +110,16 @@
         "must_contain": ["params", "submitText: 'Log Call'"],
         "must_not_contain": ["submitLabel", "confirmLabel", "confirmText"]
       }
+    },
+    {
+      "id": 12,
+      "prompt": "On `task`, add an 'Attention' list for the signed-in user: their tasks that are open or urgent, in one list.",
+      "expected_output": "One `listViews.attention` entry, not two views. Its `filter` is a list whose elements all match: one any-of group `{ or: [{ field: 'status', operator: 'equals', value: 'open' }, { field: 'priority', operator: 'equals', value: 'urgent' }] }` beside the rule `{ field: 'assigned_to', operator: 'equals', value: '{current_user_id}' }`. Flat rules only inside the group; no `$or`, `logic` / `conditions` or `anyOf` key.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["listViews", "or: [", "{current_user_id}"],
+        "must_not_contain": ["$or", "logic:", "conditions:", "anyOf"]
+      }
     }
   ]
 }

@@ -123,9 +123,15 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
             type: HTTP_TYPE,
             version: '1.0.0',
             name: 'HTTP',
+            // The description and the config help below are the Studio flow
+            // palette and node-card text an admin reads, so they speak business
+            // words. The engineer detail they used to carry lives here: with
+            // `durable: true` the call is enqueued on the messaging HTTP outbox
+            // (retry / dead-letter) and the run does not see the response;
+            // otherwise it runs inline and returns the response.
             description:
-                'Call an external HTTP endpoint. With `durable: true`, the call is enqueued on the '
-                + 'messaging outbox with retry / dead-letter; otherwise it runs inline and returns the response.',
+                'Send a request to an outside web service: wait for its answer, or hand it off to be '
+                + 'delivered in the background with automatic retries.',
             icon: 'globe',
             category: 'io',
             source: 'builtin',
@@ -166,9 +172,13 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                             + 'path is the secret: call the service through a token-authenticated connector instead, such '
                             + 'as the `slack` connector with its bot token.',
                     },
+                    // `method` is a literal, read as written (#19939): no `{{ }}`
+                    // rendering. Default `GET`; `POST` when `durable` is true.
                     method: {
                         type: 'string',
-                        description: 'HTTP method (default GET; POST when durable) — a literal, read as written',
+                        description:
+                            'The kind of request, such as GET or POST. GET by default; POST when the request is '
+                            + 'delivered in the background.',
                     },
                     headers: {
                         type: 'object',
@@ -180,19 +190,32 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                             + 'authenticated upstream through a `connector_action` on a declarative connector whose '
                             + '`auth.credentialRef` names the secret.',
                     },
+                    // `body` is JSON-serialised: a CEL value envelope
+                    // `{ dialect: 'cel', source }` evaluated per run to the payload,
+                    // or a literal sent as written.
                     body: {
-                        description:
-                            'Request body (JSON-serialised) — a CEL value envelope `{ dialect: \'cel\', source }` '
-                            + 'evaluated per run to the payload, or a literal sent as written',
+                        description: 'What to send, as JSON: a fixed value, or an expression worked out on each run.',
                     },
+                    // `durable: true` is fire-and-forget through the messaging HTTP
+                    // outbox (retry / dead-letter) instead of an inline
+                    // request / response.
                     durable: {
                         type: 'boolean',
-                        description: 'Fire-and-forget via the durable outbox (retry/dead-letter) instead of inline request/response',
+                        description:
+                            'Deliver the request in the background and keep retrying if it fails, instead of '
+                            + 'waiting for the answer; the flow does not see the response.',
                     },
-                    timeoutMs: { type: 'number', description: 'Per-request timeout (ms)' },
+                    // Per-request timeout in milliseconds, on both arms; a literal
+                    // number, read as written.
+                    timeoutMs: { type: 'number', description: 'How long to wait for an answer, in milliseconds.' },
+                    // The HMAC-SHA256 secret that signs the request body into the
+                    // `X-Objectstack-Signature` header, on every arm; the secret
+                    // itself, read as written (`''` sends unsigned on purpose).
                     signingSecret: {
                         type: 'string',
-                        description: 'HMAC-SHA256 secret → X-Objectstack-Signature — the secret itself, read as written',
+                        description:
+                            'A shared secret used to sign each request, so the receiving service can check it came '
+                            + 'from you (sent as the X-Objectstack-Signature header).',
                     },
                 },
             },

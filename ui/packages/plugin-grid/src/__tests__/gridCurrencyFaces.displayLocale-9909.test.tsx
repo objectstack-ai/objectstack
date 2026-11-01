@@ -18,8 +18,8 @@
  *    the sibling of the date branch objectui#4541 repaired one statement
  *    above (`recordDetailDateLocale.test.tsx`, whose fixture shape this file
  *    reuses: no schema type, so the value reaches the inference fallback);
- *  - the mobile card's amount line, beside the date and percent cells
- *    objectui#4272 and objectui#4553 already put on the display locale.
+ *  - the mobile card's subtitle, which draws the amount through its desktop
+ *    cell (objectstack#28484), in the display locale.
  *
  * Each surface is read twice — under a declared `de-DE` tenant locale and a
  * declared `en` one, the UI language `en` on both — and must read differently.
@@ -129,7 +129,9 @@ interface Surface {
 
 const SURFACES: Surface[] = [
   { name: 'record-detail panel — inferred currency', read: detailPanelUnder, de: /1\.234,5/, en: /1,234\.5/ },
-  { name: 'mobile card — amount line', read: mobileCardUnder, de: /1,2\s?Mio\./, en: /1\.2M/ },
+  // objectstack#28484 — the card draws no amount line of its own: the amount
+  // is a subtitle value drawn through its desktop cell, in the session locale.
+  { name: 'mobile card — subtitle amount', read: mobileCardUnder, de: /1\.234\.567/, en: /1,234,567/ },
 ];
 
 describe('ObjectGrid inferred currency faces follow the declared session locale (objectui#9909)', () => {

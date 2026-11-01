@@ -7,7 +7,11 @@ import type {
   ConnectorProviderFactory,
   ResolvedConnectorAuth,
 } from '@objectstack/spec/integration';
-import { ConnectorCredentialRejectedError, ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
+import {
+  ConnectorCredentialRejectedError,
+  ConnectorUpstreamChangedError,
+  ConnectorUpstreamUnavailableError,
+} from '@objectstack/spec/integration';
 import { callWithBorrowedCredential } from '@objectstack/types';
 import {
   createMcpConnector,
@@ -15,8 +19,10 @@ import {
   DEFAULT_MCP_CLIENT_INFO,
   type McpClientLike,
   type McpConnectorOptions,
+  type McpToolDescriptor,
   type McpTransport,
 } from './mcp-connector.js';
+import { compareToolsSnapshot, parseToolsSnapshot, type ToolsSnapshotDrift } from './tool-snapshot.js';
 
 /**
  * The provider key this package contributes (ADR-0097). A declarative
@@ -60,6 +66,8 @@ interface McpProviderConfig {
   transport?: unknown;
   /** Optional tool-name allowlist — only these tools become actions. */
   include?: unknown;
+  /** Optional per-tool pin: tool name → sha256 of its definition (see ./tool-snapshot.ts). */
+  toolsSnapshot?: unknown;
 }
 
 function isStringRecord(v: unknown): v is Record<string, string> {
@@ -310,6 +318,26 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * tool hidden from this credential apart from one the server never had, so the
  * refusal names both and takes the credential's path — the instance degraded,
  * a stored credential marked `rejected`, the boot not failed.
+ *
+ * `providerConfig.toolsSnapshot` (optional) pins tools by name: each value is
+ * the sha256 of that tool's definition (`mcpToolDigest` in
+ * ./tool-snapshot.ts — ruling 6506797088, letter B). A record that is not tool
+ * name → sha256 hex is refused before connecting, and so is a pinned name an
+ * `include` leaves out (the instance would never expose it, so the pin could
+ * never be checked); both are configuration faults, thrown plain. After
+ * listing, every pinned tool is hashed and compared on its own: a pinned tool
+ * the server serves with a different description or input schema, or no
+ * longer serves, closes the connection and degrades the instance with a
+ * message naming each such tool — thrown as {@link ConnectorUpstreamChangedError}
+ * (ruling 6545635244), which the materializer re-checks on its backoff (see
+ * {@link toolsSnapshotDriftError}). A
+ * pinned name's absence is the pin's to report even when `include` lists it
+ * too: the pin says the tool existed with that definition, so its absence is
+ * the server's change rather than a typo — unless the instance's credential
+ * reached the server, which may hide a tool from that credential: then a
+ * missing pinned tool takes the credential path ({@link ConnectorCredentialRejectedError},
+ * both causes named), and only a served tool that hashes differently is
+ * {@link ConnectorUpstreamChangedError}.
  */
 export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorProviderFactory {
   return async (ctx) => {
@@ -398,14 +426,34 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     };
 
     const includeList = cfg.include as readonly string[] | undefined;
+    // The pin is read before connecting too, and a pinned name `include`
+    // leaves out is refused here: the instance never exposes that tool, so its
+    // pin could never be compared — a pin that reads as protection and checks
+    // nothing.
+    const snapshot = parseToolsSnapshot(cfg.toolsSnapshot, ctx.name);
+    if (snapshot && includeList) {
+      const unexposed = Object.keys(snapshot).filter((name) => !includeList.includes(name));
+      if (unexposed.length > 0) {
+        throw new Error(
+          `connector-mcp provider: connector '${ctx.name}' providerConfig.toolsSnapshot pins ` +
+            `${unexposed.map((name) => `'${name}'`).join(', ')}, which providerConfig.include leaves out: ` +
+            `the instance never exposes ${unexposed.length === 1 ? 'that tool' : 'those tools'}, so the pin is ` +
+            `never checked. Pin only tools include lists, or add ${unexposed.length === 1 ? 'it' : 'them'} to include.`,
+        );
+      }
+    }
     // The allowlist rides the connector's own `include` predicate; every tool
     // name the server lists is recorded on the way, so an entry nothing
-    // matched can be named in the refusal below.
+    // matched can be named in the refusal below, and every selected tool's
+    // `tools/list` entry is kept for the pin to hash.
     const listedTools: string[] = [];
-    const include = includeList
-      ? (toolName: string) => {
+    const selectedTools = new Map<string, McpToolDescriptor>();
+    const include = includeList || snapshot
+      ? (toolName: string, tool: McpToolDescriptor) => {
           listedTools.push(toolName);
-          return includeList.includes(toolName);
+          const selected = includeList ? includeList.includes(toolName) : true;
+          if (selected) selectedTools.set(toolName, tool);
+          return selected;
         }
       : undefined;
 
@@ -473,8 +521,15 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
       // without the tool the author listed (a typo, a tool the server renamed
       // or dropped, or one hidden from this credential), and the first sign
       // would be a flow failing at run time.
+      // A pinned entry is left to the pin below — its absence is the server's
+      // change, reported with the pin's other findings, not a typo — but only
+      // when no instance credential reached the server. When one did, a
+      // missing pinned entry may be a tool hidden from that credential, which
+      // the answer cannot tell apart from a dropped one, so it takes the
+      // credential's path below like any other entry (#27401 contract review).
       const offered = new Set(listedTools);
-      const unknown = [...new Set(includeList)].filter((entry) => !offered.has(entry));
+      const pinned = new Set(snapshot && !credentialSent ? Object.keys(snapshot) : []);
+      const unknown = [...new Set(includeList)].filter((entry) => !offered.has(entry) && !pinned.has(entry));
       if (unknown.length > 0) {
         await bundle.close().catch(() => {});
         const named = unknown.map((entry) => `'${entry}'`).join(', ');
@@ -521,6 +576,25 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         );
       }
     }
+    if (snapshot) {
+      // Every pinned tool is compared on its own (ruling 6506797088): one
+      // aggregate digest could only say "something changed".
+      const drift = compareToolsSnapshot(snapshot, selectedTools);
+      if (drift) {
+        await bundle.close().catch(() => {});
+        // A pinned tool the server does not list, on an instance whose
+        // credential reached it (a pin with no `include`; an included one was
+        // refused above), is the credential's or the server's change, and the
+        // answer cannot say which — so it takes the credential's path, as an
+        // `include` entry does: degraded naming both causes, a stored
+        // credential marked `rejected`, no retry against the same value. A
+        // served tool that hashes differently is the server's change alone.
+        if (credentialSent && drift.missing.length > 0) {
+          throw pinnedToolsHiddenError(ctx.name, drift.missing, listedTools);
+        }
+        throw toolsSnapshotDriftError(ctx.name, drift);
+      }
+    }
     // [#27237] Then the server's answer proved the credential.
     const credentialVerified = credentialSent;
     return {
@@ -533,6 +607,66 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
       ...(credentialVerified ? { credentialVerified } : {}),
     };
   };
+}
+
+/** At most this many tools are named in a drift message; the rest are counted. */
+const DRIFT_NAMED_MAX = 20;
+
+/**
+ * The fault a `toolsSnapshot` mismatch is thrown as: one line naming each
+ * pinned tool the server changed (with the digest it now serves, which is what
+ * a reviewed re-pin writes) and each pinned tool it no longer serves.
+ *
+ * Thrown as {@link ConnectorUpstreamChangedError} (ruling 6545635244): the
+ * ADR-0097 materializer degrades the instance without failing boot, the husk's
+ * reason (`GET /connectors`, a `connector_action` refusal) is this message, and
+ * its log records say the pin did not match rather than that the upstream is
+ * unavailable. The instance is re-checked on the #3017 backoff — so a server
+ * that serves the pinned definitions again recovers it, as an edited pin does
+ * at once.
+ */
+function toolsSnapshotDriftError(connectorName: string, drift: ToolsSnapshotDrift): ConnectorUpstreamChangedError {
+  const findings = [
+    ...drift.changed.map(({ name, served }) => `tool '${name}' changed (it now hashes to ${served})`),
+    ...drift.missing.map((name) => `pinned tool '${name}' is no longer served`),
+  ];
+  const named = findings.slice(0, DRIFT_NAMED_MAX);
+  const more = findings.length > named.length ? `; … ${findings.length - named.length} more` : '';
+  return new ConnectorUpstreamChangedError(
+    `connector-mcp provider: connector '${connectorName}' providerConfig.toolsSnapshot does not match the tools ` +
+      `its MCP server serves: ${named.join('; ')}${more}. This materialization exposes none of the server's ` +
+      `tools. If the change is expected, review it and set each pin to the digest the server now serves; ` +
+      `otherwise the instance comes back once the server serves the pinned definitions again.`,
+  );
+}
+
+/**
+ * The fault for pinned tools the server does not list when the instance's
+ * credential reached it: {@link ConnectorCredentialRejectedError} (403), the
+ * same path and reasoning as an `include` entry the server does not list for
+ * that credential — a server may list only the tools a credential may use, so
+ * the message names both causes.
+ */
+function pinnedToolsHiddenError(
+  connectorName: string,
+  missing: readonly string[],
+  listedTools: readonly string[],
+): ConnectorCredentialRejectedError {
+  const named = missing.slice(0, DRIFT_NAMED_MAX).map((name) => `'${name}'`).join(', ');
+  const moreMissing = missing.length > DRIFT_NAMED_MAX ? `, … ${missing.length - DRIFT_NAMED_MAX} more` : '';
+  const offered = [...new Set(listedTools)];
+  const sample = offered.slice(0, 20);
+  const more = offered.length > sample.length ? `, … ${offered.length - sample.length} more` : '';
+  return new ConnectorCredentialRejectedError(
+    `connector-mcp provider: connector '${connectorName}' providerConfig.toolsSnapshot pins ${named}${moreMissing}, ` +
+      `which the MCP server does not list for the credential this instance sent. A server may list only the tools ` +
+      `a credential is allowed to use, and its tools/list answer cannot tell the two causes apart: either the ` +
+      `credential lacks the scopes or permissions these tools need — fix the credential, then set it again — or ` +
+      `the server no longer serves these tools — review the change and update providerConfig.toolsSnapshot. ` +
+      `For this credential, the server lists ${offered.length} tool(s): ` +
+      `${sample.map((name) => `'${name}'`).join(', ')}${more}.`,
+    403,
+  );
 }
 
 /** Whether {@link applyAuthToHeaders} puts the instance's credential on the http transport. */
