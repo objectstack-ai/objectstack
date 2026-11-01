@@ -2408,8 +2408,12 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
                   <p.Icon className={'h-3.5 w-3.5 ' + (tab === p.key ? 'text-primary' : '')} />
                   {/* objectui#12725 — named from 1024 px up; below that the
                       pillars read as icons, the name kept in the accessible
-                      name and the tooltip. */}
-                  <span className="sr-only lg:not-sr-only">{t(`engine.studio.pillar.${p.key}`, locale)}</span>
+                      name and the tooltip. objectstack#28561 — the "All
+                      metadata" area is named from 1280 px: the top bar's
+                      1024 px row was sized for the four pillar names. */}
+                  <span className={p.key === STUDIO_METADATA_AREA ? 'sr-only xl:not-sr-only' : 'sr-only lg:not-sr-only'}>
+                    {t(`engine.studio.pillar.${p.key}`, locale)}
+                  </span>
                 </Link>
               ))}
             </nav>

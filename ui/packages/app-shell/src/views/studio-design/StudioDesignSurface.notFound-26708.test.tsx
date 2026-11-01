@@ -147,7 +147,8 @@ describe('Studio: a package id no package has renders "package not found" (objec
       expect(within(header).getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
     );
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
+    // The four pillars and, objectstack#28561, the "All metadata" area.
+    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
   });
 
   it('CONTROL — a kernel package the switcher hides is installed, never "not found"', async () => {
@@ -169,7 +170,7 @@ describe('Studio: a package id no package has renders "package not found" (objec
         .toHaveAttribute('data-pkg-list-state', 'failed'),
     );
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
+    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
   });
 });
 
@@ -186,6 +187,7 @@ describe('Studio: a pillar segment no pillar has renders a not-found state (obje
       `/studio/${PACKAGE_ID}/automations`,
       `/studio/${PACKAGE_ID}/interfaces`,
       `/studio/${PACKAGE_ID}/access`,
+      `/studio/${PACKAGE_ID}/metadata`,
     ]);
     for (const link of links) expect(link).not.toHaveAttribute('aria-current');
   });
