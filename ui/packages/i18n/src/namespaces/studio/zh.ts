@@ -2185,11 +2185,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.heading': '自动化',
   'engine.studio.auto.deleteFlow': '删除流程',
   'engine.studio.auto.flowDeleted': '已删除流程「{item}」',
-  // objectstack#28567 (ADR-0146 D4) — 流程的「新建相似」：克隆门以新的机器名与标签复制，
+  // objectstack#28567 (ADR-0146 D4) — 流程的「新建类似」：克隆门以新的机器名与标签复制，
   // 副本为关闭状态，落在承载改动的软件包中；服务器的回答与拒绝原样显示。
-  'engine.studio.auto.newSimilar.action': '新建相似',
+  'engine.studio.auto.newSimilar.action': '新建类似',
   'engine.studio.auto.newSimilar.hint': '以新名称复制此流程。副本处于关闭状态，开启后才会运行。',
-  'engine.studio.auto.newSimilar.title': '新建相似流程',
+  'engine.studio.auto.newSimilar.title': '新建类似流程',
   'engine.studio.auto.newSimilar.bodyPair':
     '以新的机器名和标签复制「{item}」。此软件包为只读，服务器会把副本以关闭状态保存到承载你对它所做改动的软件包中，并告诉你副本所在位置。',
   'engine.studio.auto.newSimilar.bodyHere':
