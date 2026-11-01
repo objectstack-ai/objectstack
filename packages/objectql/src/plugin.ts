@@ -3,6 +3,7 @@
 import {
   ObjectQL,
   SECURITY_SERVICE_SOURCE_SLOT,
+  collectionItemOwnerStampRefusal,
   permissionSetOwnerRegistrationRefusal,
   viewsEntryNotContainerRefusal,
   type UnservableControlledByParentMaster,
@@ -953,6 +954,14 @@ export class ObjectQLPlugin implements Plugin {
         // the residual is not a package, and when the id names one of the
         // bodies (a composed stack keeps one member's manifest) that body's
         // record must not be replaced.
+        // [#28534] …and the door's statement of where that owner came from,
+        // recorded before anything of it registers: no package row answers the
+        // id, and a reader of an item's origin must tell the host's own
+        // residual from an installed bundle's (`ObjectQL.recordResidualOwner`).
+        // The residual is not an artifact entry, so it states no source of its
+        // own; the door's word, `code` when it states none, is its origin.
+        const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
+        if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
         if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
         // [ADR-0015 D7, ADR-0130 D4] Every other residual item, the same way
         // and in the same place: after every body, under the residual rule's
@@ -3153,12 +3162,22 @@ export class ObjectQLPlugin implements Plugin {
     const stamp = (item: Record<string, unknown>): Record<string, unknown> => ownerVersion === undefined
       ? { ...item }
       : applyProtection({ ...item } as any, { packageId: ownerId, packageVersion: ownerVersion });
+    // [#28534] The body seam's owner-stamp refusal, in its envelope and at its
+    // place in the order (after the name and permission-set judges): a residual
+    // item wearing a `_packageId` other than the residual's id kept it through
+    // `stamp` and `registerItem` alike, which stamp only an unset key
+    // ({@link collectionItemOwnerStampRefusal}, `engine.ts`).
+    const refuseOwnerStamp = (item: Record<string, unknown>, type: string, name: string | undefined): void => {
+      const refusal = collectionItemOwnerStampRefusal(item, type, name ?? '(unnamed)', ownerId);
+      if (refusal) throw refusal;
+    };
     for (const { type, item } of residual.items) {
       if (type === 'view' && isAggregatedViewContainer(item)) {
         const nameRefusal = viewContainerNameRefusal(item, 'manifest', ownerId);
         if (nameRefusal) throw nameRefusal;
         const object = deriveViewContainerObject(item);
         if (!object) continue;
+        refuseOwnerStamp(item, type, object);
         const container = stamp({ ...item, name: object });
         ql.registry.registerItem('view', container, 'name' as any, ownerId);
         for (const view of expandViewContainer(object, container)) {
@@ -3178,6 +3197,7 @@ export class ObjectQLPlugin implements Plugin {
       // entry that is not container-shaped (`viewKind`/`config`/flattened
       // overlay keys) is refused — `views:` carries containers only (#5320).
       const name = (item.name as string | undefined) || (type === 'view' ? deriveViewContainerObject(item) : undefined);
+      refuseOwnerStamp(item, type, name);
       const toRegister = item.name === name ? item : { ...item, name };
       if (type === 'view' && !isViewContainerShaped(toRegister)) {
         throw viewsEntryNotContainerRefusal(name, 'manifest', ownerId);
