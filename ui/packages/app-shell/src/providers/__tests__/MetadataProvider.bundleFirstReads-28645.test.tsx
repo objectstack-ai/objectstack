@@ -136,7 +136,8 @@ function mount(opts: { bundle?: Bundle | null; enterInEffect?: Bundle } = {}) {
       <Enter />
     </MetadataProvider>,
   );
-  return { calls, bundle, ctx: () => ctx as unknown as Ctx, reads: () => reads as BundledReads, page: () => page as BundledRead<any> };
+  // `bundle` is null only for the host-without-a-bundle case, which never reads it.
+  return { calls, bundle: bundle as Bundle, ctx: () => ctx as unknown as Ctx, reads: () => reads as BundledReads, page: () => page as BundledRead<any> };
 }
 
 const lists = (calls: string[]) => calls.filter((c) => !c.includes('/'));
