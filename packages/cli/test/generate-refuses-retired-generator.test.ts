@@ -54,7 +54,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** oclif + tsx cold starts, four of them, sequential. */
 const RUN_TIMEOUT_MS = 240_000;
@@ -65,10 +64,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -103,15 +102,15 @@ let afterInherited: string[];
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-g-refuses-retired-'));
 
-  // Sequential on purpose: cold tsx starts in a container several agents share.
+  // Sequential on purpose: cold CLI starts in a container several agents share.
   // Every refusal runs BEFORE the control, so the listings below are what each
   // refusal was measured against.
-  schema = await runTsx([CLI, 'generate', 'schema'], dir);
-  schemaAlias = await runTsx([CLI, 'g', 'schema', '-o', 'custom.schema.json'], dir);
+  schema = await runCli([CLI, 'generate', 'schema'], dir);
+  schemaAlias = await runCli([CLI, 'g', 'schema', '-o', 'custom.schema.json'], dir);
   afterSchemaRuns = readdirSync(dir);
-  inherited = await runTsx([CLI, 'g', 'constructor', 'thing'], dir);
+  inherited = await runCli([CLI, 'g', 'constructor', 'thing'], dir);
   afterInherited = readdirSync(dir);
-  control = await runTsx([CLI, 'g', 'object', 'customer', '--dry-run'], dir);
+  control = await runCli([CLI, 'g', 'object', 'customer', '--dry-run'], dir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

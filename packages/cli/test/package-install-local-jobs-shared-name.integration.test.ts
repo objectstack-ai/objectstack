@@ -57,7 +57,6 @@ import {
   KERNEL_ASSIGNED_PORT,
   probeThroughChild,
   readKernelAssignedPort,
-  TSX,
 } from './helpers/serve-process.js';
 
 /** The banner's tail — every row above it has printed. */
@@ -142,7 +141,7 @@ interface LiveStart {
 
 function bootStart(cwd: string, home: string, extra: string[] = []): Promise<LiveStart> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
+    const child = spawn(process.execPath, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header. Package
       // scheduled work is OFF by default in every posture (#17396); this
@@ -267,8 +266,8 @@ interface InstallRun { exit: number | null; output: string; elapsedMs: number }
  * process draining the server's pipes for the whole install.
  *
  * The child runs until `deadline` (see `SETUP_BUDGET_MS`). It gets its own
- * process group, so the kill reaches the node process `tsx` starts as well.
- * That process holds the pipes, and `close` would wait for it. A kill REJECTS,
+ * process group, so the kill reaches every process the install started.
+ * The CLI process holds the pipes, and `close` would wait for it. A kill REJECTS,
  * naming the install, the wall time and the budget: the rest of the hook could
  * only run into vitest's hook timeout. An install that exits by itself
  * resolves, whatever its code, and the first `it` judges it.
@@ -276,7 +275,7 @@ interface InstallRun { exit: number | null; output: string; elapsedMs: number }
 function packageInstall(appDir: string, live: LiveStart, deadline: number): Promise<InstallRun> {
   return new Promise((done, fail) => {
     const started = Date.now();
-    const child = spawn(TSX, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
+    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
       cwd: appDir,
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],

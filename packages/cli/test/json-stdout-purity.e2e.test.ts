@@ -71,7 +71,6 @@ import { CONFIG_MISS_FAMILY, discoverConfigMissFamily } from './helpers/config-m
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const COMMANDS_DIR = resolve(HERE, '../src/commands');
 const UTILS_DIR = resolve(HERE, '../src/utils');
 
@@ -307,7 +306,7 @@ interface Run {
 function runCli(argv: string[], cwd: string, env: Record<string, string>): Promise<Omit<Run, 'id'>> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...argv],
       { cwd, maxBuffer: 32 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', ...env }) },
       (err, stdout, stderr) => {
