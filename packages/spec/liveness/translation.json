@@ -206,6 +206,22 @@
           },
           "note": "[#22450] Seeded `live` together with its reader: the key and the engine read that makes it true land in one change (Prime Directive 10). The run stores the refusal already rendered (`sys_automation_run.refusal_message`, `AutomationResult.refusalMessage`), so no overlay on the served string could translate it; the engine picks the translated TEMPLATE before it fills the holes, the validation-message precedent (`objectValidationMessageKey`, read by objectql's rule evaluator through the same `i18n` channel). A resumed leg renders in the locale the run was started in, and a run no person started (record-change, schedule) carries no locale and stores the authored message. The translation is a text slot like the source: `TranslationDataSchema` refuses a single-brace `{token}` in it through `textSlotTemplateRefusal`, and `objectstack validate` (`validate-translation-references.ts`) refuses a key over an unknown flow, an unknown node, or a node that is not an `end` declaring `outcome: 'refused'`. No objectui reader is involved: the console draws the served `refusalMessage` verbatim. DRILLED to its one key, `message`, so no blanket verdict covers an unclassified child: the entry's face is closed (`.strict()`), and `message` carries the reader and producer evidence."
         },
+        "notices": {
+          "status": "live",
+          "verifiedAt": "2026-11-01",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-automation/src/builtin/save-notice-node.ts#registerSaveNoticeNode (the one reader of the group: the `save_notice` executor reads each `notices.<node_id>` entry for its `message`, the drilled child below)",
+          "children": {
+            "message": {
+              "status": "live",
+              "verifiedAt": "2026-11-01",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-automation/src/node-text-rendering.ts#renderFlowTextSlot (reads `flows.<flow>.notices.<node_id>.message` through the `i18n` service, spelled by `flowNoticeMessageKey` and handed over by the `save_notice` executor, in the WRITER's locale; a miss echoes the key and the authored template renders); packages/services/service-automation/src/builtin/save-notice-node.ts#registerSaveNoticeNode (renders the picked translation in place of the authored `message` and sets it on the triggering write's notice channel, which the create / update answer serves as `notice`)",
+              "producer": "packages/runtime/src/app-plugin.ts#loadTranslations (hands each bundle's locale data to the i18n service whole, `flows` included); packages/services/service-automation/src/plugin.ts#i18nServiceReader (the engine's lazy reader of that service); packages/triggers/trigger-record-change/src/record-change-trigger.ts#saveNoticeChannelOf (hands the run the write's notice channel with the writer's `HookContext.session.locale`, which `buildSession` copies from the write's `ExecutionContext.locale`)"
+            }
+          },
+          "note": "[#28251] Seeded `live` together with its reader: the key and the engine read that makes it true land in one change (Prime Directive 10). A `save_notice` node runs inside the record write that started its flow, so the sentence is rendered in the locale of the person who made that write, before the write answers. The translation is a text slot like the source: `TranslationDataSchema` refuses a single-brace `{token}` in it through `textSlotTemplateRefusal`, and `objectstack validate` (`validate-translation-references.ts`) refuses a key over an unknown flow, an unknown node, or a node that is not a `save_notice`. No objectui reader is involved: the console draws the served `notice` verbatim. DRILLED to its one key, `message`, so no blanket verdict covers an unclassified child: the entry's face is closed (`.strict()`)."
+        },
         "approvals": {
           "status": "live",
           "verifiedAt": "2026-10-21",

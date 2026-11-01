@@ -2755,7 +2755,8 @@ const WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION =
 const WRITE_ANSWER_NOTICE_DESCRIPTION =
   'One author-written message telling the person who made THIS write what the save set in motion (for example ' +
   '"Sent to your manager for approval"), set by a hook running on the write through the write\'s own `onNotice` ' +
-  'listener (`WriteObservabilityOptions`). Info severity: it reports an outcome, never a problem, so it is distinct ' +
+  'listener (`WriteObservabilityOptions`; a hook body calls it as `ctx.notice(message)`), or by a `save_notice` ' +
+  'node of a flow the write triggered. Info severity: it reports an outcome, never a problem, so it is distinct ' +
   'from `warnings` (the advisory validation-rule hits) and a client shows it with, or in place of, its own ' +
   'success message. One message: when more than one call sets it, the LAST one wins. Present ONLY when a hook set ' +
   'a non-empty message on a write that succeeded; otherwise the key is omitted. A nested write a hook or a flow ' +

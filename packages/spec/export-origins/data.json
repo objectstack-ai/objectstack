@@ -371,6 +371,7 @@
     "HookDriverPassthroughOptions": "src/data/hook-api.ts#HookDriverPassthroughOptions (type)",
     "HookEvent": "src/data/hook.zod.ts#HookEvent (const)",
     "HookEventType": "src/data/hook.zod.ts#HookEventType (type)",
+    "HookNoticeSetter": "src/data/hook.zod.ts#HookNoticeSetter (type)",
     "HookObjectApi": "src/data/hook-api.ts#HookObjectApi (interface)",
     "HookParsed": "src/data/hook.zod.ts#HookParsed (type)",
     "HookQuery": "src/data/hook-api.ts#HookQuery (type)",

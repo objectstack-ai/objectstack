@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The reading rules behind Setup › Packaged automation (ADR-0126 §7.4) — which
- * flows the page lists, and how it reads the two responses it depends on.
+ * The reading rules for packaged flows (ADR-0126 §7.4) — which flows a package
+ * ships, and how the two responses they depend on are read. Written for Setup ›
+ * Packaged automation, which objectstack ADR-0146 D11 retired; Studio's flow
+ * switch (`FlowLedgerSwitch`), the catalog's activation reads and the
+ * permission-set clone read through them still.
  *
- * Separate from `PackagedAutomationPage.tsx` because these are not components:
- * the scoping rule is the part of that page most worth testing directly, and
- * it costs a full DOM render to reach through the UI. It runs in the `unit`
- * project from here.
+ * Not components, so the rules are tested directly, in the `unit` project.
  */
 
 /**

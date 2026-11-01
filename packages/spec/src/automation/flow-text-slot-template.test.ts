@@ -29,7 +29,7 @@ import { tmpl } from '../shared/expression.zod';
 import { FLOW_TERMINAL_MESSAGE_KEYS } from '../system/i18n-resolver';
 
 describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
-  it('names exactly the eight slots whose rendered value is only ever text', () => {
+  it('names exactly the nine slots whose rendered value is only ever text', () => {
     // [#19939] `notify.actionUrl` joined: the link a person follows, text with
     // holes (`/crm_case/{{ record.id }}`), which the 17.x executor stringified.
     // Then an `http` node's `url` and each `headers` value (stage S5): the
@@ -44,6 +44,8 @@ describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
       'screen.title',
       'screen.description',
       'end.message',
+      // [#28251] the sentence the writer reads with the save.
+      'save_notice.message',
     ]);
     // Only `headers` is a map whose every value is a slot of its own.
     expect(FLOW_NODE_TEXT_SLOTS.filter((s) => s.eachValue).map((s) => `${s.nodeType}.${s.key}`)).toEqual(['http.headers']);
