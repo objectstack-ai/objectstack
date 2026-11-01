@@ -423,7 +423,7 @@ describe('ADR-0143 D4 — a borrowed token refused at tool discovery is its conn
         }));
         await vi.waitFor(() => expect(engine.getConnectorDegradedReason('notion')).toContain("needs to be reconnected for organization 'org_a'"));
         expect(engine.getConnectorDegradedReason('notion')).toContain('while it listed its tools (HTTP 403)');
-        await expect(call()).rejects.toMatchObject({ status: 503 });
+        expect(engine.resolveConnectorAction('notion', 'search')).toBeUndefined();
 
         // A reconnect by the same organization re-attempts discovery, and the instance serves.
         await (await connect()).done();
