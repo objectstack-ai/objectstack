@@ -16,7 +16,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useNavigate, useSearchParams, Link, Navigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation, Link, Navigate } from 'react-router-dom';
 import { useAdapter, SchemaRendererProvider, useMetadata } from '@object-ui/react';
 // The ONE draft-envelope reader (objectui#8181): unwrap AND strip the
 // framework's read decorations in one place. This file used to carry its own
@@ -283,7 +283,11 @@ import {
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
-import { STUDIO_METADATA_AREA, studioMetadataAreaPath } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, studioMetadataAreaPath, studioPillarItemPath } from './metadataArea.js';
+import { PermissionSetCloneDialog } from '../metadata-admin/PermissionSetCloneDialog.js';
+import type { PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
+import { useWalledCatalogReadOnly } from '../metadata-admin/catalog-scope.js';
+import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
@@ -2610,7 +2614,13 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
                 onHeldEditChange={setHeldEdit}
               />
             ) : tab === 'access' ? (
+              // objectstack#28573 — keyed by package like its siblings: "New
+              // similar" opens the copy in ANOTHER package's Access pillar
+              // (the base's `.custom`), and that route keeps this element
+              // mounted. Unkeyed, the open set, the rail and the `?surface=`
+              // capture stayed the base's.
               <AccessPillar
+                key={packageId}
                 packageId={packageId}
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
@@ -10131,6 +10141,35 @@ export function AutomationsPillar({
 }
 
 /**
+ * objectstack#28573 — what the Access pillar's "New similar" strip says: the
+ * copy the clone door saved (shown on that copy, in the package the answer
+ * named), or an answer the pillar could not open (no copy named, or no
+ * package). `notice` is the server's sentence, shown as sent.
+ */
+type NewSimilarStrip =
+  | { kind: 'landed'; name: string; package: string; notice: string }
+  | { kind: 'noPackage'; name: string; notice: string }
+  | { kind: 'noName'; notice: string };
+
+/** The navigation-state key the copy's landing rides to the copy's pillar on. */
+const NEW_SIMILAR_ARRIVAL_STATE = 'accessNewSimilar';
+
+/**
+ * The landing a "New similar" navigation carried, for the pillar it opened:
+ * kept only when it names THIS package, so a stale history entry of another
+ * package's pillar shows nothing.
+ */
+function readNewSimilarArrival(state: unknown, packageId: string): NewSimilarStrip | null {
+  const arrival = (state as Record<string, unknown> | null | undefined)?.[NEW_SIMILAR_ARRIVAL_STATE] as
+    | Partial<Extract<NewSimilarStrip, { kind: 'landed' }>>
+    | undefined;
+  if (!arrival || arrival.kind !== 'landed' || arrival.package !== packageId || typeof arrival.name !== 'string') {
+    return null;
+  }
+  return { kind: 'landed', name: arrival.name, package: packageId, notice: typeof arrival.notice === 'string' ? arrival.notice : '' };
+}
+
+/**
  * Access pillar — the permission workbench (builder-ui §7, ADR-0084's fourth
  * content pillar). Left rail: the environment's permission sets / profiles;
  * main: the Salesforce-style PermissionMatrixEditPage (objects × CRUD/VAMA +
@@ -10217,6 +10256,25 @@ export function AccessPillar({
   const [draftGoneNonce, setDraftGoneNonce] = React.useState(0);
   // [ADR-0090 D6] "why can this user access?" — right-side explain sheet.
   const [explainOpen, setExplainOpen] = React.useState(false);
+  // objectstack#28573 (ADR-0146 D6) — "New similar" on a read-only base's set:
+  // whether its dialog is open, and what the strip above the matrix says. A
+  // `landed` strip is the copy the clone door saved, shown on that copy; a
+  // `noPackage` / `noName` strip is an answer this pillar cannot open, shown
+  // on the base. The copy usually opens in ANOTHER package, which remounts
+  // this pillar (keyed by package), so the strip rides the navigation's state
+  // and is read once here.
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [newSimilarOpen, setNewSimilarOpen] = React.useState(false);
+  const [newSimilarStrip, setNewSimilarStrip] = React.useState<NewSimilarStrip | null>(() =>
+    readNewSimilarArrival(location.state, packageId),
+  );
+  // Who may press it: the clone door asks the metadata door's verdict
+  // (`manage_metadata`), and under a wall the catalog is the platform
+  // operator's (ADR-0131 D3), refused whatever the capability. Either way the
+  // action draws disabled, with the console's own sentence for why.
+  const canAuthorSets = useCanAuthorMetadata();
+  const walledSets = useWalledCatalogReadOnly('permission');
   // objectui#12456 — the open set's tab (epic objectui#12446, decision C):
   // Objects, System capabilities, Row-level security, Tab visibility,
   // Delegated admin. Objects is the landing; the choice holds across sets.
@@ -10383,6 +10441,36 @@ export function AccessPillar({
     setCurrent(name);
   }, []);
 
+  // objectstack#28573 — the clone door saved a copy of the open set. It opens
+  // only where the answer says it landed: that package's Access pillar with
+  // the copy selected. An answer that names no copy, or no package, is said
+  // so and opens nothing; the landing is never derived from the base.
+  const onNewSimilarSaved = React.useCallback(
+    (copy: PermissionSetCloned) => {
+      setNewSimilarOpen(false);
+      if (!copy.name) {
+        setNewSimilarStrip({ kind: 'noName', notice: copy.notice });
+        return;
+      }
+      if (typeof copy.package !== 'string') {
+        setNewSimilarStrip({ kind: 'noPackage', name: copy.name, notice: copy.notice });
+        return;
+      }
+      const landed: NewSimilarStrip = { kind: 'landed', name: copy.name, package: copy.package, notice: copy.notice };
+      if (copy.package === packageId) {
+        setNewSimilarStrip(landed);
+        setOwdOpen(false);
+        setCurrent(copy.name);
+        void load();
+        return;
+      }
+      navigate(studioPillarItemPath(copy.package, 'access', { type: 'permission', name: copy.name }), {
+        state: { [NEW_SIMILAR_ARRIVAL_STATE]: landed },
+      });
+    },
+    [packageId, navigate, load],
+  );
+
   // Discard the open set's pending draft (`DELETE ?state=draft` at this
   // package's address, the door the metadata editor's "Discard draft" uses).
   // A published set goes back to its live body; a set that was never
@@ -10507,6 +10595,68 @@ export function AccessPillar({
         <Undo2 className="h-3.5 w-3.5" />
         {t('engine.edit.discardDraft', locale)}
       </button>
+    ) : null;
+  // objectstack#28573 (ADR-0146 D6) — a read-only base's set offers "New
+  // similar", never an override: the copy is a NEW set, in the package the
+  // clone door chooses. Disabled, it says why in the console's words.
+  const newSimilarBlocked = walledSets
+    ? tFormat('engine.catalog.readOnly.walled', locale, { type: translateMetadataType('permission', locale) })
+    : canAuthorSets
+      ? null
+      : t('engine.edit.capabilityReadOnly', locale);
+  const accessNewSimilarEl =
+    readOnly && current && !owdOpen ? (
+      <span title={newSimilarBlocked ?? t('perm.clone.hint', locale)} className="inline-flex">
+        <button
+          type="button"
+          data-testid="access-new-similar"
+          onClick={() => {
+            setNewSimilarStrip(null);
+            setNewSimilarOpen(true);
+          }}
+          disabled={newSimilarBlocked !== null || newSimilarOpen}
+          aria-describedby={newSimilarBlocked !== null ? 'access-new-similar-blocked' : undefined}
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+        >
+          <Copy className="h-3.5 w-3.5" />
+          {t('perm.clone.action', locale)}
+        </button>
+        {newSimilarBlocked !== null && (
+          <span id="access-new-similar-blocked" className="sr-only">
+            {newSimilarBlocked}
+          </span>
+        )}
+      </span>
+    ) : null;
+  const newSimilarStripEl =
+    newSimilarStrip && !owdOpen && (newSimilarStrip.kind !== 'landed' || newSimilarStrip.name === current) ? (
+      <div
+        role={newSimilarStrip.kind === 'landed' ? 'status' : 'alert'}
+        data-testid="access-new-similar-strip"
+        className="mx-3 mt-2 flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+      >
+        <Copy className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <p>
+            {newSimilarStrip.kind === 'landed'
+              ? tFormat('engine.studio.access.newSimilar.done', locale, {
+                  name: newSimilarStrip.name,
+                  package: newSimilarStrip.package,
+                })
+              : newSimilarStrip.kind === 'noPackage'
+                ? tFormat('engine.studio.access.newSimilar.noPackage', locale, { name: newSimilarStrip.name })
+                : t('perm.clone.noName', locale)}
+          </p>
+          {newSimilarStrip.notice && <p>{newSimilarStrip.notice}</p>}
+        </div>
+        <button
+          type="button"
+          onClick={() => setNewSimilarStrip(null)}
+          className="shrink-0 rounded-md px-1.5 text-[12px] hover:bg-amber-100 dark:hover:bg-amber-900/40"
+        >
+          {t('engine.studio.access.newSimilar.dismiss', locale)}
+        </button>
+      </div>
     ) : null;
   const accessHeaderEl = (
     <StudioItemHeader
@@ -10663,6 +10813,7 @@ export function AccessPillar({
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {(owdOpen || !current) && accessHeaderEl}
+          {newSimilarStripEl}
           <main className="min-h-0 flex-1 overflow-auto">
           {owdOpen ? (
             /* Sibling surface: the package-wide OWD baseline overview
@@ -10708,6 +10859,7 @@ export function AccessPillar({
                 chips: accessNoteEl,
                 actions: (
                   <>
+                    {accessNewSimilarEl}
                     {accessDiscardEl}
                     {accessExplainEl}
                   </>
@@ -10745,6 +10897,17 @@ export function AccessPillar({
       </div>
 
       <AccessExplainPanel open={explainOpen} onOpenChange={setExplainOpen} packageId={packageId} />
+
+      {/* objectstack#28573 — the clone door's dialog, shared with Setup's
+          catalog: a name and a label, nothing else, refusals verbatim. */}
+      {newSimilarOpen && current && (
+        <PermissionSetCloneDialog
+          source={current}
+          locale={locale}
+          onClose={() => setNewSimilarOpen(false)}
+          onCloned={onNewSimilarSaved}
+        />
+      )}
 
       <CreateItemDialog
         open={creating}

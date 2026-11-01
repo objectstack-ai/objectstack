@@ -237,17 +237,21 @@ const STUDIO_EN: Record<string, string> = {
   // set on it. The hint names the hatch only to say so, as the server's own
   // refusal sentence does.
   'perm.readOnly.artifact.hint':
-    'A code package ships this permission set, so it is locked here: an environment-scope edit would overlay a packaged item, and the metadata-type registry declares allowEnvironmentOverlay false for permission (ADR-0131 D6 forbids an environment overlay of a packaged set: silent privilege drift). The server refuses the write with 403 not_overridable. Clone to customize: the copy is an ordinary permission set authored in this system, under a new name, that you edit here, and upgrades keep flowing to this base. Other routes: edit the source artifact and redeploy, or create a new runtime set. The OS_METADATA_WRITABLE escape hatch does not open a set a package ships (ADR-0131 D6).',
-  // objectui#5987 — "Clone to customize", the locked editor's primary action.
+    'A code package ships this permission set, so it is locked here: an environment-scope edit would overlay a packaged item, and the metadata-type registry declares allowEnvironmentOverlay false for permission (ADR-0131 D6 forbids an environment overlay of a packaged set: silent privilege drift). The server refuses the write with 403 not_overridable. New similar: the server copies this set under a new name into the package that holds your changes (for a read-only package, its paired .custom package) and says where it went; you edit the copy, and upgrades keep flowing to this base. Other routes: edit the source artifact and redeploy, or create a new runtime set. The OS_METADATA_WRITABLE escape hatch does not open a set a package ships (ADR-0131 D6).',
+  // objectui#5987 — the locked editor's primary action. objectstack ADR-0146
+  // D6 (#28573) names it "New similar", on Setup's catalog and in Studio's
+  // Access pillar alike: the copy is a NEW set beside the base, never an
+  // override of it.
   // objectui#7611 — it asks for a new name and label (`PermissionSetCloneDialog.tsx`)
   // and calls the server's clone door (`permission-set-clone.ts`), which copies
-  // the whole definition; never a hand-rolled copy.
-  'perm.clone.action': 'Clone to customize',
+  // the whole definition and decides the package the copy lands in; never a
+  // hand-rolled copy.
+  'perm.clone.action': 'New similar',
   'perm.clone.hint':
-    'Copies this set under a new name you choose. The copy is an ordinary permission set authored in this system, editable here, and upgrades keep flowing to the package-provided base.',
+    'Copies this set under a new name you choose. The server saves the copy beside this base, in the package that holds your changes, and says where; upgrades keep flowing to the package-provided base.',
   'perm.clone.guidance':
-    'Locked: a code package provides this permission set, so it cannot be edited in place here (upgrades keep flowing to it). Clone to customize — the copy is an ordinary permission set authored in this system, editable here.',
-  'perm.clone.dialogTitle': 'Clone permission set',
+    'Locked: a code package provides this permission set, so it cannot be edited in place here (upgrades keep flowing to it). New similar — the server saves a copy under a new name, in the package that holds your changes, and you edit the copy.',
+  'perm.clone.dialogTitle': 'New similar permission set',
   'perm.clone.dialogBody':
     'Copies {name} under a new machine name and label. The server decides what the copy carries, and says what it left out.',
   'perm.clone.name': 'New machine name',
@@ -265,7 +269,7 @@ const STUDIO_EN: Record<string, string> = {
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.
   'perm.save.locked':
-    'Save refused (403 not_overridable): a code package provides this permission set, so the server does not accept an in-place edit. Clone to customize instead — the copy is an ordinary permission set authored in this system, and upgrades keep flowing to this base.',
+    'Save refused (403 not_overridable): a code package provides this permission set, so the server does not accept an in-place edit. Use New similar instead — the server saves a copy under a new name, in the package that holds your changes, and upgrades keep flowing to this base.',
   // Designer wrapper
   'designer.unsavedChanges': 'Unsaved changes',
   'designer.editingOverlay': 'Editing overlay',
@@ -2551,6 +2555,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.bulkHint': 'Bulk actions (R · CRUD · All · None) appear on the row under the pointer or with keyboard focus.',
   // ── Access explain panel (ADR-0090 D6 — "why can this user access?") ────
   'engine.studio.access.explain.open': 'Explain access',
+  // objectstack#28573 (ADR-0146 D6) — "New similar" on a read-only base's
+  // permission set: the clone door saves the copy where it decides, and the
+  // pillar opens it only where the answer says it landed.
+  'engine.studio.access.newSimilar.noPackage':
+    'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened. Find it from the package that holds your changes.',
+  'engine.studio.access.newSimilar.done': 'Saved the copy {name} in package {package}.',
+  'engine.studio.access.newSimilar.dismiss': 'Dismiss',
   'engine.studio.access.explain.title': 'Why can this user access?',
   'engine.studio.access.explain.description':
     'Runs the same evaluation pipeline as enforcement and reports what each layer contributed — permission set → position → binding chain, OWD/sharing verdicts.',

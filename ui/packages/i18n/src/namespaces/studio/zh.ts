@@ -186,16 +186,16 @@ const STUDIO_ZH: Record<string, string> = {
   // objectui#13011 — 见 EN 表同键注释。
   'perm.readOnly.capability': '只读（需要 `manage_metadata` 能力）',
   'perm.readOnly.artifact': '只读（该权限集由代码包提供）',
-  // objectui#5987 — 见 EN 表同键注释：裁定的路径（克隆后自定义）放在最前。
+  // objectui#5987 — 见 EN 表同键注释：裁定的路径（新建类似）放在最前。
   'perm.readOnly.artifact.hint':
-    '该权限集由代码包提供，因此在此处被锁定：在环境作用域下编辑它属于覆盖（overlay）已打包的条目，而元数据类型注册表对 permission 声明 allowEnvironmentOverlay 为 false（ADR-0131 D6 禁止对已打包权限集做环境覆盖：会造成权限静默漂移）。服务端会以 403 not_overridable 拒绝该写入。请「克隆后自定义」：副本以新名称保存为本系统中创作的普通权限集、可在此编辑，升级会继续流向这个基线。其他途径：修改源工件后重新部署，或新建一个运行时权限集。OS_METADATA_WRITABLE 逃生阀不会开放由包提供的权限集（ADR-0131 D6）。',
+    '该权限集由代码包提供，因此在此处被锁定：在环境作用域下编辑它属于覆盖（overlay）已打包的条目，而元数据类型注册表对 permission 声明 allowEnvironmentOverlay 为 false（ADR-0131 D6 禁止对已打包权限集做环境覆盖：会造成权限静默漂移）。服务端会以 403 not_overridable 拒绝该写入。请「新建类似」：服务端以新名称把副本存入存放你的修改的软件包（只读包则为其配对的 .custom 包），并说明存在哪里；你编辑副本，升级会继续流向这个基线。其他途径：修改源工件后重新部署，或新建一个运行时权限集。OS_METADATA_WRITABLE 逃生阀不会开放由包提供的权限集（ADR-0131 D6）。',
   // objectui#5987 — 见 EN 表同键注释。
-  'perm.clone.action': '克隆后自定义',
+  'perm.clone.action': '新建类似',
   'perm.clone.hint':
-    '以你指定的新名称复制该权限集。副本是本系统中创作的普通权限集，可在此编辑，升级会继续流向由包提供的基线。',
+    '以你指定的新名称复制该权限集。服务端把副本存放在这个基线旁、存放你的修改的软件包中，并说明存在哪里；升级会继续流向由包提供的基线。',
   'perm.clone.guidance':
-    '已锁定：该权限集由代码包提供，不能在此处原地编辑（升级会继续流向它）。请「克隆后自定义」—— 副本是本系统中创作的普通权限集，可在此编辑。',
-  'perm.clone.dialogTitle': '克隆权限集',
+    '已锁定：该权限集由代码包提供，不能在此处原地编辑（升级会继续流向它）。请「新建类似」—— 服务端以新名称把副本存入存放你的修改的软件包，你编辑副本即可。',
+  'perm.clone.dialogTitle': '新建类似权限集',
   'perm.clone.dialogBody': '以新的机器名和显示名复制 {name}。副本携带哪些内容由服务端决定，未复制的部分会由服务端说明。',
   'perm.clone.name': '新的机器名',
   'perm.clone.label': '新的显示名',
@@ -205,7 +205,7 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.clone.noName': '克隆已创建，但服务端的响应未给出其名称。请从权限集列表中打开它。',
   'perm.clone.done': '已克隆为 {name}。请从权限集列表中打开它进行编辑。',
   'perm.save.locked':
-    '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改为「克隆后自定义」—— 副本是本系统中创作的普通权限集，升级会继续流向这个基线。',
+    '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改用「新建类似」—— 服务端以新名称把副本存入存放你的修改的软件包，升级会继续流向这个基线。',
   // Designer wrapper
   'designer.unsavedChanges': '未保存的修改',
   'designer.editingOverlay': '编辑覆盖层',
@@ -2291,6 +2291,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.bulkHint': '批量操作(R · CRUD · All · None)显示在指针所在或获得键盘焦点的行上。',
   // ── 访问解释面板(ADR-0090 D6 —「为什么该用户可以访问?」)────────────
   'engine.studio.access.explain.open': '解释访问权限',
+  // objectstack#28573 — 见 EN 表同键注释。
+  'engine.studio.access.newSimilar.noPackage':
+    '服务端已保存副本 {name}，但其响应未说明副本所在的软件包，因此没有打开任何内容。请到存放你的修改的软件包中查找它。',
+  'engine.studio.access.newSimilar.done': '已将副本 {name} 保存到软件包 {package}。',
+  'engine.studio.access.newSimilar.dismiss': '关闭',
   'engine.studio.access.explain.title': '为什么该用户可以访问?',
   'engine.studio.access.explain.description':
     '与运行时强制执行走同一条评估管线,逐层报告各层的贡献 —— 权限集 → 岗位 → 绑定链,以及 OWD/共享判定。',
