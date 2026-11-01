@@ -452,12 +452,26 @@ describe('FileI18nAdapter reports a translation fallback once (#28109)', () => {
   it('a locale with no bundle at all is said once per locale, not once per key', () => {
     const { lines, logger } = capture();
     const i18n = build(logger);
+    i18n.setSupportedLocales(['en', 'zh-CN', 'fr']);
     expect(i18n.t('k', 'fr')).toBe('Hello');
     expect(i18n.t('only_en', 'fr')).toBe('English only');
     expect(i18n.t('missing', 'fr')).toBe('missing');
     expect(lines).toHaveLength(1);
     expect(lines[0].level).toBe('warn');
     expect(lines[0].message).toContain("'fr'");
+  });
+
+  it('a locale the app does not offer, with no bundle, is said once at debug', () => {
+    const { lines, logger } = capture();
+    const i18n = build(logger);
+    expect(i18n.t('k', 'fr')).toBe('Hello');
+    expect(i18n.t('only_en', 'fr')).toBe('English only');
+    i18n.setSupportedLocales(['en', 'zh-CN']);
+    expect(i18n.t('k', 'de')).toBe('Hello');
+    expect(i18n.t('only_en', 'de')).toBe('English only');
+    expect(lines.map((l) => l.level)).toEqual(['debug', 'debug']);
+    expect(lines[0].message).toContain("'fr'");
+    expect(lines[1].message).toContain("'de'");
   });
 
   it('returns exactly what an adapter without a logger returns', () => {

@@ -305,9 +305,14 @@ export class FileI18nAdapter implements II18nService {
    * Say, once, that `t()` could not answer `key` in `locale` (#28109). Only a
    * log line: the caller still gets the fallback text or the key.
    *
-   * - The locale has no bundle at all (static or authored): ONE `warn` per
+   * - The locale has no bundle at all (static or authored): ONE line per
    *   locale, not one per key. A locale nobody ships (a `fr` reader on the
-   *   platform bundles) would otherwise warn on every key it renders.
+   *   platform bundles) would otherwise report every key it renders. It is a
+   *   `warn` only when the app declared the locale in `i18n.supportedLocales`
+   *   (offered, with nothing behind it, #7679). An undeclared one is what the
+   *   client asked for, often straight from `Accept-Language`; the fallback is
+   *   the designed answer there, so it is `debug`, and a client cannot drive
+   *   the warn volume by sending locales.
    * - The fallback locale served the key: `warn`. The key exists, so a
    *   translation for this locale is what is missing; whoever owns the bundle
    *   can add it.
@@ -326,11 +331,17 @@ export class FileI18nAdapter implements II18nService {
     if (this.reportedMisses.size >= limit) return;
     this.reportedMisses.add(said);
 
-    const served = fallback ? `the '${fallback}' (fallback locale) text, or the key itself,` : 'the key itself';
-    if (!hasBundle) {
+    const fallsBackTo = fallback ? `'${fallback}' (fallback locale) or to the key` : 'the key';
+    if (!hasBundle && this.supportedLocales?.includes(locale)) {
       logger.warn(
-        `[i18n] locale '${locale}' has no translation bundle; every string requested in it is served as ${served}. ` +
-        `Load a '${locale}' bundle, or stop offering '${locale}'. Said once for this locale.`,
+        `[i18n] locale '${locale}' is offered (i18n.supportedLocales) but has no translation bundle; ` +
+        `strings requested in it fall back to ${fallsBackTo}. ` +
+        `Load a '${locale}' bundle, or drop it from i18n.supportedLocales. Said once for this locale.`,
+      );
+    } else if (!hasBundle) {
+      logger.debug(
+        `[i18n] locale '${locale}' has no translation bundle and is not offered; ` +
+        `strings requested in it fall back to ${fallsBackTo}. Said once for this locale.`,
       );
     } else if (servedByFallback) {
       logger.warn(
