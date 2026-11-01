@@ -576,21 +576,22 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   );
 
   // The customization mark of each row, from the base's served read only.
+  const markPrimaryKey = config.primaryKey ?? 'name';
+  const markMemberField = config.bundleMemberField;
   const markOf = React.useCallback(
     (row: ItemRow): CustomizationMarkKind | null => {
       if (customizations.status !== 'read') return null;
-      const pk = config.primaryKey ?? 'name';
       return customizationMarkOf(
         {
           type,
-          name: String(row.item[pk] ?? ''),
-          member: bundleMemberOf(row.item, config.bundleMemberField),
+          name: String(row.item[markPrimaryKey] ?? ''),
+          member: bundleMemberOf(row.item, markMemberField),
           packageId: (row.item as { _packageId?: string })._packageId,
         },
         customizations.index,
       );
     },
-    [customizations, config.primaryKey, config.bundleMemberField, type],
+    [customizations, markPrimaryKey, markMemberField, type],
   );
   const markedCount = React.useMemo(
     () => scopedItems.filter((row) => markOf(row) !== null).length,
