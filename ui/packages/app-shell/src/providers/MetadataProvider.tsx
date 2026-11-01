@@ -764,6 +764,38 @@ function itemNames(items: readonly unknown[]): string[] {
   return names;
 }
 
+/** The object a view document belongs to, as `mergeViewsIntoObjects` reads it. */
+function viewObjectName(view: any): string | undefined {
+  if (isViewItem(view)) return view.object;
+  const name = view?.name || view?.list?.data?.object || view?.form?.data?.object;
+  return typeof name === 'string' && name ? name : undefined;
+}
+
+/**
+ * The bundle's views, plus the listed views of the objects the bundle does not
+ * hold (objectstack#28645): an object the bundle holds always composes with the
+ * bundle's views, so it does not change when the `/meta/view` list lands. One
+ * array per (bundle views, list) pair, so `composeObjects` keeps its identity
+ * across renders.
+ */
+const BUNDLED_WITH_LISTED = new WeakMap<unknown[], { listed: unknown[]; views: unknown[] }>();
+function bundledWithListed(
+  bundled: unknown[],
+  bundledObjects: ReadonlyMap<string, unknown> | undefined,
+  listed: unknown[],
+): unknown[] {
+  if (listed.length === 0) return bundled;
+  const cached = BUNDLED_WITH_LISTED.get(bundled);
+  if (cached && cached.listed === listed) return cached.views;
+  const rest = listed.filter((view) => {
+    const object = viewObjectName(view);
+    return !!object && !bundledObjects?.has(object);
+  });
+  const views = rest.length > 0 ? [...bundled, ...rest] : bundled;
+  BUNDLED_WITH_LISTED.set(bundled, { listed, views });
+  return views;
+}
+
 function composeObjects(objs: unknown[], views: unknown[]): unknown[] {
   const cached = COMPOSED_OBJECTS.get(objs);
   if (cached && cached.views === views) return cached.composed;
@@ -1564,26 +1596,40 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
    * whether they are in hand. `asked` are the names the scope's reader asked
    * for (a names-only scope: every object in it).
    *
-   *   - A `/meta/view` list already in hand answers, as it always has: a scope
-   *     never recomposes, or unsettles, because an app was entered after it.
-   *   - Otherwise, when the app bundle holds each asked name, the bundle's views
-   *     answer: it carries every view of every object it holds. A package
-   *     object the bundle does not hold, and that no reader asked by name, is
-   *     composed without views; a reader of its views names it.
-   *   - Otherwise the scope reads the `/meta/view` list, as before.
+   *   - The app bundle in hand: an object it holds composes with its views (it
+   *     carries every view of every object it holds). When an asked name is
+   *     outside it, the scope also reads the `/meta/view` list for the objects
+   *     the bundle does not hold, and settles once that is in hand. A package
+   *     object outside the bundle that no reader asked by name composes from a
+   *     list already in hand, and asks for none: a reader of its views names it.
+   *   - The bundle still loading: a list already in hand answers, so a scope
+   *     never unsettles because an app was entered after it; otherwise the
+   *     scope waits for the bundle.
+   *   - No bundle (no app entered, or a host without one): the list, as before.
    */
   const viewsForObjects = useCallback(
     (asked: readonly string[]): { views: unknown[]; settled: boolean } => {
       const listed = getEntry('view');
+      const peek = peekBundle();
+      if (peek?.status === 'ready') {
+        const bundledObjects = peek.items.get('object');
+        const fromBundle = (bundledViews(peek.items) as { value: unknown[] }).value;
+        const outside = asked.some((name) => !bundledObjects?.has(name));
+        if (!outside) {
+          const views = listed.status === 'ready' ? bundledWithListed(fromBundle, bundledObjects, listed.items) : fromBundle;
+          return { views, settled: true };
+        }
+        const list = readType('view');
+        const status = getEntry('view').status;
+        return { views: bundledWithListed(fromBundle, bundledObjects, list), settled: status === 'ready' || status === 'error' };
+      }
       if (listed.status === 'ready') return { views: listed.items, settled: true };
-      const bundled = readBundledViews(asked);
-      if (bundled.state === 'hit') return { views: bundled.value, settled: true };
-      if (bundled.state === 'pending') return { views: NO_VIEWS, settled: false };
+      if (peek?.status === 'pending') return { views: NO_VIEWS, settled: false };
       const views = readType('view');
       const status = getEntry('view').status;
       return { views, settled: status === 'ready' || status === 'error' };
     },
-    [getEntry, readBundledViews, readType],
+    [getEntry, peekBundle, readType],
   );
 
   // objectui#12811 — see `MetadataContextValue.readObjectScope`. Reading it

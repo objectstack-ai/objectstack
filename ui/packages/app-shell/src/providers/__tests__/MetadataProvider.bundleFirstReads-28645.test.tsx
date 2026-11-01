@@ -237,7 +237,7 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
     expect(lists(m.calls)).toEqual(['app', 'view', `object?package=${PKG}`]);
   });
 
-  it('a scope settled on the view list stays settled, and keeps its objects, when an app is entered after it', async () => {
+  it('a scope settled on the view list stays settled while an app entered after it loads its bundle', async () => {
     const m = mount();
     await act(async () => { await m.ctx().ensureType!('view'); });
     await waitFor(() => {
@@ -249,7 +249,26 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
     expect(during.settled).toBe(true);
     expect(during.objects).toBe(before.objects);
     await act(async () => { await m.bundle.land(); });
-    expect(m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] }).objects).toBe(before.objects);
+    // Landed: a bundled object composes from the bundle, the others from the list in hand.
+    const after = m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] });
+    expect(after.settled).toBe(true);
+    const byName = (name: string) => (after.objects as Doc[]).find((o) => o.name === name) as { listViews?: Record<string, unknown> };
+    expect(byName('b28645_plan').listViews?.['b28645_plan.all']).toBeDefined();
+    expect(byName('b28645_outside').listViews?.['b28645_outside.all']).toBeDefined();
+    expect(m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] }).objects).toBe(after.objects);
+  });
+
+  it('a bundled object keeps the bundle\'s views while a scope that asks an outside object reads the list', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    await act(async () => { await m.bundle.land(); });
+    const asked = ['b28645_plan', 'b28645_outside'];
+    await waitFor(() => expect(m.ctx().readObjectScope!({ packageId: PKG, names: asked }).served).toHaveLength(3));
+    // The list is on the wire: not settled, yet the bundled object already carries its views.
+    const loading = m.ctx().readObjectScope!({ packageId: PKG, names: asked });
+    const planWhileLoading = (loading.objects as Doc[]).find((o) => o.name === 'b28645_plan') as { listViews?: Record<string, unknown> };
+    expect(planWhileLoading.listViews?.['b28645_plan.all']).toBeDefined();
+    await waitFor(() => expect(m.ctx().readObjectScope!({ packageId: PKG, names: asked }).settled).toBe(true));
   });
 
   it('a scope read with `views: false` asks which objects there are and never reads the view list', async () => {
