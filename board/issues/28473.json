@@ -1,0 +1,31 @@
+{
+  "number": 28473,
+  "kind": "issue",
+  "title": "lint: warn when a package's `manifest.namespace` is longer than 13 characters, since it can then have no paired `<ns>_custom` customization namespace (ADR-0146, ruled on #28404)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T21:04:58Z",
+  "updated_at": "2026-10-31T23:57:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28473",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ① a follow-up the maintainer agreed with the #28404 ruling (「同意」, 2026-10-31 20:44Z, on the analysis in `/mnt/project-files/issue-28404/decision-analysis.md`, \"对席位的落地备注\" item 3). ⛔ Not a claim. No grade: triage sets it (the ruling calls it low priority).\nReader: the cli/lint lane (`packages/lint` authoring rules, surfaced by `os lint` / `os validate`); after PR #28467 lands, because the helper and the constant it reads ship there.\nDedupe (open AND closed): \"namespace 13 characters lint\" and \"customization namespace warn\" → no card about the pair namespace length (closest: #19831, closed, the namespace grammar's leading-digit sentence).\nreach: author-time only: `os lint` / `os validate` on a stack whose `manifest.namespace` is 14 to 20 characters. Nothing in the repository is affected today: the longest base namespace is `feature_flags`, 13.\n\n**Why.** ADR-0146 D3 gives a base package's paired customization package the namespace `<base_ns>_custom`. The manifest namespace grammar allows at most 20 characters, and `_custom` takes 7, so a base namespace over 13 characters gets no pair namespace. PR #28467 (#28404) answers that case with a named refusal from `customizationNamespace(baseNs)`: `{ ok: false, reason: 'base_namespace_too_long' }`, with no truncation and no hashing (maintainer ruling, point 1). The ensure door (N-13) will then refuse to create the pair. So installers of such a package can never customize it, and its author learns this only when a customer tries.\n\n**Wanted.** An authoring rule that WARNs, not errors, when `manifest.namespace` is longer than `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH` (13). Suggested sentence: \"namespace '<ns>' is N characters; a package's paired customization namespace is '<ns>_custom' and may be at most 20, so installers cannot customize this package. Shorten the namespace to 13 characters or fewer.\" Read the limit and the verdict from `customizationNamespace` / `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH` in `packages/spec/src/kernel/customization-package.ts`; restate neither. Add a rule id and an `os explain rule` entry, plus a test at 13 (silent) and 14 (warns) characters.\n\n**Not here.** Changing the grammar's 20-character limit, or letting a pair choose another namespace. The ruling keeps both reversible for later.\n\nLinks back: #28404, PR #28467, epic #28236, ADR-0146 D3.\n\nBlocked-by: #28467"
+}

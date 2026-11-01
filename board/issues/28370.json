@@ -2,8 +2,8 @@
   "number": 28370,
   "kind": "issue",
   "title": "Console list query and filter builder do not read a stored view filter's any-of group",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:ui",
     "finding",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T07:00:24Z",
-  "updated_at": "2026-10-31T17:22:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T22:39:04Z",
+  "closed_at": "2026-10-31T22:37:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28370",
   "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② the consumer half of #28020. The spec half adds an any-of group element to the view filter list; the console half is this card. It lands after the spec PR on branch `claude/issue-28020-view-filter-or-group` (the spec PR for #28020), and it stays open until that PR merges.\nSeam: `spec:ViewFilterElementSchema / ViewFilterAnyGroupSchema` (`{ any: [rule, ...] }`, `packages/spec/src/ui/view.zod.ts`) → `renderer:` the console's view filter readers listed below.\nReach: any list view, view tab, page base filter (`interfaceConfig.filterBy`), element data source or component `filter` door whose natural filter is an any-of, such as HotCRM's \"open, or completed in the last 7 days\" (#27386 row 1). The spec half marks the group `[PLANNED — not yet rendered]` in its describe until this card lands.\nReader who acts: `domain:ui`.\n\n## The contract (spec half)\n\nA view filter list stays an AND list. One element kind sits beside the flat `{ field, operator, value }` rule: `{ any: [rule, ...] }`, a non-empty array of flat rules of which ANY may match. One level only. `isViewFilterAnyGroup(value)` from `@objectstack/spec/ui` tells the two element kinds apart. Every carrier of the list takes it (`ViewFilterElementSchema`). `ViewFilterRule` (the type) still means one flat rule; a carrier's element type is now `ViewFilterElement`.\n\n## What the console does today (read, not run)\n\nEach reader below handles flat rules only. Read at this repo's `ui/` tree on `origin/main` `22ce3d13fe`; the per-path runtime behaviour on a stored group (a silent drop or a refusal) was not measured.\n\n- Query build: `ui/packages/plugin-list/src/ListView.tsx` (`buildEffectiveFilter`, `convertFilterGroupToAST`), `ui/packages/core/src/utils/filter-converter.ts` (`convertFiltersToAST`, `viewFilterRuleToNode`), and `ui/packages/data-objectstack/src/index.ts` (`objectFilterEntriesToAST`, which throws `MalformedFilterError` for an entry with no `field`).\n- Save: `ui/packages/app-shell/src/views/viewFilterFold.ts` (`foldFilterGroupToSpecRules`) refuses a builder group with `logic: 'or'` (`or_logic`), because the list had no OR spelling. With the group it can fold an OR group to `[{ any: [rules] }]`.\n- Read back into the builder: `ui/packages/plugin-view/src/config/view-config-utils.ts` (`parseSpecFilter`) builds a group from flat rules only.\n\n## Wanted\n\n- The list query (and every other consumer that lowers a view filter list) lowers a group to an `or` node of its rules, inside the list's `and`.\n- The filter builder saves an OR group as one group element instead of refusing it, and reads a stored group element back as an OR group.\n- When this lands, the spec describe loses its `[PLANNED — not yet rendered]` marker (a one-line spec follow-up), and the liveness note for `list.filter` names the reader.\n\nDedupe words: view filter any-of group console, plugin-list OR group query, viewFilterFold or_logic.\n\nRelated: #28020, #27386 (row 1).\n\nBlocked-by: #28020\n"

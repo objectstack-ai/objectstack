@@ -2,8 +2,8 @@
   "number": 27331,
   "kind": "issue",
   "title": "skills: point `skills/objectstack-platform` at the new marketplace handbook (`/docs/deployment/marketplace-handbook`), the Skills-docs follow-up #27321 owes",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T17:35:21Z",
-  "updated_at": "2026-10-31T15:37:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T21:07:24Z",
+  "closed_at": "2026-10-31T21:03:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27331",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: a follow-up owed by landed work. PR #27321 (merged, `Fixes #27240`) added `content/docs/deployment/marketplace-handbook.mdx` and left its skills link out on purpose, because `skills/**` is a governed surface (Tier H) and the docs PR stays off it. Its body says so: \"Follow-up line, deliberately not in this PR (governed surface): `skills/objectstack-platform` gains one link line to `/docs/deployment/marketplace-handbook`.\" Child of #27293 (E3, author surface). ⛔ Not a claim.\n\n## Work\n\nOne line in `skills/objectstack-platform/SKILL.md` (or the reference file that covers publishing, if that is where an app-authoring agent reads about `os package publish`) pointing at `/docs/deployment/marketplace-handbook`, paid for under the skills token ratchet (`scripts/check-skills-token-ratchet.mjs`; check the file's headroom first). Today the skill names the `marketplace` service once (`skills/objectstack-platform/SKILL.md:356`, read at `origin/main` `65b49208`) and nothing about listing or publishing an app.\n\n## Business reason\n\nThe agent that writes an app reads the skills first. Without this line it never finds the page that says what a listing is made of and what the customer's administrator will go through, which is North Star step ④.\n\n## Reader\n\nThe `domain:skills` lane, or the epic PM inside #27293's subtree. Tier H: a seat drafts, the maintainer lands.\n\n## Dedupe\n\n`gh api repos/objectstack-ai/objectstack/issues?state=all` recent 500, titles grepped for `marketplace-handbook|objectstack-platform`: 0 hits; control `marketplace` on the same set: 3 hits (#27293, #27284, #27240)."

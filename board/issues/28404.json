@@ -2,8 +2,8 @@
   "number": 28404,
   "kind": "issue",
   "title": "spec: the override declaration, the `.custom` pairing constants, the `<base_ns>_custom` namespace rule, the `__c` reservation, the overridable-type list and the base-field display whitelist",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T12:04:13Z",
-  "updated_at": "2026-10-31T14:38:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T23:32:03Z",
+  "closed_at": "2026-10-31T23:30:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28404",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P1, cut after ADR-0146's rewrite merged in #28295) · the shared definitions N-09, N-10, N-13, N-14 and N-23a/b read. ⛔ Not a claim.\n\nPart of #28236 (P1, child **N-08**) · governs: ADR-0146 D2 (declaration, type list), D3 (pairing, namespace, range), D6 (excluded types), D10 (`__c`, display whitelist) · lane: `domain:spec` · size: M.\n\n**Follows #28390 ruling A** (6542177429): only the paired `<base>.custom` declares an override. The pair predicate below is what the gates read.\n\n**Business reason.** A developer writing `hotcrm.custom` in a repository and an administrator customizing in Studio must produce the same declaration, one the write gate, the read, export and `os validate` all understand. Without one Zod shape and one set of constants, every door would spell \"this item overrides HotCRM's\" its own way.\n\n**Measured (`75ecaf4ad8`).**\n- `packages/spec/src` has no `overrides` key, `.custom` constant or `__c` rule; no `__c` name appears in non-test sources under `examples/` or `packages/`.\n- Every type D2 lists spreads `MetadataProtectionFields` (`packages/spec/src/kernel/metadata-protection.zod.ts:81`).\n- `DEFAULT_METADATA_TYPE_REGISTRY` (`packages/spec/src/kernel/metadata-plugin.zod.ts`) has 30 entries. Four runtime-creatable types appear on neither side of D2: `seed`, `external_catalog`, `tool`, `skill`.\n- `packages/spec/src/kernel/namespace-prefix.ts:54#deriveNamespaceFromPackageId` returns `custom` for `hotcrm.custom`. Namespaces must match `/^[a-z][a-z0-9_]{1,19}$/` (`namespace-prefix.ts:18#NAMESPACE_RE`; the same regex inline at `manifest.zod.ts:564`), so `<base_ns>_custom` fits only a base namespace of 13 characters or fewer. The longest in the repository is `feature_flags` at 13 (`packages/services/service-settings/src/manifests/feature-flags.manifest.ts:7`).\n- Field names match `/^[a-z_][a-z0-9_]*$/` (`packages/spec/src/data/field.zod.ts:1363`), which admits `region__c`. `packages/spec/src/data/object.zod.ts:4709#ObjectExtensionSchema` is strict and has no slot for patching a single field.\n\n**Wanted.**\n1. An optional `overrides: { package, basedOn }` on every overridable type, one shared field set in the style of `MetadataProtectionFields`; its `.describe()` says `basedOn` is recorded and never judged (D2). The key survives `defineStack()`, the stored body and export.\n2. Pairing constants and pure helpers: the `.custom` suffix, `customizationPackageId(baseId)`, `isCustomizationPackage(id)`, the base of a pair, an \"is the pair of\" predicate, and the dependency range `^<major>` from the base's `manifest.version` (D3; merge item 1). Dotted ids such as `com.example.showcase.custom` are covered. **N-08 owns these; N-13 (the ensure door) and N-14 (uninstall protection) consume them and are `Blocked-by` this card.** ⛔ Spelled nowhere else.\n3. Namespace rule, decided here: `customizationNamespace(baseNs)` returns `<base_ns>_custom`, never derived. **A base namespace longer than 13 characters gets no pair namespace**: the helper answers a named reason and N-13 refuses that base with a sentence. ⛔ No truncation, no hashing: either is a second spelling the declaration cannot be checked against. ADR-0146 is silent here, so the PR lists it for the maintainer. Nothing in the repository is affected today.\n4. The `__c` reservation: a suffix constant and `isExtensionFieldName(name)`. Enforcement is N-23b.\n5. A closed list of overridable types, checked against the registry: `permission`, `position`, `capability` excluded; `object` extend-only; `flow`'s and `action`'s D9 conditions carried as data. The PR classifies `seed`, `external_catalog`, `tool` and `skill`, or reports to the maintainer the ones D2 cannot decide.\n6. The base-field display whitelist as one closed constant, each member admitted by D10's test against `FieldSchema`. The per-field patch slot goes on `ObjectExtensionSchema` here, or the PR says it rides N-23a.\n7. Generated baselines (authorable surface, JSON Schema, reference docs) regenerated; the `Metadata-protocol` level declared.\n\n**Tests.** The schema accepts and refuses `overrides` shapes. Table tests cover the helpers (dotted ids, 13- and 14-character namespaces, the range). A type-list test pinned to the registry fails when an unclassified runtime-creatable type is added. A whitelist test checks every member exists on `FieldSchema` and none is structural.\n\n**Not here.** Any door: the write gate (N-09), the read (N-10), the ensure door (N-13), uninstall (N-14), enforcing `__c` and the whitelist (N-23a/b).\n\n**Dedupe.** Searched `override declaration`, `__c suffix`, `custom namespace derived`, `display property whitelist`: only #28236 and #28237 match.\n\nLinks back: #28236, #28390 (ruling 6542177429), ADR-0146 D2, D3, D6, D10, ADR-0048 §3.2.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

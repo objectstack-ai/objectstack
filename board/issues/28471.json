@@ -1,0 +1,38 @@
+{
+  "number": 28471,
+  "kind": "issue",
+  "title": "ui live e2e: master-detail.spec.ts times out waiting for POST /api/v1/batch (15 s), twice on 2026-10-31 — once on main, once ejecting a queued PR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "priority:p1",
+    "tests"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T20:54:27Z",
+  "updated_at": "2026-11-01T01:35:35Z",
+  "closed_at": "2026-11-01T01:34:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28471",
+  "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: ① a gate that went red twice in one day on the same helper, measured by the triage seat's health read (R798 and R801 on #6015). ⛔ Not a claim.\nReach: every lane. `Live E2E UI` is in CI on main and in the merge queue. When it fails, main reads red, and a queued PR is ejected for a test it did not touch.\nReader who acts: `domain:ui` (`ui/e2e/live`).\n\n## Red (both read in the job logs)\n\n| When | Where | Test | Failure |\n|:--|:--|:--|:--|\n| 2026-10-31 17:00Z | main push `70646157` (connector-mcp OAuth, unrelated), run 41222427173 | `master-detail.spec.ts:72` \"Create stores the populated parent through one atomic batch\" | `TimeoutError: page.waitForResponse: Timeout 15000ms exceeded` in `submitBatch` (`:33`) |\n| 2026-10-31 20:30Z | merge queue, PR #28465 (`1906a644`, objectql/rest/metadata-core datasource), run 41239207302 | `master-detail.spec.ts:96` \"Create with a task line stores the child referencing the parent\" | the same `submitBatch` timeout |\n\n- In both runs it was 1 failed and 15 passed. Both later main heads after the first hit ran the job green (`16e7a808`, `776c1d87`), so this is intermittent, not a deterministic break.\n- Neither PR touches the master-detail create path. The spec was last changed on 10-29 (`2cbe559d`), and `5e1342a6` (#27969) changed the create form on 10-30.\n- The failure artifacts (screenshot, video, `error-context.md`, `backend.log`) are attached to both runs as `ui-live-e2e-failure-artifacts`.\n\n## Wanted\n\n- Root-cause the missing `POST /api/v1/batch` from the artifacts. Two things are possible: the submit click never fires the batch (a form not ready, a disabled button, a validation banner), or the backend answers after 15 s. The screenshot and `backend.log` should tell which one.\n- Fix the cause. \"Flake\" is not a root cause. ⛔ No retry wrapper, no longer timeout without a measured reason, no skip or quarantine.\n- Pin it: the spec waits on the condition that makes the submit valid, not on time.\n\n## Dedupe\n\nSearched the issues updated most recently for `master-detail`, `submitBatch`, `api/v1/batch` and `Live E2E`: none. **New.**"
+}

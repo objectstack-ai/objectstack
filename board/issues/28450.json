@@ -14,17 +14,20 @@
     "area:records",
     "domain:ui",
     "enhancement",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T16:57:07Z",
-  "updated_at": "2026-10-31T19:55:41Z",
+  "updated_at": "2026-11-01T02:09:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28450",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ② the `domain:ui` half of a maintainer-ruled card: #28022, ruling 6545223246, letter A (maintainer 「同意」 2026-10-31T15:10Z), \"spec first (this card, seat 2), then a `domain:ui` card for the redirect\". The spec half is PR #28449. ⛔ Not a claim. Triage sets the grade.\nReach: any app shared by more than one audience. In HotCRM, moving Sales above Service moves service staff's landing to Leads (#27386 row 5).\nReader who acts: `domain:ui`. Lands after PR #28449 is on `main`.\nDuplicate search: \"app landing visible predicate console redirect\" → #28022 (the spec half), #23610 (closed, wording). New.\n\n## Observed (after PR #28449)\n\n- `AppSchema.landing` is `[{ item, visible }]`: each entry names a navigation item, the first entry whose `visible` predicate holds is the landing, no match falls back to the first navigation item by `order`. A dangling item, a group / separator / action target and a data read are refused at parse (`checkAppLandingItems`).\n- Its liveness row is `planned` with an author warning: the console does not read the key yet, so an app still opens on its first navigation item.\n\n## Wanted\n\n- The console landing redirect (`AppContent` landing resolution) reads `landing` and evaluates each `visible` predicate in the same scope app navigation `visible` uses; first match wins; no match keeps today's rule. Decide and pin which roots the predicate may read (PR #28449's acceptance note: no root verdict yet).\n- Attach `checkAppLandingItems` to objectui's `AppComponentSchema` and drop the `notAttachable` entry PR #28449 added in `ui/packages/types/src/__tests__/spec-object-refinements-7715.test.ts`.\n- Flip the liveness row `app.landing` to `live`, and re-classify the dogfood `cel-app-landing` conformance row.\n\nDedupe words: app landing per audience, landing visible predicate, console landing redirect.\n\nLinks back: #28022, PR #28449, #27386 (row 5).\n\nBlocked-by: #28449\n"

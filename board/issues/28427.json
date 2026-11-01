@@ -2,8 +2,8 @@
   "number": 28427,
   "kind": "issue",
   "title": "security: grant manage_connector_connections to organization_admin (and its no-bypass variant) by default, before ADR-0143 S4's Console Connect (ruling B on #28327)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:access",
     "domain:server",
-    "pm:dispatched",
     "security"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T15:14:15Z",
-  "updated_at": "2026-10-31T17:15:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T20:38:19Z",
+  "closed_at": "2026-10-31T20:33:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28427",
   "body": "domain:server#1 · os-tesla · session_01L9qibz3ZUbZ8Qcn1rDw9yc\n\nFiling gate: ③ the maintainer dispatched this card directly. On 2026-10-31 at 15:10Z Tesla answered 「同意」 to the decisions list `decisions/2026-10-31-director-rulings.md`. Its item 6 reads, verbatim: 「B：开一张跟进卡，在 S4 Console Connect 之前默认授予 organization_admin 与 organization_admin_no_bypass」. The ruling record is on #28327, comment 6545223261. ⛔ Not a claim.\n\n**Business reason.** An organization's admin is the person who connects their organization's OAuth vendors: DocuSign, Salesforce, Google. After #28400 (A, no default grant), only platform administrators hold `manage_connector_connections`. Once S4 ships the Console's Connect button, every organization admin would be refused until someone binds a permission set by hand. The maintainer chose B so that the admin who owns the organization can connect it on day one.\n\n**Reader who acts:** `domain:server` seat 1 (os-tesla), which holds ADR-0143's server slices under #26702.\n\n## Measured (`origin/main` @ `380a1078`)\n\n- `packages/spec/src/security/capabilities.ts:111` declares the capability, org-scoped. `packages/runtime/src/domains/automation.ts:941` / `:3095` gates the connection door on it, fail-closed, with only `isSystem` bypassing.\n- `packages/plugins/plugin-security/src/objects/default-permission-sets.ts` (~:385): `organization_admin` is the declaration that `deriveWallLessOrgAdmin` derives `organization_admin_no_bypass` from. A grant added there reaches both variants from one line.\n- `content/docs/automation/connectors.mdx` (the connect paragraph) says: \"platform administrators hold it by default; grant it to anyone else, an organization administrator included, through a permission set\". That sentence becomes false.\n- `docs/adr/0143-outbound-connector-auth-is-open-tier.md` D5 says \"Who may connect … is a capability check the server slice declares\", and does not yet record the default holders.\n\n## Wanted\n\n1. `organization_admin` holds `manage_connector_connections` by default, and `organization_admin_no_bypass` inherits it through the derivation. Neither is copied by hand.\n2. Pins: a default-permission-set test showing both variants hold it and `member_default` / `viewer_readonly` do not. A connection-door test showing an organization admin (non-platform) is admitted for their own organization and refused for another.\n3. `connectors.mdx` says organization admins hold it by default.\n4. ADR-0143 D5 records ruling B (default holders: platform admins and both organization-admin variants). `docs/adr/**` is CODEOWNERS `@os-zhuang @hotlong`, so the PR is Tier H and needs os-zhuang's approval. Splitting the ADR line into its own PR is acceptable if it would hold the code.\n\n**Not here:** S4's Console Connect flow; any other capability's defaults.\n\n**Dedupe:** searched \"organization_admin default grant manage_connector_connections\"; 3 hits, all closed and none of them this (#28327, #27238, #26191).\n\nLinks: #28327 (ruling record 6545223261), PR #28400, #26702, ADR-0143 D5."

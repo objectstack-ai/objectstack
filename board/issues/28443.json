@@ -2,8 +2,8 @@
   "number": 28443,
   "kind": "issue",
   "title": "server: the public form submit answer carries the record fields its thank-you panel names (#28005 server half)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T16:39:35Z",
-  "updated_at": "2026-10-31T16:39:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T23:15:26Z",
+  "closed_at": "2026-10-31T23:14:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28443",
   "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ③ maintainer-ruled split. #28005 was ruled B by the maintainer at 2026-10-31 15:10Z (ruling record 6545210989): spec first, then server, then ui. This is the server step.\nReach: web-to-case and any public form whose visitor needs a reference (a case number) on the thank-you panel (#27398 row 3).\nDuplicate search: open `domain:server` cards with \"form\" or \"thank\" in the title. None covers the submit answer.\nBlocked-by: #28440 (spec half: the slot, `thankYouRecordFieldNames`, `PublicFormSubmitResponseSchema`). Names are pending the maintainer's approval, so read the merged names.\n\n## Wanted\n\n- `POST /api/v1/forms/SLUG/submit` (`packages/rest/src/form-routes.ts`) answers with `PublicFormSubmitResponseSchema`. That is `id` always, plus `fields` holding exactly the stored values of the names `thankYouRecordFieldNames(form.submitBehavior)` returns, and only when it returns at least one.\n- ⛔ No other field. The route's own comment stays true: the stored row can carry values an elevated hook derived from records the anonymous grant may never read. The spec's lint rule already admits only `RUNTIME_OWNED_FIELD_TYPES` (today `autonumber`). The server still re-checks each named field's type against that set at answer time, and drops a name that does not pass. That covers an object retyped after publish.\n- Name the schema as the route's `responseSchema` in `rest-route-ledger.ts`.\n\n## Tests\n\n- A form whose message names an `autonumber` field answers `{ id, fields: { that_field } }`.\n- A form with no token answers `{ id }` only.\n- A name whose field was retyped to `text` after publish is dropped.\n- Ablation: answering the whole stored row reds the test.\n\n## Then\n\nThe ui half (`FormPage.tsx` fills the tokens) is filed beside this card and is blocked by it."

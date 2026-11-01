@@ -2,8 +2,8 @@
   "number": 28444,
   "kind": "issue",
   "title": "console: the public form thank-you panel fills its record field tokens from the submit answer (#28005 ui half)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T16:40:15Z",
-  "updated_at": "2026-10-31T16:40:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T01:37:34Z",
+  "closed_at": "2026-11-01T01:34:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28444",
   "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ③ maintainer-ruled split. #28005 was ruled B by the maintainer at 2026-10-31 15:10Z (ruling record 6545210989): spec first, then server, then ui. This is the ui step.\nReach: the web-to-case visitor, who sees their case number on the thank-you panel instead of the literal token text.\nBlocked-by: #28440 (spec half) and #28443 (server half) (the submit answer carries `fields`).\n\n## Wanted\n\n- `ui/apps/console/src/components/FormPage.tsx`: the `thank-you` panel's `title` / `message` replace each `{{record.field_name}}` token with `fields[field_name]` from the submit answer, read through the spec's `PublicFormSubmitResponseSchema`.\n- A token with no value in the answer renders as empty, never as the literal token text.\n- Values are inserted as text and never as HTML.\n- Use the same token reading as the spec. `thankYouRecordFieldNames` and the spec's token regex are the one grammar, so do not write a second regex.\n\n## Riders\n\n- **Skills-docs follow-up** (from #28440's `Skills-docs:` line): once this lands, teach the slot in `content/docs/ui/public-data-collection.mdx` and `content/docs/ui/forms.mdx`. Write it as one sentence plus an example, and say that only engine-generated fields (autonumber) may be named.\n- **Translated panel text:** a translation may name a field the base text does not. The server fills only the base text's names, so such a token renders empty. Whether to judge translated text is this card's question. Report what you measure; do not widen.\n\n## Tests\n\n- A message with `{{record.case_number}}` shows the answer's value.\n- A missing value renders empty.\n- HTML in a value is shown as text.\n- Ablation: dropping the fill reds the test."

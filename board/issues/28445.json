@@ -2,7 +2,7 @@
   "number": 28445,
   "kind": "pull_request",
   "title": "fix(objectql)!: the registry fold merges validation rules by name; a tenant's same-named copy carries only its message and active, and a changed condition is reported at load, never run",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T16:48:22Z",
-  "updated_at": "2026-10-31T17:22:55Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-31T20:33:35Z",
+  "closed_at": "2026-10-31T20:33:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-10-31T20:33:33Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28445",

@@ -2,9 +2,9 @@
   "number": 28386,
   "kind": "pull_request",
   "title": "fix(platform-objects): enabling two-factor and copying an invitation link are human-only identity actions",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "tooling"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T09:25:09Z",
-  "updated_at": "2026-10-31T11:54:15Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-10-31T23:30:40Z",
+  "closed_at": "2026-10-31T23:30:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-10-31T23:30:38Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28386",

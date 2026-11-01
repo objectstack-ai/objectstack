@@ -1,0 +1,34 @@
+{
+  "number": 28468,
+  "kind": "issue",
+  "title": "security: the connector connection door refuses a delegated / agent caller by name; connecting and revoking is a human administrator's act (ruling A on #28427)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:server",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T20:33:14Z",
+  "updated_at": "2026-10-31T22:29:50Z",
+  "closed_at": "2026-10-31T22:28:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28468",
+  "body": "domain:server#1 · os-tesla · session_01L9qibz3ZUbZ8Qcn1rDw9yc\n\nFiling gate: ③ the maintainer dispatched this card directly. At 2026-10-31T20:29Z Tesla answered 「同意」 to batch #435, which takes the seat's recommendation, letter **A**. The ruling record is on #28427, comment 6548764795. ⛔ Not a claim.\n\nRuling-ref: 6548764795\n\n**Business reason.** Connecting an organization's OAuth vendor, or revoking that connection, decides whose grant every later run in that organization uses. ADR-0143 D5 binds a connection to the session that began it. The maintainer ruled that only a human administrator takes that step. An agent acting for that administrator does not.\n\n**Reader who acts:** `domain:server` seat 1 (os-tesla), which holds ADR-0143's server slices under #26702.\n\n## The rule (ruling A)\n\n- The connector connection door's **begin** leg (connect and reconnect) and its **revoke** leg refuse a delegated or agent caller **by name**. That covers an OAuth client acting for a user and an API key's agent principal. The refusal answers with a stable code and a message that names the rule. It is never a silent 403 under another name.\n- Human administrators keep exactly the reach they have today: platform administrators, the organization-administrator sets (ruling B, #28441), and anyone granted `manage_connector_connections`.\n- `isSystem` keeps its bypass.\n\n## Wanted\n\n1. **First, a live measure.** The finding was read from code (dev report 6545987804, out-of-scope item). On a booted stack, show today's answer on the begin and revoke legs for a delegated caller acting for a capability holder. If the door already refuses, stop and report back to the seat with the evidence.\n2. The door refuses as ruled. Follow the precedent of the #28178 B refusal table: refuse by caller kind, and name the kind in the message.\n3. Pins:\n   - A delegated caller acting for a holder is refused on begin and on revoke.\n   - The same human, calling directly, is admitted.\n   - A system call is admitted.\n   - An ablation shows each pin goes red without the refusal.\n4. One line in `content/docs/automation/connectors.mdx`: connecting and revoking is a human administrator's act, and an agent cannot do it.\n\n`Clause-②: no (narrowing)` for delegated callers, so a contract review is owed. `Metadata-protocol: none`. Size S.\n\n**Not here:**\n- The door's read leg (connection status).\n- The callback leg. The browser landing there carries the session that began the connect.\n- Any other door's agent posture.\n- An ADR edit. D5 already says \"bound to the initiating session\". If the dev finds the ADR needs a line, that is a separate Tier H PR.\n\n**Dedupe:** I searched \"connector connection agent delegated refuse\" and found nothing open that covers this (#28427, #28327, #26702 are related, not this).\n\nLinks: #28427 (ruling record 6548764795), #28441, #26702, ADR-0143 D5, #28178."
+}

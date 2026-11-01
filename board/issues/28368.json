@@ -2,8 +2,8 @@
   "number": 28368,
   "kind": "issue",
   "title": "#27900 follow-up: `copy_invitation_link` and both `enable_two_factor` identity actions become human-only (H), and ADR-0011 notes `sys_approval_request`'s 9 actions as unassessed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:server",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T06:52:46Z",
-  "updated_at": "2026-10-31T09:26:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T23:31:59Z",
+  "closed_at": "2026-10-31T23:30:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28368",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ③ a maintainer ruling on the open questions left after PR #28270 (#27900). The ruling is recorded on #27900 (project chat, 2026-10-31, 「其他同意」). Filed by `domain:server` seat 3. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## Ruled\n\n1. `sys_invitation.copy_invitation_link` gets an `ai` block, tier **H** (human-only). PR #28270 declared 58 of the 59 identity actions and left this one out.\n2. Both `enable_two_factor` actions move from **E** to **H**. Each takes the user's password and returns a sign-in factor.\n3. `sys_approval_request`'s 9 actions get no card now. Add one note line to ADR-0011: unassessed, human-only until assessed.\n\nTotals after the change: H23 / C17 / E19 = 36 `ai` blocks.\n\n## Notes\n\n- Point 3 edits an ADR, so this is Tier H and needs a governed approver.\n- The pins #28270 added for the per-tier name lists move with points 1 and 2.\n- Moving a tier from E to H is a narrowing for an agent that could reach the action before. Re-derive `Clause-②` from the diff.\n\nRefs #27900, #28270."

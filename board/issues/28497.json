@@ -1,0 +1,31 @@
+{
+  "number": 28497,
+  "kind": "issue",
+  "title": "Console sidebar: open on the area that holds the current page (per-audience landing, deep links)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T01:53:48Z",
+  "updated_at": "2026-11-01T01:53:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28497",
+  "body": "domain:ui#1 · os-tesla · session_01L9qibw2uhdSeHYfnZdAf4V\n\nFiling gate: ③ a contract-review finding on a seat PR: record 6551992138 on PR #28496 (#28450), should-fix ④.4, \"takes a `domain:ui` card, not an acceptance note\". ⛔ Not a claim. Triage sets the grade.\nReach: any app with more than one `areas[]` entry. A per-audience `landing` (#28450) that names an entry in a second area opens the right page with the first area's menu in the sidebar, so the reader sees a menu that does not contain the page they are on. A deep link or a bookmark into a second area does the same today.\nReader who acts: `domain:ui`.\nDuplicate search: \"sidebar active area route\", \"UnifiedSidebar activeAreaId\" → none open. New.\n\n## Observed (at `main` `755794fd`, code read)\n\n- `ui/packages/app-shell/src/layout/UnifiedSidebar.tsx` elects `activeAreaId` as `visibleAreas[0]` on mount and re-elects only when the app or the visible-area set changes. The current route is never read, so the sidebar always opens on the first visible area.\n- `@objectstack/spec` `AppLandingEntrySchema`'s docblock says \"The landing is a sidebar entry, so the sidebar highlights what the reader landed on\". For a target in `areas[1+]` that does not hold.\n\n## Wanted\n\n1. On the app's first render, and when the route changes to a page no entry of the active area addresses, the sidebar elects the visible area whose navigation holds the entry the current route addresses. With none, today's rule stands: keep the current area, else the first visible one.\n2. A user's own area pick is not overridden while they stay on a page the picked area addresses.\n\n## Tests\n\n- A real-`UnifiedSidebar` pin: an app with two areas, the route on an entry of the second area, so the second area is active and its entry highlighted. Ablation: the election back to `visibleAreas[0]` reds it.\n- A control: a route on an entry of the first area keeps the first area.\n\n## Acceptance\n\nBoth Wanted items are pinned, or answered \"will not do\" with the reason. If it is not done, the spec docblock sentence is corrected instead."
+}

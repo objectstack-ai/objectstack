@@ -1,0 +1,31 @@
+{
+  "number": 28469,
+  "kind": "issue",
+  "title": "Record page tab row: tabs of related lists with records come first, and the tabs of empty related lists sink into the 「+N」 dropdown, the rule the right column already applies to empty panels",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T20:39:54Z",
+  "updated_at": "2026-10-31T20:56:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28469",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat on the maintainer's instruction. The seat walked the v4 record page on `main` against HotCRM metadata (2026-10-31), and the maintainer answered 「两条都立：页签顺序（有数据优先、空关联沉到 +N）…，都开在 domain:ui」 (2026-11-01). Part of the record-page epic #26676; it follows #27524, which is closed.\n\n## Reading\n\nReading at `main` `52306d40bd`. The page was observed on `5da3a8ce31` with the HotCRM metadata run by main's CLI. PR #28458 (④) landed after that, and it does not touch the order.\n\n- **The rows.** `RecordPageColumns.tsx` (around lines 352–371) builds the tab row as follows:\n  - 概览 first.\n  - 动态 second.\n  - Then one tab per panel, in `resolveRelatedArrangement(...).order`.\n  - The hidden panels' tabs go at the end of the dropdown.\n- **What a tab's count does.** A tab's count is only a label. It never moves the tab.\n- **The overflow.** `RecordTabRow` (`layoutRecordTabRow`, `synth/recordTabRow.ts`) puts as many tabs on the row as fit. The rest go into 「+N ▾」.\n- **The right column is different.** It already applies #27524 Target 2: empty panels fold into one line, 「还有 N 个空关联 · … · 展开」, and non-empty panels keep their order. The tab row does not apply that rule.\n- **What the reader sees.** HotCRM contact John Smith, in the drawer at 800 px wide:\n  - The row shows 概览 · 动态 0 · 活动 1 · 活动参与者 7 · 线索 · 转化联系人 **0** · 线索 · 重复的联系人 **0**.\n  - 「+6」 holds 商机 0 · 任务 0 · 工单 **2** · 合同 **1** · 报价单 **2** · 营销活动成员 **3**.\n  - Two empty lists take visible slots. Four lists with records are hidden.\n  - The same record's overview says 「还有 4 个空关联」 in the right column, so the two surfaces disagree about the same lists.\n\n## Target\n\n1. **One order rule for the tab row and the panels.**\n   - 概览 and 动态 stay first and second.\n   - The related panels follow, as a stable partition of the arrangement order:\n     - First, every panel whose count is not `0`. They keep the arrangement's relative order, so a reader's drag still decides the order among them.\n     - Then every panel whose count is `0`, in arrangement order.\n   - 「+N ▾」 lists the overflowed non-empty tabs first, then the empty tabs, then the hidden panels' tabs, as now.\n   - The width computation is unchanged. Empty tabs are always placed in the dropdown, even when the row has room for them. An empty list never takes a slot from a list with records.\n2. **A count that is not known yet** (loading, or refused) counts as non-empty: the tab stays where the arrangement puts it. The counts come with the record's page payload (`POST /data/:object/:id/page`, #27627). So on a normal open the order is final at first paint. Measure that: a tab must not move after the row first draws.\n3. **The active tab stays visible**, as Target 8 of #27524 rules. A deep link (`?related=`) to an empty list still shows that tab on the row, in the last visible slot.\n4. **Nothing stored changes.** `record.related.arrangement` keeps `{ v, order, hidden, basedOn, seen }`. The partition is computed when the row is drawn, and it is never written back into `order`.\n5. **Dropdown wording.** Empty tabs in the dropdown sit after a separator, and their count `0` reads muted.\n   - Use the `RelatedListEmptyFold` tone, so the two folds read alike.\n   - No new i18n key is needed unless the separator carries a label. If one is added, add it in all ten packs.\n\nNo spec change and no metadata key.\n\n## Why (four axes)\n\n- **Business need:** found by the epic seat on HotCRM's real metadata. A contact has 12 inbound related lists. The lists with records (cases, contracts, quotes) were the ones a reader could not see without opening a menu.\n- **Long-term fit:** the right column and the tab row describe the same lists, so one rule for both. #27524 Target 2 already ruled that empty lists fold; this card extends that rule to the tab row. The reader's arrangement still decides the order, so Target 10's stored shape is untouched.\n- **AI-error resistance:** the order comes from data, not from a new declaration. An app author has nothing to tune and nothing to get wrong.\n- **Startup focus:** a pure rendering rule on existing data. It adds no setting and no \"sort tabs by\" option.\n\n## File surface\n\n- `ui/packages/plugin-detail/src/RecordPageColumns.tsx`: the `tabs` / `hiddenTabs` build.\n- `ui/packages/plugin-detail/src/RecordTabRow.tsx` and `src/synth/recordTabRow.ts`: an \"always in the dropdown\" group, beside `alwaysInDropdown`.\n- Tests beside, and a changeset.\n- ⛔ `packages/spec/**`. ⛔ The stored arrangement shape.\n\n## Acceptance\n\n1. A unit test on the layout: given counts `[7, 0, 0, 2, 1, 2, 3]` in arrangement order, the row shows the non-empty tabs first, and the dropdown lists the overflowed non-empty tabs, then the empty ones, then the hidden ones.\n   - It also pins that a `null` count stays in place.\n   - It also pins that an active empty tab is on the row.\n   - Ablation: revert the partition, and the test fails.\n2. A component test: a page whose counts arrive with the payload draws the final order on the first render. No tab moves after.\n3. Screenshots on an evidence branch: HotCRM contact John Smith in the drawer at 800 px and on the page at 1440 px, before and after. Cases, contracts and quotes are on the row; the two empty 线索 lists are in the dropdown."
+}

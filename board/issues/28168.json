@@ -2,8 +2,8 @@
   "number": 28168,
   "kind": "issue",
   "title": "cli + docs: judge --code before boot in os migrate record-currency-codes, and document the command and the record-mode switch (multi-currency, epic #8345)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T15:03:04Z",
-  "updated_at": "2026-10-31T12:29:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-10-31T23:21:28Z",
+  "closed_at": "2026-10-31T23:20:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28168",
   "body": "epic:#8345#1 · os-bill · session_01Utp6CbTZrFqRYNgjSaSbN5\n\nFiled by the epic PM from the contract review of PR #28128 (#27577), should-fix S2 and S3. Part of #8345. ⛔ Not a claim. Not release-paired; ⛔ needs #28128 on `main` first.\n\n## 维护者速读\n\n- **改了什么：** `os migrate record-currency-codes` 在确认提示和 boot 之前先判 `--code`；在 CLI 文档和 Currency 文档页补上这条命令、切换时的 409 与回填步骤。\n- **为什么改：** 现在坏码要等 boot 之后才拒绝，而 `--apply` 的 boot 可能建表建列；文档里兄弟命令都有条目，唯独这条没有。\n- **风险与回滚：** 只提前一个纯函数判断，加两页文档；回滚即撤 PR。\n- **先看：** `packages/cli/src/commands/migrate/record-currency-codes.ts`，`content/docs/deployment/cli.mdx` 里 `summary-nulls` 的表格行与小节。\n- **两分钟验证：** `os migrate record-currency-codes --object x --field y --code usd` 在不 boot 的情况下立即以 `INVALID_FIELD` 退出。\n- **需要您做的：** 无。\n\n## Task\n\n- [ ] **S2.** In `packages/cli/src/commands/migrate/record-currency-codes.ts`, judge `--code` against `isValueDomainMember('iso_4217_currency', code)` before the `--apply` confirmation prompt and before `bootSchemaStack`. Use the same `INVALID_FIELD` / 400 envelope and wording the engine function returns, and keep the engine-side check unchanged. Add a test showing the boot is never reached for a non-member code.\n- [ ] **S3.** In `content/docs/deployment/cli.mdx`, add a table row and a section for `os migrate record-currency-codes`, shaped like `summary-nulls`. In `content/docs/data-modeling/currency.mdx`, add a short passage on switching a field with stored rows to `currencyMode: 'record'`: the 409 `destructive_change` (finding `currency_mode_to_record`, lifted by `force`), then the dry run and `--apply`. Say that the code is the operator's and is never derived.\n\n## Acceptance\n\n- [ ] A non-member `--code` exits before any prompt or boot, with the same envelope as today.\n- [ ] Both docs pages name the command, and `currency.mdx` names the 409 and the dry-run/`--apply` steps.\n- [ ] `dispatch-gates --commands` exit codes captured.\n\nLane: server (cli + docs) · Size: S · Review: default. Declarations, for the card to confirm: `Clause-②: no` · `Metadata-protocol: none`; `@objectstack/cli` patch changeset.\n\n⛔ Out of scope: `skills/**` and `docs/adr/**`. The epic PM's Tier H PR carries those.\n\nEpic: #8345. Dedupe: PR #28128 review record (S2, S3); no open card carries this.\n"

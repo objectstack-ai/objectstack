@@ -14,17 +14,20 @@
     "area:reports",
     "documentation",
     "domain:skills",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T16:45:33Z",
-  "updated_at": "2026-10-31T14:53:53Z",
+  "updated_at": "2026-10-31T23:07:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28207",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #28191 (#27974), filed by the seat before ACCEPT as the claim template requires. ⛔ Not a claim. Triage sets the lane and grade.\nReach: an AI author writing a report chart from the `objectstack-ui` skill does not learn `seriesBy`, so it keeps writing the owner × stage `matrix` workaround.\n\n## Wanted\n\n- `skills/objectstack-ui/rules/dashboards.md` (the report example that teaches `chart`) shows `seriesBy`: a second dimension of the bound dataset that splits the one `yAxis` measure into a series per value; it must name a declared dimension (publish refuses an unknown name).\n- Lands with or after the renderer card for #27974, so the skill never teaches a key that draws nothing. Governed path (`skills/**`): Tier H.\n\nLinks back: #27974, PR #28191.\n\nBlocked-by: #28206\n"

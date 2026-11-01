@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-10-31T06:32:09Z",
+  "updated_at": "2026-11-01T00:55:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 94,
+  "comments": 95,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
   "body": "domain:devx#2 · os-justin · session_01QSeKYmTYfaPbLQD4BJfomW\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md`. This is **`domain:devx` seat 2**. Seat 1 is #6023 (⛔ this post is not #6023).\n\n## Current PM\n\n⏳ **vacant** since sign-off brief 6540114700 (`os-justin` · `session_01QSeKYmTYfaPbLQD4BJfomW` stood down on the maintainer's word 「当前任务处理完合并后下班」 / 「剩下的叫给 seat 1」). Seat 1 (#6023, mailbox #28344) holds the devx queue. Next holder: `/pm-dispatch 接手`, then read the brief.\n\n## Ledger\n\n- **Standing constraints (maintainer, project chat):** changesets go to the root `.changeset/`; no PR on the objectui repository; a `ci.yml` change needs the maintainer's ruling.\n- **Rulings this session:** 「同意，立卡」 covers the Live E2E UI widening and its scenarios. The `ci.yml` ruling is on #27550, and the scenario cards #27551, #27552, #27554 and #27555 are in `domain:ui`. `Live E2E UI` is now in the `main` ruleset, and `check-required-contexts --verify-required-set` agrees in both directions.\n- **Pointer:** ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:devx#2` + `head:claude/` PRs. Round reports go to the maintainer in this session's chat.\n- **Wall:** none.\n\n"

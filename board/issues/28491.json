@@ -1,0 +1,30 @@
+{
+  "number": 28491,
+  "kind": "issue",
+  "title": "4-hourly full run: red on main (CI)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T00:25:35Z",
+  "updated_at": "2026-11-01T01:52:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28491",
+  "body": "os-4-hourly-full-run-ci — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the 4-hourly full run finds this card instead of filing a new one every 4 hours.\n# 4-hourly full run: red on main (CI)\n_Swept 2026-11-01T00:25:33.184Z · [run log](https://github.com/objectstack-ai/objectstack/actions/runs/41255489006) · commit `9b4d1933185822e4acb90e9af6f7a57b5e5f82cb` · conclusion `failure`._\n`CI` runs the FULL battery on `main` every 4 hours (#16467, #25771). A `push` run on\n`main` tests only the packages the merge touched, and a merge-queue build tests only what the group\ncontained — so this scheduled run is the only thing that says whether the WHOLE tree is green, and\nthis card is the only channel that reports it. Nothing is blocked by it.\n⛔ The remedy is never to narrow, skip or delete the failing check to make the 4-hourly run green.\nFix what it names and let the next 4-hourly run refresh this card; a card nobody reopens is closed by\nthe next green run being uneventful, not by editing this one.\n## What landed since the last green 4-hourly run\nRange: `80a9f99222` (run 41237094739, the last green `CI` schedule run) .. `9b4d193318` — [compare](https://github.com/objectstack-ai/objectstack/compare/80a9f99222a62c336659bef6e8dcabd7ffb7b1b3...9b4d1933185822e4acb90e9af6f7a57b5e5f82cb)\n- `50015d84da` fix(objectql)!: the registry fold merges validation rules by name; a tenant's same-named copy carries only its message and active, and a changed condition is reported at load, never run (#28445)\n- `a99de4402a` docs(adr): ADR-0090 D10 rule 5, the agent forward credential (step 1 of #28367) (#28455)\n- `52306d40bd` docs(adr-0143): D5 records manage_connector_connections' default holders (ruling B) (#28456)\n- `7e3822cab3` feat(spec)!: an action's description, param helpText and outcomeMessages are {{ }} template slots; ${…} refused at publish (#28463)\n- `22663cab50` docs(skills,adr): teach the code-defined datasource credential route (OS_DATASOURCE_NAME_PASSWORD behind the host switch) (#28432)\n- `36436fae70` docs(skills): teach the derived-measure fixed-currency refusal beside the two fixed-currency refusals (#28431)\n- `6e0b16acb4` feat(objectql,metadata-protocol,rest,spec): the object read names the objects a delete can cascade into (#28451)\n- `96d12ec3ce` docs(skills): the os package publish row points app authors at the marketplace handbook (#28429)\n- `8e6acf4bed` docs(adr): ADR-0070 D2 amended — a type: module sub-package of an installed app may be disabled, not authored into, by an admin (#28285) (#28430)\n- `9b1dc992c7` feat(spec,lint): a form's thank-you panel names the record's engine-generated fields, and the public submit answer has a declared shape (#28440)\n- `119931d828` fix(objectql,rest,metadata-core)!: a datasource definition's stored row is served only to datasource administrators (#27884) (#28465)\n- `f79fa7429c` feat(spec,service-automation): alipay-v3 joins the signed connector auth schemes, with response verification (ADR-0143 D2.3, slice 3 of #26710) (#28446)\n- `5e706e7a9e` fix(runtime)!: connector connection door refuses delegated or agent callers on begin and revoke (ADR-0143 D5, ruling A) (#28474)\n- `768ec4bf6f` feat(console): a stored view filter's OR group filters the list, and the filter builder saves and reads it (#28475)\n- `82b29fe5f4` feat(types): a related list's filter and add-picker filter take a view filter's any-of group (#28466)\n- `ee29ac39e8` feat(app-shell,components): on a phone the record is always a page, with a compact header, a bottom action bar and related records pushed as pages (#28477)\n- `f5e69532a7` feat(metadata-protocol)!: the save door refuses a tenant's copy of a packaged validation rule that changes the rule's condition, type or any other key the package owns (#28478)\n- `93c0a6397c` feat(rest): the public form submit answer carries the engine-generated fields its thank-you panel names (#28479)\n- `2bba35a396` fix(cli): os migrate record-currency-codes judges --code before the probe, prompt and boot; document the command and the record-mode switch (#28416)\n- `ba0084e414` feat(spec): one override declaration for code and Studio, with the .custom pairing helpers and the closed overridable-type list (ADR-0146) (#28467)\n- `9b4d193318` fix(platform-objects): enabling two-factor and copying an invitation link are human-only identity actions (#28386)\n_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 28489,
+  "kind": "issue",
+  "title": "skills(objectstack-data): the percent row says 'Percentage values (0-100)' but a percent field stores a fraction unless it declares max above 1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "documentation",
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-10-31T23:45:29Z",
+  "updated_at": "2026-10-31T23:54:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28489",
+  "body": "domain:skills#1 · os-tesla · session_01L9qibzCtJt8Q2Z63fyRNix\n\nFiling gate: ① a published skill states the storage rule wrong (skills text an AI author follows). Found by the contract review of PR #28487 (record 6550726537, ③), outside that PR's scope. ⛔ Not a claim. Triage sets the grade and lane.\n\nReach: the published `@objectstack/skills` bundle. `skills/objectstack-data/rules/field-types.md` L54 on `main` (`9b4d1933`): `| percent | Percentage values (0-100) | min, max, precision |`. An author (or an AI) reading it writes seed rows, defaults and API values as 0–100 on a `percent` field that declares no `max`.\n\n## What `main` does\n\n- `packages/spec/src/data/percent-scale.ts` (`percentScaleOf`): \"A percent field stores a FRACTION unless it declares `max > 1`.\" The percent edit widget divides typed input by 100 unless `max > 1`; the read side multiplies by 100.\n- So on a field without `max`, a seeded `25` reads back as `2500%`, and `0.25` is what \"25%\" needs. On a field with `max: 100`, `25` is right.\n- `FieldSchema.scale` on a `percent` field counts decimal places of the displayed percentage-point value, which also hangs on this answer.\n\n## Wanted\n\n- The `percent` row states the storage rule in one cell: a fraction (0–1) unless the field declares `max` above 1 (e.g. `max: 100`), then whole percentage points; seed and API values follow the same scale.\n- Pay the line inside the file's token ceiling (headroom is 1 token after PR #28487), by deletion, ⛔ no re-wrap.\n- A patch changeset for `@objectstack/skills`. Governed path (`skills/**`): Tier H.\n- Serial: lands after PR #28487 (same file).\n\nReader who acts: the skills lane seat, next PR on `skills/objectstack-data/rules/field-types.md`.\n\nDedupe (open AND closed): \"percent fraction skill field-types\" → 6 hits, \"percentScaleOf skill\" → 3 hits; #28256 / #27973 are `percentDisplay` (the face, not the scale), none teaches the storage scale. **New.**"
+}
