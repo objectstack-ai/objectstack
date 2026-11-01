@@ -3616,11 +3616,7 @@ const ja = {
     redirecting: "{{seconds}} 秒後にリダイレクトします…",
     redirectPending: "リダイレクトしています…",
     loading: "フォームを読み込み中…",
-    requiredHint: "* 必須項目",
     requiredFields: "必須項目: {{fields}}",
-    consentRequired: "続行するにはプライバシーポリシーに同意してください。",
-    rateLimited: "送信前に回答を確認してください。",
-    redirectBlocked: "送信は受理されましたが、リダイレクトURLはセキュリティのためブロックされました。",
   },
   connectAgent: {
     disabled: {

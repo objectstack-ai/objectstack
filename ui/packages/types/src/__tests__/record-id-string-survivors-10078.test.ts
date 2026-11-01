@@ -7,30 +7,28 @@
  */
 
 /**
- * objectui#10078 - three more record-id declarations that the objectui#9511
- * ruling did not enumerate are strings too.
+ * objectui#10078 - more record-id declarations that the objectui#9511 ruling
+ * did not enumerate are strings too.
  *
  * ## What is pinned
  *
  * Director batch #195 item 1, letter A (objectui#9511) made a record id a
  * `string` wherever METADATA names one, and extended it as "the same
  * principle" to `CommentEntry.recordId` / `MentionNotification.recordId`. The
- * three below are runtime / API shapes that ruling did not name; carrying the
+ * two below are runtime / API shapes that ruling did not name; carrying the
  * rule to them is the `domain:spec` seat's inheritance decision in the claim on
- * objectui#10078. Each carries the same id with the old `string | number`
+ * objectui#10078. Each carried the same id with the old `string | number`
  * spelling:
  *
- * - `CommentSearchResult.recordId` - the record a matching comment belongs to,
- *   copied from `CommentEntry.recordId` (already a string since objectui#9511);
  * - `RecordSubscription.recordId` - the record a notification bell is for;
  * - `DataSourceMutationEvent.id` - the record a `DataSource` write touched, the
  *   same id the `update` / `delete` doors already take as a string.
  *
- * All three are runtime / API shapes with NO zod mirror (nothing authors them
+ * Both are runtime / API shapes with NO zod mirror (nothing authors them
  * into JSON), so the compiler is the only face that can refuse a number, and
  * this file is where that refusal is asserted.
  *
- * ⚠️ This file pins these three ONLY. Other record ids in this package still
+ * ⚠️ This file pins these two ONLY. Other record ids in this package still
  * admit a number and are out of its scope, so a green run here says nothing
  * about the rest of the family.
  *
@@ -51,7 +49,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CommentSearchResult, RecordSubscription } from '../views';
+import type { RecordSubscription } from '../views';
 import type { DataSourceMutationEvent } from '../data';
 
 /* ------------------------------------------------------------------ *
@@ -62,13 +60,11 @@ type Equal<X, Y> =
   (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2) ? true : false;
 type Expect<T extends true> = T;
 
-type _CommentSearchResultRecordIdIsAString = Expect<Equal<CommentSearchResult['recordId'], string>>;
 type _RecordSubscriptionRecordIdIsAString = Expect<Equal<RecordSubscription['recordId'], string>>;
 /** Optional member: `NonNullable` strips the `undefined` that `?` adds. */
 type _MutationEventIdIsAString = Expect<Equal<NonNullable<DataSourceMutationEvent['id']>, string>>;
 
 /** Stated separately so a degradation to `any` cannot pass the rows above. */
-type _CommentSearchResultRecordIdIsNotAny = Expect<Equal<Equal<CommentSearchResult['recordId'], any>, false>>;
 type _RecordSubscriptionRecordIdIsNotAny = Expect<Equal<Equal<RecordSubscription['recordId'], any>, false>>;
 type _MutationEventIdIsNotAny = Expect<Equal<Equal<DataSourceMutationEvent['id'], any>, false>>;
 
@@ -78,17 +74,14 @@ type _MutationEventIdIsNotAny = Expect<Equal<Equal<DataSourceMutationEvent['id']
  * The string spellings beside them must stay legal, or the refusals would
  * prove nothing.
  */
-// @ts-expect-error a numeric primary key is no longer a `CommentSearchResult.recordId`
-const _numericSearchHit: CommentSearchResult = { comment: { id: 'c1', text: '', author: '', createdAt: '' }, objectName: 'account', recordId: 42 };
-// @ts-expect-error nor a `RecordSubscription.recordId`
+// @ts-expect-error a numeric primary key is no longer a `RecordSubscription.recordId`
 const _numericSubscription: RecordSubscription = { recordId: 42, subscribed: true };
 // @ts-expect-error nor a `DataSourceMutationEvent.id`
 const _numericMutation: DataSourceMutationEvent = { type: 'delete', resource: 'account', id: 42 };
 
-const _stringSearchHit: CommentSearchResult = { comment: { id: 'c1', text: '', author: '', createdAt: '' }, objectName: 'account', recordId: '42' };
 const _stringSubscription: RecordSubscription = { recordId: '42', subscribed: true };
 const _stringMutation: DataSourceMutationEvent = { type: 'delete', resource: 'account', id: '42' };
-void [_numericSearchHit, _numericSubscription, _numericMutation, _stringSearchHit, _stringSubscription, _stringMutation];
+void [_numericSubscription, _numericMutation, _stringSubscription, _stringMutation];
 
 /* ------------------------------------------------------------------ *
  * Runtime half - a census over the declaration text.
@@ -115,7 +108,6 @@ function memberType(source: string, iface: string, member: string): string | nul
 }
 
 const SITES: ReadonlyArray<readonly [string, string, string]> = [
-  ['views.ts', 'CommentSearchResult', 'recordId'],
   ['views.ts', 'RecordSubscription', 'recordId'],
   ['data.ts', 'DataSourceMutationEvent', 'id'],
 ];
@@ -144,7 +136,7 @@ describe('the census instrument can fire (controls)', () => {
   });
 });
 
-describe('the three surviving record ids are strings (objectui#10078)', () => {
+describe('the surviving record ids are strings (objectui#10078)', () => {
   for (const [file, iface, member] of SITES) {
     it(`\`${iface}.${member}\` declares the protocol string id`, () => {
       expect(
