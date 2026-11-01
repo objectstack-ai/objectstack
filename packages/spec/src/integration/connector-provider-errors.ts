@@ -113,3 +113,53 @@ export function isConnectorCredentialRejected(err: unknown): boolean {
     (err as { code?: unknown }).code === CONNECTOR_CREDENTIAL_REJECTED
   );
 }
+
+/**
+ * Marker `code` for an upstream that serves a definition different from the
+ * one the instance pins — ruling on #27401 (comment 6545635244).
+ *
+ * A fourth outcome beside the three above: the upstream is reachable and
+ * accepted the credential, but what it serves no longer matches a pin the
+ * instance's declaration carries (today the `mcp` provider's
+ * `providerConfig.toolsSnapshot`: a tool whose description or input schema
+ * hashes differently, or a pinned tool no longer served). It is not an
+ * outage, so {@link CONNECTOR_UPSTREAM_UNAVAILABLE} would misdescribe it; and
+ * it is not an authoring fault the author alone can fix, because the server can
+ * serve the pinned definition again where this process cannot see it. The
+ * materializer therefore **degrades** the instance naming the change (the
+ * factory's message) and re-checks it on the same backoff as an outage: a
+ * server that restores the pinned definition recovers the instance, and an
+ * edited pin re-materializes it at once.
+ */
+export const CONNECTOR_UPSTREAM_CHANGED = 'CONNECTOR_UPSTREAM_CHANGED' as const;
+
+/**
+ * Thrown by a connector provider factory when the upstream it contacted to
+ * materialize an instance serves a definition that differs from a pin the
+ * instance declares. Carries {@link CONNECTOR_UPSTREAM_CHANGED} as its `code`;
+ * the message names what changed (each differing or missing item), since it
+ * becomes the degraded instance's reason.
+ */
+export class ConnectorUpstreamChangedError extends Error {
+  readonly code = CONNECTOR_UPSTREAM_CHANGED;
+  /** The underlying failure, if any, kept for diagnostics. */
+  readonly cause?: unknown;
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'ConnectorUpstreamChangedError';
+    if (options && 'cause' in options) this.cause = options.cause;
+  }
+}
+
+/**
+ * Structural check for the {@link CONNECTOR_UPSTREAM_CHANGED} marker — reads
+ * `code`, never `instanceof`, for the reason {@link isConnectorUpstreamUnavailable}
+ * gives.
+ */
+export function isConnectorUpstreamChanged(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === CONNECTOR_UPSTREAM_CHANGED
+  );
+}

@@ -14,7 +14,7 @@ import type {
     ConnectorCredentialHandle,
     ConnectorCredentialRequest,
 } from '@objectstack/spec/integration';
-import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
+import { isConnectorCredentialRejected, isConnectorUpstreamChanged, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
@@ -2811,6 +2811,25 @@ export class AutomationServicePlugin implements Plugin {
                     });
                     continue;
                 }
+                // [#27401] The upstream serves a definition that differs from
+                // the instance's pin (ruling on #27401, comment 6545635244):
+                // degraded with a wording of its own, on the same backoff as an
+                // outage — the server can restore the pinned definition where
+                // this process cannot see it, and an edited pin re-materializes
+                // the instance at once.
+                if (isConnectorUpstreamChanged(thrown)) {
+                    this.degradeConnectorInstance(engine, ctx, {
+                        name,
+                        entry,
+                        provider,
+                        signature,
+                        hasLive: existing !== undefined,
+                        reason: (thrown as Error).message,
+                        cause: thrown,
+                        fault: 'changed',
+                    });
+                    continue;
+                }
                 if (isConnectorUpstreamUnavailable(thrown)) {
                     this.degradeConnectorInstance(engine, ctx, {
                         name,
@@ -2972,6 +2991,14 @@ export class AutomationServicePlugin implements Plugin {
              * registration `warn` (#5660), which this hands it to.
              */
             cause: unknown;
+            /**
+             * [#27401] Which backoff-retried fault degraded the instance, for
+             * the wording of the record below: `unavailable` (the default,
+             * #3017) or `changed` — the upstream serves a definition that
+             * differs from the instance's pin (`CONNECTOR_UPSTREAM_CHANGED`).
+             * The retry is the same for both.
+             */
+            fault?: 'unavailable' | 'changed';
         },
     ): void {
         const prior = this.degradedInstances.get(info.name);
@@ -3010,12 +3037,16 @@ export class AutomationServicePlugin implements Plugin {
         }
         // Third argument, per `error(message, error?, meta?)` — NOT the second,
         // which would ship the thrown value's stack on every retry (#5575).
+        const changed = info.fault === 'changed';
         ctx.logger.error(
-            `[Automation] connector instance '${info.name}' (provider '${info.provider}') upstream unavailable — ` +
+            `[Automation] connector instance '${info.name}' (provider '${info.provider}') ` +
+                (changed
+                    ? 'serves a tool definition that differs from its toolsSnapshot — '
+                    : 'upstream unavailable — ') +
                 (info.hasLive
                     ? 'the previously-materialized connector keeps serving'
                     : 'instance registered degraded (no actions)') +
-                `; retrying with backoff, attempt ${attempts}.`,
+                `; ${changed ? 're-checking' : 'retrying'} with backoff, attempt ${attempts}.`,
             undefined,
             describeThrownForLog(info.cause),
         );

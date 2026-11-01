@@ -1633,6 +1633,14 @@ export const ERROR_CODE_LEDGER = {
     // degrades the instance; no HTTP door on this tree answers with it, the
     // thrown value is the boundary.
     'CONNECTOR_CREDENTIAL_REJECTED',
+    // [#27401] `door: 'none'` — `ConnectorUpstreamChangedError`
+    // (`integration/connector-provider-errors.ts`), thrown by a connector
+    // provider factory whose upstream serves a definition that differs from a
+    // pin the instance declares (the mcp provider's
+    // `providerConfig.toolsSnapshot`). The automation materializer catches it
+    // and degrades the instance, re-checking with backoff; no HTTP door on this
+    // tree answers with it, the thrown value is the boundary.
+    'CONNECTOR_UPSTREAM_CHANGED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
