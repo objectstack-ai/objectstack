@@ -155,15 +155,28 @@ export function storedOverlayEntries(
     // provenance classification see overlay rows the way they see
     // registry items.
     return records.map((record) => {
-        const data = this.convertStoredItem(
+        const parsed = this.convertStoredItem(
             String(record.type ?? request.type),
             typeof record.metadata === 'string'
                 ? JSON.parse(record.metadata)
                 : record.metadata,
         ) as any;
         const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-        if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
-            (data as any)._packageId = recPkg;
+        // [#28594] The row's package is its COLUMN's, and only the column's: a
+        // `_packageId` the stored body carries is not served (dropped when the
+        // row is bound to no package, replaced when it is bound to another).
+        // The save door already strips a body's stamp (`stripDerivedProvenance`
+        // in `protocol.ts`: the server states provenance, a caller never does),
+        // but a row at rest can still carry one, and every reader of this list
+        // asks an item's owner of `_packageId` — the connector materializer
+        // deciding whose root a file ref reads among them. A copy, so a cached
+        // row's body is never written.
+        let data = parsed;
+        if (data && typeof data === 'object' && !Array.isArray(data) && (data as any)._packageId !== recPkg) {
+            const bound: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+            if (recPkg) bound._packageId = recPkg;
+            else delete bound._packageId;
+            data = bound;
         }
         // [ADR-0131 D6/D7] Every row is the environment's: the family
         // declares no organization column, and the reads that feed this
