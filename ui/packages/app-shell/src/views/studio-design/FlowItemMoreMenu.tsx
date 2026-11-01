@@ -20,6 +20,9 @@
  *    `type/name` (objectui#13333). The pillar sends the delete itself. Reset
  *    overlay is not offered: it arrives with the overlay editing of the
  *    Studio / Setup boundary record's phase 2 (#28045).
+ *  - **Restore package original** (objectstack#28570, ADR-0146 D2), a
+ *    read-only base's flow that its pair overrides. The pillar decides it from
+ *    the served declaration and holds the confirmation, outside this menu.
  */
 
 import * as React from 'react';
@@ -52,6 +55,7 @@ import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
 import { apiBase } from '../../utils/apiBase.js';
 import { STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
+import { StudioRestoreOriginalItem } from './StudioCustomizeControls.js';
 
 /** What the clone door saved: the copy's name, the package it names, and its sentence. */
 export interface FlowCopied {
@@ -124,15 +128,17 @@ interface NewSimilarDraft {
 /**
  * `label` is the flow's display label; `disabled` holds the menu's actions
  * while a save is in flight. `onDelete` draws Delete flow (a writable
- * package's flow); `newSimilar` draws New similar.
+ * package's flow); `newSimilar` draws New similar; `restore` draws Restore
+ * package original (a flow the base's pair overrides).
  */
-export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newSimilar }: {
+export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newSimilar, restore }: {
   name: string;
   label: string;
   locale: string;
   disabled?: boolean;
   onDelete?: () => void;
   newSimilar?: FlowNewSimilarProps;
+  restore?: { disabled?: boolean; onSelect: () => void };
 }): React.ReactElement {
   const [confirming, setConfirming] = React.useState(false);
   const [copy, setCopy] = React.useState<NewSimilarDraft | null>(null);
@@ -208,6 +214,9 @@ export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newS
               <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
               {t('engine.studio.auto.deleteFlow', locale)}
             </DropdownMenuItem>
+          )}
+          {restore && (
+            <StudioRestoreOriginalItem disabled={disabled || restore.disabled} locale={locale} onSelect={restore.onSelect} />
           )}
         </DropdownMenuContent>
       </DropdownMenu>
