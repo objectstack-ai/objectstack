@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 80 — spawns the real producer once per single-cause fixture: three app shapes (a requires: app, a host config, a compiled artifact with no config), each one serving provision-and-exit boot and one os migrate plan --json over the database it left, six spawns of the source CLI, every one a distinct triple; slowest CI reading 60.6 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';

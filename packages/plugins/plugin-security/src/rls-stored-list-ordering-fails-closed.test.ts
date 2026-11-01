@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine and SecurityPlugin per (driver, clause, predicate) on two SQL driver families, 120 boots for 94 cases, each case asserting on the whole stored table of its own boot (nothing stored, the row unchanged), so no boot can be shared; 4.4 s in a local run; slowest CI reading 11.9 s (scheduled full-battery run 41237094739, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#19886 stage 2e] A row-level policy that ORDERS a field against a bound fails

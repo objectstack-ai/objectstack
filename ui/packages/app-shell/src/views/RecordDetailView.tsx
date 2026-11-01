@@ -2208,8 +2208,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // (`seedRecordPageReaders`) instead of asking. The record-load effect above
   // takes the record from it. Keyed on the plan's CONTENT (AGENTS.md #10).
   // An adapter without `getRecordPage` leaves every reader asking on its own.
+  //
+  // objectstack#28546 — so does an approval request's OWN page. The payload is
+  // the data API's read (`POST /data/{object}/{id}/page`), and a request is not
+  // a data-API record: the approvals service serves it
+  // (`GET /approvals/requests/:id`), with the per-caller `viewer` block the
+  // decision actions' `visible` predicates read and `pending_approvers` as an
+  // array. The data API attaches neither, and refuses the object to an ordinary
+  // approver. So a request's page asks each part on its own through the
+  // adapter, whose `findOne` the console routes to the approvals service
+  // (`routeApprovalRecordReads`); the page never widens what the data API reads.
   const recordPagePlan = useMemo(() => {
     if (!hasPage || !objectName || !pureRecordId || typeof dataSource?.getRecordPage !== 'function') return '';
+    if (objectName === SYS_APPROVAL_REQUEST_OBJECT) return '';
     const explain: RecordPageOperation[] = [];
     if (objectDef?.name && !editOffByObject) explain.push('update');
     if (objectDef?.name && !deleteOffByObject) explain.push('delete');
@@ -2221,7 +2232,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       related: recordPageRelatedLists(effectivePage, assignedPage ? undefined : childRelations),
       explain,
       fieldAccess: typeof dataSource.getRecordFieldAccess === 'function',
-      approvals: objectName !== SYS_APPROVAL_REQUEST_OBJECT,
+      approvals: true,
     });
   }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, pageRecordExpand, effectivePage, assignedPage, childRelations]);
   const recordPagePrincipal = perms.userId ?? null;
@@ -4931,14 +4942,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // of the drawer its related rows and lookups open over it
   // (objectstack#26679): the same in-place stack, drawn by this same view.
   // In a drawer, the record ↑ ↓ shows next has its related counts warmed
-  // once this one has loaded (objectstack#27056, Target 4). An adapter that
-  // answers the record page payload asks that record's whole payload instead
-  // (above), so the counts are not asked twice (objectstack#27627).
+  // once this one has loaded (objectstack#27056, Target 4). An open that asks
+  // the record page payload from an adapter that prefetches it asks that
+  // record's whole payload instead (above), so the counts are not asked twice
+  // (objectstack#27627). An open that asks no payload (an approval request's,
+  // objectstack#28546) keeps the warm-up.
   if (embedded) {
     return (
       <>
         {pageTree}
-        {typeof dataSource?.prefetchRecordPage === 'function' ? null : (
+        {recordPagePlan && typeof dataSource?.prefetchRecordPage === 'function' ? null : (
           <PrefetchUpcomingRelatedCounts
             page={renderedPage}
             objectName={objectName}

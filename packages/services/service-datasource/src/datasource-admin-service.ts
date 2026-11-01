@@ -624,6 +624,14 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   }
 
   async testConnection(input: DatasourceDraft, secret?: SecretInput): Promise<TestConnectionResult> {
+    // [#28612] First, and as a refusal (a `400` at the route) rather than a
+    // failed probe: the probe below is built from the known keys only, so a
+    // top-level `password` or any other key the schema refuses would vanish
+    // and the answer would be about a different connection than the one
+    // described.
+    if (input && typeof input === 'object') {
+      this.assertNoUndeclaredTopLevelKey('This connection draft is not a valid datasource.', input);
+    }
     if (!input?.driver) {
       return { ok: false, error: 'A driver is required to test a connection.' };
     }
@@ -667,6 +675,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   async createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary> {
     this.assertValidName(input?.name);
     this.assertNoDraftCredentialsRef(input);
+    this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${input.name}'.`, input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
     this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
@@ -728,6 +737,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     if (existing.origin !== 'runtime') {
       throw new Error(`Datasource '${name}' is code-defined and cannot be edited at runtime.`);
     }
+    // [#28549 · #28612] Whatever else the patch touches, a `label`/`active`-only
+    // edit included: that exemption spares a row stored before a gate, and this
+    // judges a key the author is writing now.
+    this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${existing.name}'.`, patch);
 
     // Merge patch over the existing record; `name`/`origin` are never patched.
     const merged: StoredDatasource = {
@@ -1242,6 +1255,41 @@ export class DatasourceAdminService implements IDatasourceAdminService {
         + 'under can be stored on a new datasource. Send the credential as `secret`, and leave '
         + '`external.credentialsRef` out. Nothing was written.',
     );
+  }
+
+  /**
+   * [#28549 · #28612] Refuse a body that carries a top-level key
+   * `DatasourceSchema` does not declare: a credential (`password`, a
+   * `connectionString` with URL userinfo), a connection key one level too high
+   * (`url`, `host`, …), an alias (`type`), a retired block, or any unknown key.
+   * The record and the probe are built from the known keys only, so such a key
+   * would vanish and the door answer success (or probe) over a datasource
+   * other than the one described, while the build door refuses it by name.
+   *
+   * The key set and the prescription are `DatasourceSchema`'s own: the body's
+   * key names, each with `null` for its value, are parsed through the strict
+   * shape and only its root `unrecognized_keys` refusal is kept, the one
+   * `os compile` prints. A key the schema declares passes here even when the
+   * projection leaves it out (`origin`, `description`, …). Only key names are
+   * judged, never values, so the answer cannot echo a credential. ⛔ No key
+   * list or prescription is restated here; the spec is the one copy. Thrown
+   * before anything is read, written or probed (a `400` at the route).
+   *
+   * `secret` never reaches this check: the route splits it off the body
+   * (`splitSecret`) before the service sees the draft, and it stays the one
+   * credential channel.
+   */
+  private assertNoUndeclaredTopLevelKey(heading: string, body: object): void {
+    const present = Object.keys(body).filter((key) => (body as Record<string, unknown>)[key] !== undefined);
+    if (present.length === 0) return;
+    const result = DatasourceSchema.safeParse(Object.fromEntries(present.map((key) => [key, null])));
+    const detail = result.success
+      ? []
+      : result.error.issues
+          .filter((issue) => issue.code === 'unrecognized_keys' && issue.path.length === 0)
+          .map((issue) => issue.message);
+    if (detail.length === 0) return;
+    throw new Error(`${heading}\n${detail.join('\n')}`);
   }
 
   private toRecord(input: DatasourceDraft): StoredDatasource {

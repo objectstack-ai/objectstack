@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a pooled real better-sqlite3 engine and a fresh AuthManager per case, each case's SCIM provision, ban, last-administrator and sign-in sequence its subject; 1.8 s in a local run; slowest CI reading 10.3 s (scheduled full-battery run 41237094739, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#14360] SCIM `active: false` disables the account again — end to end,
