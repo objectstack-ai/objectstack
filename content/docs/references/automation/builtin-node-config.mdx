@@ -104,8 +104,8 @@ Deliberately absent:
 ## TypeScript Usage
 
 ```typescript
-import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, FlowCollectionSlotSchema, FlowValueSlotSchema, GetRecordConfigSchema, MapConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
-import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, FlowCollectionSlot, FlowValueSlot, GetRecordConfig, MapConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, FlowCollectionSlotSchema, FlowValueSlotSchema, GetRecordConfigSchema, MapConfigSchema, SaveNoticeConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
+import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, FlowCollectionSlot, FlowValueSlot, GetRecordConfig, MapConfig, SaveNoticeConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
 
 // Validate data
 const result = AssignmentConfigSchema.parse(data);
@@ -252,6 +252,17 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | **itemObject** | `string` | optional | When items are records, the object they belong to (exposes each item as the child's record) |
 | **input** | `Record<string, any>` | optional | Params passed to each item's subflow, keyed by its input variables: each value a CEL value envelope `{ dialect: 'cel', source }` evaluated per item (the item variable is in scope), or a literal written as it is — a `{…}` template token is refused |
 | **outputVariable** | `string` | optional | Each item's subflow output, collected in order — bound to a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}`. An item whose run was cancelled keeps its slot as the closed marker `{ $status: 'cancelled', $itemRunId }`: never an output, and not counted as a run |
+
+
+---
+
+## SaveNoticeConfig
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | ✅ | The sentence the person who made the triggering write reads, answered as the create/update `notice` — a template rendered at run time like an `end` refusal `message`: `{{ }}` holes over the flow's variables (`Sent {{ record.name }} for approval`). Translated through flows.`<flow>`.notices.`<node_id>`.message in the writer's locale. One notice per write: a later notice on the same write replaces it. |
 
 
 ---

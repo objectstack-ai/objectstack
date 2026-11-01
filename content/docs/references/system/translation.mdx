@@ -285,6 +285,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `PlatformTranslationData.hooks[string]`
 
@@ -460,6 +461,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `ServedTranslationData.hooks[string]`
 
@@ -697,6 +699,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `TranslationData.hooks[string]`
 
@@ -904,6 +907,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `TranslationItem.hooks[string]`
 
