@@ -5784,3 +5784,152 @@ describe('status mirror identity (#3783)', () => {
     expect(mirrorContext()).toEqual({ isSystem: true, userId: 'u1', tenantId: 't1' });
   });
 });
+
+// ── The doors that act on a request answer an unreadable one as a missing one ──
+//
+// `getRequest` serves a request to its participants and to the override actor,
+// and answers `null` alike for an id it does not hold and for a request the
+// caller may not read. Every door that acts on a request — decide, recall,
+// send back, resubmit, reassign, remind, request info, comment — asks that same
+// rule (`requestRowForCaller`) right after the row is found, before any refusal
+// that depends on it: a caller who may not read the request is answered
+// `REQUEST_NOT_FOUND: <id>`, byte for byte what an id that names nothing gets,
+// and nothing is written. A caller who CAN read it is judged by the door's own
+// rule, as before; the override actor and a system context are not asked.
+// The HTTP door is pinned in
+// `packages/qa/dogfood/test/approval-act-doors-read-visibility.dogfood.test.ts`.
+describe('ApprovalService — the act doors answer an unreadable request as a missing one', () => {
+  const MISSING = 'areq_missing_0001';
+  const SUBMITTER = CTX; // u1, tenant t1
+  const APPROVER = asUser('u2');
+  /** Same tenant, participant of nothing. */
+  const STRANGER = asUser('u5');
+  /** The administrator of ANOTHER organization: their override stops at their own. */
+  const OTHER_ORG_ADMIN = { userId: 'adm_t2', tenantId: 't2', positions: [], permissions: [], posture: 'TENANT_ADMIN' } as any;
+  /** A platform administrator whose active organization is another one: the override crosses the wall. */
+  const PLATFORM_ADMIN_ELSEWHERE = { userId: 'root', tenantId: 't2', positions: [], permissions: ['admin_full_access'] } as any;
+
+  let seq = 0;
+  const setup = (opts: Record<string, unknown> = {}) => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({
+      engine: engine as any, clock: { now: () => new Date(1757000000000 + (n++) * 1000) }, ...opts,
+    });
+    return { engine, svc };
+  };
+  const open = async (svc: ApprovalService, engine: ReturnType<typeof makeFakeEngine>) => {
+    const recordId = `actvis_${++seq}`;
+    (engine._tables['opportunity'] ??= []).push({ id: recordId, amount: 100 });
+    const out: any = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_actvis_${seq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval', config: nodeConfig(['u2']), record: { id: recordId, amount: 100 },
+    }, SUBMITTER);
+    expect(out.id, 'the request opened').toBeTruthy();
+    expect(out.pending_approvers).toEqual(['u2']);
+    return out as { id: string };
+  };
+  /** Every door that acts on one request, each with a body it would accept from a caller it admits. */
+  const DOORS: Array<[string, (svc: ApprovalService, id: string, ctx: any) => Promise<unknown>]> = [
+    ['approve', (svc, id, ctx) => svc.decide(id, { decision: 'approve' } as any, ctx)],
+    ['approve with outputs', (svc, id, ctx) => svc.decide(id, { decision: 'approve', outputs: { next: ['u5'] } } as any, ctx)],
+    ['reject', (svc, id, ctx) => svc.decide(id, { decision: 'reject', comment: 'no' } as any, ctx)],
+    ['recall', (svc, id, ctx) => svc.recall(id, {} as any, ctx)],
+    ['send back', (svc, id, ctx) => svc.sendBack(id, { comment: 'rework' } as any, ctx)],
+    ['resubmit', (svc, id, ctx) => svc.resubmit(id, {} as any, ctx)],
+    ['reassign', (svc, id, ctx) => svc.reassign(id, { to: 'u3' } as any, ctx)],
+    ['remind', (svc, id, ctx) => svc.remind(id, {} as any, ctx)],
+    ['request info', (svc, id, ctx) => svc.requestInfo(id, { comment: 'why?' } as any, ctx)],
+    ['comment', (svc, id, ctx) => svc.comment(id, { comment: 'hi' } as any, ctx)],
+  ];
+  const refusalOf = (p: Promise<unknown>) => p.then(() => 'ADMITTED', (err: Error) => err.message);
+  const snapshot = (engine: ReturnType<typeof makeFakeEngine>, id: string) => ({
+    row: { ...(engine._tables['sys_approval_request'] ?? []).find((r) => r.id === id) },
+    actions: (engine._tables['sys_approval_action'] ?? []).length,
+  });
+
+  it('every act door answers a caller who may not read the request what it answers an id that names nothing, and writes nothing', async () => {
+    const { engine, svc } = setup();
+    const req = await open(svc, engine);
+    // The read door's own verdict on the two callers, first.
+    expect(await svc.getRequest(req.id, STRANGER), 'the stranger is no participant').toBeNull();
+    expect(await svc.getRequest(req.id, OTHER_ORG_ADMIN), 'another organization is behind the wall').toBeNull();
+    const before = snapshot(engine, req.id);
+    for (const [door, act] of DOORS) {
+      for (const [who, ctx] of [['stranger', STRANGER], ['another organization\'s admin', OTHER_ORG_ADMIN]] as const) {
+        const existing = await refusalOf(act(svc, req.id, ctx));
+        const missing = await refusalOf(act(svc, MISSING, ctx));
+        expect(existing, `${door} · ${who}`).toBe(`REQUEST_NOT_FOUND: ${req.id}`);
+        expect(existing.replace(req.id, 'ID'), `${door} · ${who}: the same bytes as no request`)
+          .toBe(missing.replace(MISSING, 'ID'));
+      }
+    }
+    expect(snapshot(engine, req.id), 'no refused door wrote anything').toEqual(before);
+
+    // Decided: its state is not told to a non-reader either — and still is to a reader.
+    await svc.decideNode(req.id, { decision: 'approve' } as any, APPROVER);
+    for (const [door, act] of DOORS) {
+      expect(await refusalOf(act(svc, req.id, STRANGER)), `decided · ${door}`).toBe(`REQUEST_NOT_FOUND: ${req.id}`);
+    }
+    expect(await refusalOf(svc.decide(req.id, { decision: 'approve' } as any, SUBMITTER)))
+      .toBe('INVALID_STATE: request is approved');
+  });
+
+  it('a caller who can read the request keeps the door\'s own answer, and the approver still decides', async () => {
+    const { engine, svc } = setup();
+    const req = await open(svc, engine);
+    expect(await svc.getRequest(req.id, SUBMITTER)).not.toBeNull();
+    expect(await svc.getRequest(req.id, APPROVER)).not.toBeNull();
+    // The submitter, on the approver's verbs.
+    expect(await refusalOf(svc.decide(req.id, { decision: 'approve' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: actor 'u1' is not a pending approver");
+    expect(await refusalOf(svc.sendBack(req.id, { comment: 'rework' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: actor 'u1' is not a pending approver");
+    expect(await refusalOf(svc.requestInfo(req.id, { comment: 'why?' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: actor 'u1' is not a pending approver");
+    expect(await refusalOf(svc.reassign(req.id, { to: 'u3' } as any, SUBMITTER)))
+      .toBe("FORBIDDEN: 'u1' is not a pending approver on this request");
+    expect(await refusalOf(svc.resubmit(req.id, {} as any, SUBMITTER)))
+      .toBe('INVALID_STATE: request is pending (resubmit applies to returned requests)');
+    // The approver, on the submitter's verbs.
+    expect(await refusalOf(svc.recall(req.id, {} as any, APPROVER))).toMatch(/^FORBIDDEN: /);
+    expect(await refusalOf(svc.remind(req.id, {} as any, APPROVER)))
+      .toBe('FORBIDDEN: only the submitter may send reminders');
+    // And the approver decides.
+    const out = await svc.decideNode(req.id, { decision: 'approve' } as any, APPROVER);
+    expect(out.request.status).toBe('approved');
+  });
+
+  it('follows the read rule, not a copy of it: a reader the record-reader tier admits is judged by the door', async () => {
+    // With the opt-in tier on for `opportunity`, a caller who can read the
+    // target record may read its requests — so the act doors now hold the
+    // stranger to their own rule instead of answering "no such request".
+    const { engine, svc } = setup({ recordReaderVisibleObjects: ['opportunity'] });
+    const req = await open(svc, engine);
+    expect(await svc.getRequest(req.id, STRANGER), 'the tier serves the stranger').not.toBeNull();
+    expect(await refusalOf(svc.decide(req.id, { decision: 'approve' } as any, STRANGER)))
+      .toBe("FORBIDDEN: actor 'u5' is not a pending approver");
+    expect(await refusalOf(svc.comment(req.id, { comment: 'hi' } as any, STRANGER)))
+      .toBe("FORBIDDEN: actor 'u5' is not on this request");
+  });
+
+  it('the override actor and a system context act as before — across the organization wall the read door keeps', async () => {
+    const { engine, svc } = setup();
+    const crossOrg = await open(svc, engine);
+    // The read door does not serve it to the platform admin in their own organization…
+    expect(await svc.getRequest(crossOrg.id, PLATFORM_ADMIN_ELSEWHERE)).toBeNull();
+    // …and their override still decides it, as it did.
+    const overridden = await svc.decideNode(crossOrg.id, { decision: 'approve' } as any, PLATFORM_ADMIN_ELSEWHERE);
+    expect(overridden.request.status).toBe('approved');
+    const [act] = (engine._tables['sys_approval_action'] ?? [])
+      .filter((a) => a.request_id === crossOrg.id && a.action === 'approve');
+    expect(act.via_override).toBe(true);
+    // A decided request is still told to them as decided, not hidden.
+    expect(await refusalOf(svc.decide(crossOrg.id, { decision: 'approve' } as any, PLATFORM_ADMIN_ELSEWHERE)))
+      .toBe('INVALID_STATE: request is approved');
+
+    const bySystem = await open(svc, engine);
+    const out = await svc.decideNode(bySystem.id, { decision: 'reject', actorId: SLA_ACTOR_ID } as any, SYS);
+    expect(out.request.status).toBe('rejected');
+  });
+});

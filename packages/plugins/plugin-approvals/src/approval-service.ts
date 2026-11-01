@@ -2008,14 +2008,19 @@ export class ApprovalService implements IApprovalService {
     return notified;
   }
 
-  /** Load a request row and assert it is still pending. */
-  private async loadPendingRow(requestId: string): Promise<any> {
+  /**
+   * Load a request row for a door acting on it as `context` and assert it is
+   * still pending. A request that caller may not read answers as an id that
+   * names no request ({@link refuseUnreadableRequest}).
+   */
+  private async loadPendingRow(requestId: string, context: ExecutionContext): Promise<any> {
     if (!requestId) throw new Error('VALIDATION_FAILED: requestId is required');
     const rows = await this.engine.find('sys_approval_request', {
       where: { id: requestId }, limit: 1, context: SYSTEM_CTX,
     });
     const raw: any = Array.isArray(rows) ? rows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
     return raw;
   }
@@ -4449,6 +4454,7 @@ export class ApprovalService implements IApprovalService {
     });
     const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     if (raw.status !== 'pending') throw new Error(`INVALID_STATE: request is ${raw.status}`);
 
     const pendingApprovers = csvSplit(raw.pending_approvers);
@@ -5215,6 +5221,7 @@ export class ApprovalService implements IApprovalService {
     });
     const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     const inReviseWindow = raw.status === 'returned';
     if (raw.status !== 'pending' && !inReviseWindow) {
       throw new Error(`INVALID_STATE: request is ${raw.status}`);
@@ -5658,7 +5665,7 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<ApprovalSendBackResult> {
     const actorId = await this.resolveActor(input?.actorId, context);
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     const pending = csvSplit(raw.pending_approvers);
     const slot = await this.takenSlot(pending, actorId, context);
     if (!context.isSystem && slot === undefined) {
@@ -5817,6 +5824,7 @@ export class ApprovalService implements IApprovalService {
     });
     const raw: any = Array.isArray(rawRows) ? rawRows[0] : null;
     if (!raw) throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+    await this.refuseUnreadableRequest(raw, requestId, context);
     if (raw.status !== 'returned') {
       throw new Error(`INVALID_STATE: request is ${raw.status} (resubmit applies to returned requests)`);
     }
@@ -5971,7 +5979,7 @@ export class ApprovalService implements IApprovalService {
     const actorId = await this.resolveActor(input?.actorId, context);
     const to = String(input?.to ?? '').trim();
     if (!to) throw new Error('VALIDATION_FAILED: `to` (new approver) is required');
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
 
     const pending = csvSplit(raw.pending_approvers);
     if (pending.includes(to)) {
@@ -6174,7 +6182,7 @@ export class ApprovalService implements IApprovalService {
     context: ExecutionContext,
   ): Promise<{ request: ApprovalRequestRow; notified: number }> {
     const actorId = await this.resolveActor(input?.actorId, context);
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
       throw new Error('FORBIDDEN: only the submitter may send reminders');
     }
@@ -6281,7 +6289,9 @@ export class ApprovalService implements IApprovalService {
     opts?: { ttlMs?: number },
   ): Promise<{ approve: string; reject: string }> {
     if (!approverId?.trim()) throw new Error('VALIDATION_FAILED: approverId is required');
-    const raw = await this.loadPendingRow(requestId);
+    // Minted by the server for a slot it names, on behalf of no reader — read
+    // as the system, as before.
+    const raw = await this.loadPendingRow(requestId, SYSTEM_CTX);
     const pending = csvSplit(raw.pending_approvers);
     if (!pending.includes(approverId)) {
       throw new Error(`FORBIDDEN: '${approverId}' is not a pending approver on this request`);
@@ -6477,7 +6487,7 @@ export class ApprovalService implements IApprovalService {
   ): Promise<{ request: ApprovalRequestRow }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     const pending = csvSplit(raw.pending_approvers);
     const slot = await this.takenSlot(pending, actorId, context);
     if (!context.isSystem && slot === undefined) {
@@ -6517,7 +6527,7 @@ export class ApprovalService implements IApprovalService {
   ): Promise<{ request: ApprovalRequestRow }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     if (!input?.comment?.trim()) throw new Error('VALIDATION_FAILED: comment is required');
-    const raw = await this.loadPendingRow(requestId);
+    const raw = await this.loadPendingRow(requestId, context);
     const pending = csvSplit(raw.pending_approvers);
     const isSubmitter = raw.submitter_id && String(raw.submitter_id) === String(actorId);
     // The submitter speaks as themselves; anyone else speaks from the slot
@@ -9123,6 +9133,80 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * The stored row request `requestId` names, as the READ door finds it for
+   * this caller — the one rule {@link getRequest} serves by and every door
+   * that acts on a request asks ({@link refuseUnreadableRequest}), so the two
+   * cannot disagree about who may see a request.
+   *
+   * The row is read inside the caller's organization (`findRequestRow` — the
+   * tenancy wall), and with `enforceVisibility` it is kept only when it is
+   * among the requests this caller may see ({@link visibleRequestIds}). `null`
+   * alike for an id this store does not hold and for a request the caller may
+   * not read — ⛔ no path tells the two apart. `caller` comes back because the
+   * read path also attaches the viewer block with it.
+   *
+   * Without `enforceVisibility` only the tenancy wall applies: the echo a write
+   * path builds ({@link readBackRequest}) has already been authorized by the
+   * operation's own rule.
+   */
+  private async requestRowForCaller(
+    requestId: string,
+    context: ExecutionContext,
+    enforceVisibility: boolean,
+  ): Promise<{ raw: any; caller: ActingCaller | null } | null> {
+    // `organizationId` is not on the envelope — see isOverrideActor().
+    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
+    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
+    if (!raw) return null;
+    const caller = await this.actingCaller(context);
+    // #3590: tenant scoping alone let any authenticated user read any request
+    // — and, once decision attachments derived their access from the request
+    // (#3580), its files too. Participation is the rest of the rule.
+    if (enforceVisibility) {
+      // [#8652] The row itself names the target record, so a request loaded by
+      // id carries its own anchor — which is what makes `listActions` and the
+      // decision-attachment gate follow this rule without a second copy of it.
+      const visible = await this.visibleRequestIds(context, tenantOrg ?? null, {
+        object: raw.object_name, recordId: raw.record_id,
+      }, caller);
+      if (visible && !visible.has(String(raw.id))) return null;
+    }
+    return { raw, caller };
+  }
+
+  /**
+   * Every door that ACTS on a request — decide (approve / reject), recall,
+   * send back, resubmit, reassign, remind, request info, comment — answers a
+   * caller who may not READ the request exactly what it answers an id that
+   * names no request: `REQUEST_NOT_FOUND`. Asked right after the row is found
+   * and before any refusal that depends on it (its status, its slate, its
+   * submitter), so no answer a door gives tells that caller the request
+   * exists or what state it is in. A caller who can read the request is
+   * judged by the door's own rule, as before: `FORBIDDEN`, `INVALID_STATE`, or
+   * the action.
+   *
+   * The test is the read door's own ({@link requestRowForCaller}) — ⛔ never a
+   * second copy of it. `requestId` is the id the caller sent, so the refusal
+   * is byte for byte the one a missing id gets.
+   *
+   * The override actor ({@link isOverrideActor}, judged against the REQUEST's
+   * organization, exactly as each door judges it) is not asked: a platform
+   * admin's override crosses the tenancy wall the read door keeps, and a system
+   * context (the SLA sweep, the action link) acts on behalf of no reader. Both
+   * act exactly as before. Everyone else a door admits — a pending approver,
+   * the submitter — is a participant of the request, and so can read it.
+   */
+  private async refuseUnreadableRequest(
+    raw: any,
+    requestId: string,
+    context: ExecutionContext,
+  ): Promise<void> {
+    if (this.isOverrideActor(context, raw?.organization_id ?? null)) return;
+    if (await this.requestRowForCaller(requestId, context, true)) return;
+    throw new Error(`REQUEST_NOT_FOUND: ${requestId}`);
+  }
+
+  /**
    * [#26314] `IApprovalService.getRecordLock` — is this record held by a
    * locking approval, for EVERY caller who can read the record (#25934 ruling
    * A). A non-participant is told the record is locked before they edit it,
@@ -9168,23 +9252,9 @@ export class ApprovalService implements IApprovalService {
     enforceVisibility: boolean,
   ): Promise<ApprovalRequestRow | null> {
     if (!requestId) return null;
-    // `organizationId` is not on the envelope — see isOverrideActor().
-    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
-    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
-    if (!raw) return null;
-    const caller = await this.actingCaller(context);
-    // #3590: tenant scoping alone let any authenticated user read any request
-    // — and, once decision attachments derived their access from the request
-    // (#3580), its files too. Participation is the rest of the rule.
-    if (enforceVisibility) {
-      // [#8652] The row itself names the target record, so a request loaded by
-      // id carries its own anchor — which is what makes `listActions` and the
-      // decision-attachment gate follow this rule without a second copy of it.
-      const visible = await this.visibleRequestIds(context, tenantOrg ?? null, {
-        object: raw.object_name, recordId: raw.record_id,
-      }, caller);
-      if (visible && !visible.has(String(raw.id))) return null;
-    }
+    const read = await this.requestRowForCaller(requestId, context, enforceVisibility);
+    if (!read) return null;
+    const { raw, caller } = read;
     const row = rowFromRequest(raw);
     // [#10749] Redact before enrichment — see `redactPayloads`. [#23594] The
     // snapshot and the subject title are narrowed by ONE answer for the reader;
