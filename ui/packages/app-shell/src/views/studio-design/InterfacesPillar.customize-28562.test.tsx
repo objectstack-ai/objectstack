@@ -356,6 +356,22 @@ describe('Customize a read-only base’s dashboard into its pair (objectstack#28
     expect(srv.saves[1]!.opts.packageId).toBe(PAIR);
   });
 
+  it('the first save into the pair is pinned to "no draft there", the next to the version it was answered', async () => {
+    mount();
+    await openPipeline();
+    await customize();
+
+    patchBoard();
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    expect(srv.saves[0]!.opts).toMatchObject({ packageId: PAIR, ifNoneMatch: '*' });
+    expect(srv.saves[0]!.opts).not.toHaveProperty('ifMatch');
+
+    patchBoard();
+    await waitFor(() => expect(srv.saves).toHaveLength(2), { timeout: 8000 });
+    expect(srv.saves[1]!.opts).toMatchObject({ packageId: PAIR, ifMatch: 'v1' });
+    expect(srv.saves[1]!.opts).not.toHaveProperty('ifNoneMatch');
+  });
+
   it('a second item asks the door again and is answered 200; it is written into the same pair', async () => {
     mount();
     await openPipeline();
@@ -513,6 +529,8 @@ describe('Customize an object leaf’s list view into the pair (objectstack#2856
     expect(saved).toMatchObject({ type: 'view', name: 'opportunity.default', opts: { mode: 'draft', packageId: PAIR } });
     expect((saved!.body.config as Record<string, unknown>).calendar).toEqual({ startDateField: 'start_date', titleField: 'name' });
     expect(saved!.body.overrides).toEqual({ package: BASE, basedOn: '4.0.0' });
+    // Read at the base before the pair was there: pinned to "no draft in the pair".
+    expect(saved!.opts).toMatchObject({ ifNoneMatch: '*' });
     expect(srv.base.get('view/opportunity.default')).toStrictEqual(BASE_ROWS['view/opportunity.default']);
     await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
     expect(screen.getByRole('button', { name: t('engine.studio.inspector.listView.addView', 'en') })).toBeDisabled();
