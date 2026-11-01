@@ -4,7 +4,8 @@
  * [ADR-0146 D10, #28564] The `__c` extension-field reservation at every door
  * of this package — one judge (`protocol-extension-field-suffix.ts`), asked by
  * the save door, the restore doors, the draft promotion (`publishMetaItem` and
- * the `publishPackageDrafts` batch that shares it) and `duplicatePackage`; and
+ * the `publishPackageDrafts` batch that shares it), `duplicatePackage` and
+ * ([#28735]) `reassignOrphanedMetadata`, the adopt-orphans door; and
  * `installPackage`, which its closed manifest already covers.
  *
  * Maintainer, verbatim: 「扩展字段用 __c 后缀，只有 .custom 包能用。」
@@ -532,6 +533,34 @@ describe('[ADR-0146 D10] the draft promotion refuses an object draft carrying a 
     });
 });
 
+describe('[#28735] the promotion\'s suffix block is not asked of sealed managed content', () => {
+    /** A code package's shipped object, as `SchemaRegistry.getArtifactItem` stamps it. */
+    const SHIPPED = 'probe_sealed';
+    const sealedHarness = () => {
+        const h = makeProtocol();
+        h.engine.registry.getArtifactItem = (type: string, name: string) => (type === 'object' && name === SHIPPED
+            ? { name, label: 'Sealed', _packageId: 'com.acme.shipper', _provenance: 'package' }
+            : undefined);
+        return h;
+    };
+
+    it('a draft of a shipped object carrying `x__c`, stored before the rule, answers the store\'s NOT_OVERRIDABLE, not "rename the field"', async () => {
+        const h = sealedHarness();
+        // The save door refuses this draft (`refusePackagedBaseOverride`), so it is staged as a row stored before the gate.
+        const row: Row = {
+            id: 'r_sealed', type: 'object', name: SHIPPED, organization_id: null, package_id: BOUND, state: 'draft',
+            metadata: JSON.stringify(obj(SHIPPED, 'Sealed', 'x__c')),
+        };
+        h.rows.set(keyOf(row as unknown as Record<string, unknown>), row);
+
+        const { error } = await attempt(() => h.protocol.publishMetaItem({ type: 'object', name: SHIPPED, packageId: BOUND }));
+
+        expect(error).toBeInstanceOf(Error);
+        expect({ code: error.code, status: error.status }).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(storedObjects(h)).toEqual([{ row: SHIPPED, state: 'draft', binding: BOUND, fields: ['title', 'x__c'] }]);
+    });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 4. duplicatePackage, judged against the target id
 // ═══════════════════════════════════════════════════════════════════════════
@@ -564,6 +593,56 @@ describe('[ADR-0146 D10] duplicatePackage from a `.custom` pair into a plain id 
         expect(res.failed).toEqual([]);
         expect(res.copiedCount).toBe(1);
         expect(storedObjects(h).filter((r) => r.binding === DST)).toHaveLength(1);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4b. reassignOrphanedMetadata (the adopt-orphans door), judged against the target id
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[ADR-0146 D10, #28735] the adopt-orphans door judges each object row it rebinds against the target', () => {
+    /** Package-less active objects through the real save door (not judged: no package), then the write-through spied. */
+    async function orphans(h: Harness, ...bodies: Array<ReturnType<typeof obj>>) {
+        for (const item of bodies) await h.protocol.saveMetaItem({ type: 'object', name: item.name, item });
+        h.saveDoor.mockClear();
+        return vi.spyOn(h.protocol, 'applyRegistryWriteThrough');
+    }
+
+    it('a package-less object with `x__c` adopted into a plain package is refused with case (a); nothing moves, nothing registers', async () => {
+        const h = makeProtocol();
+        const writeThrough = await orphans(h, obj('probe_env', 'Env', 'x__c'));
+        const update = vi.spyOn(h.engine, 'update');
+
+        const { error } = await attempt(() => h.protocol.reassignOrphanedMetadata({ targetPackageId: BOUND }));
+
+        expectReservedRefusal(error, 'x__c', 'probe_env', BOUND, 'objects.probe_env.fields.x__c');
+        expect(update).not.toHaveBeenCalled();
+        expect(writeThrough).not.toHaveBeenCalled();
+        expect(storedObjects(h)).toEqual([{ row: 'probe_env', state: 'active', binding: null, fields: ['title', 'x__c'] }]);
+    });
+
+    it('a mixed adoption (one clean row, one `x__c` row) into a plain package is refused whole: the clean row does not move either', async () => {
+        const h = makeProtocol();
+        const writeThrough = await orphans(h, obj('probe_clean', 'Clean'), obj('probe_env', 'Env', 'x__c'));
+
+        const { error } = await attempt(() => h.protocol.reassignOrphanedMetadata({ targetPackageId: BOUND }));
+
+        expectReservedRefusal(error, 'x__c', 'probe_env', BOUND, 'objects.probe_env.fields.x__c');
+        expect(writeThrough).not.toHaveBeenCalled();
+        expect(storedObjects(h).map((r) => [r.row, r.binding])).toEqual([['probe_clean', null], ['probe_env', null]]);
+    });
+
+    it('CONTROL: the same `x__c` row adopted into the base\'s `.custom` pair is admitted and moves; a clean row into the plain package too', async () => {
+        const pairH = makeProtocol();
+        await orphans(pairH, obj('probe_env', 'Env', 'x__c'));
+        const res = await pairH.protocol.reassignOrphanedMetadata({ targetPackageId: PAIR });
+        expect(res).toMatchObject({ success: true, reassignedCount: 1, targetPackageId: PAIR });
+        expect(storedObjects(pairH)).toEqual([{ row: 'probe_env', state: 'active', binding: PAIR, fields: ['title', 'x__c'] }]);
+
+        const plainH = makeProtocol();
+        await orphans(plainH, obj('probe_clean', 'Clean', 'region'));
+        expect((await plainH.protocol.reassignOrphanedMetadata({ targetPackageId: BOUND })).reassignedCount).toBe(1);
+        expect(storedObjects(plainH)).toEqual([{ row: 'probe_clean', state: 'active', binding: BOUND, fields: ['title', 'region'] }]);
     });
 });
 

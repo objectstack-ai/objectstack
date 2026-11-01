@@ -125,6 +125,7 @@
  *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
+ *   flows.<flow>.notices.<node_id>.message                     (#28251)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
@@ -2079,6 +2080,12 @@ const END_NODE_TYPE = 'end';
 const REFUSED_OUTCOME = 'refused';
 
 /**
+ * [#28251] The node whose message `flows.<flow>.notices.<node_id>.message`
+ * addresses: a `save_notice` node (`SaveNoticeConfigSchema`).
+ */
+const SAVE_NOTICE_NODE_TYPE = 'save_notice';
+
+/**
  * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
  * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
  * the same reason: a stack handed to `defineStack` is hand-built objects rather
@@ -2347,6 +2354,19 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [#28251] `flows.<flow>.notices.<node_id>.message` — the message of every
+    // `save_notice` node, at any depth of the same node universe. The engine
+    // reads that key (`flowNoticeMessageKey`) in the WRITER's locale before it
+    // renders the holes, so the seed is the authored template, holes and all,
+    // exactly as for a refusal: the person who made the record write reads it.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== SAVE_NOTICE_NODE_TYPE) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'notices', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
     }
 
     // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's

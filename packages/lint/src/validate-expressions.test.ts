@@ -5355,6 +5355,49 @@ describe('the http text slots, body and literals are refused with their remedies
   });
 });
 
+describe('a flow\'s own text slots — `successMessage` / `errorMessage` (#28054)', () => {
+  const stackWith = (messages: Record<string, unknown>, endMessage?: string) => ({
+    flows: [{
+      name: 'enrol',
+      ...messages,
+      nodes: [
+        { id: 'start', type: 'start' },
+        ...(endMessage !== undefined ? [{ id: 'finish', type: 'end', config: { outcome: 'refused', message: endMessage } }] : []),
+      ],
+      edges: [],
+    }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+
+  it.each(['successMessage', 'errorMessage'] as const)('%s: a single-brace token is refused at `error`, as in a node text slot', (key) => {
+    const text = '{enrolledCount} contacts enrolled';
+    const found = errorsOf(stackWith({ [key]: text }));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toBe(`flow 'enrol' ${key}`);
+    expect(found[0]!.path).toBe(`flows[0].${key}`);
+    expect(found[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(found[0]!.message).toContain('`{{ enrolledCount }} contacts enrolled`');
+    // The node text slot carrying the same text is refused with the same words.
+    const node = errorsOf(stackWith({}, text));
+    expect(node).toHaveLength(1);
+    expect(node[0]!.message).toBe(found[0]!.message);
+  });
+
+  it('a hole that does not compile is refused with the compile step\'s words, as in a node text slot', () => {
+    const text = 'Enrolled {{ enrolledCount + 1 }} contacts';
+    const found = errorsOf(stackWith({ successMessage: text }));
+    const node = errorsOf(stackWith({}, text));
+    expect(found).toHaveLength(1);
+    expect(node).toHaveLength(1);
+    expect(found[0]!.message).toBe(node[0]!.message);
+  });
+
+  it('a well-formed template and a plain sentence are clean', () => {
+    expect(errorsOf(stackWith({ successMessage: '{{ enrolledCount }} contacts enrolled', errorMessage: 'Enrolment failed.' }))).toEqual([]);
+  });
+});
+
 describe('node config an executor requires (#20316)', () => {
   const stackWith = (node: Record<string, unknown>) => ({
     flows: [{ name: 'config_flow', nodes: [{ id: 'start', type: 'start' }, { id: 'n', ...node }], edges: [] }],

@@ -186,6 +186,7 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { bindStoredRow } from './stored-row-binding.js';
+import { incomingTakesStoredFlowSlot } from './stored-flow-slot.js';
 import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#28413, ADR-0146 D11] The package-less overlay migration (`os migrate
 // packageless-overlays`), and the save's landing on a migrated row.
@@ -13437,6 +13438,16 @@ export class ObjectStackProtocolImplementation implements
      * ever returning the value — is untouched, exactly as #7823 kept the engine's
      * write results whole while the generic-data-path ingress stripped them.
      *
+     * PUBLIC, and asked by the generic data mouths that hand a caller's query
+     * to the engine without passing through {@link findData}: the MCP stdio
+     * transport's `query_records` / `aggregate_records` and the HTTP MCP
+     * bridge's `aggregate_records` arm (`callData`'s `aggregate`). Each asks
+     * this method on the `protocol` service it already resolves, before the
+     * engine, so a filter, sort, group key or aggregation over an `internal`
+     * field gets this door's refusal, word for word, on every transport —
+     * one definition, never a copy beside it (route-ownership rule 1). The
+     * engine's privileged consumers above still never reach it.
+     *
      * Positions, with the ONE flag reader ({@link collectInternalWriteResponseFields},
      * `@objectstack/core`'s cross-package twin of objectql's
      * `collectInternalReadFields` — identical rule, imported because this package
@@ -13476,7 +13487,7 @@ export class ObjectStackProtocolImplementation implements
      * door). A dotted sort inside an `expand` entry is admitted but orders a
      * batch the expansion re-keys by id with no `limit`, so it changes no answer.
      */
-    private assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
+    assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
         const host: ThisParameterType<typeof assertNoInternalFieldEvaluated> = {
             groupByFieldNames: (...a) => this.groupByFieldNames(...a),
@@ -15392,9 +15403,10 @@ export class ObjectStackProtocolImplementation implements
      * `atomic=false`). It used to change a second — forbidding the upsert
      * fallback insert, whose failure inside an aborted transaction could only
      * mask the real cause — until #5099 removed that fallback from BOTH arms:
-     * the upsert fork is decided by an existence probe before any write, so a
-     * fallback insert could only bury a real update failure under the
-     * duplicate-key error of inserting a row just proven to exist.
+     * the upsert fork is decided before any write (by what the caller can
+     * read, since the fork's own note says why), so a fallback insert could
+     * only bury a real update failure under the duplicate-key error of
+     * inserting a row the caller was just shown to read.
      */
     private runBatchDataLoop(args: {
         object: string;
@@ -15407,10 +15419,11 @@ export class ObjectStackProtocolImplementation implements
     }): Promise<BatchDataLoopOutcome> {
         // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
         const readEngine = () => this.engine;
+        const readGetServicesRegistry = () => this.getServicesRegistry;
         const host: ThisParameterType<typeof runBatchDataLoop> = {
             assertRecordExists: (...a) => this.assertRecordExists(...a),
             get engine() { return readEngine(); },
-            probeRecord: (...a) => this.probeRecord(...a),
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return runBatchDataLoop.call(host, args);
     }
@@ -17297,14 +17310,19 @@ export class ObjectStackProtocolImplementation implements
      * second code package's claim on the name, ADR-0029 D3), and its artifact
      * lookup reads the owner's layer whatever package is asked for, so the
      * owner is the whole set.
+     *
+     * [#28746] `member` — one bundle member's artifacts, for a type whose
+     * identity is a pair (the override write gate's question, which asks
+     * about the member a write addresses). Omitted, the bundle's artifact
+     * canonical-first, as before: a lock binds the NAME.
      */
-    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
+    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages, member?: string): unknown[] {
         // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
         const host: ThisParameterType<typeof shippedArtifactsOf> = {
             lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
             shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
-        return shippedArtifactsOf.call(host, type, name, shipping);
+        return shippedArtifactsOf.call(host, type, name, shipping, member);
     }
 
     /**
@@ -18662,10 +18680,12 @@ export class ObjectStackProtocolImplementation implements
      * suggestion of an `isDefault` set) saw the item as unowned: on a host
      * kernel until the next list read, and on an environment kernel that
      * hydrates its own store until never. ⛔ No owner is derived: the binding is
-     * only read, a body that already names a `_packageId` keeps it, a row with
-     * no binding stays unowned, and an artifact's envelope still wins over the
-     * stamp ({@link mergeArtifactProtection}). The expansions of a view
-     * container are registered from the unstamped row, as before.
+     * only read, and since #28673 the column wins over the body — a body that
+     * names a different `_packageId` has it replaced by the row's binding, and
+     * a row with no binding has a body stamp dropped, so it stays unowned. An
+     * artifact's envelope still wins over the stamp
+     * ({@link mergeArtifactProtection}). The expansions of a view container are
+     * registered from the stamped row too ({@link hydrateExpandedViewItems}).
      *
      * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
      *
@@ -18820,7 +18840,20 @@ export class ObjectStackProtocolImplementation implements
         // ({@link bindStoredRow}): the pull arms the shipping package's
         // declared override over the loader's body only when the column, not
         // a stamp in the body, binds the row to that package's `.custom` pair.
-        if (canonicalType === 'flow') bindStoredRow(registered, options.packageId ?? null);
+        if (canonicalType === 'flow') {
+            bindStoredRow(registered, options.packageId ?? null);
+            // [#28717] …and the shipping package's declared override keeps the
+            // name's one bare slot over any other stored row of the name, in
+            // whatever order the store reads them, so the boot pull arms it
+            // from the first pull. The row that loses stays stored and is
+            // carried on the override's body for the boot pull to name
+            // ({@link incomingTakesStoredFlowSlot}).
+            const held = typeof registry.getItem === 'function'
+                ? registry.getItem(type, String((data as any).name))
+                : undefined;
+            const owner = this.packagedArtifactOwner({ type, name: String((data as any).name) });
+            if (!incomingTakesStoredFlowSlot(held, registered, owner)) return true;
+        }
         registry.registerItem(type, registered, 'name' as any);
         await this.hydrateExpandedViewItems(type, data, options);
         return true;
@@ -23977,8 +24010,10 @@ export class ObjectStackProtocolImplementation implements
         // [ADR-0146 D10, #28564] …and an object draft's fields against the
         // `__c` reservation, judged against the package promoted into, with the
         // save door's judge and envelope, before `repo.promoteDraft` writes. See
-        // {@link objectBodyExtensionFieldSuffixRefusal}.
-        if (draftForGate) {
+        // {@link objectBodyExtensionFieldSuffixRefusal}. [#28735] ⛔ Not asked
+        // of SEALED managed content, for the D9.9 block's reason: the store's
+        // `NOT_OVERRIDABLE` is that row's one answer, not "rename the field".
+        if (draftForGate && singularType === 'object' && !this.isSealedManagedItem(singularType, request.name)) {
             const suffixRefusal = objectBodyExtensionFieldSuffixRefusal(
                 singularType, draftForGate.body, request.name, promoteInto,
             );
@@ -26853,6 +26888,21 @@ export class ObjectStackProtocolImplementation implements
      * new binding) until the next boot dropped it again, against the
      * write-through's own rule that a draft never leaks into the runtime
      * (ADR-0048). One gate before both limbs now admits active rows only.
+     *
+     * ## [ADR-0146 D10, #28735] The `__c` reservation, judged against the target
+     *
+     * A package-unbound row is not judged by the reservation (it is the
+     * environment's own), so the save door admits an object carrying `x__c`
+     * into no package. Rebinding that row makes `x__c` a field the TARGET
+     * package declares on its own object, which case (a) refuses outside a
+     * `.custom` pair. So every active `object` row this adoption would rebind
+     * is judged against the target id with the save door's judge
+     * ({@link judgeExtensionFieldSuffix}) before the first storage update, and
+     * any refused field refuses the adoption whole, with the save door's
+     * envelope ({@link extensionFieldSuffixRefusalError}, `VALIDATION_ERROR` /
+     * 400, `issues[]` locating each field): no row moves and nothing is
+     * written through to the registry. An adopted draft is judged when it is
+     * promoted (the promotion asks the same judge against its binding).
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;
@@ -26884,6 +26934,30 @@ export class ObjectStackProtocolImplementation implements
                 // (ADR-0070); see the header. The type folds as the save's does.
                 && !this.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name)),
         );
+
+        // [ADR-0146 D10, #28735] ⭐ THE `__c` RESERVATION, JUDGED AGAINST THE
+        // TARGET, before the first update below: each active object row this
+        // adoption rebinds becomes the target's own object. Refused whole, with
+        // the save door's judge and envelope; see the header. An unparseable
+        // row is left to the loop, as `duplicatePackage` leaves it.
+        {
+            const adoptedObjects: Record<string, unknown> = {};
+            for (const row of orphans) {
+                if (canonicalMetaType(String(row?.type)) !== 'object' || row.state !== 'active') continue;
+                if (typeof row.name !== 'string') continue;
+                let body: unknown;
+                try {
+                    body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+                } catch {
+                    continue;
+                }
+                if (body && typeof body === 'object' && !Array.isArray(body)) {
+                    adoptedObjects[row.name] = { ...(body as Record<string, unknown>), name: row.name };
+                }
+            }
+            const suffixRefusals = judgeExtensionFieldSuffix({ packageId: request.targetPackageId, objects: adoptedObjects });
+            if (suffixRefusals.length > 0) throw extensionFieldSuffixRefusalError(suffixRefusals);
+        }
 
         const reassigned: Array<{ type: string; name: string }> = [];
         // [#12981] The refusal channel this loop used to lack entirely.
@@ -28872,8 +28946,10 @@ export class ObjectStackProtocolImplementation implements
                     // #5927 — was an inline `this.isArtifactBacked(...)` call
                     // with these exact arguments; now reads the method-scoped
                     // binding the receipts share. Same fact, one call fewer.
-                    // [#28412] The pair's row of an open-override type is
-                    // removed as the declared save wrote it: runtime-only.
+                    // [#28412] The pair's row of a type whose D9 conditions
+                    // are delivered (`flow` only, {@link isPairRowRemoval})
+                    // is removed as the declared save wrote it: runtime-only.
+                    // Every other type keeps the intent main gave it.
                     intent: artifactBacked && !pairRowRemoval
                         ? 'override-artifact'
                         : 'runtime-only',

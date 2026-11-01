@@ -116,6 +116,10 @@
  * are each an orphan, with its own diagnosis. The message's `{{ }}` holes are
  * the schema's to judge (`TranslationDataSchema`, the one text-slot judge).
  *
+ * `flows.<name>.notices.<node_id>.message` (#28251) is judged the same way:
+ * the node id must name a `save_notice` node, at any depth. A node of another
+ * type and an id the flow does not declare are each an orphan.
+ *
  * `flows.<name>.approvals.<node_id>.label` is judged the same way: the node id
  * must name an `approval` node (`APPROVAL_NODE_TYPE`), at any depth. A node of
  * another type and an id the flow does not declare are each an orphan, with
@@ -278,6 +282,13 @@ const SCREEN_NODE_TYPE = 'screen';
  * `'refused'` a member of the schema's `outcome` enum, neither exported by name.
  */
 const END_NODE_TYPE = 'end';
+
+/**
+ * [#28251] The node a `flows.<name>.notices.*` key addresses: a `save_notice`
+ * node (`SaveNoticeConfigSchema`). A local const for {@link SCREEN_NODE_TYPE}'s
+ * reason.
+ */
+const SAVE_NOTICE_NODE_TYPE = 'save_notice';
 
 /**
  * The component a misplaced `components.<id>.items` key most often sits on: a
@@ -485,6 +496,11 @@ interface FlowFacts {
    * renders no message, so a key over one is an orphan.
    */
   refusals: Set<string>;
+  /**
+   * [#28251] The ids of the `save_notice` nodes — the nodes a
+   * `flows.<name>.notices.<node_id>` key addresses, at any depth.
+   */
+  notices: Set<string>;
   /**
    * The ids of the `approval` nodes — the nodes a
    * `flows.<name>.approvals.<node_id>` key addresses, at any depth.
@@ -1628,6 +1644,7 @@ function buildUniverse(stack: AnyRec): Universe {
     if (!ownDeclaration && flows.has(flowName)) return;
     const screens = new Map<string, ScreenFacts>();
     const refusals = new Set<string>();
+    const notices = new Set<string>();
     const approvals = new Set<string>();
     const otherNodes = new Map<string, string>();
     const messages = new Set<string>(FLOW_TERMINAL_MESSAGE_KEYS.filter((key) => typeof flow[key] === 'string'));
@@ -1643,6 +1660,7 @@ function buildUniverse(stack: AnyRec): Universe {
           refusals.add(nodeId);
         }
         if (nodeType === APPROVAL_NODE_TYPE) approvals.add(nodeId);
+        if (nodeType === SAVE_NOTICE_NODE_TYPE) notices.add(nodeId);
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
@@ -1662,7 +1680,7 @@ function buildUniverse(stack: AnyRec): Universe {
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
       });
     }
-    flows.set(flowName, { screens, refusals, approvals, messages, otherNodes });
+    flows.set(flowName, { screens, refusals, notices, approvals, messages, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -2453,6 +2471,23 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                     suggest(nodeId, flow.refusals),
             `Refusal translations are keyed by the \`id\` of an \`end\` node declaring ` +
               `\`outcome: 'refused'\`.`,
+          );
+        }
+        // ── flows.<name>.notices.<node_id> (#28251) ───────────────────────
+        for (const nodeId of Object.keys(asRecord(rawFlow.notices))) {
+          if (flow.notices.has(nodeId)) continue;
+          const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+          orphan(
+            `${inLocale} · flow "${flowName}" · save notice "${nodeId}"`,
+            `${flowPath}.notices.${nodeId}`,
+            nodeType
+              ? `Translations are keyed to save notice "${nodeId}", which flow "${flowName}" declares as ` +
+                `${/^[aeiou]/.test(nodeType) ? 'an' : 'a'} \`${nodeType}\` node, not a \`save_notice\`, so ` +
+                `nothing resolves this key.`
+              : `Translations are keyed to save notice "${nodeId}", a node id flow "${flowName}" does not ` +
+                `declare, so the notice keeps its source-locale message.` +
+                suggest(nodeId, flow.notices),
+            `Save-notice translations are keyed by the \`id\` of a \`save_notice\` node.`,
           );
         }
         // ── flows.<name>.approvals.<node_id> ──────────────────────────────

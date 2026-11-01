@@ -1599,6 +1599,46 @@ export const HookContextSchema = lazySchema(() => z.object({
     .describe('Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`)'),
 
   /**
+   * Save Notice (#28251)
+   *
+   * `ctx.notice('Sent to your manager for approval')` tells the person who
+   * made THIS write what the save set in motion. It is the hook face of the
+   * write's own `onNotice` listener (`WriteObservabilityOptions`), never a
+   * second channel: the engine binds it from the write's options at every
+   * `insert` / `update` dispatch (`before*` and `after*`, one record or each
+   * row of a batch), and a call hands the message to that listener, which
+   * `metadata-protocol`'s `createData` / `updateData` answer as `notice`.
+   *
+   * It is the one spelling every hook face can reach. An in-process handler
+   * calls it like the cast `ctx.input.options` listener; a sandboxed `body`
+   * (and a `handler` the build lowers into one), whose `ctx.input.options`
+   * is the frozen `{ multi, where }` projection, calls it too: the body
+   * runner marshals it as a host function. No capability token: it reads
+   * nothing and writes nothing but the requester's own answer.
+   *
+   * - The message is one non-empty string; anything else is REFUSED with a
+   *   `TypeError` naming the call, so a mistaken call is never a silent no-op.
+   * - One message per write, the listener's rule: a later call replaces an
+   *   earlier one, so the last call before the write answers wins.
+   * - Present on every `insert` / `update` dispatch, whether or not anyone
+   *   listens: a write no person is waiting on (a batch, a seed, an import, a
+   *   flow node's write) passes no listener, and then the call sets nothing.
+   *   Absent on `find` and `delete` dispatches, whose answers carry no notice.
+   * - A refused write answers its error, never a notice, even if a `before*`
+   *   hook set one first. A nested write a hook or a flow makes inside this one
+   *   carries its own options, so its notice never reaches this answer.
+   *
+   * Runtime-only, like {@link api}: a live function, so the RUNTIME schema is
+   * `z.unknown()` (JSON Schema `{}`) and the type is a static cast.
+   */
+  notice: (z.unknown().optional() as unknown as z.ZodOptional<z.ZodType<HookNoticeSetter, HookNoticeSetter>>)
+    .describe(
+      'Tell the person who made THIS insert/update what the save set in motion: `ctx.notice(message)` hands one '
+      + 'non-empty string to the write\'s own `onNotice` listener, answered as the create/update `notice`. Bound '
+      + 'by the engine on every insert/update dispatch (a no-op when nothing listens); absent on find/delete',
+    ),
+
+  /**
    * Current User Info
    * Convenience shortcut for session.userId + additional user metadata.
    * Populated by the engine when available.
@@ -1628,6 +1668,12 @@ export type ResolvedHook = z.output<typeof HookSchema>;
  * the enclosing transaction commits (#7477).
  */
 export type HookEventType = z.input<typeof HookEvent>;
+/**
+ * The function a hook calls as `ctx.notice(message)` (#28251) — see
+ * `HookContext.notice`. Refuses (throws a `TypeError`) a message that is not
+ * a non-empty string.
+ */
+export type HookNoticeSetter = (message: string) => void;
 export type HookContext = z.input<typeof HookContextSchema>;
 /**
  * The engine's dispatch marker (#6966) — see `HookContext.dispatch`. Named so

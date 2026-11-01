@@ -951,6 +951,12 @@ const VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION: RuleExplanation = {
       'does not echo the predicate; its `path` locates it.',
     'Logic genuinely this large is not element visibility: compute it once on the record rather than ' +
       're-deriving it in every predicate that needs it.',
+    'An app navigation entry\'s `visible` is judged the same way, and there the cost is the opposite ' +
+      'one: the console\'s navigation gate falls CLOSED, so an entry whose predicate is over budget is ' +
+      'hidden from every viewer, its author included. A navigation entry binds no `record`, so the ' +
+      'rewrite is a smaller predicate over the viewer: collapse a chain of `\'a\' in current_user.positions` ' +
+      'tests into one `current_user.positions.exists(p, p in [\'a\', \'b\'])`, or gate the entry on one ' +
+      'permission check such as `current_user.can(\'OBJECT\', \'read\')`.',
   ],
 };
 
@@ -964,9 +970,10 @@ const VISIBILITY_PREDICATE_SYNTAX_EXPLANATION: RuleExplanation = {
       'predicate surface already gates a syntax fault (ADR-0032), so this one does too.',
     'An app navigation entry\'s `visible` is judged the same way, and there the cost is the opposite ' +
       'one: the console\'s navigation gate falls CLOSED, so an entry whose predicate does not parse is ' +
-      'hidden from every viewer, its author included. Only the syntax is judged on a navigation entry: ' +
-      'it binds `current_user`, `user`, `features` and the rest of the shell\'s roots rather than ' +
-      '`record`, so the reference checks a page predicate gets do not apply to it.',
+      'hidden from every viewer, its author included. Only whether it parses is judged on a navigation ' +
+      'entry (a size overrun is `visibility-predicate-over-budget`): it binds `current_user`, `user`, ' +
+      '`features` and the rest of the shell\'s roots rather than `record`, so the reference checks a page ' +
+      'predicate gets do not apply to it.',
     'Spellings from other languages do not parse: write `==` (not `===`), `!=` (not `!==` or `<>`), ' +
       '`&&` (not `and`), `||` (not `or`), `!` (not `not`). A predicate that is flawless CEL but too ' +
       'large is `visibility-predicate-over-budget` instead.',
@@ -1004,6 +1011,22 @@ const VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION: RuleExplanation = {
       '(`data` instead of `record` on a metadata-editing form), and `size(record.items) > 0` to ask whether ' +
       'a list has a first element. `has()` over a selection whose receiver is indexed or called, such as ' +
       '`has(record.items[0].name)`, is accepted.',
+  ],
+};
+
+const VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-page-variable-undeclared',
+  covers: 'which page variables a page predicate can read',
+  paragraphs: [
+    'On a page component `page` holds the page\'s own variables and nothing else: the console seeds it ' +
+      'from the page\'s `variables` declarations, and the only things that write it — an element bound ' +
+      'by a declaration\'s `source`, and a dashboard\'s filter bar — write declared names. So ' +
+      '`page.NAME` for a `NAME` no declaration carries is never there: the predicate cannot evaluate and ' +
+      'the console falls OPEN, rendering the element unconditionally.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Declare the variable ' +
+      'in the page\'s `variables`, or correct the name to one the page declares (names are compared ' +
+      'exactly, case included). A predicate that reads through an index (`page[\'x\']`) is not judged.',
   ],
 };
 
@@ -2762,6 +2785,22 @@ const PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION: RuleExplanation = {
     'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
       'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Fix the default, omit ' +
       'it, or declare the type the default really has.',
+  ],
+};
+
+const PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-source-unknown',
+  covers: 'what a page variable `source` must name',
+  paragraphs: [
+    'A page variable\'s `source` is the `id` of the component that writes it — a record picker or a ' +
+      'text input on the same page. The console binds the writer by comparing that `id` exactly, so a ' +
+      '`source` no component on the page carries binds nothing: no element ever writes the variable, ' +
+      'and it keeps its default for as long as the page is open while the author believes it is fed.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Set `source` to the ' +
+      'writer\'s `id` (components nested inside a container count), give the writer that `id`, or drop ' +
+      '`source` when nothing on the page writes the variable. A page authored as `source` code ' +
+      '(`kind: \'react\'` or `\'html\'`) is not judged, because its components live in the code.',
   ],
 };
 
@@ -5347,6 +5386,40 @@ const REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION: RuleExplanation = {
   paragraphs: REPORT_DATE_RANGE_SHARED_PARAGRAPHS,
 };
 
+// The pairing rule lives in `@objectstack/spec/kernel`'s `customization-package.ts`
+// (`customizationNamespace`, `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH`,
+// `CUSTOMIZATION_NAMESPACE_SUFFIX`); `rule-explanations.test.ts` holds the
+// numbers and the suffix written below to those constants.
+const NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION: RuleExplanation = {
+  rule: 'namespace-no-customization-pair',
+  covers: 'why a long namespace leaves a package uncustomizable',
+  paragraphs: [
+    'A package\'s paired customization package holds its installers\' changes to it (ADR-0146). The ' +
+      'first time an installer customizes an installed package, the platform creates `<id>.custom` ' +
+      'beside it, with the package\'s namespace followed by `_custom` as its namespace. A manifest ' +
+      'namespace is at most 20 characters and `_custom` takes 7, so a namespace of 14 characters or more ' +
+      'has no pair namespace: the door that creates the pair refuses the package, and its installers can ' +
+      'never customize it. (A package an installer authored in Studio is writable and is customized ' +
+      'directly; the pair exists for a package provided by code or installed as an app.)',
+    'The pair namespace is never shortened to fit. Truncating or hashing it would be a second spelling ' +
+      'of the pair\'s namespace that nothing could check the pair\'s declarations against, so the only ' +
+      'remedy is the package\'s own namespace.',
+    'Nothing fails when such a package is built or installed: the refusal arrives on an installer\'s ' +
+      'first customization, long after the namespace has shipped. By then shortening it is no small ' +
+      'edit, because the namespace is the prefix of every object name, so every table name and REST path ' +
+      'of the package carries it. The warning is printed while renaming is still a source edit.',
+    'Judged: the namespace of each package one install delivers, which is each `packages[]` body of a ' +
+      'multi-package artifact, or the top-level `manifest` of a single package (an artifact\'s own ' +
+      'wrapper manifest is not a package). Not judged: a package that is itself a pair (an id ending in ' +
+      '`.custom`), whose namespace is a pair namespace and is never paired again; a package that declares ' +
+      'no namespace; and a namespace the manifest grammar refuses for another reason (an uppercase ' +
+      'letter, a leading digit), which `os validate` refuses with the grammar\'s own sentence.',
+    'It stays a warning: the package builds, installs and runs, and only its customization is refused, ' +
+      'so a package nobody is meant to customize may keep its namespace. To fix it, shorten ' +
+      '`manifest.namespace` to 13 characters or fewer and rename the object names it prefixes to match.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -5392,6 +5465,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VISIBILITY_PREDICATE_SYNTAX_EXPLANATION.rule]: VISIBILITY_PREDICATE_SYNTAX_EXPLANATION,
   [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION.rule]: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION,
   [VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION.rule]: VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION,
+  [VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION.rule]: VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION,
   [VISIBILITY_BARE_IDENTIFIER_EXPLANATION.rule]: VISIBILITY_BARE_IDENTIFIER_EXPLANATION,
   [HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
@@ -5454,6 +5528,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION.rule]: PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION,
   [PAGE_VARIABLE_NAME_EMPTY_EXPLANATION.rule]: PAGE_VARIABLE_NAME_EMPTY_EXPLANATION,
   [PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION.rule]: PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION,
+  [PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION.rule]: PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION,
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
   [FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,
@@ -5555,6 +5630,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NOT_DATE_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
+  [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

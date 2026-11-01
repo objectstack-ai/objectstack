@@ -3578,6 +3578,33 @@ describe('runtime authoring gate on APP and PAGE writes — nav `visible` syntax
         expect(activeRows(rows, 'app')).toEqual([]);
     });
 
+    it('[#28726] REFUSES an active app save whose nav `visible` overruns the CEL parse budget, with the build\'s finding; nothing stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app(Array.from({ length: 90 }, () => 'features.cloudManaged != true').join(' || '));
+
+        const err = await protocol.saveMetaItem({ type: 'app', name: 'qa_app', item }).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the over-budget nav predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues.filter((i: any) => i.rule === 'visibility-predicate-over-budget');
+        expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ path: 'apps[0].navigation[0].visible', where: 'app "qa_app" · nav "nav_admin_only"' });
+        const atBuild = buildErrors({ apps: [item] }).filter((f) => f.rule === 'visibility-predicate-over-budget');
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(issues[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+        expect(activeRows(rows, 'app')).toEqual([]);
+    });
+
+    it('[#28726] an app whose nav `visible` is a chain inside the budget saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app(Array.from({ length: 51 }, () => 'features.cloudManaged != true').join(' || '));
+
+        await expect(protocol.saveMetaItem({ type: 'app', name: 'qa_app', item })).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'app')).toHaveLength(1);
+    });
+
     it('an app whose nav `visible` parses saves, and the row lands', async () => {
         const { protocol, rows } = makeProtocol();
 
@@ -3613,6 +3640,42 @@ describe('runtime authoring gate on APP and PAGE writes — nav `visible` syntax
             type: 'page',
             name: 'vars_page',
             item: page([{ name: 'count', type: 'number', defaultValue: 0 }, { name: 'picked', type: 'record_id' }]),
+        })).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'page')).toHaveLength(1);
+    });
+
+    // #28725 — references INTO the variables list: a `source` naming no
+    // component on the page, and a `page.NAME` read the page does not declare.
+    const referencing = (source: string, visibleWhen: string) => ({
+        ...page([{ name: 'picked', type: 'record_id', source }]),
+        regions: [{ name: 'main', components: [
+            { id: 'project_picker', type: 'element:record_picker', dataSource: { object: 'qa_note' }, properties: { label: 'Note', labelField: 'name' } },
+            { type: 'page:header', properties: { title: 'Vars' }, visibleWhen },
+        ] }],
+    });
+    for (const [rule, item, path] of [
+        ['page-variable-source-unknown', referencing('no_such_component', "page.picked != ''"), 'pages[0].variables[0].source'],
+        ['visibility-page-variable-undeclared', referencing('project_picker', "page.nosuch == 'x'"), 'pages[0].regions[0].components[1]'],
+    ] as const) {
+        it(`[#28725] REFUSES an active page save carrying [${rule}], located at the reference; nothing stored`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await protocol.saveMetaItem({ type: 'page', name: 'vars_page', item }).catch((e: any) => e);
+
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(err.issues.filter((i: any) => i.rule === rule).map((i: any) => i.path)).toEqual([path]);
+            const atBuild = buildErrors({ pages: [item] }).filter((f) => f.rule === rule);
+            expect(err.issues.filter((i: any) => i.rule === rule).map((i: any) => i.message)).toEqual(atBuild.map((f) => f.message));
+            expect(activeRows(rows, 'page')).toEqual([]);
+        });
+    }
+
+    it('[#28725] a page whose `source` names its picker and whose predicate reads a declared variable saves', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        await expect(protocol.saveMetaItem({
+            type: 'page', name: 'vars_page', item: referencing('project_picker', "page.picked != ''"),
         })).resolves.toMatchObject({ success: true });
 
         expect(activeRows(rows, 'page')).toHaveLength(1);

@@ -796,9 +796,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [pageReturn.stepper, originFromState?.label],
   );
   useRecordStepKeys(!embedded && !!pageStepper, pageStepper, { arrows: false });
-  // `i18n` with `language`: what a flow launch translates the flow's own
-  // toasts in (objectui#12075).
-  const { t, language, i18n } = useObjectTranslation();
+  // `language` is also the language a flow launch reads a refused write's
+  // permission line in.
+  const { t, language } = useObjectTranslation();
   // The DISPLAY locale the audit-history dates format with (objectui#10442).
   // `language` above stays for what it is: the key into per-locale LABEL maps.
   const displayLocale = useDisplayLocale();
@@ -1813,7 +1813,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         recordId,
         triggerParams: flowParams,
         objects,
-        translation: { i18n, language },
+        language,
       });
       const judged = launch.judged;
       // Paused at a `screen` node: FlowRunner renders the form + resumes, and
@@ -1839,7 +1839,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, pureRecordId, objectName, objects, i18n, language]);
+  }, [authFetch, pureRecordId, objectName, objects, language]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action},
   // built from @object-ui/core's `createServerActionHandler` via the shared

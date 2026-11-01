@@ -61,6 +61,7 @@ import { useMemo } from 'react';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { RecentItem } from '../context/RecentItemsProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
 import { findByName, metadataText, useNavTargetLabel, type LabelledRecord } from './useNavTargetLabel.js';
 
 /** Answers the display text of a recent entry, in the current language. */
@@ -80,6 +81,7 @@ export function useRecentItemLabel(
   const { packages } = sources;
   const targetLabel = useNavTargetLabel();
   const metadata = useMetadata();
+  const bundledReads = useBundledReads();
   const { objectPluralLabel, pageLabel, reportLabel } = useObjectLabel();
   const { language } = useObjectTranslation();
 
@@ -102,7 +104,7 @@ export function useRecentItemLabel(
         case 'dashboard':
           return targetLabel({ kind: 'dashboard', dashboardName: item.name }) ?? item.name;
         case 'page': {
-          const text = metadataText(findByName(metadata.pages, item.name)?.label, language);
+          const text = metadataText(bundledFirst(bundledReads, 'page', item.name, () => metadata.pages)?.label, language);
           return nonEmpty(pageLabel({ name: item.name, label: text ?? '' })) ?? item.name;
         }
         case 'report': {
@@ -115,6 +117,6 @@ export function useRecentItemLabel(
           return item.label;
       }
     },
-    [targetLabel, metadata, objectPluralLabel, pageLabel, reportLabel, language, packages],
+    [targetLabel, metadata, bundledReads, objectPluralLabel, pageLabel, reportLabel, language, packages],
   );
 }

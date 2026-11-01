@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
+import { LiteKernel, ObjectKernel } from '@objectstack/core';
 import type {
     Connector,
     ConnectorProviderContext,
@@ -1214,6 +1214,150 @@ describe('#28698 — a stored entry\'s configuration fault never fails the boot;
             providerFactory: factory, packages: { ...packages, 'com.acme.installed': { source: 'marketplace' } }, registered: [installed],
         }));
         expect(err.message).toContain(`connector instance 'installed_faulty' declares provider 'no_such_provider'`);
+    });
+});
+
+// ── #28713 — a stored entry waits until every plugin has started ────────────
+//
+// A connector plugin registers its connector in its own start(), after the
+// automation plugin's (it depends on it). A stored entry under that name used
+// to be materialized by the automation plugin's start() reconcile first, so the
+// plugin's registration was refused and its start() failed the boot. Stored
+// entries now wait for the `kernel:bootstrapped` pass, where they meet the
+// plugin's connector the way a running platform does: the §4 conflict logged,
+// the stored entry skipped, the plugin's connector served.
+
+describe('#28713 — a stored entry under a connector plugin\'s name never stops the boot; the plugin\'s connector serves', () => {
+    const HOST = 'com.acme.host';
+    const packages = { [HOST]: { source: 'code' } };
+    const ownedBy = <T extends object>(item: T, packageId: string) => ({ ...item, _packageId: packageId });
+    const hostServed = ownedBy(providerConnector('host_served'), HOST);
+
+    interface Observed {
+        /** What the registry holds when the connector plugin's start() begins (after the automation plugin's). */
+        atPluginStart?: string[];
+        /** What it holds when `kernel:listening` is dispatched. */
+        atListening?: string[];
+        logged: Array<{ msg: string; meta?: unknown }>;
+    }
+
+    /**
+     * Boot `kernel` with the automation plugin and one harness standing for the
+     * registry and a connector plugin: it serves `declared` (`registered` are the
+     * host's, the rest stored) and registers `pluginConnectors` in its own
+     * start(), the way ConnectorSlackPlugin does.
+     */
+    async function bootWith(
+        kernel: { use(p: unknown): unknown; bootstrap(): Promise<void> },
+        declared: unknown[],
+        opts: { registered: unknown[]; pluginConnectors?: string[] },
+    ): Promise<Observed> {
+        const observed: Observed = { logged: [] };
+        const { factory } = makeFakeProvider();
+        await kernel.use(new AutomationServicePlugin());
+        await kernel.use({
+            name: 'test.connector-plugin',
+            type: 'standard' as const,
+            version: '1.0.0',
+            dependencies: ['com.objectstack.service-automation'],
+            async init(ctx: any) {
+                ctx.registerService('objectql', {
+                    registry: {
+                        listItems: (type: string) => (type === 'connector' ? declared : []),
+                        getPackage: (id: string) => (packages as Record<string, { source: string }>)[id],
+                        getArtifactItem: artifactReader(opts.registered),
+                    },
+                    residualOwnerSource: () => undefined,
+                });
+                const original = ctx.logger.error.bind(ctx.logger);
+                ctx.logger.error = (msg: string, err?: unknown, meta?: unknown) => {
+                    observed.logged.push({ msg, meta });
+                    return original(msg, err, meta);
+                };
+                ctx.getService('automation').registerConnectorProvider('fake', factory);
+                ctx.hook('kernel:listening', async () => {
+                    observed.atListening = ctx.getService('automation').getRegisteredConnectors();
+                });
+            },
+            async start(ctx: any) {
+                const automation = ctx.getService('automation');
+                observed.atPluginStart = automation.getRegisteredConnectors();
+                for (const name of opts.pluginConnectors ?? []) {
+                    automation.registerConnector(
+                        { name, label: name, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'plugin_action', label: 'A' }] },
+                        { plugin_action: async () => ({ ok: true }) },
+                    );
+                }
+            },
+        });
+        await kernel.bootstrap();
+        await flush();
+        return observed;
+    }
+
+    it('a stored entry under a name a plugin registers in its start(): the boot starts, the plugin\'s connector serves, the stored entry is skipped with its record', async () => {
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        const observed = await bootWith(kernel, [{ ...hostServed }, providerConnector('slack')], {
+            registered: [hostServed],
+            pluginConnectors: ['slack'],
+        });
+        const engine = automationOf(kernel);
+        expect(engine.getConnectorOrigin('slack')).toBe('plugin');
+        expect(engine.resolveConnectorAction('slack', 'plugin_action')).toBeDefined();
+        expect(engine.resolveConnectorAction('slack', 'ping')).toBeUndefined();
+        expect(engine.getConnectorOrigin('host_served')).toBe('declarative');
+        const record = observed.logged.find((l) => l.msg.includes(`declarative provider-bound instance 'slack' collides with a plugin-registered connector`));
+        expect(record, JSON.stringify(observed.logged.map((l) => l.msg))).toBeDefined();
+        await kernel.shutdown();
+    });
+
+    it('control: a stored entry under a free name serves, materialized after every plugin has started and before kernel:listening', async () => {
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        const observed = await bootWith(kernel, [{ ...hostServed }, providerConnector('stored_free')], {
+            registered: [hostServed],
+        });
+        // The host's entry is served from the automation plugin's start(); the
+        // stored one is not there yet when a later plugin starts…
+        expect(observed.atPluginStart).toEqual(['host_served']);
+        // …and is served before the server listens.
+        expect(observed.atListening).toEqual(expect.arrayContaining(['host_served', 'stored_free']));
+        expect(automationOf(kernel).getConnectorOrigin('stored_free')).toBe('declarative');
+        expect(observed.logged).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('control: the host\'s own entry under a name a plugin registers in its start() still fails the boot', async () => {
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        const hostSlack = ownedBy(providerConnector('slack'), HOST);
+        const err = await rejectionOf(bootWith(kernel, [{ ...hostSlack }], {
+            registered: [hostSlack],
+            pluginConnectors: ['slack'],
+        }));
+        expect(err.message).toContain(`Connector name conflict: 'slack' is already registered by a declarative provider-bound`);
+    });
+
+    it('a kernel that withholds its boot-phase hooks keeps stored entries in the start() reconcile, so they are served', async () => {
+        const kernel = new ObjectKernel({ logger: { level: 'error' }, gracefulShutdown: false, skipSystemValidation: true, bootPhaseHooks: false });
+        const observed = await bootWith(kernel, [{ ...hostServed }, providerConnector('stored_free')], {
+            registered: [hostServed],
+        });
+        expect(observed.atPluginStart).toEqual(expect.arrayContaining(['host_served', 'stored_free']));
+        expect((kernel.getService('automation') as AutomationEngine).getConnectorOrigin('stored_free')).toBe('declarative');
+        await kernel.shutdown();
+    });
+
+    it.each([
+        ['has no reader', (k: LiteKernel) => { (k as unknown as { dispatchesBootPhaseHooks?: unknown }).dispatchesBootPhaseHooks = undefined; }],
+        ['answers false', (k: LiteKernel) => { (k as unknown as { dispatchesBootPhaseHooks: () => boolean }).dispatchesBootPhaseHooks = () => false; }],
+    ] as const)('a host whose kernel %s keeps stored entries in the start() reconcile, so they are served', async (_label, shape) => {
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        shape(kernel);
+        const observed = await bootWith(kernel, [{ ...hostServed }, providerConnector('stored_free')], {
+            registered: [hostServed],
+        });
+        expect(observed.atPluginStart).toEqual(expect.arrayContaining(['host_served', 'stored_free']));
+        expect(automationOf(kernel).getConnectorOrigin('stored_free')).toBe('declarative');
+        await kernel.shutdown();
     });
 });
 
