@@ -26,6 +26,10 @@
  *   value, keyed by both names, as native and the preview do, on its direct
  *   path and beside a cross-object dimension. Before, it answered
  *   `INVALID_QUERY` for the same duplicate groupBy column.
+ * - #28765. A selection that asks one column raw beside its own bucket (or for
+ *   two buckets of it) under one name is refused by the draft preview with the
+ *   live faces' refusal: `INVALID_QUERY` / 400, the same message, path, param,
+ *   object and fields. Before, the preview served both columns.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -366,6 +370,63 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
         ],
         fields: ['region:string', 'zone:string', 'account.name:string', 'total:number'],
       });
+    });
+  });
+  describe('#28765 — the draft preview refuses one column asked twice under one name, as the live faces do', () => {
+    /** Every face refuses `selection`, and the preview's refusal is the ObjectQL face's, field for field. */
+    const refusedAsLive = async (selection: Selection, path: string) => {
+      const refusals: Array<Record<string, unknown>> = [];
+      for (const face of FACES) {
+        const err = (await ask(face, UNBACKED, selection).then(
+          () => { throw new Error(`${face}: expected a refusal, but the query resolved`); },
+          (e: unknown) => e,
+        )) as Error & Record<string, unknown>;
+        expect(err.code, `${face}: ${err.message}`).toBe('INVALID_QUERY');
+        expect(err.status, face).toBe(400);
+        expect(err.path, face).toBe(path);
+        refusals.push({
+          message: err.message, code: err.code, status: err.status, httpStatus: err.httpStatus,
+          object: err.object, param: err.param, path: err.path, fields: err.fields,
+        });
+      }
+      expect(refusals[2], 'preview vs ObjectQL').toEqual(refusals[1]);
+      expect(refusals[2], 'preview vs native').toEqual(refusals[0]);
+    };
+
+    it('refuses a column raw beside its own month bucket, where the preview served both', async () => {
+      await refusedAsLive(
+        { dimensions: ['closed_at'], measures: ['total'], timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }] },
+        'groupBy.1.field',
+      );
+    });
+
+    it('refuses it after another dimension, naming the later position', async () => {
+      await refusedAsLive(
+        { dimensions: ['region', 'closed_at'], measures: ['total'], timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }] },
+        'groupBy.2.field',
+      );
+    });
+
+    it('refuses two buckets of one column', async () => {
+      await refusedAsLive(
+        {
+          measures: ['total'],
+          timeDimensions: [
+            { dimension: 'closed_at', granularity: 'month' },
+            { dimension: `${OBJECT}.closed_at`, granularity: 'year' },
+          ],
+        },
+        'groupBy.1.field',
+      );
+    });
+
+    it('still serves a dimension that is also its own time dimension, as one bucket', async () => {
+      await answeredAlike(
+        FACES,
+        UNBACKED,
+        { dimensions: ['closed_at'], measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }] },
+        { rows: [{ closed_at: '2026-03', total: 100 }, { closed_at: '2026-04', total: 80 }], fields: ['closed_at:time', 'total:number'] },
+      );
     });
   });
 });

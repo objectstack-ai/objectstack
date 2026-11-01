@@ -11,9 +11,10 @@
  * and the code layer (`getArtifactItem`) — serves "Sector", while the field's
  * type, requiredness and option VALUES stay the vendor's. Removing the
  * extender serves the vendor's text again; a tenant's own label keeps winning
- * (ADR-0029 D9.2a); two patching extenders resolve by `priority`; and a patch
- * naming what the target lacks is not applied and is named once in the log,
- * never a boot refusal.
+ * (ADR-0029 D9.2a); two patching extenders resolve by `priority`; a patch
+ * reaches the owner's own fields only, never a field an extension adds; and a
+ * patch naming what the target lacks is not applied and is named once in the
+ * log, never a boot refusal.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -160,14 +161,53 @@ describe('ADR-0146 D10 — fieldPatches is applied by mergeObjectDefinitions on 
     }
   });
 
-  it('applies after the additive merges: a patch reaches a field another extender adds at a lower priority', () => {
+  it('reaches the owner\'s own fields only: a field another extender adds is not patched, at either priority, and is named once', () => {
+    for (const [adder, patcher] of [[100, 200], [200, 100]] as const) {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const reg = withVendor();
+      reg.registerObject(
+        { name: OBJ, fields: { region: { name: 'region', type: 'text', label: 'Region' } } } as any,
+        'com.acme.region', undefined, 'extend', adder,
+      );
+      extend(reg, { region: { label: 'Territory' }, industry: { label: 'Sector' } }, EXT_PKG, patcher);
+
+      const served = reg.getObject(OBJ) as any;
+      expect(served.fields.region.label, `adder ${adder}, patcher ${patcher}`).toBe('Region');
+      // The owner's own field in the same patch still applies.
+      expect(industryOf(served).label).toBe('Sector');
+      reg.invalidateAll();
+      reg.getObject(OBJ);
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('fieldPatches.region'));
+      expect(lines, `adder ${adder}, patcher ${patcher}`).toHaveLength(1);
+      expect(lines[0]).toContain(EXT_PKG);
+      warn.mockRestore();
+    }
+  });
+
+  it('…and a field the same extension adds in `fields` is not patched either: the extension writes its own field\'s text there', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const reg = withVendor();
     reg.registerObject(
-      { name: OBJ, fields: { region: { name: 'region', type: 'text', label: 'Region' } } } as any,
-      'com.acme.region', undefined, 'extend', 150,
+      {
+        name: OBJ,
+        fields: { region: { name: 'region', type: 'text', label: 'Region' } },
+        fieldPatches: { region: { label: 'Territory' } },
+      } as any,
+      EXT_PKG, undefined, 'extend', 200,
     );
-    extend(reg, { region: { label: 'Territory' } });
-    expect(reg.getObject(OBJ)?.fields?.region?.label).toBe('Territory');
+    expect((reg.getObject(OBJ) as any).fields.region.label).toBe('Region');
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('fieldPatches.region'))).toHaveLength(1);
+  });
+
+  it('judges and patches one spelling: a body with array-spelled `fields` handed to the by-name fold is not patched, and the patch is named', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    extend(reg, { industry: { label: 'Sector' } });
+    const body = { ...vendorAccount(), fields: Object.values(vendorAccount().fields) };
+
+    const folded = reg.foldObjectExtendersOnto(OBJ, body) as any;
+    expect(folded.fields.find((f: any) => f.name === 'industry').label).toBe('Industry');
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('fieldPatches.industry'))).toHaveLength(1);
   });
 
   it('a patch naming a missing field or option is not applied and is named once in the log — never a boot refusal', () => {

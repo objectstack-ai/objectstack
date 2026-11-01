@@ -29411,7 +29411,21 @@ export class ObjectStackProtocolImplementation implements
                         // defines in code is named once, by the
                         // datasource-admin boot restore's warning, which
                         // carries its own remedy — not here as well.
-                        if (!this.isHostCodeDatasource(normalizedType, String(record.name))) {
+                        //
+                        // [#28771, ADR-0146 D2] …nor a row the served-override
+                        // rule serves: the shipping package's declared `.custom`
+                        // override IS served (and, for a flow, armed), so a line
+                        // saying "no read serves them … delete the stored row"
+                        // would prescribe deleting the live customization. The
+                        // one predicate, on the row's `package_id` column. The
+                        // census only: what this loop loads is unchanged.
+                        if (
+                            !this.isHostCodeDatasource(normalizedType, String(record.name))
+                            && !isServedOverrideRowOf(
+                                record as ServedOverrideRow,
+                                this.packagedArtifactOwner({ type: normalizedType, name: String(record.name) }),
+                            )
+                        ) {
                             sealedOverlays.push({ type: normalizedType, name: String(record.name) });
                         }
                         if (normalizedType === 'object') continue;

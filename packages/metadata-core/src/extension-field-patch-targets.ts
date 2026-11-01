@@ -83,9 +83,11 @@ function optionValuesOf(field: Record<string, unknown>): string[] {
  * patch is absent, malformed (the schema's parse reports that), or fully
  * matched.
  *
- * `target` is the extended object as the reader sees it: the registry's
- * resolved object at the install door and in the fold, the composed stack's
- * declaration at `os validate`.
+ * `target` is the extended object's OWN declaration as the reader sees it —
+ * a patch reaches the owner's own fields only, never one an extension adds:
+ * the registry's owner declaration at the install door, the owner's fields as
+ * the fold has merged them in the fold, the composed stack's declaration at
+ * `os validate`.
  */
 export function fieldPatchTargetMisses(object: string, fieldPatches: unknown, target: unknown): FieldPatchTargetMiss[] {
   if (!isRecord(fieldPatches)) return [];
