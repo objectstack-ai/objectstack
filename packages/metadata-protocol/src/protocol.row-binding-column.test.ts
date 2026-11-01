@@ -26,7 +26,7 @@
  * back, served in a package's slot) is `protocol.scoped-list-fallback.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation, mergePackageAwareOverlay, withRowBinding } from './protocol.js';
 
 const TYPE = 'dashboard';
