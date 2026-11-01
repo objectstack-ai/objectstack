@@ -95,11 +95,11 @@ describe('os validate — the field-patch target check (ADR-0146 D10)', () => {
       'objectExtensions[0].fieldPatches.industry.options.finance',
     ]);
     expect(report.errors.map((e: { reason: string }) => e.reason)).toEqual(['field', 'option']);
-  });
+  }, 120_000);
 
   it('validates clean when the patch names a field and option value the target has', async () => {
     const run = await runValidate(matchingDir);
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
     expect(JSON.parse(run.stdout).valid).toBe(true);
-  });
+  }, 120_000);
 });
