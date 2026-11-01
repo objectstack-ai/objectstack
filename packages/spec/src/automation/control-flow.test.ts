@@ -278,8 +278,10 @@ describe('validateControlFlow', () => {
 // the join node by trial. It now says what to add, for every container kind
 // that owns a region, at the same `where` path as before.
 describe('a multi-exit region refusal prescribes the join', () => {
+  // A parsed edge carries `type` and `isDefault`; spell them so the region typechecks.
+  const jedge = (id: string, source: string, target: string) => ({ ...edge(id, source, target), type: 'default' as const, isDefault: false });
   // d → x and d → y: one entry, two exits.
-  const forked = { nodes: [node('d'), node('x'), node('y')], edges: [edge('e1', 'd', 'x'), edge('e2', 'd', 'y')] };
+  const forked = { nodes: [node('d'), node('x'), node('y')], edges: [jedge('e1', 'd', 'x'), jedge('e2', 'd', 'y')] };
   const refusalOf = (flow: unknown): string => {
     try {
       validateControlFlow(flow as never);
@@ -324,7 +326,7 @@ describe('a multi-exit region refusal prescribes the join', () => {
   it('names every exit when there are more than two', () => {
     const a = analyzeRegion({
       nodes: [node('d'), node('x'), node('y'), node('z')],
-      edges: [edge('e1', 'd', 'x'), edge('e2', 'd', 'y'), edge('e3', 'd', 'z')],
+      edges: [jedge('e1', 'd', 'x'), jedge('e2', 'd', 'y'), jedge('e3', 'd', 'z')],
     });
     expect(a.errors).toHaveLength(1);
     expect(a.errors[0]).toMatch(/^region must be single-exit but has 3: x, y, z — add one node with an edge from each of x, y, z to it/);
@@ -338,7 +340,7 @@ describe('a multi-exit region refusal prescribes the join', () => {
           config: {
             try: {
               nodes: [...forked.nodes, node('j')],
-              edges: [...forked.edges, edge('e3', 'x', 'j'), edge('e4', 'y', 'j')],
+              edges: [...forked.edges, jedge('e3', 'x', 'j'), jedge('e4', 'y', 'j')],
             },
           },
         }] as never,
@@ -347,7 +349,7 @@ describe('a multi-exit region refusal prescribes the join', () => {
   });
 
   it('a zero-exit region keeps its own refusal, with no join prescription', () => {
-    const a = analyzeRegion({ nodes: [node('a'), node('b')], edges: [edge('e1', 'a', 'b'), edge('e2', 'b', 'a')] });
+    const a = analyzeRegion({ nodes: [node('a'), node('b')], edges: [jedge('e1', 'a', 'b'), jedge('e2', 'b', 'a')] });
     expect(a.errors.join(' ')).toMatch(/region has no exit node/);
     expect(a.errors.join(' ')).not.toMatch(/add one node/);
   });
