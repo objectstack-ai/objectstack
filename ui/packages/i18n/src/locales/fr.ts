@@ -476,6 +476,9 @@ const fr = {
     bulkAllOnPage_other: "Les {{count}} éléments de cette page sont sélectionnés.",
     bulkSelectAllMatching: "Sélectionner les {{count}} correspondances",
     bulkAllMatchingSelected: "Les {{count}} enregistrements correspondants sont tous sélectionnés.",
+    bulkSelectAllMatchingCapped: "Sélectionner les {{cap}} premières des {{total}} correspondances",
+    bulkAllMatchingSelectedCapped: "Seuls les {{cap}} premiers des {{total}} enregistrements correspondants seront traités.",
+    bulkSelectedAllMatchesCapped: "{{cap}} sélectionnés (sur {{total}} résultats)",
     bulkActions: "Actions groupées",
     bulk: {
       confirmDefault: "Ceci s'appliquera à {{count}} enregistrement(s).",
