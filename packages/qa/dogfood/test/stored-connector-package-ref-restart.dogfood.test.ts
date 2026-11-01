@@ -23,15 +23,22 @@
 // environment-wide stdio `mcp` entry, and a control carrying its document
 // inline. [#28698] It also saves an environment-wide entry naming a provider
 // no installed plugin offers (accepted at save, skipped after boot: the shape
-// a row takes when the plugin that offered its provider is removed). The
-// second boot:
+// a row takes when the plugin that offered its provider is removed).
+// [#28713] And an environment-wide entry under the name of a connector a host
+// plugin registers (`slack`, ConnectorSlackPlugin): accepted at save, not
+// served beside the plugin's connector while the platform runs. The second
+// boot:
 //
 //   1. starts (no throw);
 //   2. does not list any refused entry, and its boot record names each entry
 //      and its ref (or, for the unknown provider, the provider);
 //   3. lists the stored inline control `ready` with its operation (the rows
 //      were hydrated, so the refusal above was read at boot, not skipped);
-//   4. lists the showcase's own file-ref and stdio entries `ready` (control).
+//   4. lists the showcase's own file-ref and stdio entries `ready` (control);
+//   5. [#28713] lists the plugin's `slack` connector `ready` with the plugin's
+//      actions, not the stored entry's, and its boot record names the stored
+//      entry; the stored inline control is already `ready` on the first read
+//      after the start (it is served before the server answers).
 //
 // Boots fixture stacks of its own (a database file), so it stays out of
 // `SHARED_SHOWCASE`.
@@ -53,6 +60,8 @@ const AUTHORED_PACKAGE_ID = 'com.dogfood.storedrestart';
 const INLINE = 'srr_inline';
 /** [#28698] A stored entry whose provider no installed plugin offers. */
 const UNKNOWN_PROVIDER = 'srr_unknown_provider';
+/** [#28713] The name of the connector ConnectorSlackPlugin registers on the showcase. */
+const PLUGIN_NAME = 'slack';
 const HOST_FILE_ENTRY = 'showcase_status_openapi';
 const HOST_STDIO_ENTRY = 'showcase_mcp_tools';
 
@@ -126,6 +135,7 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
   let before: Answer;
   let bootError: unknown;
   let after: Answer;
+  let firstRead: Answer;
   let bootLines: string[] = [];
   let second: VerifyStack | undefined;
 
@@ -154,6 +164,7 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
         ...openapi(UNKNOWN_PROVIDER, DOCUMENT),
         provider: 'no_such_provider',
       }));
+      saves[PLUGIN_NAME] = await json(await first.apiAs(token, 'PUT', `/meta/connector/${PLUGIN_NAME}`, openapi(PLUGIN_NAME, DOCUMENT)));
       saves[INLINE] = await json(await first.apiAs(token, 'PUT', `/meta/connector/${INLINE}`, openapi(INLINE, DOCUMENT)));
       before = await settle(first, token, [INLINE]);
     } finally {
@@ -168,6 +179,7 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
         return undefined;
       }
       const token = await second.signIn();
+      firstRead = await json(await second.apiAs(token, 'GET', '/automation/connectors'));
       return settle(second, token, [INLINE, HOST_FILE_ENTRY, HOST_STDIO_ENTRY]);
     });
     bootLines = captured.lines;
@@ -186,6 +198,8 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
     expect(entryOf(before, INLINE)?.state, shown(before, INLINE)).toBe('ready');
     expect(entryOf(before, ENV_FILE), shown(before, ENV_FILE)).toBeUndefined();
     expect(entryOf(before, UNKNOWN_PROVIDER), shown(before, UNKNOWN_PROVIDER)).toBeUndefined();
+    // [#28713] While the platform runs, the plugin's connector keeps the name.
+    expect(entryOf(before, PLUGIN_NAME)?.actions?.map((a: any) => a.key), shown(before, PLUGIN_NAME)).not.toContain('GetThings');
   });
 
   it('the second boot over the same database starts', () => {
@@ -208,6 +222,19 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
     const record = bootLines.find((l) => l.includes(`connector instance '${UNKNOWN_PROVIDER}' declares provider 'no_such_provider'`));
     expect(record, `no boot record names '${UNKNOWN_PROVIDER}'`).toBeDefined();
     expect(record).toContain('no provider factory is registered');
+  });
+
+  it('[#28713] a stored entry under a host plugin connector\'s name: the plugin\'s connector lists ready after the restart, and the boot record names the stored entry', () => {
+    const plugin = entryOf(after, PLUGIN_NAME);
+    expect(plugin?.state, shown(after, PLUGIN_NAME)).toBe('ready');
+    expect(plugin.actions.map((a: any) => a.key)).not.toContain('GetThings');
+    expect(plugin.actions.length).toBeGreaterThan(0);
+    const record = bootLines.find((l) => l.includes(`declarative provider-bound instance '${PLUGIN_NAME}' collides with a plugin-registered connector`));
+    expect(record, `no boot record names '${PLUGIN_NAME}'`).toBeDefined();
+  });
+
+  it('[#28713] control: the stored inline entry is already ready on the first read after the restart', () => {
+    expect(entryOf(firstRead, INLINE)?.state, shown(firstRead, INLINE)).toBe('ready');
   });
 
   it('controls: the stored inline entry, and the showcase\'s own file-ref and stdio entries, list ready after the restart', () => {
