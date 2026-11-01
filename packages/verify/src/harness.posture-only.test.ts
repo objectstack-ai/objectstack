@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three in-process bootStack boots, no two the same setup (posture-only with no posture in the environment, read by three cases; posture-only under an explicit group posture; the default single boot), the first paying the file's first-boot cost; slowest CI reading 13.8 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; read before the three identical posture-only boots became one
 //
 // [#5261] `bootStack({ multiTenant: 'posture-only' })` — the stand-in that
 // activates the tenancy POSTURE without the enterprise runtime this package may
