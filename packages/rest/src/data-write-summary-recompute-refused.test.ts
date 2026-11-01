@@ -92,9 +92,14 @@ let engine: ObjectQL;
 let protocol: ObjectStackProtocolImplementation;
 let call: (method: string, path: string, req: Record<string, unknown>) => Promise<any>;
 let warn: ReturnType<typeof vi.spyOn>;
+let errorLog: ReturnType<typeof vi.spyOn>;
 
 beforeAll(async () => {
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  // The package harness declares `OS_REST_LOG: 'silent'`; this file reads the
+  // shipped default, because the error line is what it pins.
+  vi.stubEnv('OS_REST_LOG', 'info');
+  errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
   engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'rollup.sqlite') }, useNullAsDefault: true }) as any,
@@ -130,6 +135,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   warn.mockRestore();
+  errorLog.mockRestore();
+  vi.unstubAllEnvs();
   try { await engine.destroy(); } catch { /* noop */ }
   rmSync(dir, { recursive: true, force: true });
 });
@@ -161,6 +168,15 @@ describe('[#28661] a child write under a failing roll-up answers its success ans
     expect(res._json).toEqual({ object: CHILD, id: 'c2', success: true });
     expect(await childRows({ id: 'c2' })).toEqual([]);
     expect(await parentRow()).toMatchObject({ child_sum: 95, child_count: 2 });
+  });
+
+  it('the operator is told once, at error, which summary column is stale and how to fix it', () => {
+    const lines = errorLog.mock.calls.map((c: unknown[]) => String(c[0])).filter((l: string) => l.includes('could not be recomputed'));
+    // Three writes above, one stale field: said once, not once per write.
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`A write to "${CHILD}" landed and was answered as a success`);
+    expect(lines[0]).toContain(`"${PARENT}.probe_sf"`);
+    expect(lines[0]).toContain('republish');
   });
 
   it('the protocol below the door still reports the stale roll-up: ERR_SUMMARY_RECOMPUTE, carrying the written record', async () => {

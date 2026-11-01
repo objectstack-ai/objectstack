@@ -27,7 +27,7 @@ import { logError } from './log.js';
 export function answerEarnedWriteDespiteStaleSummary(error: unknown, res: any, status: number, object: string | undefined): boolean {
   const earned = earnedAnswerOf(error);
   if (earned === undefined) return false;
-  for (const line of staleSummaryAnswerLines(error as SummaryRecomputeRefusal, object)) logError(`[REST] ${line}`, error);
+  for (const line of staleSummaryAnswerLines(error as SummaryRecomputeRefusal, object)) logError(`[REST] ${line}`);
   applyDroppedFieldsHeader(res, earned);
   res.status(status).json(earned);
   return true;
