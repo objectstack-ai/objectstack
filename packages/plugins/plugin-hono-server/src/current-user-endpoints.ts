@@ -50,7 +50,7 @@ import {
     type RequestAuthService,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { MePermissionsAnonymousResponse, MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
+import type { MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import {
     OWNERSHIP_QUEUE_SERVICE,
@@ -897,7 +897,7 @@ export function registerCurrentUserEndpoints(
     rawApp.get(`${prefix}/auth/me/permissions`, withRequestContext(async (c, ctx, resolveCtx) => {
         const execCtx = await resolveCtx(c);
         if (!execCtx?.userId) {
-            return c.json({ authenticated: false } satisfies MePermissionsAnonymousResponse);
+            return c.json({ authenticated: false });
         }
         // Captured BEFORE the `try`: the closed body the outer `catch` answers is
         // built from this alone (see {@link mePermissionsBody}).
@@ -947,7 +947,7 @@ export function registerCurrentUserEndpoints(
                     objects: {},
                     fields: {},
                     hasAnyQueue,
-                } satisfies MePermissionsAuthenticatedResponse);
+                });
             }
             // [#7616] The caller's sets, resolved ONCE by the owner of the
             // rule: positions expanded, the ADR-0090 D5 baseline applied

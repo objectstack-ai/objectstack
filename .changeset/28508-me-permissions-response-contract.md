@@ -17,4 +17,4 @@ Metadata-protocol: none
   - Both branches are strict: an undeclared key is refused, not dropped. A key the server starts sending is declared here first.
   - Types `MePermissionsResponse`, `MePermissionsAnonymousResponse`, `MePermissionsAuthenticatedResponse`.
 - **`IOwnershipQueueService.hasAnyQueue(organizationId)`** (`@objectstack/spec/contracts`): does the organization have at least one ownership queue, `true` exactly when some name would resolve through `resolveQueue`. `@objectstack/plugin-sharing`'s `OwnershipQueueService` implements it.
-- **`@objectstack/plugin-hono-server`** types each body it builds for the route against the schema's types, and reads `hasAnyQueue` through the contract. The wire is unchanged.
+- **`@objectstack/plugin-hono-server`** types the route's body builder against `MePermissionsAuthenticatedResponse`, and reads `hasAnyQueue` through the contract. The wire is unchanged.
