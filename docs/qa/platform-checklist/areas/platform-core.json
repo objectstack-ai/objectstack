@@ -3615,7 +3615,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3638,7 +3638,7 @@
       "steps": [
         "as platform admin write a global-scope key through PUT /api/settings/NAMESPACE; GET /api/v1/data/sys_platform_setting and /sys_setting?filter scope=global",
         "as the member GET /api/v1/data/sys_platform_setting",
-        "walled: as A's admin save a tenant key (PUT /api/settings/NAMESPACE); lock A's row with the fixture write of fixtures.requires[2] (knownGaps[1]) and re-read the key as A (locked: true); as B's admin read and write the same key",
+        "walled: as A's admin save a tenant key (PUT /api/settings/NAMESPACE); lock A's row with the fixture write of fixtures.requires[2] (knownGaps[1]) and re-read the key as A (locked: true); then as A's admin save the locked key again (negative[0]); as B's admin read and write the same key",
         "walled: write a tenant key with no organization in scope"
       ],
       "acceptance": [
@@ -3666,6 +3666,9 @@
           "verify": "status + code",
           "evidence": "the answer"
         }
+      ],
+      "negative": [
+        "walled: LOCKED means platform-locked — after steps[2]'s lock, A's admin (an organization administrator, not the platform admin) saving the same key again through PUT /api/settings/NAMESPACE must be refused, the way a lock refuses a lower rung's save (409 SETTINGS_LOCKED, packages/services/service-settings/src/settings-routes.ts), with A's value unchanged and the row still locked on re-read; a 2xx, or a re-read showing the new value, is a security FAIL. Unprovisioned walled fixtures make it blocked(fixture), like acceptance[2] and acceptance[3]"
       ],
       "traps": [
         "wrong-persona",
@@ -3710,6 +3713,12 @@
           "date": "2026-10-20",
           "change": "steps[2]'s tenant lock made a named fixture prerequisite (fixtures.requires[2], new knownGaps[1]), and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F6 and F2), round 11 of wave anchor #24579. No HTTP door sets a tenant-row lock: sys_setting answers update 405 (apiMethods get/list) and the settings PUT writes values only, so the run stamped the lock with a system write on its scratch DB. A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-01",
+          "change": "negative[0] added, with steps[2] driving it: LOCKED means platform-locked, so an organization administrator's save of its own locked tenant row must be refused, and a save that lands is a security FAIL. Ruling 6545938831 item ⑤ on #28345, which settles the semantics; the clause is a walled leg like acceptance[2] and [3]. No existing clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },

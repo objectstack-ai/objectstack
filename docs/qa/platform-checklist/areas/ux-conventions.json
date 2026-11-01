@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -62,7 +62,7 @@
         {
           "clause": "success feedback names its subject: a record-level write names the record or item (its title, label or display name) or the count; a singleton page (settings) and a named automation (e.g. Flow \"X\" completed) are their own subject and pass as they are; a bare 'Success' / 'Done' or a machine name never passes",
           "oracle": "screenshot",
-          "verify": "two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until #26172 (the dialog paths) and #26461 (the full-page /new and /edit form route) — both closed fixed, so those rows are now expected PASS, and a toast naming only the object is a regression. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row",
+          "verify": "two steps per row. First classify the write: record-level (a record create, edit or delete, the import, the approval decision, a record or param action, a Studio item) or singleton / named automation (the settings save, a named Flow run). Then score it by that class's test. Record-level: PASS when the captured text names the record or item (record title or display name, invitee email, package or item label, e.g. 'Approved \"EXP-2001\"') or the count ('N created · M skipped', '1 row saved'); text that names only the object ('Task created successfully') scores FAIL — the console's record create and edit toasts read that way until #26172 (the dialog paths) and #26461 (the full-page /new and /edit form route) — both closed fixed, so those rows are now expected PASS, and a toast naming only the object is a regression. Singleton / named automation: PASS when the text names that page or automation ('Settings saved', 'Flow \"Reassign Task\" completed'). In either class a generic 'Done' / 'Success' or a raw snake_case name scores FAIL for that row. The Studio top bar's save status ('Saved' / 「已保存」, with or without a time) names no item, so it is not write feedback under this convention: a Studio row (autosave, publish, discard) passes only on a toast or inline text that names the item or package, and a row whose only feedback is that status scores FAIL",
           "evidence": "the verbatim feedback strings"
         },
         {
@@ -153,6 +153,12 @@
           "date": "2026-10-31",
           "change": "Three findings of QA run #27441. First, variants[4], variants[5] and knownGaps[0] quoted stale successMessages. MarkDoneAction now declares `{{ record.title | default:'Task' }} marked done.` and invite_user `Invitation sent to {{ result.email }}`. knownGaps[1]'s approve message had the same ${...} spelling and now reads `Approved \"{{ result.request.record_title }}\"` (sys-approval-request.object.ts). Second, variants[1] now names the task Grid view, the only task list that declares inlineEdit: true (task.view.ts). Third, steps[4](a): the Backlog → Done refusal cannot be driven in the UI, because the record form and the grid editor offer only the moves the state machine admits (stateMachineOptions.ts). The step now drives it through the API (400, invalid_transition) and records the narrowed picker as the UI's answer. No clause changed. acceptance[1].verify, held on #28345, is untouched. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); findings parked in anchor comment 6490438726",
           "ref": "#27441"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-01",
+          "change": "acceptance[1].verify says the Studio top bar's save status ('Saved' / 「已保存」) is not write feedback: it names no item, so a Studio row passes only on a toast or inline text naming the item or package, and a row with only that status scores FAIL. This is ruling 6545938831 item ② on #28345, which keeps the convention's wording (success names its subject) and settles how a runner scores that indicator; the clause is unchanged. Held from slice S5 (revision 8). Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },

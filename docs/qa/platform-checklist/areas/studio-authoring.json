@@ -2563,12 +2563,15 @@
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
           "a writable package with one published object carrying two date fields, a number field, a text field, a status picklist (with option values) and a long-text field for JSON — the fields the presets and the six types bind to"
+        ],
+        "knownGaps": [
+          "Studio's Validations tab has no initialStates input: a state_machine rule authored there carries its field and transitions only (ui/packages/app-shell/src/views/studio-design/ObjectValidationsPanel.tsx; the metadata previews only display initialStates, ValidationPreview.tsx). initialStates is written through the API only (packages/spec/src/data/validation.zod.ts, the state_machine rule's initialStates), so the insert-time invalid_initial_state refusal is not part of this item: acceptance[3] does not name it, and its runtime code is records-forms.validation-rule-type-matrix's (variants[0], showcase_project's project_status_flow)"
         ]
       },
       "steps": [
         "open /_console/studio/PKG/data → the object → Validations → New: read the menu — a few presets in plain words first, the six rule types folded under Advanced",
         "presets: pick 'End date on or after start date' and 'Number can't be negative' (each written at once on the author's own fields, as editable rows); pick 'Reject the save when…' — it is held, not written, and opens with the condition focused; type a condition and watch it save",
-        "Advanced: author one rule of each remaining type with real settings — state_machine on the status field (initial state plus one allowed transition), format on the text field, json_schema on the long-text field, cross_field on the two dates, conditional wrapping a script rule — each with a message; set one rule's severity to warning and switch another rule off (active false)",
+        "Advanced: author one rule of each remaining type with real settings — state_machine on the status field (one allowed transition; the tab has no initial-state input, fixtures.knownGaps[0]), format on the text field, json_schema on the long-text field, cross_field on the two dates, conditional wrapping a script rule — each with a message; set one rule's severity to warning and switch another rule off (active false)",
         "CEL: type an invalid condition into one rule and read the live verdict, then fix it",
         "let the autosave land, publish, and GET /api/v1/meta/object/OBJ: validations[] holds every rule as authored",
         "write path: for each rule POST or PATCH /api/v1/data/OBJ with the violating payload, then its happy-path twin; for the warning rule send a matching payload; for the inactive rule send the payload it would reject"
@@ -2593,7 +2596,7 @@
           "evidence": "the live object read"
         },
         {
-          "clause": "each published rule enforces with its per-type code: invalid_initial_state / invalid_transition (state_machine), invalid_format, json_schema_violation, rule_violation (script, cross_field) and the wrapped rule under conditional — 400 VALIDATION_FAILED, nothing stored — while every happy-path twin lands",
+          "clause": "each published rule enforces with its per-type code: invalid_transition (state_machine), invalid_format, json_schema_violation, rule_violation (script, cross_field) and the wrapped rule under conditional — 400 VALIDATION_FAILED, nothing stored — while every happy-path twin lands",
           "oracle": "api",
           "verify": "status, code and targeted field per violating write; a read-back shows nothing persisted; each twin answers 2xx",
           "evidence": "one line per write"
@@ -2638,7 +2641,7 @@
         {
           "revision": 3,
           "date": "2026-11-01",
-          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). Also acceptance[3] no longer names invalid_initial_state, and steps[2] no longer asks for an initial state: Studio's Validations tab has no initialStates input, so the state is API-only (new fixtures.knownGaps[0]; measured at base 37184244, ObjectValidationsPanel.tsx carries no initialStates). The insert-time code stays covered by records-forms.validation-rule-type-matrix. invalid_transition and every other per-type code are unchanged. Ruling 6545938831 item ③ on #28345 (no product card for a Studio input). Wave anchor #27377",
           "ref": "#28345"
         }
       ]

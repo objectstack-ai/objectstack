@@ -3572,7 +3572,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3585,7 +3585,8 @@
           "the bulk actions above, so the BulkActionBar and both its aggregate and per-record dispatch are exercisable (objectui plugin-grid BulkActionBar)"
         ],
         "knownGaps": [
-          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
+          "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
+          "OPEN defect, acceptance[5] expected FAIL until it is fixed — card owed (seat files): the banner draws the uncapped server total (ui/packages/plugin-grid/src/components/BulkActionBar.tsx, the grid.bulkSelectAllMatching, grid.bulkAllMatchingSelected and grid.bulkSelectedAllMatches strings, each counting totalMatching) while resolveBulkRows stops at its local HARD_CAP of 5000 (ui/packages/plugin-grid/src/ObjectGrid.tsx), so past 5000 the user is told every match is selected and the action processes the first 5000. Read at base 37184244"
         ]
       },
       "steps": [
@@ -3595,7 +3596,8 @@
         "dispatch a bulk action; capture the requests — resolveBulkRows fans out a paged find (dropping $top/$skip, paging 500) collecting every matching id ACROSS pages",
         "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
         "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is POST /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level (the grid hands them to the action runner as params._selectedIds, objectui plugin-grid ObjectGrid.tsx); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
-        "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)"
+        "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)",
+        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (deleteMany, at most 200 ids per call)"
       ],
       "acceptance": [
         {
@@ -3627,6 +3629,12 @@
           "oracle": "network",
           "verify": "the collected set never exceeds 5000; where the match set is larger, the run records the cap rather than asserting full coverage",
           "evidence": "the collected-set size vs the server total"
+        },
+        {
+          "clause": "past the cap the banner names it: when the server total exceeds HARD_CAP 5000, the cross-page offer, the all-selected line and the selected count say the action covers the first 5000 (e.g. 「将处理前 5000 条」, 'the first 5000 will be processed'), never the uncapped total alone — a banner claiming all M matching while the dispatch stops at 5000 is a silent partial execution",
+          "oracle": "dom",
+          "verify": "with more than 5000 matching rows (steps[7]), after a screenshot confirms the bar rendered: read the bulk-cross-page-banner text and the selected count before and after Select all; PASS when each names the 5000 cap, FAIL when any presents the uncapped total M as the set the action will process. The fan-out itself is acceptance[4]'s; this clause scores only what the banner tells the user",
+          "evidence": "the banner screenshot and its DOM text before and after Select all, the find response total, the collected-set size"
         }
       ],
       "negative": [
@@ -3677,6 +3685,12 @@
           "date": "2026-10-26",
           "change": "automated.ref says what its three files score, from Tier 1 run #25815 (6679644a, pin b41ed7f68956), re-read under ui/packages/plugin-grid on main cc378e93. (1) None exercises resolveBulkRows' paged fan-out or HARD_CAP (acceptance[1], [4], negative[0]). The run's 'unpinned even at component level' does not hold: bulkFanoutHostParams.test.tsx, not in the ref, drives the fan-out and the cap at component level, so the ref names it as evidence of that layer only. (2) The Clear case in bulkActionRefresh.test.tsx pins acceptance[3] and negative[2] in jsdom, and their dom oracle needs the browser. fixtures.knownGaps[0], the objectui-pinned-automation note, said the objectui specs live in a separate repo and none exist here; they are under ui/ in this checkout since the import, so it says where they resolve and how they run (devx seat 2's direction, carried for #26035). Re-read on main cc378e93. No clause changed",
           "ref": "#25846"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-01",
+          "change": "acceptance[5] added with steps[7] and fixtures.knownGaps[1]: past HARD_CAP 5000 the cross-page banner must name the cap (e.g. 「将处理前 5000 条」), never present the uncapped server total as the set the action processes. Today the banner counts totalMatching uncapped (BulkActionBar.tsx) while resolveBulkRows stops at 5000 (ObjectGrid.tsx), so the clause is an expected FAIL until the product defect card the seat files is fixed. Read at base 37184244. No existing clause changed. Ruling 6545938831 item ④ on #28345. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
