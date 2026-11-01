@@ -586,7 +586,7 @@ async function continuePastCancelledMapItem(
                 `map node '${link.nodeId}' on item run '${itemRunId}', which is no longer suspended, and ${found}. ` +
                 `The map records an item only when it completes or when its run was cancelled, so resuming here ` +
                 `would advance the map past that item with nothing recorded for it. Nothing was changed. To end the ` +
-                `batch, cancel run '${link.runId}'${link.runId === runId ? '' : ` and run '${runId}', which waits on it`}; ` +
+                `batch, cancel run '${link.runId}'${waitingRunsClause(chain)}; ` +
                 `if the run history store was unreachable, retry once it is readable`,
         };
     }
@@ -598,6 +598,20 @@ async function continuePastCancelledMapItem(
             variables: { ...(signal?.variables ?? {}), [mapItemCancelledVariable(link.nodeId)]: itemRunId },
         }),
     };
+}
+
+/**
+ * [#28202] The remedy's tail after "cancel run 'MAP'": every run above the map
+ * in `chain`, nearest first, up to the one the caller resumed. Cancelling a run
+ * never cascades to the runs waiting on it, so a run left out of this list
+ * stays parked after the operator follows the remedy. Empty when the map's run
+ * is the one resumed. The list is bounded by the chain walk's own depth bound.
+ */
+function waitingRunsClause(chain: readonly SuspendedRun[]): string {
+    const waiting = chain.slice(0, -1).map(r => `'${r.runId}'`).reverse();
+    if (waiting.length === 0) return '';
+    if (waiting.length === 1) return ` and run ${waiting[0]}, which waits on it`;
+    return ` and runs ${waiting.slice(0, -1).join(', ')} and ${waiting[waiting.length - 1]}, which wait on it in turn`;
 }
 
 /** The body of {@link AutomationEngine.refuseUndeclaredSuspension}, moved unedited; that method's docblock is its contract. */
