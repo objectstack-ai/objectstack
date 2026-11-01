@@ -281,7 +281,7 @@ describe('#28809 — an option patch is judged against the owner\'s declared opt
   const optionLabel = (body: any, value: string) =>
     industryOf(body).options.find((o: any) => o.value === value)?.label;
 
-  const patchLines = (warn: ReturnType<typeof vi.spyOn>, needle: string) =>
+  const patchLines = (warn: { mock: { calls: unknown[][] } }, needle: string): string[] =>
     warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes(needle));
 
   it('another extension adds an option by redeclaring the owner field: a patch of that option is not applied, and is named once — as the door and os validate refuse it', () => {
