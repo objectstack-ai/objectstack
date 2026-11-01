@@ -14,7 +14,9 @@
  * [#28238] Beside them, `packagelessContentPackage`: the package a by-name
  * read that names none takes its stored content from, given that address and
  * the code packages that ship the name. Not a moved body: the rule the two
- * by-name reads share.
+ * by-name reads share. [#28409] …and `shippingPackageIds` /
+ * `soleShippingPackage`, the code packages that ship a name, read one way by
+ * those reads and by the env-wide list.
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
@@ -46,6 +48,7 @@ import type { StoredOverlayRow } from './item-lock.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { rowMatchesOverlayWhere, servedOverlayRowCandidates } from './protocol.js';
+import { isServedOverrideRowOf } from './served-override.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -100,9 +103,11 @@ export async function findServedOverlayRow(
     packageId?: string | null;
     /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
     member?: string;
+    /** [#28409] The package's declared override first — see {@link servedOverlayRowCandidates}. */
+    servedOverride?: boolean;
 },
     activeRows?: readonly StoredOverlayRow[],
-): Promise<{ row: any } | undefined> {
+): Promise<{ row: any; overrideOf?: string } | undefined> {
     // [#21804] The order is {@link servedOverlayRowCandidates}, the one
     // the list's merge takes over the rows it read: the canonical
     // spelling then the other, and within each, the package's
@@ -110,7 +115,7 @@ export async function findServedOverlayRow(
     // collision would serve package B's customization for a package A
     // read); with no package context (legacy/runtime reader), any row.
     const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId })) {
+    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride })) {
         const type = candidate.spelling === 'canonical' ? args.type : other;
         if (type === undefined) continue;
         const where: Record<string, unknown> = {
@@ -129,7 +134,16 @@ export async function findServedOverlayRow(
         const row = activeRows !== undefined && args.state === 'active'
             ? activeRows.find((stored) => rowMatchesOverlayWhere(stored, where))
             : await this.findEnvironmentRow('sys_metadata', { where, context: { isSystem: true } });
-        if (row) return { row };
+        if (!row) continue;
+        // [#28409, ADR-0146 D8 item 2] The pair's row holds the override
+        // candidate only when it declares the override of the address's
+        // package ({@link isServedOverrideRowOf}, on the row's own binding and
+        // body): an undeclared row of the pair is the pair's own item.
+        if (candidate.overrideOf !== undefined) {
+            if (isServedOverrideRowOf(row, candidate.overrideOf)) return { row, overrideOf: candidate.overrideOf };
+            continue;
+        }
+        return { row };
     }
     return undefined;
 }
@@ -199,14 +213,45 @@ export function packagelessContentPackage(
     address: { readonly packageId: string | null; readonly candidates: readonly string[] },
     shipped: readonly unknown[],
 ): string | null | undefined {
-    const shippers = new Set<string>();
-    for (const artifact of shipped) {
-        const id = (artifact as { _packageId?: unknown } | null | undefined)?._packageId;
-        if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') shippers.add(id);
-    }
+    const shippers = shippingPackageIds(shipped);
     if (shippers.size === 0 || (address.packageId !== null && shippers.has(address.packageId))) {
         return address.packageId ?? undefined;
     }
     if (shippers.size === 1) return [...shippers][0];
     return address.candidates.some((id) => shippers.has(id)) ? undefined : null;
+}
+
+/**
+ * [#28238, #28409] The code packages `shipped` belongs to — every artifact an
+ * installed code package registered under one name
+ * (`ObjectStackProtocolImplementation#shippedArtifactsOf`), by its
+ * `_packageId`, the `'sys_metadata'` sentinel left out. The candidates
+ * {@link packagelessContentPackage} weighs for the by-name reads, and the set
+ * the env-wide list asks for the same name ({@link soleShippingPackage}), so
+ * the two read the code packages that ship a name one way.
+ */
+export function shippingPackageIds(shipped: readonly unknown[]): ReadonlySet<string> {
+    const shippers = new Set<string>();
+    for (const artifact of shipped) {
+        const id = (artifact as { _packageId?: unknown } | null | undefined)?._packageId;
+        if (typeof id === 'string' && id !== '' && id !== 'sys_metadata') shippers.add(id);
+    }
+    return shippers;
+}
+
+/**
+ * [#28409, ADR-0146 D8 items 1–2] The one code package that ships a name, or
+ * `undefined` when none or several do: the case in which
+ * {@link packagelessContentPackage} answers that package for every stored row
+ * the name has. The env-wide list (`readFlattenedMetaItems`, naming no
+ * package) then lists the name once, as that package's item, which is what
+ * the by-name read naming no package serves: a row another package stored
+ * under the name is that package's own item, served under its own address
+ * (the read naming it, the list scoped to it), never a second item of the
+ * name beside the base's. Several packages that ship a name keep one item
+ * each (ADR-0048 §3.3), as the by-name read keeps its best-effort answer.
+ */
+export function soleShippingPackage(shipped: readonly unknown[]): string | undefined {
+    const shippers = shippingPackageIds(shipped);
+    return shippers.size === 1 ? [...shippers][0] : undefined;
 }
