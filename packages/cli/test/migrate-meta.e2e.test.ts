@@ -30,7 +30,6 @@ import { childEnv } from './helpers/serve-process.js';
 const execFileP = promisify(execFile);
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
  * A stack authored against protocol 16: every line marked `// 16:` is a shape
@@ -137,7 +136,7 @@ let dir: string;
 let out: { stdout: string; parsed: any };
 
 async function runMeta(args: string[], cwd: string) {
-  const { stdout } = await execFileP(TSX, [CLI, 'migrate', 'meta', ...args], {
+  const { stdout } = await execFileP(process.execPath, [CLI, 'migrate', 'meta', ...args], {
     cwd,
     maxBuffer: 16 * 1024 * 1024,
     env: childEnv({ NO_COLOR: '1' }),
@@ -455,7 +454,7 @@ export default defineStack({
   it('still refuses the same source everywhere else — `os validate` keeps the prescription', async () => {
     let refused = false;
     try {
-      await execFileP(TSX, [CLI, 'validate'], {
+      await execFileP(process.execPath, [CLI, 'validate'], {
         cwd: rkDir,
         maxBuffer: 16 * 1024 * 1024,
         env: childEnv({ NO_COLOR: '1' }),
