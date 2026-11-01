@@ -848,7 +848,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Resend Invitation",
-        description: "Resend the invitation to {{ record.email }}? Its expiry date starts over.",
+        description: "Resend the invitation to {{ record.email }}? The expiry date starts over, and an invitation that has already expired is replaced by a new one.",
         successMessage: "Invitation resent",
         outcomeMessages: {
           sent: "Invitation resent to {{ result.email }}",

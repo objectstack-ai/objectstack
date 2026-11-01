@@ -97,6 +97,15 @@ const DEFAULT_OBJECT = 'sys_setting';
 const PLATFORM_SETTING_OBJECT = 'sys_platform_setting';
 
 /**
+ * The platform-scope capability (`PLATFORM_CAPABILITIES`,
+ * `@objectstack/spec/security`) every platform-scope settings manifest reads
+ * and writes behind, and the one that marks an HTTP caller as the platform
+ * rung a lock at the write's own rung does not bind
+ * ({@link SettingsService.writesAsPlatform}).
+ */
+const PLATFORM_SETTINGS_CAPABILITY = 'manage_platform_settings';
+
+/**
  * The execution context `SettingsService`'s own reads and writes of its two
  * stores — `sys_setting` and {@link PLATFORM_SETTING_OBJECT} — run under
  * (#8030, #21913).
@@ -1096,7 +1105,8 @@ export class SettingsService {
   /**
    * Cascade priority ranks for lock comparisons (lower = higher
    * precedence). env<global<tenant<user<default. A locked row at a
-   * lower rank blocks writes at all higher ranks.
+   * lower rank blocks writes at all higher ranks; one at the write's own
+   * rank blocks every writer but the platform rung ({@link lockThatRefuses}).
    */
   private scopeRank(scope: SpecifierScope | 'env' | 'default'): number {
     switch (scope) {
@@ -1105,6 +1115,60 @@ export class SettingsService {
       case 'user':    return 3;
       default:        return 99;
     }
+  }
+
+  /**
+   * Whether a write is made by the platform rung — the one writer a lock at
+   * the write's own rung does not bind (see {@link lockThatRefuses}).
+   *
+   * A locked row is platform-locked: the lock is the platform's statement that
+   * this value is not the organization's to change. So the writers it does not
+   * bind are exactly the platform's own:
+   *
+   *  - a trusted in-process caller (`enforced` unset) — the seed and boot paths
+   *    {@link assertPermitted} already lets through ungated, and the system
+   *    write that sets a lock in the first place;
+   *  - an HTTP caller holding {@link PLATFORM_SETTINGS_CAPABILITY}, the
+   *    capability every platform-scope settings manifest writes behind.
+   *
+   * An organization's administrator holds the namespace's write capability
+   * (`setup.write`) and nothing more, so a lock binds it.
+   */
+  private static writesAsPlatform(ctx: SettingsContext): boolean {
+    if (!ctx.enforced) return true;
+    return (ctx.permissions ?? []).includes(PLATFORM_SETTINGS_CAPABILITY);
+  }
+
+  /**
+   * The locked row that refuses a write at `scope`, among the rows the
+   * caller's cascade reads lock state from (the global row, and the tenant row
+   * its reach prefers) — or `undefined` when none does.
+   *
+   *  - A locked row at an UPPER rung refuses every write below it, the
+   *    platform's included: the value is pinned above the rung being written.
+   *  - A locked row at the write's OWN rung refuses every writer but the
+   *    platform rung ({@link writesAsPlatform}), which writes through it and
+   *    leaves the row locked. This is what makes a tenant row's lock bind the
+   *    organization's own administrators, and what keeps their save agreeing
+   *    with {@link get}, which reports that row as locked.
+   *
+   * The user rung carries no lock: the cascade never reads a user row's
+   * `locked` ({@link resolveKeyFromRows}), so none is judged here either, and
+   * what the read reports as locked is exactly what a non-platform write is
+   * refused on.
+   */
+  private lockThatRefuses(
+    candidates: ReadonlyArray<SettingsRow | undefined>,
+    scope: SpecifierScope,
+    platformRung: boolean,
+  ): SettingsRow | undefined {
+    return candidates.find(
+      (r): r is SettingsRow =>
+        r !== undefined &&
+        r.locked === true &&
+        (this.scopeRank(r.scope) < this.scopeRank(scope) ||
+          (r.scope === scope && !platformRung)),
+    );
   }
 
   // ---------------------------------------------------------------------
@@ -2311,6 +2375,9 @@ export class SettingsService {
     // upper rung to be locked by and no organization to be stored for.
     let reach: OrganizationReach | undefined;
     const ownerless: FieldError[] = [];
+    // Whether this caller may write through a lock at its own rung — judged
+    // once for the batch, from the context alone (see `writesAsPlatform`).
+    const platformRung = SettingsService.writesAsPlatform(ctx);
     for (const key of Object.keys(patch)) {
       if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
       // An env override pins the key against writes — but only one that is IN
@@ -2324,12 +2391,24 @@ export class SettingsService {
         throw new SettingsLockedError(namespace, key);
       }
 
-      // Phase 2 lock: a row at an upper scope marked locked=true
-      // refuses writes at this (lower) scope. Writing AT the same
-      // scope as the lock is still permitted (i.e. a platform admin
-      // can edit a globally-locked value; a tenant admin cannot).
+      // Phase 2 lock — see `lockThatRefuses`: a locked row at an upper rung
+      // refuses every write below it, and a locked row at the write's OWN rung
+      // refuses every writer but the platform rung.
       const scope = reg.scopes.get(key)!;
-      if (scope === 'global') continue;
+      if (scope === 'global') {
+        // The global rung's row is the only one a global key's cascade reads,
+        // and only its own lock can bind the write. The platform rung writes
+        // through it, so for that caller there is nothing to read.
+        if (platformRung) continue;
+        const rows = await this.loadRows(namespace, null, UNOWNED);
+        const own = this.lockThatRefuses(
+          [rows.find((r) => r.key === key && r.scope === 'global')],
+          scope,
+          platformRung,
+        );
+        if (own) throw new SettingsLockedError(namespace, key, `locked-by-${own.scope}`);
+        continue;
+      }
       if (scope === 'user' && callerUserId === null) {
         ownerless.push(this.ownerlessUserKeyError(reg, key));
         continue;
@@ -2343,20 +2422,20 @@ export class SettingsService {
         continue;
       }
       const rows = await this.loadRows(namespace, scope === 'user' ? callerUserId : null, reach);
-      // The upper rungs THIS caller's cascade reads — the global row and the
-      // tenant row it prefers — so another organization's lock locks nothing
-      // here, and the row that answers the read is the row whose lock counts.
-      const upper = [
-        rows.find((r) => r.key === key && r.scope === 'global'),
-        this.preferredRow(rows.filter((r) => r.key === key && r.scope === 'tenant'), reach),
-      ].find(
-        (r): r is SettingsRow =>
-          r !== undefined &&
-          r.locked === true &&
-          this.scopeRank(r.scope) < this.scopeRank(scope),
+      // The rungs THIS caller's cascade reads lock state from — the global row
+      // and the tenant row it prefers — so another organization's lock locks
+      // nothing here, and the row that answers the read is the row whose lock
+      // counts.
+      const lock = this.lockThatRefuses(
+        [
+          rows.find((r) => r.key === key && r.scope === 'global'),
+          this.preferredRow(rows.filter((r) => r.key === key && r.scope === 'tenant'), reach),
+        ],
+        scope,
+        platformRung,
       );
-      if (upper) {
-        throw new SettingsLockedError(namespace, key, `locked-by-${upper.scope}`);
+      if (lock) {
+        throw new SettingsLockedError(namespace, key, `locked-by-${lock.scope}`);
       }
     }
     if (ownerless.length > 0) {
@@ -3265,7 +3344,7 @@ export class SettingsService {
    *
    * `SettingsService` is a privileged writer: it has already run the
    * manifest's read/write capability gate (`assertPermitted`), the env-lock
-   * and upper-scope-lock pre-flight, and `validatePatch` before anything
+   * and row-lock pre-flight, and `validatePatch` before anything
    * reaches here, and the columns in question are ones IT owns rather than
    * ones a caller forged. So the write is elevated — the same posture, and for
    * the same measured reason, as the roll-up recompute's elevation in
@@ -3465,7 +3544,10 @@ export class SettingsService {
     const idx = this.memoryIndexOf(row);
     if (idx >= 0) {
       const previous = this.memory[idx];
-      this.memory[idx] = row;
+      // Merged, as the engine's UPDATE merges: a column this write does not
+      // carry keeps what the row held — above all its lock, which a write the
+      // platform rung makes through it must leave in place.
+      this.memory[idx] = { ...previous, ...row };
       return { previousEnc: SettingsService.handleOf(previous.value_enc), previous };
     }
     this.memory.push(row);
