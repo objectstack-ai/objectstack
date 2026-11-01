@@ -63,7 +63,7 @@ export interface FlowCopied {
 }
 
 /** The clone door's answer: the copy, or its refusal verbatim. */
-export type FlowNewSimilarOutcome = { ok: true; copy: FlowCopied } | { ok: false; message: string };
+type FlowNewSimilarOutcome = { ok: true; copy: FlowCopied } | { ok: false; message: string };
 
 /**
  * `POST /automation/<name>/clone` with EXACTLY the members the clone body
@@ -71,7 +71,7 @@ export type FlowNewSimilarOutcome = { ok: true; copy: FlowCopied } | { ok: false
  * only when the pillar names a target. Never throws: a refusal comes back as
  * the server's sentence, read by `actionErrorDetail` like the toggle door's.
  */
-export async function requestFlowNewSimilar(
+async function requestFlowNewSimilar(
   source: string,
   body: { name: string; label: string; package?: string },
   fallbacks: { http: (status: number) => string; network: string },
