@@ -92,7 +92,7 @@ export {
   MAIL_HTML_SUPPORTED_SHAPES,
 } from './mail-html-hole-placement';
 export type { MailHtmlHole, MailHtmlHolePlacement, MailHtmlHoleJudgeOptions } from './mail-html-hole-placement';
-export { registerStdLib, buildScope, registerPermissionPredicate, registerCapabilityPredicate } from './stdlib';
+export { registerStdLib, buildScope, registerPermissionPredicate, registerCapabilityPredicate, declaresOptions } from './stdlib';
 export type { PermissionBinding } from './stdlib';
 // objectui#4421 / batch #147 — the permission predicate's data door. `can` reads
 // `EvalContext.permissions` and nothing else, and this is how that map is built

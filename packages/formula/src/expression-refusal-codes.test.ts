@@ -374,6 +374,22 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'time and reject the write. Denormalise the value you need onto `account`\'s object, or read it in a hook instead.',
     },
   ],
+  'label-field-no-options': [
+    {
+      // #28659: the evaluator's own fault sentence, at author time.
+      produce: () =>
+        onlyError('value', 'label(record.first)', {
+          scope: 'record',
+          objectName: 'p4',
+          fields: ['first', 'kind'],
+          optionFields: ['kind'],
+        }),
+      params: { field: 'first' },
+      message:
+        'label(record.first): `first` declares no options, so it has no option label. ' +
+        "label() reads a select field's option label; read any other field directly (record.first).",
+    },
+  ],
   'empty-expression': [
     {
       produce: () => rootsRefusal('   '),
@@ -451,6 +467,7 @@ const SWEEP_SOURCES: readonly string[] = [
   "type == 'grid' && status == 'q'",
   'has(status) && other == 1',
   'daysBetween(record.a, record.b) > 3',
+  "label(record.name) + label(record.status)",
 ];
 
 const SWEEP_INPUTS: readonly ExprInput[] = [
@@ -477,6 +494,7 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     fields: ['amount', 'close_date', 'name', 'active', 'account', 'status'],
     fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup' },
     roleCatalog: ['org_admin', 'sales'],
+    optionFields: ['status'],
   },
   { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' } },
   { fields: ['status'] },

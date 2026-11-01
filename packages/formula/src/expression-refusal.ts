@@ -141,6 +141,12 @@ export interface ExpressionRefusalParams {
   'traversal-bare-and-traversed': { readonly root: string; readonly field: string };
   /** A reference field read through more than one relationship hop. */
   'traversal-multi-hop': { readonly root: string; readonly field: string };
+  /**
+   * `label(record.<field>)` naming a declared field that declares no options
+   * (`ExprSchemaHint.optionFields`, #28659). The message is the evaluator's own
+   * fault sentence for that call.
+   */
+  'label-field-no-options': { readonly field: string };
   /** `collectCelRootIdentifiers` was handed no expression. */
   'empty-expression': Readonly<Record<string, never>>;
   /** `collectCelRootIdentifiers` could not parse the source; `detail` is the parser's reason. */
@@ -189,6 +195,7 @@ const CODE_TABLE = {
   'field-near-miss': true,
   'traversal-bare-and-traversed': true,
   'traversal-multi-hop': true,
+  'label-field-no-options': true,
   'empty-expression': true,
   'cel-parse-failed': true,
 } as const satisfies Record<ExpressionRefusalCode, true>;

@@ -43,7 +43,7 @@
  */
 
 import { translateObject, type ObjectFieldLike, type TranslationBundle } from '@objectstack/spec/system';
-import type { EvalOptionLabels } from '@objectstack/formula';
+import { declaresOptions, type EvalOptionLabels } from '@objectstack/formula';
 
 /** The slice of `II18nService` the labels are translated through — what the metadata route reads. */
 export interface OptionLabelI18n {
@@ -70,13 +70,18 @@ export function planCallsOptionLabel(plan: ReadonlyArray<PlannedExpression>): bo
   });
 }
 
-/** The fields of `schema` that declare options, as `translateObject` takes them. */
+/**
+ * The fields of `schema` that declare options, as `translateObject` takes them.
+ * "Declares options" is `@objectstack/formula`'s `declaresOptions`, the same
+ * predicate `@objectstack/lint`'s formula pass refuses `label()` by (#28659),
+ * so the door refuses exactly the fields this map leaves out.
+ */
 function optionFields(schema: unknown): Record<string, ObjectFieldLike> {
   const fields = (schema as { fields?: unknown } | undefined)?.fields;
   const out: Record<string, ObjectFieldLike> = {};
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return out;
   for (const [name, def] of Object.entries(fields as Record<string, ObjectFieldLike>)) {
-    if (def && typeof def === 'object' && Array.isArray(def.options)) out[name] = def;
+    if (declaresOptions(def)) out[name] = def;
   }
   return out;
 }

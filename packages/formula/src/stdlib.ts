@@ -380,12 +380,51 @@ const LABEL_ARGUMENT_REFUSAL =
 /**
  * The field `label()`'s argument names — `kind` for `label(record.kind)` — or
  * `undefined` when the argument is any other shape.
+ *
+ * Package-internal, not re-exported from the entry: the macro reads its field
+ * through it, and `validateExpression`'s option check (#28659) reads the field
+ * of each `label(` call in a parsed source through it too, so the authoring
+ * gate and the evaluator agree on WHICH field a call names.
  */
-function optionLabelFieldOf(node: CelMacroNode | undefined): string | undefined {
+export function optionLabelFieldOf(node: CelMacroNode | undefined): string | undefined {
   if (!node || node.op !== '.' || !Array.isArray(node.args)) return undefined;
   const [receiver, field] = node.args as [CelMacroNode | undefined, unknown];
   if (!receiver || receiver.op !== 'id' || receiver.args !== 'record') return undefined;
   return typeof field === 'string' && field.length > 0 ? field : undefined;
+}
+
+/**
+ * Does this field definition declare options — the one reading of "has options"
+ * `label()` depends on (#28659)?
+ *
+ * A field whose definition carries an `options` list is a field the engine
+ * builds a label map for (`@objectstack/objectql`'s `formula-option-labels.ts`
+ * reads its fields through this), so `label(record.<field>)` answers on it.
+ * Any other field is absent from that map, and {@link optionLabelOf} faults on
+ * every row. `@objectstack/lint`'s formula pass reads the object's fields
+ * through the same predicate, so the authoring gate refuses exactly the fields
+ * the evaluator would fault on: one spelling, two readers.
+ *
+ * It reads the declaration, not the type: a `select` that declares no options
+ * has no labels either (and is refused for that by its own completeness rule),
+ * and any field type that does declare a list is answered.
+ */
+export function declaresOptions(def: unknown): boolean {
+  return !!def && typeof def === 'object' && Array.isArray((def as { options?: unknown }).options);
+}
+
+/**
+ * The sentence for `label(record.<field>)` on a field that declares no options.
+ * Shared by the evaluation fault ({@link optionLabelOf}) and the authoring
+ * refusal (`validateExpression`'s `label-field-no-options`, #28659), so the
+ * author reads the same prescription at the door that the log line carries.
+ */
+export function optionlessLabelSentence(field: string): string {
+  return (
+    `label(record.${field}): \`${field}\` declares no options, so it has no option label. ` +
+    'label() reads a select field\'s option label; read any other field directly ' +
+    `(record.${field}).`
+  );
 }
 
 /**
@@ -410,13 +449,7 @@ function optionLabelOf(field: string, value: unknown, labels: EvalOptionLabels |
   // The field's options first, so a field that declares none faults on EVERY
   // row, not only on the rows where it happens to hold a value.
   const options = Object.prototype.hasOwnProperty.call(labels, field) ? labels[field] : undefined;
-  if (options === undefined) {
-    throw new Error(
-      `label(record.${field}): \`${field}\` declares no options, so it has no option label. ` +
-      'label() reads a select field\'s option label; read any other field directly ' +
-      `(record.${field}).`,
-    );
-  }
+  if (options === undefined) throw new Error(optionlessLabelSentence(field));
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') {
     throw new Error(
