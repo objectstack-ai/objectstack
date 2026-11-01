@@ -14573,14 +14573,19 @@ export class ObjectStackProtocolImplementation implements
             onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
         };
         if (ctx !== undefined) opts.context = ctx;
-        const result = await this.engine.insert(request.object, data, opts);
+        // [#28782] A copy the engine stored but whose parent roll-up it could
+        // not recompute carries this method's answer on the refusal, as
+        // `createData` does since #28781 (`withEarnedAnswer`).
+        let stale: SummaryRecomputeRefusal | undefined;
+        const result = await this.engine.insert(request.object, data, opts)
+            .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
         // [#7823] Same ingress strip as `createData` — a clone's 201 body is
         // the same generic-data-path surface. (The SOURCE row was read through
         // the engine's find path, which already omits internal fields, so the
         // copy never carried one in; this guards the INSERT RESULT, which the
         // engine returns whole by design.)
         omitInternalFieldsFromWriteResponse(schema, result);
-        return {
+        const answer = {
             object: request.object,
             id: result.id,
             sourceId: request.id,
@@ -14588,6 +14593,8 @@ export class ObjectStackProtocolImplementation implements
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
