@@ -102,29 +102,8 @@ authored on this side: a trailing **ghost** row always exists, so never add an
 never persisted); `autofill: false` opts one column out of the typeahead copy;
 and the form's `taxRateField` overrides which parent field drives the totals.
 
-**Read side — detail-page related lists.** The mirror of `inlineEdit` is the
-related list on the parent's record DETAIL page. You don't author it: every
-child relationship is shown as a related list by default (owned `master_detail`
-children first). Refine on the relationship:
-- `relatedList: 'primary'` — main content: a full-width body table (see layout
-  below); it places, the parent's `relatedLists` orders (ADR-0085).
-- `relatedList: false` — suppress a noisy child from the detail page.
-- `relatedListTitle` / `relatedListColumns` — override the derived title /
-  columns (both optional; columns otherwise auto-derive from the child object's
-  `highlightFields`). See objectstack-data → Relationships → Detail-page related lists.
-
-**Related-list layout.** On the synthesized record page, each
-`relatedList: 'primary'` child (default: inline-edited `master_detail`) is a
-body table in the details column after the first field section (in the
-Details tab, no tab of its own); every other list is a side card in one shared
-**Related** tab, both in the object's `relatedLists` order. Field changes
-(`trackHistory`) join the Timeline tab under its Changes filter; there is no
-History tab. The object declares no per-surface *layout* hints: the
-`detail.relatedLayout` toggle, object-level `detail: {...}` block and app-level
-`relatedLayout` are **removed** (ADR-0085). For arrangements the relationship
-layer can't express — filtered splits (e.g. Open vs Closed tabs), a chart/report
-tab — assign the object a **custom record Page** and lay it out
-explicitly with `record:related_list` (or inline-editable `line_items`) blocks.
+**Read side — the record page.** Child relationships are related lists on the
+parent's record page by default; the flags, slots and open mode: [Record Page](./rules/record-page.md).
 
 ### Field Conditional Rules in Forms
 
@@ -146,6 +125,7 @@ authoring non-trivial CEL.
 - [Navigation & Run Modes](./rules/navigation.md) — `App.create`, the three run modes, record presentation.
 - [Dashboards, Reports & Cubes](./rules/dashboards.md) — widgets, dataset binding, filters, `compareTo`, bucketing, `options`, drilldown, report config, cubes.
 - [Pages & Docs](./rules/pages.md) — page types, regions, components, print pages, the html/react source tiers, styling, package docs.
+- [Record Page](./rules/record-page.md) — declarations → page, relationship flags, slotted / full overrides, drawer vs `page`, the reader's own choices.
 - [Actions](./rules/actions.md) — `locations`, visibility, examples, `ctx`, new tab, params.
 
 ---
@@ -207,7 +187,7 @@ Use this CRM-style structure as the canonical UI assembly reference:
 | **Analytics dataset** | `src/datasets/*.dataset.ts` | One per object you want reportable — dashboards and reports bind a **declared** dataset by name, so an object without one has no analytics face |
 | Dashboards | `src/dashboards/*.dashboard.ts` | Combine KPI + chart + table widgets with shared `dateRange` and `globalFilters` |
 | Reports | `src/reports/*.report.ts` | Select `rows` (dimensions) + `values` (measures) from that dataset; tabular/summary/matrix/joined |
-| Record pages | `src/pages/*.page.ts` | Compose `regions` + components (`page:header`, `record:highlights`, related lists, tabs) |
+| Record pages | — (synthesized) | The object's declarations produce the page ([Record Page](./rules/record-page.md)); `src/pages/*.page.ts` only to override a `slotted` slot or for a `kind: 'full'` layout |
 | User actions | `src/actions/*.actions.ts` | Use `flow` for orchestration and `script` for parameterized bulk mutations |
 
 This blueprint is the default for “build a complete metadata app UI” tasks.

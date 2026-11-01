@@ -59,6 +59,7 @@ import { RouteFader } from '../chrome/RouteFader.js';
 import { NavigationSyncEffect } from '../hooks/useNavigationSync.js';
 import { AppNoAccessEmptyState } from './AppNoAccessEmptyState.js';
 import { appNamesOnlyUnreadableObjects, appServesNoNavigation } from './appServesNoNavigation.js';
+import { resolveDeclaredLandingRoute, type LandingVisibilityEvaluator } from './appDeclaredLanding.js';
 import {
   useNavMemberGates,
   navEntriesShownToMember,
@@ -1714,25 +1715,40 @@ function buildItemRoute(item: any, ctx?: NavTemplateContext): string {
 
 /**
  * Resolves the route to navigate to when the user lands on the bare
- * `/console/apps/:appName` URL: the app's landing page is its FIRST reachable
- * navigation item, in `order`, among the entries the member is shown
- * (`navigation` arrives already gated, objectui#12426) — `findFirstRoute` walks groups and lands on an
- * `object`, `page`, `dashboard`, `report` or `component` entry (objectui#12113
- * added `component`). It skips the item types that address nothing inside
- * the app (`url`, `separator`, `action`), and a `doc` entry is never the
- * landing (objectui#11197). Which app the ROOT lands on is a separate
- * question, decided by `isDefault`.
+ * `/console/apps/:appName` URL.
  *
- * This used to honour an explicit `app.homePageId`. Spec 17.0.0 retired that
- * key (objectstack#4667, premise corrected in objectstack-ai/objectstack#4709 / objectui#3287): it was
- * an ID cross-reference with no referential integrity, so a dangling id fell
- * back to the first item *silently*. If the capability returns, the correct
- * encoding is a flag on the navigation item itself (`navigation[].landing`),
- * which cannot dangle — hence this function is kept as the seam even though it
- * now has a single expression.
+ * The app's declared per-audience landing comes first (`AppSchema.landing`,
+ * objectstack-ai/objectstack#28022, ruling record 6545223246, letter A): the
+ * first entry whose `visible` holds for this member, asked with the
+ * navigation's own `visible` evaluator, opens the navigation entry its `item`
+ * names, when the member is shown that entry. The rules, the predicate's scope
+ * and what a fault does are `resolveDeclaredLandingRoute`'s
+ * (`appDeclaredLanding.ts`).
+ *
+ * With no declared landing, or none that lands, the app's landing page is its
+ * FIRST reachable navigation item, in `order`, among the entries the member is
+ * shown (`navigation` arrives already gated, objectui#12426) — `findFirstRoute`
+ * walks groups and lands on an `object`, `page`, `dashboard`, `report` or
+ * `component` entry (objectui#12113 added `component`). It skips the item
+ * types that address nothing inside the app (`url`, `separator`, `action`),
+ * and a `doc` entry is never that fallback landing (objectui#11197). Which app
+ * the ROOT lands on is a separate question, decided by `isDefault`.
+ *
+ * The retired `app.homePageId` (spec 17.0.0, objectstack#4667) is not read: it
+ * was an id cross-reference that fell back to the first item in silence when
+ * it dangled. A `landing` entry's `item` is refused at parse when it names no
+ * entry of the app (`checkAppLandingItems`), so it cannot dangle.
  */
-function resolveLandingRoute(navigation: NavigationItem[], ctx?: NavTemplateContext): string {
-  return findFirstRoute(navigation, ctx);
+function resolveLandingRoute(
+  app: { landing?: unknown } | null | undefined,
+  shownTrees: readonly NavigationItem[][],
+  evaluateVisibility: LandingVisibilityEvaluator,
+  ctx?: NavTemplateContext,
+): string {
+  const declared = resolveDeclaredLandingRoute(app?.landing, shownTrees, evaluateVisibility, (item) =>
+    buildItemRoute(item, ctx),
+  );
+  return declared || findFirstRoute(shownTrees[0] ?? [], ctx);
 }
 
 /**
@@ -1812,12 +1828,19 @@ function AppRootLanding({
     return <AppNoAccessEmptyState app={app} setupPath={setupPath} reason="no-readable-object" />;
   }
   const navigation = navEntriesShownToMember(app?.navigation || [], gates);
-  const landing = resolveLandingRoute(navigation, ctx);
   const areas = (app?.areas || []) as Array<{ navigation?: NavigationItem[] } | null | undefined>;
   const shownApp = {
     navigation,
     areas: areas.map((area) => ({ navigation: navEntriesShownToMember(area?.navigation || [], gates) })),
   };
+  // objectstack-ai/objectstack#28022 — a declared landing entry may name an
+  // entry of any tree the member is shown, `navigation` first.
+  const landing = resolveLandingRoute(
+    app,
+    [navigation, ...shownApp.areas.map((area) => area.navigation)],
+    gates.evaluateVisibility,
+    ctx,
+  );
   // objectui#13097 — the same questions, as if every pending read showed its
   // entry. A different answer means a pending read is still deciding it.
   const undecided = navEntriesShownOncePendingReadsShow(app?.navigation || [], gates);
@@ -1825,8 +1848,14 @@ function AppRootLanding({
     navigation: undecided,
     areas: areas.map((area) => ({ navigation: navEntriesShownOncePendingReadsShow(area?.navigation || [], gates) })),
   };
+  const undecidedLanding = resolveLandingRoute(
+    app,
+    [undecided, ...undecidedApp.areas.map((area) => area.navigation)],
+    gates.evaluateVisibility,
+    ctx,
+  );
   if (
-    resolveLandingRoute(undecided, ctx) !== landing ||
+    undecidedLanding !== landing ||
     (!landing && appServesNoNavigation(shownApp) !== appServesNoNavigation(undecidedApp))
   ) {
     return (
