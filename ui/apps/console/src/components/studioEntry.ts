@@ -191,7 +191,8 @@ export function useStudioEntry(options?: {
           }
           const json = (await res.json()) as MePermissionsResponse;
           if (cancelled) return;
-          const reported = json?.systemPermissions;
+          // [objectstack#28508] Only the authenticated body carries systemPermissions.
+          const reported = json?.authenticated === true ? json.systemPermissions : undefined;
           setState({
             status: 'loaded',
             systemPermissions: Array.isArray(reported) ? reported : undefined,

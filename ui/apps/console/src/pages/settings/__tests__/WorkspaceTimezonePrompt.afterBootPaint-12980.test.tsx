@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const { AUTH, toastError, toastSuccess } = vi.hoisted(() => ({
   AUTH: { user: { id: 'u_admin' }, activeOrganization: { id: 'org_1' } },
@@ -114,11 +114,12 @@ const settingsCalls = (method: string, url = '/api/settings/localization') =>
   fetchMock.mock.calls.filter(([u, init]) => u === url && ((init as RequestInit | undefined)?.method ?? 'GET') === method);
 
 function permissionsPayload(systemPermissions: string[] | undefined): MePermissionsResponse {
-  const base: MePermissionsResponse = {
+  const base: MePermissionsAuthenticatedResponse = {
     authenticated: true,
     userId: 'u_admin',
     tenantId: 'org_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: {},
     fields: {},

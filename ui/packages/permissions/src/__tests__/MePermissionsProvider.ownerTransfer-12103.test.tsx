@@ -23,7 +23,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import React from 'react';
 import { SystemFieldName } from '@objectstack/spec/system';
-import { MePermissionsProvider, type MePermissionsResponse } from '../MePermissionsProvider';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
 import { usePermissions } from '../usePermissions';
 import type { PermissionContextValue } from '../PermissionContext';
 
@@ -34,11 +34,13 @@ const OWNER = SystemFieldName.OWNER_ID;
 const EDITOR = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false };
 
 function envelope(
-  objects: MePermissionsResponse['objects'],
-  fields: MePermissionsResponse['fields'] = {},
+  objects: MePermissionsAuthenticatedResponse['objects'],
+  fields: MePermissionsAuthenticatedResponse['fields'] = {},
   authenticated = true,
 ): MePermissionsResponse {
-  return { authenticated, userId: authenticated ? 'u1' : null, tenantId: null, roles: [], permissionSets: [], objects, fields };
+  // [objectstack#28508] The anonymous body is `{ authenticated: false }` and nothing else.
+  if (!authenticated) return { authenticated: false };
+  return { authenticated: true, userId: 'u1', tenantId: null, positions: [], permissionSets: [], objects, fields, hasAnyQueue: false };
 }
 
 function checkFieldUnder(perms: MePermissionsResponse): PermissionContextValue['checkField'] {
