@@ -74,6 +74,10 @@ export type {
     // method is barrel-reachable, so a host building a custom composition
     // needs the name to hand it the loader's set.
     PackagedFlowSource,
+    // [#28405] The reader `AutomationEngine.setFlowHistorySource` takes —
+    // barrel-reachable through that method, for a host composing its own
+    // metadata history.
+    FlowHistorySource,
     // [#20790] The write-only flow credential channel's engine port, and what
     // `AutomationEngine.flowCredentialHoldings` answers — both
     // barrel-reachable through `setFlowCredentialSource` and that method.
