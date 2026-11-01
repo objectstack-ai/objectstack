@@ -237,14 +237,23 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
 
     for (const environmentId of [undefined, 'env_1']) {
         for (const operation of ['save', 'delete'] as const) {
-            it(`a packaged flow's ${operation} refusal names clone and the switch, cites ADR-0126, and names no hatch `
+            // [#28412, ADR-0146 D9 item 1] The SAVE names the declaration from
+            // the base's paired `.custom` in place of the clone: a clone is a
+            // second flow beside the base, and both run. The removal keeps
+            // the row's prescription.
+            it(`a packaged flow's ${operation} refusal names ${operation === 'save' ? 'the declaration' : 'clone'} and the switch, cites ADR-0126, and names no hatch `
                 + `(${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
                 const refusal: any = protocolOn(environmentId)
                     .packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation });
                 expect(shape(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
                 const message = String(refusal.message);
                 expect(message.startsWith("Metadata item 'flow/pkg_flow' is provided by a managed package")).toBe(true);
-                expect(message).toContain(CLONE);
+                if (operation === 'save') {
+                    expect(message).toContain(`Declare an override from '${PACKAGE_ID}.custom'`);
+                    expect(message).not.toContain(CLONE);
+                } else {
+                    expect(message).toContain(CLONE);
+                }
                 expect(message).toContain(TOGGLE);
                 expect(message).toContain(ADR_0126);
                 expect(message).not.toContain('OS_METADATA_WRITABLE');
@@ -269,7 +278,9 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
         const thrownBy = (run: Promise<unknown>) => run.then(() => undefined, (e: any) => e);
         const save: any = await thrownBy(p.saveMetaItem({ type: 'flow', name: 'pkg_flow', item: { name: 'pkg_flow', label: 'x' } }));
         const del: any = await thrownBy(p.deleteMetaItem({ type: 'flow', name: 'pkg_flow' }));
-        expect(save?.message).toContain(CLONE);
+        // [#28412] The save names the declaration in place of the clone.
+        expect(save?.message).toContain(`Declare an override from '${PACKAGE_ID}.custom'`);
+        expect(save?.message).toBe(p.packagedBaseRefusal({ type: 'flow', name: 'pkg_flow', operation: 'save' })?.message);
         expect(del?.message).toContain(TOGGLE);
     });
 
@@ -340,10 +351,12 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
         // Spelled out literally, NOT through the builder: the builder cannot
         // move a byte of the flow sentence without this pin seeing it.
         // [ADR-0131 D6] The opener names the managed package and the seal.
+        // [#28412, ADR-0146 D9 item 1] The save names the declaration from the
+        // base's paired `.custom` (or a rename) in place of the clone.
         expect(refusal('flow', 'pkg_flow', 'save').message).toBe(
             "Metadata item 'flow/pkg_flow' is provided by a managed package and is sealed "
-            + 'against in-place edits. Clone it under a new name to customize it (POST /api/v1/automation/:name/clone, '
-            + 'body {name, label}), or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; '
+            + "against in-place edits. Declare an override from 'com.example.pkg.custom' or rename it to customize it, "
+            + 'or switch it off (POST /api/v1/automation/:name/toggle, body {enabled: false}; '
             + 'operator-only where one install serves several organizations). '
             + 'See docs/adr/0126-packaged-metadata-customization-model.md.',
         );
@@ -741,11 +754,49 @@ describe('the override write gate — only the base\'s paired .custom declares a
         expect(stored()).toEqual([]);
     });
 
-    it('a declared flow override is refused — flow customization is not yet available', async () => {
+    // [#28412, ADR-0146 D9] `flow`'s D9 conditions are delivered (the flow
+    // precedence arms the pair's declaration over the loader's body, version
+    // pinning landed in #28405), so the same gate admits the pair's declared
+    // flow override — refused until this card as "not yet available" — and
+    // keeps every other refusal. `action` stays closed (the next case).
+    it('the pair\'s declared flow override is admitted at the save door and stored with its declaration (#28412)', async () => {
+        const { protocol, rows, stored } = gateProtocol();
+        await protocol.saveMetaItem({ type: 'flow', name: 'crm_flow', packageId: PAIR, item: body('flow', 'crm_flow', true) });
+        expect(stored()).toEqual([{ type: 'flow', name: 'crm_flow', package_id: PAIR, state: 'active' }]);
+        expect(JSON.parse(Array.from(rows.values())[0].metadata).overrides).toEqual(DECLARATION);
+    });
+
+    it('publishMetaItem promotes the pair\'s declared flow override draft (#28412)', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('flow', 'crm_flow', PAIR, body('flow', 'crm_flow', true));
+        await protocol.publishMetaItem({ type: 'flow', name: 'crm_flow', packageId: PAIR });
+        expect(stored()).toEqual([{ type: 'flow', name: 'crm_flow', package_id: PAIR, state: 'active' }]);
+    });
+
+    it('publishPackageDrafts promotes the pair\'s declared flow override (#28412)', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('flow', 'crm_flow', PAIR, body('flow', 'crm_flow', true));
+        const res = await protocol.publishPackageDrafts({ packageId: PAIR });
+        expect(res.success).toBe(true);
+        expect(stored()).toEqual([{ type: 'flow', name: 'crm_flow', package_id: PAIR, state: 'active' }]);
+    });
+
+    it('a partner\'s declared flow override is still refused — only the pair declares (#28412)', async () => {
         const { protocol, stored } = gateProtocol();
-        const e = await thrown(protocol.saveMetaItem({ type: 'flow', name: 'crm_flow', packageId: PAIR, item: body('flow', 'crm_flow', true) }));
+        const e = await thrown(protocol.saveMetaItem({ type: 'flow', name: 'crm_flow', packageId: PARTNER, item: body('flow', 'crm_flow', true) }));
         expect(shape(e)).toEqual(REFUSED);
-        expect(String(e.message)).toMatch(/flow customization is not yet available/);
+        expect(String(e.message)).toContain(`only '${PAIR}' may declare`);
+        expect(String(e.message)).not.toMatch(/not yet available/);
+        expect(stored()).toEqual([]);
+    });
+
+    it('the pair\'s undeclared same-named flow is refused — declare or rename, never clone (#28412)', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'flow', name: 'crm_flow', packageId: PAIR, item: body('flow', 'crm_flow') }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toMatch(/[Dd]eclare/);
+        expect(String(e.message)).not.toMatch(/not yet available/);
+        expect(String(e.message).toLowerCase()).not.toContain('clone');
         expect(stored()).toEqual([]);
     });
 

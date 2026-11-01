@@ -75,7 +75,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, within, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const APP = 'com.objectstack.account';
 const PURCHASE = 'showcase_purchase';
@@ -216,12 +216,13 @@ vi.mock('../../services/approvalsApi', async (importOriginal) => ({
 // Imported after the mocks so the page picks them up.
 import { ApprovalsInboxPage } from './ApprovalsInboxPage';
 
-function permissionsPayload(): MePermissionsResponse {
+function permissionsPayload(): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_1',
     tenantId: 't_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: {},
     fields: {},

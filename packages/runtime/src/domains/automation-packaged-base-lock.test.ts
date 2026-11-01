@@ -169,14 +169,23 @@ const errorOf = (response: any): { code?: unknown; message?: unknown } => respon
 
 /**
  * [#20819, ADR-0126 §2] The relayed refusal NAMES Regime C's sanctioned paths —
- * the clone under a new name (§7.1) and the enable/disable switch (§7.2) — and
+ * the clone under a new name (§7.1; [#28412] for a save, the declared override
+ * from the paired `.custom` instead) and the enable/disable switch (§7.2) — and
  * neither the `OS_METADATA_WRITABLE` hatch nor a redeploy. The sentence is the
  * metadata protocol's (`packagedBaseRefusal`, chosen per regime there); this
  * asserts it arrives at these doors, not its wording.
  */
-function expectRegimeCPrescription(response: any): void {
+function expectRegimeCPrescription(response: any, verb: 'save' | 'delete'): void {
     const message = String(errorOf(response).message);
-    expect(message).toContain('POST /api/v1/automation/:name/clone');
+    // [#28412, ADR-0146 D9] A save names the declared override from the
+    // package's paired `.custom` in place of the clone: the clone is a second
+    // flow beside the base, and both run. The removal still names the clone.
+    if (verb === 'save') {
+        expect(message).toContain(`Declare an override from '${PACKAGE_ID}.custom'`);
+        expect(message).not.toContain('POST /api/v1/automation/:name/clone');
+    } else {
+        expect(message).toContain('POST /api/v1/automation/:name/clone');
+    }
     expect(message).toContain('POST /api/v1/automation/:name/toggle');
     expect(message).toContain('docs/adr/0126-packaged-metadata-customization-model.md');
     expect(message).not.toContain('OS_METADATA_WRITABLE');
@@ -201,7 +210,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
 
                 expect(statusOf(response)).toBe(403);
                 expect(errorOf(response).code).toBe('NOT_OVERRIDABLE');
-                expectRegimeCPrescription(response);
+                expectRegimeCPrescription(response, 'save');
                 // Refuse first, mutate never: the engine was not entered, and
                 // the live definition is the one that was there before.
                 expect(h.registerFlow).not.toHaveBeenCalled();
@@ -221,7 +230,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
 
                 expect(statusOf(response)).toBe(403);
                 expect(errorOf(response).code).toBe('NOT_OVERRIDABLE');
-                expectRegimeCPrescription(response);
+                expectRegimeCPrescription(response, 'delete');
                 expect(h.unregisterFlow).not.toHaveBeenCalled();
 
                 const read = await h.dispatcher.handleAutomation(`/${PACKAGED}`, 'GET', undefined, AUTHOR(), undefined);
@@ -272,7 +281,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
         );
         expect(statusOf(overwrite.response)).toBe(403);
         expect(errorOf(overwrite.response).code).toBe('NOT_OVERRIDABLE');
-        expectRegimeCPrescription(overwrite.response);
+        expectRegimeCPrescription(overwrite.response, 'save');
         expect(h.registerFlow).not.toHaveBeenCalled();
         expect(h.held(PACKAGED)).toBe(before);
 
