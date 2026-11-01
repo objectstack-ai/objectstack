@@ -206,6 +206,27 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     return out;
   }
 
+  /**
+   * Does `organizationId` have at least one ownership queue? A declared queue
+   * the activation ledger leaves on counts for every organization; otherwise
+   * the organization's `sys_queue` rows count, except a row under a declared
+   * queue's name, which resolves nowhere (see {@link resolveQueue}). So the
+   * answer is `true` exactly when some name would resolve.
+   *
+   * The session payload's one boolean (`/auth/me/permissions` `hasAnyQueue`):
+   * the console's list toolbar asks it once per session, for a member who may
+   * not read `sys_queue` themselves. It discloses no name and no count. Not
+   * yet on the spec contract, which gains it with the payload's response
+   * schema.
+   */
+  async hasAnyQueue(organizationId: string | null): Promise<boolean> {
+    const engine = this.engine();
+    if (!engine) return false;
+    if ((await this.activeDeclaredQueues()).length > 0) return true;
+    const declaredNames = new Set(this.declaredItems().map((q) => q.name));
+    return (await this.authoredQueueNames(engine, organizationId, declaredNames)).length > 0;
+  }
+
   // ── Helpers the plugin's other modules read ────────────────────────────────
 
   /**
