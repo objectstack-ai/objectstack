@@ -23881,8 +23881,10 @@ export class ObjectStackProtocolImplementation implements
         // [ADR-0146 D10, #28564] …and an object draft's fields against the
         // `__c` reservation, judged against the package promoted into, with the
         // save door's judge and envelope, before `repo.promoteDraft` writes. See
-        // {@link objectBodyExtensionFieldSuffixRefusal}.
-        if (draftForGate) {
+        // {@link objectBodyExtensionFieldSuffixRefusal}. [#28735] ⛔ Not asked
+        // of SEALED managed content, for the D9.9 block's reason: the store's
+        // `NOT_OVERRIDABLE` is that row's one answer, not "rename the field".
+        if (draftForGate && singularType === 'object' && !this.isSealedManagedItem(singularType, request.name)) {
             const suffixRefusal = objectBodyExtensionFieldSuffixRefusal(
                 singularType, draftForGate.body, request.name, promoteInto,
             );
@@ -26757,6 +26759,21 @@ export class ObjectStackProtocolImplementation implements
      * new binding) until the next boot dropped it again, against the
      * write-through's own rule that a draft never leaks into the runtime
      * (ADR-0048). One gate before both limbs now admits active rows only.
+     *
+     * ## [ADR-0146 D10, #28735] The `__c` reservation, judged against the target
+     *
+     * A package-unbound row is not judged by the reservation (it is the
+     * environment's own), so the save door admits an object carrying `x__c`
+     * into no package. Rebinding that row makes `x__c` a field the TARGET
+     * package declares on its own object, which case (a) refuses outside a
+     * `.custom` pair. So every active `object` row this adoption would rebind
+     * is judged against the target id with the save door's judge
+     * ({@link judgeExtensionFieldSuffix}) before the first storage update, and
+     * any refused field refuses the adoption whole, with the save door's
+     * envelope ({@link extensionFieldSuffixRefusalError}, `VALIDATION_ERROR` /
+     * 400, `issues[]` locating each field): no row moves and nothing is
+     * written through to the registry. An adopted draft is judged when it is
+     * promoted (the promotion asks the same judge against its binding).
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;
@@ -26788,6 +26805,30 @@ export class ObjectStackProtocolImplementation implements
                 // (ADR-0070); see the header. The type folds as the save's does.
                 && !this.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name)),
         );
+
+        // [ADR-0146 D10, #28735] ⭐ THE `__c` RESERVATION, JUDGED AGAINST THE
+        // TARGET, before the first update below: each active object row this
+        // adoption rebinds becomes the target's own object. Refused whole, with
+        // the save door's judge and envelope; see the header. An unparseable
+        // row is left to the loop, as `duplicatePackage` leaves it.
+        {
+            const adoptedObjects: Record<string, unknown> = {};
+            for (const row of orphans) {
+                if (canonicalMetaType(String(row?.type)) !== 'object' || row.state !== 'active') continue;
+                if (typeof row.name !== 'string') continue;
+                let body: unknown;
+                try {
+                    body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+                } catch {
+                    continue;
+                }
+                if (body && typeof body === 'object' && !Array.isArray(body)) {
+                    adoptedObjects[row.name] = { ...(body as Record<string, unknown>), name: row.name };
+                }
+            }
+            const suffixRefusals = judgeExtensionFieldSuffix({ packageId: request.targetPackageId, objects: adoptedObjects });
+            if (suffixRefusals.length > 0) throw extensionFieldSuffixRefusalError(suffixRefusals);
+        }
 
         const reassigned: Array<{ type: string; name: string }> = [];
         // [#12981] The refusal channel this loop used to lack entirely.
