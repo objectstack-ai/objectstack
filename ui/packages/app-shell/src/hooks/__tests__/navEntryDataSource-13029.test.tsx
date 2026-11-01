@@ -40,7 +40,7 @@ import '@object-ui/components';
 import { SidebarProvider } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import { SchemaRenderer, SchemaRendererContext, MetadataCtx, type ApiFetch } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import type { NavigationItem } from '@object-ui/types';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';

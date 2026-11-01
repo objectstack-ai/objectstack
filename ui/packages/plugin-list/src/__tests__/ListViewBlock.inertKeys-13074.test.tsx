@@ -42,7 +42,7 @@ import {
   type RelatedRecordActionsValue,
   type RelatedRecordHandlers,
 } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 // Registers the REAL `list-view`.
 import '../index';

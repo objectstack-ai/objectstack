@@ -33,7 +33,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 // The reporter's dedupe `Set` is module state: reset it so every arm's
 // "nothing reported" is a reading, not a leftover from an earlier arm.
 import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';

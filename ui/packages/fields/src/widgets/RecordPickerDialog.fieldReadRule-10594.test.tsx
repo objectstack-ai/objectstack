@@ -48,7 +48,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { SchemaRendererContext } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordPickerDialog } from './RecordPickerDialog';
 import { getCellRenderer } from '../index';
 

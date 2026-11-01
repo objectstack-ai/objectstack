@@ -34,7 +34,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const route = vi.hoisted(() => ({ pathname: '/apps/crm/lead', search: '' }));
 const nav = vi.hoisted(() => ({ recordTitle: undefined as string | undefined }));

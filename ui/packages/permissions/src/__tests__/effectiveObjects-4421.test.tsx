@@ -20,7 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
 import { PermissionProvider } from '../PermissionProvider';
 import { usePermissions } from '../usePermissions';
 

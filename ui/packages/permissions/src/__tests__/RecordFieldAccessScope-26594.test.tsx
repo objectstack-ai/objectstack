@@ -24,7 +24,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, waitFor, act } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
 import { RecordFieldAccessScope } from '../RecordFieldAccessScope';
 import { usePermissions } from '../usePermissions';
 

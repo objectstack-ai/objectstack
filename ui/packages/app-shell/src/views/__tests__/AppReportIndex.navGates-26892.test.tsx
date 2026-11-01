@@ -48,7 +48,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({

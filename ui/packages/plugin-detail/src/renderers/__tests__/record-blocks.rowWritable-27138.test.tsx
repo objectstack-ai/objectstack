@@ -22,7 +22,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, screen, waitFor, act, cleanup, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { HighlightFieldsProvider, InlineEditProvider, RecordContextProvider, useInlineEdit } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordDetailsRenderer } from '../record-details';
 import { RecordHighlightsRenderer } from '../record-highlights';
 

@@ -25,7 +25,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
 import { SchemaRendererProvider, FilterScopeProvider } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { DataSource, ObjectGallerySchema } from '@object-ui/types';
 import { ObjectGallery } from '../ObjectGallery';
 

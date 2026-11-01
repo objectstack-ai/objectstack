@@ -47,7 +47,7 @@ import {
   MePermissionsProvider,
   PermissionProvider,
   usePermissions,
-  type MePermissionsResponse, type MePermissionsAuthenticatedResponse,
+  type MePermissionsAuthenticatedResponse,
 } from '@object-ui/permissions';
 import { RecordDetailsRenderer } from '../record-details';
 import { RecordHighlightsRenderer } from '../record-highlights';

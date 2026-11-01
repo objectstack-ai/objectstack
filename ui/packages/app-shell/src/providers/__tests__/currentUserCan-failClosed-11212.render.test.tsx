@@ -62,7 +62,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { ExpressionProvider } from '../ExpressionProvider';
 // Module-scope side-effect imports: the registry renderers must be registered
 // before the first render (AGENTS.md §测试纪律 — import phase, not a hook).

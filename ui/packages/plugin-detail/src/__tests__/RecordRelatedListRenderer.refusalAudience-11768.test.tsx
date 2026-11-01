@@ -52,7 +52,7 @@ import {
   type RelatedRecordActionsValue,
   type RelatedRowActionDef,
 } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 // Registers `record:related_list`, the block under test.
 import '../index';
 

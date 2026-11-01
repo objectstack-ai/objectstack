@@ -55,7 +55,7 @@ import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
 import { MetadataCtx, RecordContextProvider } from '@object-ui/react';
 import type { MetadataContextValue } from '@object-ui/react';
-import { MePermissionsProvider, PermissionProvider, usePermissions, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, PermissionProvider, usePermissions, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordQuickActionsProps } from '@objectstack/spec/ui';
 import { RecordQuickActionsRenderer } from '../record-quick-actions';
 // Registers `record:quick_actions` and its three sibling record blocks, whose

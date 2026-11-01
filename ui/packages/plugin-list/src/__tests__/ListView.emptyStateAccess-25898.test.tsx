@@ -38,7 +38,7 @@ import { render, waitFor, cleanup } from '@testing-library/react';
 import { ListView } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
 import { SchemaRendererProvider, FilterScopeProvider } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
 
 afterEach(cleanup);
