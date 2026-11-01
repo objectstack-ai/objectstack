@@ -51,6 +51,8 @@ import type { HttpProtocolContext } from '../http-dispatcher.js';
 /** A flow a code package ships — registered with a package id, as an artifact loader does. */
 const PACKAGED = 'pkg_alert_flow';
 const PACKAGE_ID = 'com.example.pkg';
+/** [#28149] The base's paired customization package — where a clone lands. */
+const PAIR_PACKAGE_ID = 'com.example.pkg.custom';
 /** The customer's own flow — lives in the engine only (authored through `POST /automation`). */
 const CUSTOMER = 'customer_flow';
 /** A runtime-authored registry item with no package provenance. */
@@ -127,8 +129,17 @@ function boot(
         environmentId,
     );
 
+    // [#28149] The installed packages the clone door's target rule reads: the
+    // code-shipped base (read-only) and its writable pair, which depends on it.
+    const manifests: Record<string, { id: string; scope?: string; dependencies?: Record<string, string> }> = {
+        [PACKAGE_ID]: { id: PACKAGE_ID, scope: 'system' },
+        [PAIR_PACKAGE_ID]: { id: PAIR_PACKAGE_ID, dependencies: { [PACKAGE_ID]: '*' } },
+    };
+    const objectql = { registry: { getPackage: (id: string) => (manifests[id] ? { manifest: manifests[id] } : undefined) } };
+
     const services: Record<string, unknown> = {
         automation: { handlerReady: true, registerFlow, unregisterFlow, toggleFlow, getFlow },
+        objectql,
     };
     if (mode === 'real') services.protocol = protocol;
     const resolve = (name: string): unknown => services[name];
@@ -350,11 +361,20 @@ describe('what the lock leaves open', () => {
         // protocol's own save — pinned in
         // `automation-tenant-authored-write.test.ts`; stood in for here, where
         // the store is not this file's subject.
-        vi.spyOn(h.protocol, 'saveMetaItem').mockResolvedValue({ success: true } as never);
+        const save = vi.spyOn(h.protocol, 'saveMetaItem').mockResolvedValue({ success: true } as never);
+        // [#28149] The copy lands in the source's paired `<base>.custom`,
+        // ensured through N-13's door — stood in for here (its own suite pins
+        // it); the pair's manifest depends on the base, as the ensure door
+        // writes it.
+        vi.spyOn(h.protocol, 'ensureCustomizationPackage').mockResolvedValue(
+            { basePackageId: PACKAGE_ID, packageId: PAIR_PACKAGE_ID } as never,
+        );
         const { response } = await h.dispatcher.handleAutomation(
             `/${PACKAGED}/clone`, 'POST', { name: 'my_alert_copy', label: 'My Alert' }, AUTHOR(), undefined,
         );
         expect(statusOf(response)).toBe(200);
+        expect((response as any)?.body?.data?.packageId).toBe(PAIR_PACKAGE_ID);
+        expect(save).toHaveBeenCalledWith(expect.objectContaining({ packageId: PAIR_PACKAGE_ID }));
         expect(h.registerFlow).toHaveBeenCalledWith('my_alert_copy', expect.objectContaining({ name: 'my_alert_copy' }));
         expect(h.held(PACKAGED)).toEqual(definitionOf(PACKAGED));
     });
