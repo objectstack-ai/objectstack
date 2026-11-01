@@ -30,13 +30,17 @@
  *   epic rows        an open `pm:epic` PARENT — sub-issues under it AND a
  *                    `session_…` registration in its body, the paired
  *                    delegation signal (`seat-lifecycle.md` 〈Epic 子树车道〉;
- *                    H45's `h45DelegationNodeSignals`, both halves) — is lane
- *                    `epic:#<n>`, with no seat post: one row per `epic:#<n>#K`
- *                    seat holding an open mailbox (seat K, seated by the login
- *                    on its `Mailbox-of:` line — opened at seating, closed at
- *                    hand-over), else one row, seat 1, status unknown, so an
- *                    epic seat nobody can ring shows as one. No epic in-flight
- *                    or ruling is read, so an epic row is never 「疑似撞墙」.
+ *                    H45's `h45DelegationNodeSignals`, both halves) — or a
+ *                    registered `pm:epic` issue an open mailbox names (a
+ *                    parent delegated before its first sub-issue; a child is
+ *                    never a seat's mailbox) is lane `epic:#<n>`, with no seat
+ *                    post: one row per `epic:#<n>#<k>` seat holding an open
+ *                    mailbox, matched by its slug `epic-<n>-<k>` as the mailbox
+ *                    column is (seat k, seated by the mailbox's login — opened
+ *                    at seating, closed at hand-over), else one row, seat 1,
+ *                    status unknown, so an epic seat nobody can ring shows as
+ *                    one. No epic in-flight or ruling is read, so an epic row
+ *                    is never 「疑似撞墙」.
  *   account          the login after 🟢 in the title, else the post's first
  *                    assignee while seated. `🟢 Routine` reads as Routine.
  *   project          「由 X 账户的项目负责」 in the title or body — the line
@@ -257,7 +261,26 @@ export function hasLandingVerdict(comments) {
  * not imported, so the relay (which imports `ROSTER_MARKER` from here) never loads the patrol. A child carries
  * `pm:epic` and a signature's session too, never sub-issues of its own. Pure.
  */
-export const isEpicParent = (i) => Number(i?.sub_issues_summary?.total ?? 0) > 0 && /session_[A-Za-z0-9]{4,}/.test(String(i?.body ?? ''));
+export const isEpicParent = (i) => Number(i?.sub_issues_summary?.total ?? 0) > 0 && isEpicRegistered(i);
+/** H45's registration half alone: a `session_…` id in the body. Never a row on its own — every seat-filed child has one. Pure. */
+const isEpicRegistered = (i) => /session_[A-Za-z0-9]{4,}/.test(String(i?.body ?? ''));
+/**
+ * The second condition for an epic row: a registered `pm:epic` issue that an open mailbox already names — a parent
+ * delegated before its first sub-issue, whose PM opened `epic:#<n>#<k>` at seating. A child never has a mailbox named
+ * after itself. `held` is that issue's seat → login map (`epicSeatsHeld`). Pure.
+ */
+export const isSeatedFreshEpic = (i, held) => held.size > 0 && isEpicRegistered(i);
+/**
+ * Epic `lane`'s seats holding an open mailbox, seat → login, matched by `seatKey`'s slug `epic-<n>-<k>` exactly as the
+ * mailbox column matches — a `Mailbox-of:` line or a head-only `mailbox/<login>/epic-<n>-<k>` alike. Pure.
+ */
+export function epicSeatsHeld(lane, mailboxes) {
+  const stem = seatKey(lane).slug.replace(/1$/, '');
+  return new Map(mailboxes.flatMap((m) => {
+    const k = m.slug?.startsWith(stem) ? m.slug.slice(stem.length) : null;
+    return k !== null && seatKey(`${lane}#${k}`)?.slug === m.slug ? [[Number(k), m.login]] : [];
+  }));
+}
 const isEpicLane = (lane) => lane.startsWith(`${SEAT_EPIC_KIND}:`);
 
 /** A seat row's mailbox slug — its `LANE#N` as the opener spells it in a ref — or null. Pure. */
@@ -315,10 +338,11 @@ export function buildRows(snapshot, { now }) {
       if (seat) rows.push(seat);
     }
     for (const epic of s.epics ?? []) {
-      if (epic.pull_request || epic.state === 'closed' || !labelNames(epic).includes('pm:epic') || !isEpicParent(epic)) continue;
+      if (epic.pull_request || epic.state === 'closed' || !labelNames(epic).includes('pm:epic')) continue;
       const lane = `${SEAT_EPIC_KIND}:#${epic.number}`;
-      // Its seats are the ones holding a mailbox (the canonical key on the `Mailbox-of:` line); none open ⇒ seat 1, unknown.
-      const held = new Map(mailboxes.filter((m) => m.seat?.startsWith(`${lane}#`)).map((m) => [Number(m.seat.slice(lane.length + 1)), m.login]));
+      // Its seats are the ones holding a mailbox; none open ⇒ seat 1, unknown.
+      const held = epicSeatsHeld(lane, mailboxes);
+      if (!isEpicParent(epic) && !isSeatedFreshEpic(epic, held)) continue;
       for (const [seat, login] of held.size ? held : new Map([[1, null]])) {
         rows.push({ board: repo, post: epic.number, name: lane, lane, seat, repo, status: login ? 'seated' : 'unknown', mark: login ? '🟢' : null, account: login, routine: false, project: null, wallNote: null, updatedAt: epic.updated_at ?? null });
       }
@@ -581,7 +605,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 9,
   'seat titles: lane, seat, repo, status, account, project': 13,
   'wall notes, closing refs, verdicts and mailboxes': 13,
-  'the fixture snapshot: rows for the three repos': 22,
+  'the fixture snapshot: rows for the three repos': 25,
   'the rendered body: marker, columns, footer, determinism': 10,
   'refusing to overwrite what is not the roster': 6,
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
@@ -674,18 +698,23 @@ async function selfTest() {
     'objectstack:domain:skills:2',
     'objectstack:epic:#26676:1',
     'objectstack:epic:#27293:1',
+    'objectstack:epic:#27293:2',
+    'objectstack:epic:#28800:2',
     'objectstack:triage:1',
     'objectui:domain:ui:1',
     'objectui:domain:ui:4',
   ]);
   const laneListed = (lane) => (lane.includes(':') ? [...mailboxOpen.SEAT_LANE_KINDS, mailboxOpen.SEAT_EPIC_KIND].includes(lane.slice(0, lane.indexOf(':'))) : mailboxOpen.SEAT_BARE_LANES.includes(lane));
-  t('every fixture lane is a kind or bare word from the opener\'s lane-word lists — imported, not re-spelled', [...new Set(rows.map((r) => r.lane))].map((lane) => `${lane}:${laneListed(lane)}`), ['repo:hotcrm:true', 'domain:devx:true', 'domain:skills:true', 'epic:#26676:true', 'epic:#27293:true', 'triage:true', 'domain:ui:true']);
+  t('every fixture lane is a kind or bare word from the opener\'s lane-word lists — imported, not re-spelled', [...new Set(rows.map((r) => r.lane))].map((lane) => `${lane}:${laneListed(lane)}`), ['repo:hotcrm:true', 'domain:devx:true', 'domain:skills:true', 'epic:#26676:true', 'epic:#27293:true', 'epic:#28800:true', 'triage:true', 'domain:ui:true']);
   const os = (number) => ({ repo: 'objectstack-ai/objectstack', number });
   const ep = (post) => (({ lane, seat, status, mark, account, mailbox, suspectedWall, inFlight }) => ({ lane, seat, status, mark, account, mailbox, suspectedWall, inFlight }))(row(post));
   t('⭐ an epic parent is a row: lane epic:#n, the seat its open mailbox names, seated by that login, the mailbox in its column — and, stale with no in-flight read, never 疑似撞墙', ep(27293), { lane: 'epic:#27293', seat: 1, status: 'seated', mark: '🟢', account: 'sunhaolin', mailbox: [os(25397)], suspectedWall: false, inFlight: [] });
   t('⭐ an epic parent with no mailbox open is one row, seat 1, status unknown — an epic seat nobody can ring shows as one', ep(26676), { lane: 'epic:#26676', seat: 1, status: 'unknown', mark: null, account: null, mailbox: [], suspectedWall: false, inFlight: [] });
-  t('⛔ a pm:epic child (a session, no sub-issues) and a parent with no session registration are no row', rows.filter((r) => r.post === 28647 || r.post === 27108).length, 0);
-  t('isEpicParent is both halves of H45\'s delegation signals, over every fixture epic and a bare card', await (async () => { const { h45DelegationNodeSignals } = await import('./check-half-states.mjs'); return [...fixture.repos['objectstack-ai/objectstack'].epics, {}].map((i) => { const h = h45DelegationNodeSignals(i); return isEpicParent(i) === (h.subIssues && h.registration); }); })(), [true, true, true, true, true]);
+  t('⛔ a pm:epic child (a session, no sub-issues, no mailbox named after it) and a parent with no session registration are no row', rows.filter((r) => r.post === 28647 || r.post === 27108).length, 0);
+  t('⭐ a head-only epic mailbox (no `Mailbox-of:` line) seats its row by slug, as the mailbox column reads it', (({ post, seat, status, account, mailbox }) => ({ post, seat, status, account, mailbox }))(rows.find((r) => r.post === 27293 && r.seat === 2)), { post: 27293, seat: 2, status: 'seated', account: 'os-bill', mailbox: [os(25400)] });
+  t('⭐ a parent delegated before its first sub-issue is a row once its PM opened a mailbox — seated, never flagged as on no seat row', [ep(28800), unassignedMailboxes(fixture, rows).some((m) => m.ref.number === 25399)], [{ lane: 'epic:#28800', seat: 2, status: 'seated', mark: '🟢', account: 'os-tesla', mailbox: [os(25399)], suspectedWall: false, inFlight: [] }, false]);
+  t('the two conditions apart: registration + a held seat is a row without sub-issues; registration alone, or a held seat with no registration, is not', [isSeatedFreshEpic({ body: 'session_01Abcd' }, new Map([[1, 'a']])), isSeatedFreshEpic({ body: 'session_01Abcd' }, new Map()), isSeatedFreshEpic({ body: 'no id' }, new Map([[1, 'a']])), [...epicSeatsHeld('epic:#27293', readMailboxes(fixture)).keys()]], [true, false, false, [1, 2]]);
+  t('isEpicParent is both halves of H45\'s delegation signals, over every fixture epic and a bare card', await (async () => { const { h45DelegationNodeSignals } = await import('./check-half-states.mjs'); return [...fixture.repos['objectstack-ai/objectstack'].epics, {}].map((i) => { const h = h45DelegationNodeSignals(i); return isEpicParent(i) === (h.subIssues && h.registration); }); })(), [true, true, true, true, true, true]);
   t('the non-seat issue in the seat list is skipped', rows.some((r) => r.post === 999), false);
   t('today’s three seats carry the right accounts', [row(19287).account, row(6023).account, row(1353, 'objectstack-ai/hotcrm').account], ['os-elon-musk', 'os-elon-musk', 'os-elon-musk']);
   t('devx seat 1: its assigned dispatched card, not seat 2’s', row(6023).inFlight, [{ repo: 'objectstack-ai/objectstack', number: 25416 }]);
@@ -715,7 +744,7 @@ async function selfTest() {
     const flagged = renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort(), unassigned: unassignedMailboxes(fixture, rows) });
     return [flagged.includes('⚠️ 3 mailbox PR(s) on no seat row'), flagged.includes('objectstack#25395 (os-sales: legacy per-login, names no seat)'), flagged.includes('objectstack#25396 (domain:spec#5 · os-tesla: no seat post or epic parent carries this seat)'), body.includes('on no seat row')];
   })(), [true, true, true, false]);
-  t('an epic row renders its lane, its parent card as the seat link, its seat holder or `? —`, and the summary counts it', [body.includes('| objectstack | epic:#27293 | [1](https://github.com/objectstack-ai/objectstack/issues/27293) | 🟢 `sunhaolin` |'), body.includes('| objectstack | epic:#26676 | [1](https://github.com/objectstack-ai/objectstack/issues/26676) | ? — |'), body.includes(`${rows.length} seat rows (2 epic) ·`)], [true, true, true]);
+  t('an epic row renders its lane, its parent card as the seat link, its seat holder or `? —`, and the summary counts it', [body.includes('| objectstack | epic:#27293 | [1](https://github.com/objectstack-ai/objectstack/issues/27293) | 🟢 `sunhaolin` |'), body.includes('| objectstack | epic:#26676 | [1](https://github.com/objectstack-ai/objectstack/issues/26676) | ? — |'), body.includes(`${rows.length} seat rows (4 epic) ·`)], [true, true, true]);
   t('the attribution footer closes the body', body.endsWith('\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ABC)_'), true);
   const shuffled = { ...fixture, repos: Object.fromEntries(Object.entries(fixture.repos).reverse().map(([k, v]) => [k, { ...v, seats: [...v.seats].reverse() }])) };
   t('the same facts in another read order render the same body', renderBody(buildRows(shuffled, { now: fixture.now }), { now: fixture.now, repos: Object.keys(fixture.repos).sort() }), renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort() }));

@@ -33,7 +33,7 @@
 
 ## 信箱 PR
 
-- 每席一个 draft PR,键是席位 ⛔ 非账号,epic 席 `epic:#<n>#K` 同样开;标签 `pm:mailbox`+`pinned`。
+- 每席一个 draft PR,键是席位 ⛔ 非账号,epic 席 `epic:#<n>#<k>` 同样开;标签 `pm:mailbox`+`pinned`。
 - 正文首行 `Mailbox-of: <席位> · <login>`;坐席即开(`mailbox-open.mjs`)并订阅,存根记 `Mailbox:`。
 - 永不合并,不欠 CI,落地与台账查询排除它;移交或换账号关旧开新;评论首行 `To: <席位>`。
 - 次行恒为一键,下列事件必敲;一事一行 ≤200 字节,只写键与编号;表外即半态。

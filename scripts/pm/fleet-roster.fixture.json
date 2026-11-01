@@ -14,6 +14,7 @@
         { "number": 27293, "title": "[Epic] Marketplace and connector auto-shelf", "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\n## Epic PM registration", "labels": [{ "name": "pm:epic" }], "sub_issues_summary": { "total": 31 }, "updated_at": "2026-10-20T09:00:00Z" },
         { "number": 26676, "title": "epic: record page v2", "body": "Reserved for the epic PM session `session_cdb7a717-def7`.", "labels": [{ "name": "pm:epic" }], "sub_issues_summary": { "total": 20 }, "updated_at": "2026-10-22T09:00:00Z" },
         { "number": 28647, "title": "a child of #27293", "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U", "labels": [{ "name": "pm:epic" }], "sub_issues_summary": { "total": 0 }, "updated_at": "2026-10-23T09:00:00Z" },
+        { "number": 28800, "title": "[Epic] delegated, no sub-issue filed yet", "body": "epic:#28800#2 · os-tesla · session_01FreshEpicPm", "labels": [{ "name": "pm:epic" }], "sub_issues_summary": { "total": 0 }, "updated_at": "2026-10-23T10:00:00Z" },
         { "number": 27108, "title": "[Epic] not yet delegated", "body": "Owner: undecided.", "labels": [{ "name": "pm:epic" }], "sub_issues_summary": { "total": 3 }, "updated_at": "2026-10-23T09:00:00Z" }
       ],
       "dispatched": [
@@ -35,6 +36,8 @@
         { "number": 25395, "state": "open", "head": { "ref": "claude/project-thread-eeee" }, "body": "To: os-sales\n\nThe mailbox of the seat held by `os-sales`", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
         { "number": 25396, "state": "open", "head": { "ref": "claude/project-thread-ffff" }, "body": "Mailbox-of: domain:spec#5 · os-tesla", "labels": [{ "name": "pm:mailbox" }] },
         { "number": 25397, "state": "open", "head": { "ref": "mailbox/sunhaolin/epic-27293-1" }, "body": "Mailbox-of: epic:#27293#1 · sunhaolin", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
+        { "number": 25399, "state": "open", "head": { "ref": "mailbox/os-tesla/epic-28800-2" }, "body": "Mailbox-of: epic:#28800#2 · os-tesla", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
+        { "number": 25400, "state": "open", "head": { "ref": "mailbox/os-bill/epic-27293-2" }, "body": "", "labels": [{ "name": "pm:mailbox" }] },
         { "number": 25398, "state": "open", "head": { "ref": "mailbox/os-zhuang/epic-28130-1" }, "body": "Mailbox-of: epic:#28130#1 · os-zhuang", "labels": [{ "name": "pm:mailbox" }, { "name": "pinned" }] },
         { "number": 25433, "state": "open", "head": { "ref": "claude/project-thread-cccc" }, "body": "Fixes #25417", "labels": [] }
       ],
