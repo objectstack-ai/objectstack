@@ -350,10 +350,15 @@ export const GetPackageCustomizationsRequestSchema = lazySchema(() => z.object({
  * [#28722, ADR-0029 D7 as amended by ADR-0146 D3] Beside the pair's changes,
  * the same read names what OTHER installed packages bring to X's surface, so
  * Studio can draw those items greyed with their source: `contributions`, one
- * entry per item, each stamped with the package that contributes it. The
- * stamp is on the item, so two packages adding a field of the same name are
- * two entries and nothing is joined by name on the client. X's own items and
- * the pair's (listed above) are never contributions.
+ * entry per item, each stamped with the package that contributes it. What is
+ * listed is exactly two kinds: the fields another package's object extension
+ * adds to an object X owns, and the flows another package ships whose trigger
+ * object X owns. The stamp is on the item, so two packages adding a field of
+ * the same name are two entries and nothing is joined by name on the client.
+ * Neither X's own items nor its pair's are contributions: a pair item that
+ * overrides one of X's (a flow included) is in `overrides`, the pair's
+ * extension members are in `extensions`, and any other pair flow is in no
+ * list of this answer.
  */
 export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object({
   packageId: z.string().describe('The base package the customizations are of (the request\'s id).'),

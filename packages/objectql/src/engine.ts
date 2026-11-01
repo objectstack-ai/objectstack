@@ -9329,8 +9329,19 @@ export class ObjectQL implements IObjectQLEngine {
       // record, object, app or item behind; asked here, before anything is
       // written. See {@link refusedRegistrationWithdrawable}.
       const withdrawable = refusedRegistrationWithdrawable(this._registry, id, manifest, this.residualOwnerSources);
+      // [#28697] A re-register of an installed id is an upgrade: refused
+      // part-way, the registry puts back exactly the entries it wrote, so the
+      // installed version keeps serving whole, with other packages'
+      // extensions of its objects and tenant overlays as they were. Never
+      // through uninstall, which refuses an extended object and drops a
+      // tenant's overlay. See {@link SchemaRegistry.restoringOnRefusal}.
+      const upgrade = Boolean(id) && this._registry.getPackage(id) !== undefined;
       try {
-          this.registerPackageBody(manifest, id, namespace, version, source, scope);
+          if (upgrade) {
+              this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope));
+          } else {
+              this.registerPackageBody(manifest, id, namespace, version, source, scope);
+          }
       } catch (err) {
           if (withdrawable) this.withdrawRefusedRegistration(id, manifest, err);
           throw err;
