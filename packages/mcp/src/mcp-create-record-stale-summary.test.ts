@@ -34,6 +34,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { IDataEngine, IMetadataService, ExecutionContext } from '@objectstack/spec/contracts';
 import { withEarnedAnswer } from '@objectstack/types';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
@@ -63,7 +64,7 @@ function staleRefusal(written: unknown): Error {
 function engineDouble(stored: Record<string, unknown>[]) {
   return {
     find: vi.fn(async () => []),
-    findOne: vi.fn(async () => null),
+    findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
     insert: vi.fn(async (_o: string, data: Record<string, unknown>) => {
       if (data.name === 'refused') {
         throw Object.assign(new Error('name is not allowed'), { code: 'VALIDATION_FAILED', status: 400 });
@@ -72,8 +73,8 @@ function engineDouble(stored: Record<string, unknown>[]) {
       stored.push(row);
       throw staleRefusal(row);
     }),
-    update: vi.fn(async () => null),
-    delete: vi.fn(async () => true),
+    update: vi.fn(async (_o: string, data: Record<string, unknown>, options?: any) => { assertEngineUpdateDispatch(data, options); return null; }),
+    delete: vi.fn(async (_o: string, options?: any) => { assertEngineDeleteDispatch(options); return true; }),
     count: vi.fn(async () => 0),
   } as unknown as IDataEngine;
 }
