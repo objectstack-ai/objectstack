@@ -42,6 +42,7 @@ import { ExecutionLogSchema, ExecutionStatus, FlowRunSummarySchema } from '../au
  * DELETE /api/v1/automation/:name                — Delete flow
  * POST   /api/v1/automation/:name/trigger        — Trigger flow execution
  * POST   /api/v1/automation/:name/toggle         — Enable/disable a packaged flow
+ * POST   /api/v1/automation/:name/clone          — Copy a flow, switched off, into a package
  * GET    /api/v1/automation/:name/runs           — List execution runs
  * GET    /api/v1/automation/:name/runs/:runId    — Get single execution run
  * ```
@@ -656,6 +657,76 @@ export type ToggleFlowResponse = z.input<typeof ToggleFlowResponseSchema>;
 export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
 
 // ==========================================
+// 8a. Clone Flow (POST /api/v1/automation/:name/clone)
+// ==========================================
+
+/**
+ * [#28149, ADR-0146 D4] Request body of the flow clone door — "new similar":
+ * a whole-definition copy of the flow at `:name`, under a NEW machine name,
+ * written into a writable package and switched off.
+ *
+ * Closed: the door refuses a key not declared here (400 `VALIDATION_FAILED`,
+ * located on the key), so a caller who meant to choose the copy's `status`
+ * or its envelope learns that nothing was read. The path's `:name` is the
+ * SOURCE; this body's `name` is the copy's.
+ *
+ * `package` names where the copy lands. Omitted, the copy lands in the
+ * source's paired customization package `<base>.custom` (ADR-0146 D3),
+ * created on the customer's first customization through the protocol's
+ * ensure door, the one creation path of the pair. A source that no read-only
+ * package ships has no pair, so its copy needs `package`. ⛔ The copy is
+ * never written without a package (ADR-0070 D5/D6).
+ *
+ * @example POST /api/v1/automation/crm_lead_followup/clone
+ * { name: 'acme_lead_followup', label: 'Lead Follow-up (ACME)' }
+ */
+export const CloneFlowRequestSchema = lazySchema(() => z.object({
+  name: z.string().min(1).describe(
+    'The copy\'s machine name — mandatory, and a name no flow uses (ADR-0126 §7.1): the automation '
+    + 'engine keys flows by bare name, so a taken name is refused 409 `RESOURCE_CONFLICT`.',
+  ),
+  label: z.string().min(1).describe(
+    'The copy\'s display name — mandatory, so the copy and its source are told apart in every list.',
+  ),
+  package: z.string().min(1).optional().describe(
+    'Id of the package the copy lands in. Given, it must be an installed, writable package whose '
+    + 'dependency closure holds the source\'s package: an unknown or read-only one is refused 422 '
+    + '`WRITABLE_PACKAGE_REQUIRED`, one that declares no dependency path to the source\'s package 409 '
+    + '`RESOURCE_CONFLICT`, and nothing is written. Omitted, the copy lands in the source\'s paired '
+    + 'customization package `<base>.custom`, created on first use; a source no read-only package ships '
+    + 'has no pair, and the request is refused 400 `VALIDATION_FAILED` located on this member.',
+  ),
+}).strict());
+export type CloneFlowRequest = z.input<typeof CloneFlowRequestSchema>;
+export type CloneFlowRequestParsed = z.infer<typeof CloneFlowRequestSchema>;
+
+/**
+ * Response of the flow clone door.
+ *
+ * `data.flow` is the copy as stored: the source's whole definition, renamed,
+ * relabelled and switched off (`status: 'obsolete'`), with no package
+ * envelope and no reference to the source (ADR-0126 §9: no clone lineage).
+ * `data.packageId` is the package the copy landed in, so a console opens the
+ * copy where it lives.
+ */
+export const CloneFlowResponseSchema = lazySchema(() => BaseResponseSchema.extend({
+  data: z.object({
+    flow: FlowSchema.describe('The copy as stored: switched off, in `packageId`, with no lineage.'),
+    packageId: z.string().describe(
+      'The package the copy landed in: the one the request named, else the source\'s paired '
+      + 'customization package `<base>.custom`.',
+    ),
+    notice: z.string().describe(
+      'One line for the administrator, in the server\'s words: the copy is switched off until '
+      + 'someone switches it on, and its references are not re-pointed.',
+    ),
+  }),
+}));
+export type CloneFlowResponse = z.input<typeof CloneFlowResponseSchema>;
+/** Post-parse shape of {@link CloneFlowResponse} — defaults applied, transforms run (ADR-0122). */
+export type CloneFlowResponseParsed = z.infer<typeof CloneFlowResponseSchema>;
+
+// ==========================================
 // 9. List Runs (GET /api/v1/automation/:name/runs)
 // ==========================================
 
@@ -842,6 +913,12 @@ export const AutomationApiContracts = {
     path: '/api/v1/automation/:name/toggle',
     input: ToggleFlowRequestSchema,
     output: ToggleFlowResponseSchema,
+  },
+  cloneFlow: {
+    method: 'POST' as const,
+    path: '/api/v1/automation/:name/clone',
+    input: CloneFlowRequestSchema,
+    output: CloneFlowResponseSchema,
   },
   listRuns: {
     method: 'GET' as const,
