@@ -251,6 +251,7 @@ const ROSTER: Record<string, Member> = {
   meta: { argv: ['--stored', '--apply'], confirm: '--yes', writes: BOOT },
   'multi-value-columns': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'organization-ownership': { argv: ['--apply', '--plan-file', PLAN_FILE], confirm: '--backup-taken', writes: BOOT },
+  'packageless-overlays': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'recorded-by': {
     argv: ['--apply'],
     confirm: '--yes',
