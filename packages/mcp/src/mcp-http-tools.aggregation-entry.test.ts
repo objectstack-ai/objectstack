@@ -23,9 +23,19 @@
  *
  * CONTROLS. Entries without a filter reach the bridge exactly as before, and
  * the top-level unknown-key posture is unchanged.
+ *
+ * [#28609] The entry is now the spec's `AggregationNodeSchema` itself, closed at
+ * the producer, instead of this tool's own closed copy of its members. So a
+ * refused entry reads here in the very words the REST query door prints for
+ * the same body (`packages/rest/src/aggregation-entry-undeclared-key-door.test.ts`
+ * pins that half against the same spec message), and the retired `distinct`
+ * answers its tombstone sentence on both doors. `tools/list` declares
+ * `distinct` as a schema nothing satisfies (`not: {}`), with the removal text.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+
+import { AggregationNodeSchema } from '@objectstack/spec/data';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
@@ -53,6 +63,13 @@ function makeBridge(): RecordingBridge {
 }
 
 let nextId = 1;
+
+/** The refusal the spec node prints for one entry — the words the REST door answers too. */
+function nodeRefusal(entry: Record<string, unknown>): string {
+  const parsed = AggregationNodeSchema.safeParse(entry);
+  expect(parsed.success, 'the spec node refuses this entry').toBe(false);
+  return parsed.error!.issues[0]!.message;
+}
 
 async function rpc(runtime: MCPServerRuntime, bridge: RecordingBridge, method: string, params?: unknown) {
   const body = { jsonrpc: '2.0', id: nextId++, method, ...(params === undefined ? {} : { params }) };
@@ -124,6 +141,8 @@ describe('aggregate_records — the aggregation entry (#28550)', () => {
     });
     expect(refused).toBe(true);
     expect(text).toContain('bogusKey');
+    // [#28609] The spec node's own sentence, the one REST prints for this entry.
+    expect(text).toContain(nodeRefusal({ function: 'count', alias: 'n', bogusKey: 1 }));
     expect(bridge.calls).toHaveLength(0);
   });
 
@@ -135,16 +154,18 @@ describe('aggregate_records — the aggregation entry (#28550)', () => {
     expect(refused).toBe(true);
     expect(text).toContain('where');
     expect(text).toContain('filter');
+    expect(text).toContain(nodeRefusal({ function: 'count', alias: 'n', where: { status: 'active' } }));
     expect(bridge.calls).toHaveLength(0);
   });
 
-  it('the retired `distinct` entry key is refused, not dropped', async () => {
+  it('the retired `distinct` entry key is refused with its tombstone sentence, as on REST', async () => {
     const { refused, text } = await aggregate(runtime, bridge, {
       objectName: 'showcase_project',
       aggregations: [{ function: 'sum', field: 'budget', alias: 's', distinct: true }],
     });
     expect(refused).toBe(true);
-    expect(text).toContain('distinct');
+    expect(text).toContain('`query.aggregations[].distinct` was removed in @objectstack/spec 17 (ADR-0049)');
+    expect(text).not.toContain('Unrecognized key');
     expect(bridge.calls).toHaveLength(0);
   });
 
@@ -170,13 +191,17 @@ describe('aggregate_records — the aggregation entry (#28550)', () => {
     expect(bridge.calls).toHaveLength(0);
   });
 
-  it('`tools/list` advertises the entry as closed, with `filter` declared', async () => {
+  it('`tools/list` advertises the entry as closed, with `filter` declared and `distinct` unsatisfiable', async () => {
     const json = await rpc(runtime, bridge, 'tools/list');
     const tool = (json.result?.tools ?? []).find((t: any) => t.name === 'aggregate_records');
     expect(tool).toBeDefined();
     const entry = tool.inputSchema?.properties?.aggregations?.items;
     expect(entry?.additionalProperties).toBe(false);
-    expect(Object.keys(entry?.properties ?? {}).sort()).toEqual(['alias', 'field', 'filter', 'function']);
+    expect(Object.keys(entry?.properties ?? {}).sort()).toEqual(['alias', 'distinct', 'field', 'filter', 'function']);
+    // [#28609] The tombstone: declared so the refusal carries its prescription,
+    // and advertised as a schema no value satisfies.
+    expect(entry?.properties?.distinct?.not).toEqual({});
+    expect(entry?.properties?.distinct?.description).toMatch(/^\[REMOVED\] /);
     expect(entry?.required).toEqual(expect.arrayContaining(['function', 'alias']));
   });
 });

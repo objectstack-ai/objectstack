@@ -13,7 +13,7 @@
  *    third-party plugins can't ship runaway predicates.
  */
 
-import { Environment, EvaluationError, ParseError, serialize } from '@marcbachmann/cel-js';
+import { Environment, EvaluationError, ParseError, TypeError as CelTypeError, serialize } from '@marcbachmann/cel-js';
 import type { ASTNode } from '@marcbachmann/cel-js';
 import type { Expression } from '@objectstack/spec';
 
@@ -1969,44 +1969,112 @@ function classifyCelFault(err: unknown): 'parse' | 'bounds' | 'type' | 'runtime'
  *
  * All four are one native regex-compilation failure, i.e. `runtime`.
  */
-function classifyError(err: unknown): EvalResult<never> {
+function classifyError(err: unknown, located = false): EvalResult<never> {
   const message = err instanceof Error ? err.message : String(err);
   const kind = classifyCelFault(err) ?? 'runtime';
-  return { ok: false, error: { kind, message } };
+  const pos = located ? celFaultRange(err) : undefined;
+  return { ok: false, error: pos ? { kind, message, pos } : { kind, message } };
+}
+
+/** A cel-js error object — the three classes that carry a structured `code` and `range`. */
+function isCelFault(err: unknown): err is ParseError | EvaluationError | CelTypeError {
+  return err instanceof ParseError || err instanceof EvaluationError || err instanceof CelTypeError;
+}
+
+/**
+ * The source range a cel-js fault points at (#27904): `ParseError#range` /
+ * `TypeError#range` / `EvaluationError#range`, UTF-16 offsets into the text
+ * cel-js read, `end` exclusive. `undefined` when the fault carries none
+ * (`expression_must_be_string`, a non-cel-js throw) — ⛔ never a guessed `0`.
+ *
+ * The offsets are into the text cel-js READ. Every caller passes `located`
+ * only when that text is the author's source byte for byte; a source the
+ * #3306 / #25267 rewrites reserialized is read as different text, and a range
+ * into it would point the author at characters they never wrote.
+ */
+function celFaultRange(err: unknown): { start: number; end: number } | undefined {
+  if (!isCelFault(err)) return undefined;
+  const range = err.range;
+  if (!range || !Number.isInteger(range.start) || !Number.isInteger(range.end)) return undefined;
+  return { start: range.start, end: range.end };
+}
+
+/**
+ * cel-js's own structured code for a fault (#27904) — the parser's
+ * (`unexpected_token`, `expected_token`, `unexpected_character`,
+ * `unterminated_string`, …) or the checker's (`no_such_overload`, …). Read off
+ * the error object, never off its prose (the #6223 rule {@link classifyCelFault}
+ * follows); `undefined` for anything that is not a cel-js error.
+ */
+function celFaultCode(err: unknown): string | undefined {
+  if (!isCelFault(err)) return undefined;
+  return typeof err.code === 'string' && err.code ? err.code : undefined;
+}
+
+/**
+ * What {@link compileCel} answers: the {@link DialectEngine.compile} verdict,
+ * and beside it the engine's own fault code when it refused.
+ *
+ * Package-internal — `validateExpression` reads `celCode` into the
+ * `invalid-cel` refusal's params. Not on {@link EvalError}: that type reaches
+ * callers that put it into logs and error bodies, where a second `code` beside
+ * an ADR-0112 `error.code` would read as one.
+ */
+export interface CelCompileOutcome {
+  readonly result: EvalResult<unknown>;
+  /** cel-js's code for the fault ({@link celFaultCode}); absent on success or when it named none. */
+  readonly celCode?: string;
+}
+
+/**
+ * {@link celEngine.compile}, keeping the fault's cel-js code (#27904).
+ * `celEngine.compile` is this with the code dropped, so the two can never
+ * disagree about a verdict.
+ */
+export function compileCel(source: string): CelCompileOutcome {
+  let parsed: string | undefined;
+  try {
+    // The canonical parse env (#24536): parsing and checking neither mutate
+    // it nor call the stdlib, so one environment serves every compile.
+    const env = (canonicalParseEnv ??= buildEnv(() => new Date(0)));
+    // #3306 — accept the null-guard idiom `cond ? <value> : null`, which cel-js's
+    // ternary unifier otherwise rejects (`int`/`double`/`string` ≠ `null`). Same
+    // rewrite the runtime uses, so build and eval agree on what is valid.
+    // #25267 — and `has()` over an indexed receiver, lowered the same way.
+    parsed = rewriteNullableTernary(rewriteIndexedHas(source));
+    const compiled = env.parse(parsed);
+    // Surface check errors eagerly. cel-js's `check()` returns a
+    // `TypeCheckResult` object (`{ valid, type?, error? }`) — NOT an array —
+    // so the type fault (including `found no matching overload for 'PRIOR(dyn)'`
+    // when a condition calls an UNKNOWN function) only surfaces when we read
+    // `valid === false`. The previous `Array.isArray(...)` guard never matched
+    // an object, so unknown-function predicates type-checked clean and were
+    // silently accepted by `objectstack build` / `registerFlow`, then no-op'd
+    // the flow at runtime (#1877). Reading the documented shape closes that.
+    const checkResult = compiled.check?.();
+    if (checkResult && checkResult.valid === false) {
+      const fault: unknown = checkResult.error;
+      const message = checkResult.error?.message ?? 'expression failed type checking';
+      // #27904 — the range only when the checker read the author's own text.
+      const pos = parsed === source ? celFaultRange(fault) : undefined;
+      const celCode = celFaultCode(fault);
+      return {
+        result: { ok: false, error: pos ? { kind: 'type', message, pos } : { kind: 'type', message } },
+        ...(celCode ? { celCode } : {}),
+      };
+    }
+    return { result: { ok: true, value: compiled.ast } };
+  } catch (err) {
+    const celCode = celFaultCode(err);
+    return { result: classifyError(err, parsed === source), ...(celCode ? { celCode } : {}) };
+  }
 }
 
 export const celEngine: DialectEngine = {
   dialect: 'cel',
 
   compile(source: string): EvalResult<unknown> {
-    try {
-      // The canonical parse env (#24536): parsing and checking neither mutate
-      // it nor call the stdlib, so one environment serves every compile.
-      const env = (canonicalParseEnv ??= buildEnv(() => new Date(0)));
-      // #3306 — accept the null-guard idiom `cond ? <value> : null`, which cel-js's
-      // ternary unifier otherwise rejects (`int`/`double`/`string` ≠ `null`). Same
-      // rewrite the runtime uses, so build and eval agree on what is valid.
-      // #25267 — and `has()` over an indexed receiver, lowered the same way.
-      const compiled = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
-      // Surface check errors eagerly. cel-js's `check()` returns a
-      // `TypeCheckResult` object (`{ valid, type?, error? }`) — NOT an array —
-      // so the type fault (including `found no matching overload for 'PRIOR(dyn)'`
-      // when a condition calls an UNKNOWN function) only surfaces when we read
-      // `valid === false`. The previous `Array.isArray(...)` guard never matched
-      // an object, so unknown-function predicates type-checked clean and were
-      // silently accepted by `objectstack build` / `registerFlow`, then no-op'd
-      // the flow at runtime (#1877). Reading the documented shape closes that.
-      const checkResult = compiled.check?.();
-      if (checkResult && checkResult.valid === false) {
-        return {
-          ok: false,
-          error: { kind: 'type', message: checkResult.error?.message ?? 'expression failed type checking' },
-        };
-      }
-      return { ok: true, value: compiled.ast };
-    } catch (err) {
-      return classifyError(err);
-    }
+    return compileCel(source).result;
   },
 
   evaluate<T = unknown>(expr: Expression, ctx: EvalContext): EvalResult<T> {
@@ -2030,6 +2098,9 @@ export const celEngine: DialectEngine = {
     }
 
     const now = () => ctx.now ?? new Date();
+    // #27904 — the text cel-js read, so a fault's range is reported only when
+    // that text is the author's source (see `celFaultRange`).
+    let readSource: string | undefined;
     try {
       // Scope FIRST: `can` is answered about the acting subject by IDENTITY, and
       // the subject is the canonical `EvalUser` object `buildScope` mints. The
@@ -2064,6 +2135,7 @@ export const celEngine: DialectEngine = {
         // which cel-js's macro refuses, to the spec-equivalent `e.?f.hasValue()`.
         // All rewrites are no-ops for sources that don't need them.
         const evalSource = rewriteNullableTernary(rewriteTemporalEquality(rewriteIndexedHas(source), scope));
+        readSource = evalSource;
         try {
           const raw = runProgram(env, evalSource, scope);
           return { ok: true, value: coerce(raw) as T };
@@ -2096,7 +2168,7 @@ export const celEngine: DialectEngine = {
         activeBinding = outer;
       }
     } catch (err) {
-      return classifyError(err);
+      return classifyError(err, readSource === source);
     }
   },
 };
