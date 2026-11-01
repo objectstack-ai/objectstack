@@ -487,6 +487,9 @@ const ru = {
     bulkAllOnPage_other: "Выбраны все записи на этой странице ({{count}}).",
     bulkSelectAllMatching: "Выбрать все совпадения ({{count}})",
     bulkAllMatchingSelected: "Выбраны все подходящие записи ({{count}}).",
+    bulkSelectAllMatchingCapped: "Выбрать первые {{cap}} из совпадений ({{total}})",
+    bulkAllMatchingSelectedCapped: "Будут обработаны только первые {{cap}} подходящих записей из {{total}}.",
+    bulkSelectedAllMatchesCapped: "Выбрано: {{cap}} (всего совпадений: {{total}})",
     bulkActions: "Массовые действия",
     bulk: {
       confirmDefault: "Будет применено к записям: {{count}}.",

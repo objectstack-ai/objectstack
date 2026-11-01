@@ -506,6 +506,9 @@ const ar = {
     bulkAllOnPage_other: "تم تحديد جميع العناصر ({{count}}) في هذه الصفحة.",
     bulkSelectAllMatching: "تحديد كل النتائج المطابقة ({{count}})",
     bulkAllMatchingSelected: "تم تحديد جميع السجلات المطابقة ({{count}}).",
+    bulkSelectAllMatchingCapped: "تحديد أول {{cap}} من النتائج المطابقة ({{total}})",
+    bulkAllMatchingSelectedCapped: "ستتم معالجة أول {{cap}} سجل فقط من السجلات المطابقة ({{total}}).",
+    bulkSelectedAllMatchesCapped: "تم تحديد {{cap}} (إجمالي النتائج المطابقة: {{total}})",
     bulkActions: "إجراءات جماعية",
     bulk: {
       confirmDefault: "سيُطبَّق هذا على {{count}} من السجلات.",

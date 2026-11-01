@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: one served boot writes the template database, then its 129 cases boot in process, each over its own copy (every bootSchemaStack caller's modes on a present file, on an absent file and in a development key home, plus the lifecycle and key-home controls), each a distinct (command, mode, state); slowest CI reading 17.7 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21391] Every command that boots through `bootSchemaStack` keeps the two

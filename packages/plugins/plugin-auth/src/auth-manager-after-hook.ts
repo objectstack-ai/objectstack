@@ -45,6 +45,7 @@ import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
 import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotation.js';
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
+import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
@@ -233,6 +234,13 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // invitation row, by the one deliverability rule sign-up uses (see
   // `invitation-delivery-outcome.ts`). A refusal passes untouched.
   await stampInvitationDeliveryOutcome(ctx, () => this.isEmailDeliveryLive());
+
+  // ── #28540: a new invitation retires the person's expired pending one ──
+  // The vendor skips an expired row when it looks for one to renew, so a
+  // resend (or an invite) on it issues a new invitation; the expired row is
+  // moved to `expired` here, so the Pending list holds one row per person
+  // (see `invitation-expired-supersede.ts`). A refusal retires nothing.
+  await retireExpiredInvitationsOnReissue(ctx);
 
   // ── #27862: a role change names the permission set it granted ──
   // The before hook read the member's org-admin grants; a success that

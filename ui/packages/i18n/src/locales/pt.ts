@@ -476,6 +476,9 @@ const pt = {
     bulkAllOnPage_other: "Os {{count}} desta página estão selecionados.",
     bulkSelectAllMatching: "Selecionar todas as {{count}} correspondências",
     bulkAllMatchingSelected: "Todos os {{count}} registros correspondentes estão selecionados.",
+    bulkSelectAllMatchingCapped: "Selecionar as primeiras {{cap}} de {{total}} correspondências",
+    bulkAllMatchingSelectedCapped: "Apenas os primeiros {{cap}} de {{total}} registros correspondentes serão processados.",
+    bulkSelectedAllMatchesCapped: "{{cap}} selecionados (de {{total}} correspondências)",
     bulkActions: "Ações em massa",
     bulk: {
       confirmDefault: "Isto será aplicado a {{count}} registro(s).",
