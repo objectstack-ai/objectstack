@@ -103,7 +103,12 @@
  *            and the declared range, and no seed row is read for it (#21822).
  *
  *   DELETE /api/v1/marketplace/install-local/:manifestId
- *          → removes the cached manifest, withdraws the package from the
+ *          → refused `409 RESOURCE_CONFLICT`, with the registry's own
+ *            sentence and nothing removed, when the running registry would
+ *            refuse the uninstall: the package's paired customization package
+ *            (`<id>.custom`) is installed (ADR-0146 D3), or another package
+ *            extends an object it owns (ADR-0029) (#28511). Otherwise
+ *            removes the cached manifest, withdraws the package from the
  *            running kernel through the registry's `uninstallPackage` — the
  *            verb the protocol's own uninstall uses — so its objects answer
  *            404 at once (#21576), and the copies of its objects the install
@@ -2371,6 +2376,46 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         {
             const walled = this.refuseWalledCatalogPackage(c, ctx, 'Uninstalling', manifestId, admission);
             if (walled) return walled;
+        }
+        // [#28511, ADR-0146 D3] THE REGISTRY'S UNINSTALL REFUSAL, ASKED BEFORE
+        // THE LEDGER WRITE. The withdrawal below asks the registry to
+        // uninstall the package, and the registry refuses a base whose paired
+        // customization package (`<base>.custom`) it holds, or a package
+        // owning an object another package extends (ADR-0029). Met only
+        // there, that refusal came after the ledger entry was gone: the door
+        // answered 200 with a failed `registry.uninstallPackage` outcome, the
+        // base stayed registered until the restart, and the restart then
+        // dropped it from under its pair. So the same question is asked here,
+        // of the same registry and the same id the withdrawal uninstalls,
+        // through `assertPackageUninstallable` — the ONE predicate
+        // `uninstallPackage` itself asks, which mutates nothing — and its
+        // refusal is the request's: its own `409 RESOURCE_CONFLICT` and its
+        // sentence, with nothing moved (the ledger entry, the registration and
+        // the pair stay as they were).
+        //
+        // ⛔ A refusal check ahead of the ledger write, not a reversal of
+        // #21576's ledger-then-withdraw order: an uninstall the registry would
+        // let go still removes the ledger entry first. No `objectql` registry,
+        // or one that does not carry the method (an engine double), is not
+        // asked, and the door behaves as before: anything the withdrawal then
+        // meets is reported on `cleanups`. A throw that is not the coded
+        // refusal is left to the withdrawal the same way, never answered as a
+        // conflict it is not.
+        {
+            let registry: { assertPackageUninstallable?(id: string): void } | undefined;
+            try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — nothing registered */ }
+            if (typeof registry?.assertPackageUninstallable === 'function') {
+                try {
+                    registry.assertPackageUninstallable(manifestId);
+                } catch (err: any) {
+                    if (err?.code === 'RESOURCE_CONFLICT' && err?.status === 409) {
+                        return c.json({
+                            success: false,
+                            error: { code: 'RESOURCE_CONFLICT', message: String(err.message) },
+                        }, 409);
+                    }
+                }
+            }
         }
         try {
             this.ledger.remove(manifestId);

@@ -579,6 +579,26 @@ const MAX_JOIN_HOPS = 3;
 const joinAlias = (path: string): string => path.replace(/\./g, '__');
 
 /**
+ * [#28258] The first relationship PATH along a dotted `member` whose join alias
+ * is not in `allowed` (a compiled dataset's `allowedRelationships`), or `null`
+ * when every hop is backed or the member names no hop.
+ *
+ * Hop by hop, as `NativeSQLStrategy.qualifyAndRegisterJoin` registers its joins
+ * (one alias per path prefix, `account` then `account__owner`) and as its join
+ * allowlist then judges each alias: `account.owner.name` over a dataset that
+ * includes only `account` answers `account.owner`. The allowlist holds every
+ * declared path AND its prefixes, so a fully declared path answers `null`.
+ */
+export function unbackedRelationshipPath(member: string, allowed: ReadonlySet<string>): string | null {
+  const hops = member.split('.').slice(0, -1);
+  for (let i = 1; i <= hops.length; i++) {
+    const path = hops.slice(0, i).join('.');
+    if (!allowed.has(joinAlias(path))) return path;
+  }
+  return null;
+}
+
+/**
  * [#6761] The locale this compiler resolves an inline-locale-map label at:
  * **none**, i.e. the platform source language `en` per `resolveI18nLabel`'s
  * documented nullish-tolerance.

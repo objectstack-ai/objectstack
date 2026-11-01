@@ -1071,7 +1071,6 @@ export type {
   ViewComponentSchema,
   CommentEntry,
   MentionNotification,
-  CommentSearchResult,
   ActivityEntry,
   // Feed / Chatter Protocol Types
   FeedItemType,
