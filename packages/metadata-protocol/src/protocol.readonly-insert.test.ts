@@ -96,7 +96,7 @@ function makeProtocol(schema: any = SCHEMA) {
     findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
       assertEngineFindOnePredicate(object, query);
       // The clone source exists; any other id names no row, which is what sends
-      // `batchData`'s upsert fork (`probeRecord`, #5099) down its CREATE arm.
+      // `batchData`'s upsert fork (the caller's `findOne`) down its CREATE arm.
       const id = (query as any)?.where?.id;
       return id === 'src-1' ? { id: 'src-1', title: 'Source', approval_status: 'approved' } : null;
     }),
