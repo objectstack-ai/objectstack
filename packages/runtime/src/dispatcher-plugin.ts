@@ -1609,6 +1609,8 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 mountPackagesRoute('get', '/:id/commits', (req) => `/${req.params.id}/commits`);
                 mountPackagesRoute('post', '/:id/commits/:commitId/revert', (req) => `/${req.params.id}/commits/${req.params.commitId}/revert`);
                 mountPackagesRoute('post', '/:id/rollback', (req) => `/${req.params.id}/rollback`);
+                // ADR-0146 D3 — ensure the base's paired `.custom` package.
+                mountPackagesRoute('post', '/:id/ensure-customization', (req) => `/${req.params.id}/ensure-customization`);
             };
 
             // Mounted at the UNSCOPED prefix right here, keeping the exact

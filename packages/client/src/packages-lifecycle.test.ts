@@ -91,4 +91,24 @@ describe('client.packages lifecycle (#3563 PR-4)', () => {
             targetNamespace: 'copy',
         });
     });
+
+    it('ensureCustomization POSTs to the ensure door with no body, URL-encoding the base id, and returns the answer', async () => {
+        const answer = {
+            basePackageId: 'com.acme.crm',
+            packageId: 'com.acme.crm.custom',
+            namespace: 'crm_custom',
+            dependencyRange: '^3',
+            created: true,
+            writable: true,
+        };
+        const { client, fetchMock } = createMockClient({ success: true, data: answer }, 201);
+        const out = await client.packages.ensureCustomization('com.acme.crm');
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe(`${BASE}/com.acme.crm/ensure-customization`);
+        expect(init.method).toBe('POST');
+        expect(init.body).toBeUndefined();
+        expect(out).toEqual(answer);
+        await client.packages.ensureCustomization('a b');
+        expect(String(fetchMock.mock.calls[1][0])).toBe(`${BASE}/a%20b/ensure-customization`);
+    });
 });
