@@ -26,7 +26,15 @@
 //      each entry, its ref and the remedy;
 //   3. controls: the installed entry carrying its document inline lists
 //      `ready` with that document's operation, and the showcase's own
-//      file-ref and stdio entries keep listing `ready` with their own actions.
+//      file-ref and stdio entries keep listing `ready` with their own actions;
+//   4. the installed package cannot opt out of 2 by what it writes about
+//      itself (the review of the first fix, read and then measured here):
+//      a connector entry stamping `_packageId: 'com.example.showcase'` (the
+//      host's own `code` package) is refused at the install, nothing of it
+//      registered; and a two-member bundle whose member's entry states
+//      `source: 'code'` installs with that member recorded `marketplace`, so its
+//      file-ref connector is refused its ref while the inline one beside it
+//      lists `ready`.
 //
 // Boots a fixture stack of its own (the install-local plugin mounted), so it
 // stays out of `SHARED_SHOWCASE`.
@@ -41,6 +49,16 @@ import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import { bootShowcase } from './showcase-boot.js';
 
 const PACKAGE_ID = 'com.dogfood.pkgref';
+/** The showcase's own package id — a `code` row. */
+const HOST_PACKAGE_ID = 'com.example.showcase';
+/** M1: an installed entry naming the host's package as its own owner. */
+const STAMPED_PACKAGE_ID = 'com.dogfood.pkgrefstamp';
+const STAMPED_ENTRY = 'pkgrefstamp_host_file';
+/** M2: a two-member bundle, its second member's entry stating `source: 'code'`. */
+const BUNDLE_ID = 'com.dogfood.pkgrefbundle';
+const BUNDLE_MEMBER_ID = 'com.dogfood.pkgrefbundle.member';
+const MEMBER_FILE_ENTRY = 'pkgrefbundle_host_file';
+const MEMBER_INLINE_ENTRY = 'pkgrefbundle_inline';
 /** An `openapi` entry naming a file the showcase ships and the installed package does not. */
 const FILE_REF_ENTRY = 'pkgref_host_file';
 const FILE_REF = './src/system/connectors/status-openapi.json';
@@ -94,6 +112,61 @@ const INSTALL_BODY = {
   },
 };
 
+/** M1: the install body of an inline manifest whose connector stamps the host's package id on itself. */
+const STAMPED_INSTALL_BODY = {
+  manifest: {
+    id: STAMPED_PACKAGE_ID,
+    namespace: 'pkgrefstamp',
+    name: 'Self-stamped connector owner',
+    version: '1.0.0',
+    type: 'app',
+    connectors: [
+      {
+        name: STAMPED_ENTRY,
+        label: 'Claims the host as its owner',
+        type: 'api',
+        provider: 'openapi',
+        providerConfig: { spec: FILE_REF, baseUrl: 'http://127.0.0.1:9/' },
+        _packageId: HOST_PACKAGE_ID,
+      },
+    ],
+  },
+};
+
+/** M2: a two-member bundle whose second member's entry states `source: 'code'`. */
+const BUNDLE_INSTALL_BODY = {
+  manifest: {
+    id: BUNDLE_ID,
+    namespace: 'pkgrefbundle',
+    name: 'Bundle with a member stating code',
+    version: '1.0.0',
+    type: 'app',
+    packages: [
+      { manifest: { id: BUNDLE_ID, namespace: 'pkgrefbundle', name: 'Bundle with a member stating code', version: '1.0.0', type: 'app' } },
+      {
+        source: 'code',
+        manifest: {
+          id: BUNDLE_MEMBER_ID,
+          namespace: 'pkgrefbundlem',
+          name: 'Member stating code',
+          version: '1.0.0',
+          type: 'app',
+          connectors: [
+            {
+              name: MEMBER_FILE_ENTRY,
+              label: 'Names a host file',
+              type: 'api',
+              provider: 'openapi',
+              providerConfig: { spec: FILE_REF, baseUrl: 'http://127.0.0.1:9/' },
+            },
+            { name: MEMBER_INLINE_ENTRY, label: 'Inline document', type: 'api', provider: 'openapi', providerConfig: { spec: DOCUMENT } },
+          ],
+        },
+      },
+    ],
+  },
+};
+
 type Answer = { status: number; body: any };
 
 async function json(res: Response): Promise<Answer> {
@@ -137,6 +210,11 @@ describe('dogfood: an installed package\'s package-relative connector ref is ref
   let install: Answer;
   let connectors: Answer;
   let lines: string[] = [];
+  let stampedInstall: Answer;
+  let bundleInstall: Answer;
+  let installed: Answer;
+  let afterBundle: Answer;
+  let bundleLines: string[] = [];
 
   beforeAll(async () => {
     storageDir = mkdtempSync(join(tmpdir(), 'dogfood-connector-package-ref-'));
@@ -158,6 +236,19 @@ describe('dogfood: an installed package\'s package-relative connector ref is ref
       } while (Date.now() < deadline);
     });
     lines = captured.lines;
+
+    stampedInstall = await json(await stack.apiAs(token, 'POST', '/marketplace/install-local', STAMPED_INSTALL_BODY));
+    const bundled = await captureOutput(async () => {
+      bundleInstall = await json(await stack.apiAs(token, 'POST', '/marketplace/install-local', BUNDLE_INSTALL_BODY));
+      const deadline = Date.now() + 10_000;
+      do {
+        afterBundle = await json(await stack.apiAs(token, 'GET', '/automation/connectors'));
+        if (entryOf(afterBundle, MEMBER_INLINE_ENTRY)) break;
+        await new Promise((r) => setTimeout(r, 100));
+      } while (Date.now() < deadline);
+    });
+    bundleLines = bundled.lines;
+    installed = await json(await stack.apiAs(token, 'GET', '/marketplace/install-local'));
   }, 300_000);
 
   afterAll(async () => {
@@ -192,5 +283,27 @@ describe('dogfood: an installed package\'s package-relative connector ref is ref
     const record = lines.find((l) => l.includes(`connector instance '${PATH_REF_ENTRY}'`) && l.includes(PACKAGE_ID));
     expect(record, `no reconcile record names '${PATH_REF_ENTRY}' with its package`).toBeDefined();
     expect(record).toContain('path ref \'.\'');
+  });
+
+  it('M1: an installed entry stamping the host\'s own package id on itself is refused at the install, nothing of it registered', () => {
+    expect(stampedInstall.status, JSON.stringify(stampedInstall.body)).toBe(422);
+    expect(stampedInstall.body?.error?.code).toBe('PLUGIN_REGISTER_FAILED');
+    expect(stampedInstall.body?.error?.message).toContain(`Drop \`_packageId\` from connector '${STAMPED_ENTRY}'`);
+    expect(stampedInstall.body?.error?.message).toContain(`under package '${STAMPED_PACKAGE_ID}'`);
+    expect(entryOf(afterBundle, STAMPED_ENTRY), shown(afterBundle, STAMPED_ENTRY)).toBeUndefined();
+    const ids = (installed.body?.data?.items ?? []).map((i: any) => i.manifestId);
+    expect(ids, 'a refused inline install persists no ledger entry').not.toContain(STAMPED_PACKAGE_ID);
+    // CONTROL: the host's own file-ref entry is untouched.
+    expect(entryOf(afterBundle, HOST_FILE_ENTRY)?.state, shown(afterBundle, HOST_FILE_ENTRY)).toBe('ready');
+  });
+
+  it('M2: a bundle member whose entry states `code` is installed as marketplace — its file ref refused, its inline sibling ready', () => {
+    expect(bundleInstall.status, JSON.stringify(bundleInstall.body)).toBe(200);
+    expect(entryOf(afterBundle, MEMBER_INLINE_ENTRY)?.state, shown(afterBundle, MEMBER_INLINE_ENTRY)).toBe('ready');
+    expect(entryOf(afterBundle, MEMBER_FILE_ENTRY), shown(afterBundle, MEMBER_FILE_ENTRY)).toBeUndefined();
+    const record = bundleLines.find((l) => l.includes(`connector instance '${MEMBER_FILE_ENTRY}'`) && l.includes(BUNDLE_MEMBER_ID));
+    expect(record, `no reconcile record names '${MEMBER_FILE_ENTRY}' with its package`).toBeDefined();
+    expect(record).toContain('which was installed into this runtime');
+    expect(record).toContain(`'${FILE_REF}'`);
   });
 });

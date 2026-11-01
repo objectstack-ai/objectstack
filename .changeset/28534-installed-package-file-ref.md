@@ -20,4 +20,6 @@ fault, so the instance is not materialized and the reconcile logs the refusal. F
 current `os build`, which carries an `openapi` spec file into the artifact, or by inlining the document; an
 installed package reaches an MCP server over `http`, since a stdio transport needs a working directory inside the
 package. An entry carrying its document inline or as an `http(s)` URL is unaffected, and so is every entry of the
-host's own stack, which keeps reading its files as before.
+host's own stack, which keeps reading its files as before. Whose entry it is comes only from what a registering door
+recorded (the package row's `source`, or the residual owner's door for an artifact residual), never from the entry's
+own words: an entry stamped with a package no registration records is refused its refs as well.
