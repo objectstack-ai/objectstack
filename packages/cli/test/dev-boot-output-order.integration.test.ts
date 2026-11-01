@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 80 — spawns the real producer once per single-cause fixture: five sequential boots of the built `os dev` (a supervisor plus its `serve` child) under a real pty, each on a fresh database, held 2 s past the MCP block and stopped by a typed Ctrl+C; the boots are the subject, because the order defect was a race one boot can miss; slowest CI reading 59.4 s of the five scheduled runs 41199450735…41271604267, x 1.25, rounded up
 
 /**
  * #22410 — the first screen of `os dev` prints in ONE fixed order, each block
