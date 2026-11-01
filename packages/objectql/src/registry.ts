@@ -3141,6 +3141,34 @@ function withoutField(schema: ServiceObject, name: string): ServiceObject {
   return { ...schema, fields: rest } as ServiceObject;
 }
 
+/**
+ * [#28697] The undo record of one registration run under
+ * {@link SchemaRegistry.restoringOnRefusal}: for each registry entry the run
+ * writes, the way to put back what the entry held just before the run's FIRST
+ * write to it. An entry the run never writes is never recorded, so a restore
+ * puts back exactly the entries the run touched and nothing else — another
+ * package's entries and a tenant's layers are left as they are.
+ */
+class RegistrationRestorePoint {
+  private readonly touched = new Set<string>();
+  private readonly undo: Array<() => void> = [];
+
+  /**
+   * Record `key` before its first write in this run. `capture` reads the
+   * entry as it is now and returns how to put it back.
+   */
+  note(key: string, capture: () => () => void): void {
+    if (this.touched.has(key)) return;
+    this.touched.add(key);
+    this.undo.push(capture());
+  }
+
+  /** Put every recorded entry back, the last one written first. */
+  restore(): void {
+    for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i]();
+  }
+}
+
 export class SchemaRegistry {
   // ==========================================
   // Logging control
@@ -3424,6 +3452,173 @@ export class SchemaRegistry {
   }
 
   // ==========================================
+  // Restore on refusal
+  // ==========================================
+
+  /** The open {@link RegistrationRestorePoint}, while {@link restoringOnRefusal} runs. */
+  private restorePoint: RegistrationRestorePoint | undefined;
+
+  /**
+   * [#28697] Run `register` — one registration made of several registry
+   * writes, such as an upgrade of an installed package — and, when it throws,
+   * put back exactly the entries it wrote, then throw the same error.
+   *
+   * Every refusal a verb below raises keeps its code and words; this changes
+   * only what is left afterwards. A refusal raised after some of the run's
+   * writes (an object another package owns, a field with no `type`, a
+   * picklist value already added, …) would otherwise leave those writes
+   * serving beside the entries they replaced: an upgrade's new package record
+   * and the objects it reached, next to the installed version's remainder.
+   *
+   * What is recorded, each entry before the run's first write to it: an
+   * object's contributor list (an `extend` or overlay layer of another package
+   * or a tenant sits in it and is put back unchanged), a namespace's owners,
+   * an item slot (the package record included), this package's picklist
+   * extension of one list, and the security catalog and default record page
+   * claims the package door records. Nothing the run does not write is
+   * recorded or put back. After a restore every merged object is
+   * re-resolved, since a fold computed during the run may have read an entry
+   * the restore put back.
+   *
+   * ⛔ Not a way back from an operator's verb: {@link uninstallPackage},
+   * {@link unregisterObject} and the overlay removals are never journaled.
+   * Synchronous by contract: `register` must not return a promise, so no
+   * other caller's write can land between the run's writes and its restore.
+   * A nested call joins the run that is already open.
+   */
+  restoringOnRefusal<T>(register: () => T): T {
+    if (this.restorePoint) return register();
+    const point = new RegistrationRestorePoint();
+    this.restorePoint = point;
+    try {
+      const result = register();
+      if (result instanceof Promise) {
+        throw new TypeError('[Registry] restoringOnRefusal takes a synchronous registration; it was handed one that returned a promise.');
+      }
+      return result;
+    } catch (err) {
+      point.restore();
+      this.invalidateAll();
+      throw err;
+    } finally {
+      this.restorePoint = undefined;
+    }
+  }
+
+  /** Record an object's contributor list (and each contributor's mutable slots) before its first write. */
+  private noteObjectEntry(fqn: string): void {
+    this.restorePoint?.note(`object\u0000${fqn}`, () => {
+      const list = this.objectContributors.get(fqn);
+      if (!list) return () => this.closeObjectEntry(fqn);
+      // The late-install branch re-classifies a sitting contributor in place,
+      // so its ownership and priority are kept beside the reference.
+      const saved = list.map((c) => ({ c, ownership: c.ownership, priority: c.priority }));
+      return () => {
+        for (const s of saved) {
+          s.c.ownership = s.ownership;
+          s.c.priority = s.priority;
+        }
+        list.splice(0, list.length, ...saved.map((s) => s.c));
+        this.mergedObjectCache.delete(fqn);
+      };
+    });
+  }
+
+  /** Record a namespace's owner set before its first write. */
+  private noteNamespace(namespace: string): void {
+    this.restorePoint?.note(`namespace\u0000${namespace}`, () => {
+      const owners = this.namespaceRegistry.get(namespace);
+      const saved = owners ? new Set(owners) : undefined;
+      return () => {
+        if (saved) this.namespaceRegistry.set(namespace, saved);
+        else this.namespaceRegistry.delete(namespace);
+      };
+    });
+  }
+
+  /** Record whether an item type had a store at all, before the run can create one. */
+  private noteItemType(type: string): void {
+    this.restorePoint?.note(`type\u0000${type}`, () => {
+      const hadType = this.metadata.has(type);
+      return () => {
+        if (!hadType && this.metadata.get(type)?.size === 0) this.metadata.delete(type);
+      };
+    });
+  }
+
+  /** Record one item slot before its first write. */
+  private noteItem(type: string, key: string): void {
+    this.restorePoint?.note(`item\u0000${type}\u0000${key}`, () => {
+      const collection = this.metadata.get(type);
+      const had = collection?.has(key) ?? false;
+      const value = collection?.get(key);
+      return () => {
+        const now = this.metadata.get(type);
+        if (had) now?.set(key, value);
+        else now?.delete(key);
+      };
+    });
+  }
+
+  /** Record this package's extension of one picklist before its first write. */
+  private notePicklistExtension(target: string, packageKey: string): void {
+    this.restorePoint?.note(`picklistExtension\u0000${target}\u0000${packageKey}`, () => {
+      const byPackage = this.picklistExtensionContributions.get(target);
+      const saved = byPackage?.get(packageKey);
+      return () => {
+        let now = this.picklistExtensionContributions.get(target);
+        if (saved) {
+          if (!now) this.picklistExtensionContributions.set(target, now = new Map());
+          now.set(packageKey, saved);
+        } else if (now) {
+          now.delete(packageKey);
+          if (now.size === 0) this.picklistExtensionContributions.delete(target);
+        }
+      };
+    });
+  }
+
+  /** Record who holds one security catalog name before its first write. */
+  private noteSecurityCatalogClaim(type: SecurityCatalogType, name: string): void {
+    this.restorePoint?.note(`catalogClaim\u0000${type}\u0000${name}`, () => {
+      const saved = this.securityCatalogClaims.get(type)?.get(name);
+      return () => {
+        let byName = this.securityCatalogClaims.get(type);
+        if (saved !== undefined) {
+          if (!byName) this.securityCatalogClaims.set(type, byName = new Map());
+          byName.set(name, saved);
+        } else {
+          byName?.delete(name);
+        }
+      };
+    });
+  }
+
+  /**
+   * Record the default record page claims before `packageId`'s first rewrite
+   * of them ({@link recordDefaultRecordPageClaims} drops all of the package's
+   * claims, then adds what the manifest declares). Put back per object, and
+   * only for the objects `packageId` held a claim on before or after, each in
+   * its holders' original order.
+   */
+  private noteDefaultRecordPageClaims(packageId: string): void {
+    this.restorePoint?.note(`defaultPageClaims\u0000${packageId}`, () => {
+      const saved = new Map<string, Map<string, string>>();
+      for (const [object, byPackage] of this.defaultRecordPageClaims) saved.set(object, new Map(byPackage));
+      return () => {
+        const objects = new Set<string>();
+        for (const [object, byPackage] of saved) if (byPackage.has(packageId)) objects.add(object);
+        for (const [object, byPackage] of this.defaultRecordPageClaims) if (byPackage.has(packageId)) objects.add(object);
+        for (const object of objects) {
+          const before = saved.get(object);
+          if (before) this.defaultRecordPageClaims.set(object, new Map(before));
+          else this.defaultRecordPageClaims.delete(object);
+        }
+      };
+    });
+  }
+
+  // ==========================================
   // Namespace Management
   // ==========================================
 
@@ -3433,6 +3628,7 @@ export class SchemaRegistry {
    */
   registerNamespace(namespace: string, packageId: string): void {
     if (!namespace) return;
+    this.noteNamespace(namespace);
 
     let owners = this.namespaceRegistry.get(namespace);
     if (!owners) {
@@ -3449,6 +3645,7 @@ export class SchemaRegistry {
   unregisterNamespace(namespace: string, packageId: string): void {
     const owners = this.namespaceRegistry.get(namespace);
     if (owners) {
+      this.noteNamespace(namespace);
       owners.delete(packageId);
       if (owners.size === 0) {
         this.namespaceRegistry.delete(namespace);
@@ -3623,6 +3820,7 @@ export class SchemaRegistry {
    * {@link defaultRecordPageClaims} for why a re-install replaces).
    */
   private recordDefaultRecordPageClaims(packageId: string, manifest: ObjectStackManifest): void {
+    this.noteDefaultRecordPageClaims(packageId);
     this.forgetDefaultRecordPageClaims(packageId);
     for (const { object, page } of declaredDefaultRecordPages(manifest)) {
       let byPackage = this.defaultRecordPageClaims.get(object);
@@ -3752,6 +3950,7 @@ export class SchemaRegistry {
         byName = new Map();
         this.securityCatalogClaims.set(type, byName);
       }
+      this.noteSecurityCatalogClaim(type, name);
       byName.set(name, packageId);
     }
   }
@@ -4101,6 +4300,11 @@ export class SchemaRegistry {
     // record — skip rather than registering `undefined` as an owner (which
     // would also mean widening `registerNamespace`'s own required-string
     // contract, out of scope here).
+    // [#28697] Recorded before the first write below (the namespace claim),
+    // so a refusal raised after it — the ownership conflict — puts this
+    // object's layers back exactly ({@link restoringOnRefusal}).
+    this.noteObjectEntry(fqn);
+
     if (namespace && packageId) {
       this.registerNamespace(namespace, packageId);
     }
@@ -6122,6 +6326,7 @@ export class SchemaRegistry {
    * Universal Register Method for non-object metadata.
    */
   registerItem<T>(type: string, item: T, keyField: keyof T = 'name' as keyof T, packageId?: string) {
+    this.noteItemType(type);
     if (!this.metadata.has(type)) {
       this.metadata.set(type, new Map());
     }
@@ -6400,6 +6605,7 @@ export class SchemaRegistry {
       }
     }
 
+    this.noteItem(type, storageKey);
     collection.set(storageKey, item);
     if (type === 'picklist') this.invalidateAll();
     // [#24400] A bound action is attached to its target on read
@@ -7165,6 +7371,7 @@ export class SchemaRegistry {
       this.registerNamespace(manifest.namespace, manifest.id);
     }
     
+    this.noteItemType('package');
     if (!this.metadata.has('package')) {
       this.metadata.set('package', new Map());
     }
@@ -7174,6 +7381,7 @@ export class SchemaRegistry {
       // a normal path, not an error — keep it at debug (#3420).
       this.debug(`[Registry] Overwriting package: ${manifest.id}`);
     }
+    this.noteItem('package', manifest.id);
     collection.set(manifest.id, pkg);
     // The names this package now holds, recorded whether or not an item store
     // entry will carry them (see `securityCatalogClaims`).
@@ -7699,6 +7907,7 @@ export class SchemaRegistry {
 
     let byPackage = this.picklistExtensionContributions.get(target);
     if (!byPackage) this.picklistExtensionContributions.set(target, byPackage = new Map());
+    this.notePicklistExtension(target, packageKey);
     byPackage.set(packageKey, { packageId, options: merged });
     this.invalidateAll();
     this.log(`[Registry] Registered picklist extension: ${target} (+${extension.options?.length ?? 0}) from ${packageId}`);

@@ -23,7 +23,9 @@
  *  - CONTROLS: a clean body registers everything as before; a body that took
  *    over a tenant's object is not withdrawn (the withdrawal would drop the
  *    tenant's layer); nor is an installed id refused part-way by the registry
- *    (the withdrawal would take the installed version with it).
+ *    (the withdrawal would take the installed version with it), which keeps
+ *    serving its installed version instead
+ *    (`package-refused-upgrade-keeps-installed.test.ts`).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -225,22 +227,22 @@ describe('[#28697] controls', () => {
         expect(engine.registry.getPackage(PKG), 'not withdrawn').toBeDefined();
     });
 
-    it('an installed id refused part-way by the registry is not withdrawn', () => {
+    it('an installed id refused part-way by the registry is not withdrawn: the installed version keeps serving', () => {
         const engine = new ObjectQL();
         engine.registerApp({ id: HOST, name: HOST, objects: [object('probe_held')] } as any);
         engine.registerApp({ id: PKG, name: PKG, version: '1.0.0', objects: [object('probe_a'), object('probe_old')], apps: [app('probe_app')] } as any);
+        const before = trace(engine);
         const err = refusal(() => engine.registerApp(body({
             version: '2.0.0',
             objects: [object('probe_a', { label: 'v2 label' }), object('probe_held')],
         }) as any));
         expect(err).toMatchObject({ code: 'OBJECT_OWNERSHIP_CONFLICT', status: 422 });
-        const t = trace(engine);
-        // Not withdrawn: the withdrawal would take v1 with it.
-        expect(t.pkg?.manifest.version).toBe('2.0.0');
-        expect((engine.registry.getObject('probe_a') as any)?.label).toBe('v2 label');
-        expect(t.objects).toEqual(['probe_a', 'probe_held', 'probe_old']);
-        expect(t.apps).toEqual(['probe_app']);
-        // What `registerApp` writes only once the body registered whole is not written.
-        expect({ nav: t.nav, kinds: t.kinds, datasources: t.datasources }).toEqual({ nav: [], kinds: [], datasources: [] });
+        // Not withdrawn (the withdrawal would take v1 with it), and nothing of
+        // v2 stays: the registry puts back what the refused upgrade wrote.
+        expect(trace(engine)).toEqual(before);
+        expect(engine.registry.getPackage(PKG)?.manifest.version).toBe('1.0.0');
+        expect((engine.registry.getObject('probe_a') as any)?.label).toBe('probe_a');
+        expect(trace(engine).objects).toEqual(['probe_a', 'probe_held', 'probe_old']);
+        expect(engine.registry.getObjectOwner('probe_held')?.packageId).toBe(HOST);
     });
 });
