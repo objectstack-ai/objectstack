@@ -8,7 +8,8 @@ one thing the **customer's administrator** supplies: the value behind
 value set in the running app at `PUT /api/v1/automation/connectors/credential-refs/:ref`;
 an unset ref leaves its instance degraded until set. A spec is not a
 secret and ships in the package; an `api` flow's hook secret goes to the
-deployment and to the sender. Full guide: https://objectstack.ai/docs/automation/connectors.
+deployment and to the sender. Keep `automation` in `requires` whenever a
+connector is declared. Full guide: https://objectstack.ai/docs/automation/connectors.
 
 ## Holds on every recipe
 
@@ -23,10 +24,11 @@ deployment and to the sender. Full guide: https://objectstack.ai/docs/automation
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value slot.
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
-  default `X-API-Key`, or `paramName` for a query-string key); `basic` (`username`
+  or `paramName` for a query-string key); `basic` (`username`
   stays in metadata); `signed` on `openapi` / `rest` (`scheme`
   `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
-  `keyId`) signs each request; `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
+  `keyId`) signs each request — WeChat Pay has no scheme yet: mark it blocked,
+  write no plugin; `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
 - `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
 
@@ -61,8 +63,8 @@ export const StripeBalanceSweep = defineFlow({
 
 `requires: ['automation', 'triggers', 'job']`. Convert Swagger 2.0 or YAML and
 dereference every `$ref` offline, in-document ones included: the loader skips a
-`$ref` parameter, request body or response, and the derived input/output schema
-silently loses it. `providerConfig.include` allowlists operation keys as the
+`$ref` parameter, request body or response and the derived schema silently
+loses it. `providerConfig.include` allowlists operation keys as the
 `mcp` provider's does (absent = every operation; a non-array or unknown entry is
 fatal).
 
@@ -72,8 +74,8 @@ fatal).
 export const GitHubMcp = defineConnector({
   name: 'github_mcp', label: 'GitHub (remote MCP)', type: 'api', provider: 'mcp',
   providerConfig: {
-    transport: { kind: 'http', url: 'https://api.githubcopilot.com/mcp/',  // `stdio` spawns a local process:
-                 headers: { 'X-MCP-Readonly': 'true' } },   // denied unless the host allowlists the command
+    transport: { kind: 'http', url: 'https://api.githubcopilot.com/mcp/',  // `stdio` needs the host's allowlist
+                 headers: { 'X-MCP-Readonly': 'true' } },
     include: ['search_issues'],
   },
   auth: { type: 'bearer', credentialRef: 'GITHUB_MCP_TOKEN' },
@@ -85,11 +87,14 @@ export const GitHubMcp = defineConnector({
 
 `toolsSnapshot` pins each tool the app depends on: tool name → sha256 of its
 `tools/list` definition; a pinned name `include` leaves out is refused at boot.
-Digests: `computeMcpToolsSnapshot(tools)` from `@objectstack/connector-mcp`, or
-pin a 64-hex placeholder and copy the served digest from the degraded reason. A
-pinned tool served differently degrades the instance with no actions
-(`CONNECTOR_UPSTREAM_CHANGED`), one no longer listed too; `GET /api/v1/automation/connectors`
-names each tool and any digest it now serves — review, then re-pin. Rest:
+Digests: `computeMcpToolsSnapshot(tools)` (`@objectstack/connector-mcp`), or a
+64-hex placeholder pin, then the served digest from the degraded reason. The
+instance degrades with no actions, the reason on `GET /api/v1/automation/connectors`
+naming each tool: a pinned tool served differently is `CONNECTOR_UPSTREAM_CHANGED`
+with the digest it now serves (review, re-pin); one no longer listed is
+the credential path when the instance's credential reached the server, as this
+`bearer` does — the stored credential marked `rejected`: fix the credential and
+set it again, or update the pin — and `CONNECTOR_UPSTREAM_CHANGED` otherwise. Rest:
 https://objectstack.ai/docs/automation/connectors#pinning-tools-toolssnapshot.
 
 ## 3 · Plain REST API — `provider: 'rest'`, the one `request` action
@@ -97,7 +102,7 @@ https://objectstack.ai/docs/automation/connectors#pinning-tools-toolssnapshot.
 ```ts
 export const WarehouseApi = defineConnector({
   name: 'warehouse_api', label: 'Warehouse API', type: 'api', provider: 'rest',
-  providerConfig: { baseUrl: 'https://wms.example.com', defaultHeaders: { Accept: 'application/json' } },
+  providerConfig: { baseUrl: 'https://wms.example.com' },
   auth: { type: 'api-key', credentialRef: 'WMS_API_KEY', headerName: 'X-Api-Key' },
 });
 // connector_action { connectorId: 'warehouse_api', actionId: 'request',
@@ -125,10 +130,9 @@ export const CarrierCallback = defineFlow({
 ```
 
 `requires: ['automation', 'triggers', 'queue']`. The sender signs each post
-under `CARRIER_HOOK_SECRET` (SKILL.md § Inbound webhook, *Signature*). The door
-has no unsigned form and verifies no other scheme, so a vendor whose webhook
-signs its own header cannot post here today: poll its status (recipe 1's shape)
-until vendor schemes verify.
+under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). The door verifies no
+other scheme: a vendor whose webhook signs its own header cannot post here
+today — poll its status (recipe 1's shape) until vendor schemes verify.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
@@ -167,12 +171,7 @@ auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialR
 `client_credentials` and `app-credential` dispatch once the ref is set.
 `authorization_code` is degraded "not connected" until an administrator holding
 `manage_connector_connections` connects it, once per organization, from a
-signed-in session (an agent or API key is refused):
-`POST /api/v1/automation/connectors/:name/connection` answers `{ authorizationUrl }`;
-the vendor redirects to `GET …/connectors/oauth/callback`. Endpoints are `https://`; an
-`authorization_code` instance on `mcp` may omit them and `clientId`, discovered at connect.
+signed-in session: `POST /api/v1/automation/connectors/:name/connection` answers
+`{ authorizationUrl }`. An `authorization_code` instance on `mcp` may omit the
+`https://` endpoints and `clientId`, discovered at connect.
 Still never park a short-lived token behind a `bearer` ref.
-
-## Not yet — mark the integration blocked, write no plugin
-
-- **WeChat Pay**: no `signed` scheme yet.
