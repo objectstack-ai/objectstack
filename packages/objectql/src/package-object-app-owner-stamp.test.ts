@@ -95,15 +95,30 @@ describe('[#28697] registerApp refuses an app or object whose body `_packageId` 
         expectRefused(register({ id: PKG, name: 'probe', objects: { probe_thing: unnamed }, apps: [app()] }), 'object', 'probe_thing');
     });
 
-    it('a nested plugin\'s object and plugin-as-app, judged against the parent package', () => {
-        const r1 = register({ id: PKG, name: 'probe', plugins: [{ name: 'nested', objects: [object(HOST)] }] });
+    it('a nested plugin\'s object and plugin-as-app, judged against the parent package before the PARENT registers anything', () => {
+        // The parent carries an object and an app of its own, both unstamped:
+        // the nested plugin's stamp is refused before either is registered.
+        const parent = { id: PKG, name: 'probe', version: '1.0.0', objects: [object(undefined, 'parent_thing')], apps: [app(undefined, 'parent_app')] };
+        const r1 = register({ ...parent, plugins: [{ name: 'nested', objects: [object(HOST)] }] });
         expect(r1.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
         expect(r1.error.message).toContain("from object 'probe_thing'");
+        expect(r1.pkg, 'refused before the parent\'s package record is written').toBeUndefined();
         expect(r1.objects).not.toContain('probe_thing');
-        const r2 = register({ id: PKG, name: 'probe', plugins: [{ ...app(HOST, 'nested_app') }] });
+        expect(r1.objects).not.toContain('parent_thing');
+        expect(r1.apps).toEqual([]);
+        const r2 = register({ ...parent, plugins: [{ ...app(HOST, 'nested_app') }] });
         expect(r2.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
         expect(r2.error.message).toContain("from app 'nested_app'");
+        expect(r2.pkg).toBeUndefined();
+        expect(r2.objects).not.toContain('parent_thing');
         expect(r2.apps).toEqual([]);
+    });
+
+    it('CONTROL: a nested plugin whose object and plugin-as-app stamp nothing registers under the parent', () => {
+        const r = register({ id: PKG, name: 'probe', version: '1.0.0', plugins: [{ ...app(undefined, 'nested_app'), objects: [object()] }] });
+        expect(r.error).toBeUndefined();
+        expect(r.objects).toContain('probe_thing');
+        expect(r.apps).toEqual([{ name: 'nested_app', _packageId: PKG }]);
     });
 
     it('`null` and the empty string are stamps too', () => {
@@ -124,15 +139,21 @@ describe('[#28697] registerApp refuses an app or object whose body `_packageId` 
     });
 
     it('CONTROL: one app object, stamped in place by a first registration, registers again under its own package and under another', () => {
-        const shared = app();
-        new ObjectQL().registerApp({ id: HOST, name: 'host', apps: [shared] } as any);
-        expect((shared as { _packageId?: unknown })._packageId, 'the first registration stamped the caller\'s app').toBe(HOST);
-        expect(register({ id: HOST, name: 'host', apps: [shared] }).error).toBeUndefined();
-        // A module constant handed on: no body wrote that stamp.
-        expect(register({ id: PKG, name: 'probe', apps: [shared] }).error).toBeUndefined();
-        // The same bytes ARRIVING as a body are the body's own stamp.
-        const arrived = register({ id: PKG, name: 'probe', apps: [JSON.parse(JSON.stringify(shared))] });
-        expect(arrived.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        // Versioned and version-less registrations stamp the caller's app at
+        // different points (`stampPackage` with a version, `registerItem`
+        // without one); both stamps are the registration's, never a body's.
+        for (const version of ['1.0.0', undefined]) {
+            const label = `version ${String(version)}`;
+            const shared = app();
+            new ObjectQL().registerApp({ id: HOST, name: 'host', version, apps: [shared] } as any);
+            expect((shared as { _packageId?: unknown })._packageId, `${label}: the first registration stamped the caller's app`).toBe(HOST);
+            expect(register({ id: HOST, name: 'host', version, apps: [shared] }).error, label).toBeUndefined();
+            // A module constant handed on: no body wrote that stamp.
+            expect(register({ id: PKG, name: 'probe', version, apps: [shared] }).error, label).toBeUndefined();
+            // The same bytes ARRIVING as a body are the body's own stamp.
+            const arrived = register({ id: PKG, name: 'probe', version, apps: [JSON.parse(JSON.stringify(shared))] });
+            expect(arrived.error, label).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        }
     });
 });
 

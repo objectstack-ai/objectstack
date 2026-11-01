@@ -39,7 +39,9 @@
  * never copied. Nothing re-exports them from the package entry, so the
  * published surface does not move. [#28697] Two more follow the same rule:
  * `packageBodyObjectAndAppOwnerStampRefusal` and `registerAppNotingStamp`
- * (`registerApp` and `registerPlugin`).
+ * (`registerApp` and `registerPlugin`); the plugin-as-app now reaches
+ * `stampPackage` through `registerAppNotingStamp`, so this module no longer
+ * imports `stampPackage` itself.
  *
  * That import is a run-time module cycle (`engine.ts` imports this module,
  * this module imports `engine.ts`). Nothing here runs at module evaluation,
@@ -56,7 +58,6 @@ import {
   packageBodyObjectAndAppOwnerStampRefusal,
   registerAppNotingStamp,
   stampObjectPackage,
-  stampPackage,
 } from './engine.js';
 import type { ObjectQL } from './engine.js';
 
@@ -191,7 +192,7 @@ export function registerPlugin(
     if (plugin.name && plugin.navigation) {
         try {
             const resolved = pluginNamespace ? this.resolveNavObjectNames(plugin, pluginNamespace) : plugin;
-            registerAppNotingStamp(this._registry, stampPackage(resolved, ownerId, parentVersion), ownerId);
+            registerAppNotingStamp(this._registry, resolved, ownerId, parentVersion);
             this.logger.debug('Registered plugin-as-app', { app: plugin.name, from: pluginName });
         } catch (err: any) {
             this.logger.warn('Failed to register plugin as app', { pluginName, error: err.message });

@@ -4987,15 +4987,23 @@ export function packageBodyObjectAndAppOwnerStampRefusal(
 }
 
 /**
- * [#28697] Register an app object through the registry's app verb, recording
- * the stamp the registration writes onto the caller's own object
- * ({@link noteRegistrationStamp}): `registerItem` stamps the object in place,
- * so a module constant handed to a second registration arrives wearing the
- * first one's stamp, which no body wrote.
+ * [#28697] Stamp an app object ({@link stampPackage}) and register it through
+ * the registry's app verb, recording the stamp the registration writes onto
+ * the caller's own object ({@link noteRegistrationStamp}): `stampPackage` (with
+ * a version) and `registerItem` (without one) stamp the object in place, so a
+ * module constant handed to a second registration arrives wearing the first
+ * one's stamp, which no body wrote. The stamp before is read BEFORE
+ * `stampPackage`, the order the collection and seed loops keep, so a versioned
+ * registration is recorded too.
  */
-export function registerAppNotingStamp(registry: SchemaRegistry, app: any, ownerId: string): void {
+export function registerAppNotingStamp(
+  registry: SchemaRegistry,
+  app: any,
+  ownerId: string,
+  ownerVersion: string | undefined,
+): void {
   const stampBefore = (app as { _packageId?: unknown } | null | undefined)?._packageId;
-  registry.registerApp(app, ownerId);
+  registry.registerApp(stampPackage(app, ownerId, ownerVersion), ownerId);
   noteRegistrationStamp(app, stampBefore);
 }
 
@@ -9028,6 +9036,20 @@ export class ObjectQL implements IObjectQLEngine {
               selfAsApp: Boolean(manifest.name && manifest.navigation && !manifest.apps?.length),
           });
           if (refusal) throw refusal;
+          // …and each nested plugin's objects and plugin-as-app (step 7, which
+          // registers them under this package after everything above), so a
+          // nested plugin's stamp is refused before this body registers too.
+          // `registerPlugin` asks the same of the plugin it is handed.
+          if (Array.isArray(manifest.plugins)) {
+              for (const plugin of manifest.plugins) {
+                  if (!plugin || typeof plugin !== 'object') continue;
+                  const nested = packageBodyObjectAndAppOwnerStampRefusal(plugin, id, {
+                      apps: false,
+                      selfAsApp: Boolean(plugin.name && plugin.navigation),
+                  });
+                  if (nested) throw nested;
+              }
+          }
       }
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
       this.logger.debug('Registering package manifest', { id, namespace });
@@ -9113,7 +9135,7 @@ export class ObjectQL implements IObjectQLEngine {
               const appName = app.name || app.id;
               if (appName) {
                   const resolved = namespace ? this.resolveNavObjectNames(app, namespace) : app;
-                  registerAppNotingStamp(this._registry, stampPackage(resolved, id, version), id);
+                  registerAppNotingStamp(this._registry, resolved, id, version);
                   this.logger.debug('Registered App', { app: appName, from: id });
               }
           }
@@ -9123,7 +9145,7 @@ export class ObjectQL implements IObjectQLEngine {
       //    This handles the case where the manifest IS the app definition (legacy/simple packages)
       if (manifest.name && manifest.navigation && !manifest.apps?.length) {
           const resolved = namespace ? this.resolveNavObjectNames(manifest, namespace) : manifest;
-          registerAppNotingStamp(this._registry, stampPackage(resolved, id, version), id);
+          registerAppNotingStamp(this._registry, resolved, id, version);
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });
       }
 
