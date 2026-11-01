@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one real-kernel boot in beforeAll (ObjectQL, the sqlite-wasm default datasource, Hono on port 0, auth, datasource admin, security, sharing, REST, the dispatcher and the spike's plugin driver) with real sign-ups, shared by all 12 cases, the boot itself the subject of cases (a) and (b); 2.9 s in a local run, the cases 0.24 s of it; slowest CI reading 12.4 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up
 
 /**
  * Spike: a virtual object on a plugin driver, end to end in a booted kernel

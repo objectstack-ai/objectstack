@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: five in-process bootStack boots, no two the same configuration (the plain package, read by the slate, cube-control and mail-control cases; a declared cube; a package body's cube; email.persist false; the smtp boot that is refused), the first paying the file's first-boot cost; slowest CI reading 10.9 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; read before the three plain boots became one
 
 /**
  * #22301 item 1, the composition gap the stage-2 contract review recorded:
@@ -23,7 +24,7 @@
  * declare is the stack schema's question, not this file's.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { CAPABILITY_PROVIDERS } from '@objectstack/core';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
@@ -76,6 +77,20 @@ afterEach(async () => {
   stack = undefined;
 });
 
+/**
+ * The plain one-package boot, booted once for the three cases that boot it: the
+ * slate case and the cube control only read the kernel, and the mail control's
+ * send leaves a `sys_email` row that only it counts.
+ */
+let plain: VerifyStack | undefined;
+beforeAll(async () => {
+  plain = await bootStack(onePackage());
+}, BOOT_TIMEOUT);
+afterAll(async () => {
+  await plain?.stop();
+  plain = undefined;
+});
+
 /** The registered plugin name each slate token's provider registers under (the table's first identity). */
 const SLATE_PROVIDERS = PLATFORM_ALWAYS_ON_CAPABILITIES.flatMap((token) => {
   const spec = CAPABILITY_PROVIDERS[token];
@@ -88,13 +103,13 @@ describe('the always-on slate `serve` mounts for every app is mounted', () => {
     expect(SLATE_PROVIDERS.length).toBeGreaterThanOrEqual(8);
     const config = onePackage();
     expect(config.requires).toBeUndefined();
-    stack = await bootStack(config);
-    const missing = SLATE_PROVIDERS.filter(({ name }) => !stack!.kernel.hasPlugin(name)).map(({ token }) => token);
+    const booted = plain!;
+    const missing = SLATE_PROVIDERS.filter(({ name }) => !booted.kernel.hasPlugin(name)).map(({ token }) => token);
     expect(missing).toEqual([]);
     // Control: a provider neither declared nor on the slate is not mounted, so
     // the cases above prove the slate, not the whole table.
-    expect(stack.kernel.hasPlugin(CAPABILITY_PROVIDERS.approvals!.identities[0]!)).toBe(false);
-    expect(stack.kernel.hasPlugin(CAPABILITY_PROVIDERS.realtime!.identities[0]!)).toBe(false);
+    expect(booted.kernel.hasPlugin(CAPABILITY_PROVIDERS.approvals!.identities[0]!)).toBe(false);
+    expect(booted.kernel.hasPlugin(CAPABILITY_PROVIDERS.realtime!.identities[0]!)).toBe(false);
   }, BOOT_TIMEOUT);
 });
 
@@ -118,8 +133,7 @@ describe('the analytics service is built with the app\'s `analyticsCubes`', () =
   }, BOOT_TIMEOUT);
 
   it('control — an app that declares no cube registers none of this name', async () => {
-    stack = await bootStack(onePackage());
-    expect(await cubeNames(stack)).not.toContain(CUBE);
+    expect(await cubeNames(plain!)).not.toContain(CUBE);
   }, BOOT_TIMEOUT);
 });
 
@@ -149,8 +163,7 @@ describe('the email service is built from the app\'s mail configuration', () => 
   }, BOOT_TIMEOUT);
 
   it('control — with no mail configuration, the same send leaves one row', async () => {
-    stack = await bootStack(onePackage());
-    expect(await probeRowsAfterSend(stack)).toBe(1);
+    expect(await probeRowsAfterSend(plain!)).toBe(1);
   }, BOOT_TIMEOUT);
 
   it('a mail configuration no transport can deliver through fails the boot, naming the provider and the fix', async () => {
