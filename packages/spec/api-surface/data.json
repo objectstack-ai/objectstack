@@ -381,6 +381,7 @@
     "HookDriverPassthroughOptions (type)",
     "HookEvent (const)",
     "HookEventType (type)",
+    "HookNoticeSetter (type)",
     "HookObjectApi (interface)",
     "HookParsed (type)",
     "HookQuery (type)",

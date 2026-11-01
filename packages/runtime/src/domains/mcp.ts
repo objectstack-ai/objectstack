@@ -20,6 +20,9 @@ import { actionInvocationFailure, recordActionInvocation, withActionSurface } fr
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+// [#28715] The engine's own reading of "this field declares options" (its
+// `label()` map is built from it), never a second spelling here.
+import { declaresOptions } from '@objectstack/formula';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -601,6 +604,18 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         (await readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
 
     /**
+     * The one object `describe_object` describes and `validate_expression`
+     * judges against: from the listing {@link readMergedObjects} reads, or the
+     * metadata service's by-name read on a host with none.
+     */
+    const readServedObject = async (name: string): Promise<any> => {
+        const merged = await readMergedObjects();
+        return merged !== undefined
+            ? merged.find((o: any) => o?.name === name)
+            : await ((await getMeta()) as any)?.getObject?.(name);
+    };
+
+    /**
      * [#25139] The object definitions `list_objects` lists: the merged listing,
      * or the metadata service's on a host with none. `list_actions`,
      * `run_action` and `resume_run` collect object-embedded actions from the
@@ -683,10 +698,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // can describe, and a name the listing omits (a disabled package's
         // object among them) is "not found" here too.
         describeObject: async (name: string) => {
-            const merged = await readMergedObjects();
-            const def: any = merged !== undefined
-                ? merged.find((o: any) => o?.name === name)
-                : await ((await getMeta()) as any)?.getObject?.(name);
+            const def: any = await readServedObject(name);
             if (!def) return null;
             const fields = def.fields ?? {};
             return {
@@ -700,6 +712,17 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 })),
                 enableFeatures: def.enable ?? {},
             };
+        },
+        // [#28715] The fields `validate_expression` judges a `label()` call
+        // against, from the object `describeObject` reads: the served object,
+        // where a picklist-bound field carries its list's resolved `options`,
+        // so the served-form predicate is the one that matches.
+        optionFieldsOf: async (name: string): Promise<readonly string[] | null> => {
+            const def: any = await readServedObject(name);
+            if (!def) return null;
+            return Object.entries(def.fields ?? {})
+                .filter(([, f]) => declaresOptions(f))
+                .map(([k]) => k);
         },
         query: async (object: string, o: any) => {
             const query: any = {};

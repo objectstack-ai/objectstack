@@ -152,6 +152,10 @@ export default defineConfig({
       // dependency closure with `resolvePackageClosure`, the one walk the save
       // door's publish gate uses; its tests judge the source, never `dist/`.
       { find: /^@objectstack\/lint\/runtime$/, replacement: path.resolve(__dirname, '../lint/src/runtime.ts') },
+      // The MCP bridge (`domains/mcp.ts`) reads "this field declares options"
+      // through `@objectstack/formula`'s `declaresOptions`; its tests judge the
+      // predicate in the checkout, never `dist/`.
+      { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../formula/src/index.ts') },
       // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in
       // place of the hand-maintained list of the twelve subpaths tests happened
       // to reach on the day it was written. That list had gone stale in three
