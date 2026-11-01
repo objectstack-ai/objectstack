@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/runtime': patch
+'@objectstack/spec': minor
+'@objectstack/runtime': minor
 ---
 
 feat(runtime): `GET /packages/:id/customizations` names the package behind each field and flow another package contributes to the base
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 Studio draws the items another installed package brings to a base greyed, naming their source (ADR-0029 D7 as amended by ADR-0146 D3). Until now no served read said which package contributed what. The per-base customization read now answers a fourth list, `contributions`, with its count:
 
