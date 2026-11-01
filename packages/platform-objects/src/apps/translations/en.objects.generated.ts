@@ -108,7 +108,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.",
         options: {
           idp_provisioned: "IdP-Provisioned",
-          env_native: "Env-Native"
+          env_native: "Local Account"
         }
       },
       id: {

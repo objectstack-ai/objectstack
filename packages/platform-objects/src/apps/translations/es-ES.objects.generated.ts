@@ -108,7 +108,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Cómo se creó esta identidad: idp_provisioned (JIT de SSO federado) o env_native (registro local / usuario final de la aplicación). Gestionado por el sistema; no editar.",
         options: {
           idp_provisioned: "Aprovisionada por IdP",
-          env_native: "Nativa del entorno"
+          env_native: "Cuenta local"
         }
       },
       id: {

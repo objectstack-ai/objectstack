@@ -108,7 +108,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "该身份的创建方式——idp_provisioned（联合 SSO 即时开通）或 env_native（本地注册 / 应用最终用户）。系统维护，请勿编辑。",
         options: {
           idp_provisioned: "IdP 开通",
-          env_native: "环境本地"
+          env_native: "本地账号"
         }
       },
       id: {

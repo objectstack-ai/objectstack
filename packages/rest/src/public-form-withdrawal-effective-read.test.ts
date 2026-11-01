@@ -102,6 +102,9 @@ async function boot(baseAllowsAnonymous = true) {
     id: BASE,
     name: 'forms28409',
     version: '1.0.0',
+    // The pair's namespace is the base's followed by `_custom` (ADR-0146 D3),
+    // so a base with a pair declares one.
+    namespace: 'pfw',
     objects: [INQUIRY],
     // A shipped view is a container; its `formViews.contact` slot expands to
     // the `<object>.contact` form view the doors read.
@@ -139,8 +142,14 @@ async function boot(baseAllowsAnonymous = true) {
     await submit.handler({ params: { slug: SLUG }, body: { name: 'Ada', email: 'ada@example.test' }, headers: {} } as any, res);
     return { status: res._status ?? 200, body: res._json };
   };
+  // The pair carries what its ensure door writes — the pair namespace and a
+  // dependency on the base at its major — which the install door requires of a
+  // pair-shaped id (ADR-0146 D3).
   const install = async (id: string) => protocol.installPackage({
-    manifest: { id, name: id.split('.').join('-'), version: '0.1.0', type: 'app', dependencies: { [BASE]: '*' } },
+    manifest: {
+      id, name: id.split('.').join('-'), version: '0.1.0', type: 'app',
+      ...(id === PAIR ? { namespace: 'pfw_custom', dependencies: { [BASE]: '^1' } } : { dependencies: { [BASE]: '*' } }),
+    },
   });
   const saveInto = async (packageId: string, item: Record<string, unknown>) => {
     await protocol.saveMetaItem({ type: 'view', name: VIEW, item, mode: 'draft', packageId });

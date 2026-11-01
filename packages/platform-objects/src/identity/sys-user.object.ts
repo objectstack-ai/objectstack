@@ -1174,6 +1174,9 @@ export const SysUser = ObjectSchema.create({
     // identity-edit actions hide for managed users, who hold no local
     // credential) and is the marker SCIM lifecycle keys off. Owned by objectql
     // (better-auth is oblivious to this column — like `ai_access`).
+    // The option labels are the administrator's words (#27855): `env_native`
+    // reads "Local Account", an identity held by this environment's own
+    // sign-in, beside the federated "IdP-Provisioned". The stored values stay.
     source: Field.select({
       label: 'Identity Source',
       required: false,
@@ -1182,7 +1185,7 @@ export const SysUser = ObjectSchema.create({
       defaultValue: 'env_native',
       options: [
         { label: 'IdP-Provisioned', value: 'idp_provisioned' },
-        { label: 'Env-Native', value: 'env_native' },
+        { label: 'Local Account', value: 'env_native' },
       ],
       description: 'How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.',
     }),

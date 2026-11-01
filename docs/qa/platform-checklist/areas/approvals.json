@@ -1293,7 +1293,7 @@
       "title": "The bell badge and Home's action card agree on the pending-approval count and lead to an app the user can open",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["a non-admin pending approver", "an admin with >9 combined unread notifications + pending approvals"],
@@ -1304,7 +1304,8 @@
           "enough seeded sys_inbox_message rows plus pending approvals that the combined total exceeds 9, so the CLAMP case is the one exercised (a total of 9 or less never proves the breakdown is unclamped)"
         ],
         "knownGaps": [
-          "[STALE premise corrected — #7344 closed 2026-08-11] a plain member's notification count is NOT structurally 0: a member holding only the baseline sets reads its own notifications (GET /api/v1/notifications?view=mine 200), so the >9 case is reachable for a non-admin. Measured on main c91af8ed6: seed it by routing approvals to the member through a runtime user-routed flow (POST /api/v1/automation, record-triggered on showcase_field_zoo; DELETE it afterwards). Notifications of one type COALESCE in the popover ('Approval requested ×9' counts as one), so drive the total past 9 with pending approvals: at 10 pending + 2 notification groups the button read 9+ and the header 12 total"
+          "[STALE premise corrected — #7344 closed 2026-08-11] a plain member's notification count is NOT structurally 0: a member holding only the baseline sets reads its own notifications (GET /api/v1/notifications?view=mine 200), so the >9 case is reachable for a non-admin. Measured on main c91af8ed6: seed it by routing approvals to the member through a runtime user-routed flow (POST /api/v1/automation, record-triggered on showcase_field_zoo; DELETE it afterwards). Notifications of one type COALESCE in the popover ('Approval requested ×9' counts as one), so drive the total past 9 with pending approvals: at 10 pending + 2 notification groups the button read 9+ and the header 12 total",
+          "the bell's 'View all notifications' and Home's 'View all activity' links are OUT of this item's scope and are known to route into /apps/setup/... for every persona — tracked at objectui#4074 (moved from #7266), browser-confirmed by the #7331 run; do not record them here"
         ]
       },
       "steps": [
@@ -1335,8 +1336,7 @@
         }
       ],
       "negative": [
-        "a popover header that clamps its own breakdown (e.g. '9+ notifications') is a FAIL — the clamp belongs to the button badge; the popover exists to say which N and which M produced it",
-        "the bell's 'View all notifications' and Home's 'View all activity' links are OUT of this item's scope and are known to route into /apps/setup/... for every persona — tracked at objectui#4074 (moved from #7266), browser-confirmed by the #7331 run; do not record them here"
+        "a popover header that clamps its own breakdown (e.g. '9+ notifications') is a FAIL — the clamp belongs to the button badge; the popover exists to say which N and which M produced it"
       ],
       "traps": ["hydration-race", "single-datapoint", "wrong-persona"],
       "source": [
@@ -1347,7 +1347,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" },
         { "revision": 2, "date": "2026-10-17", "change": "knownGaps[0] said a plain member's notification count is structurally 0, so the >9 case was admin-only (#7344); #7344 closed on 2026-08-11 and the #23878 run saw a member read 2 notifications. Re-run on main c91af8ed6 with the console at objectui f8267df93aba as a baseline-only member seeded with 10 pending approvals and 2 notification groups: the bell button read 9+, the popover header '12 total · 2 notifications + 10 pending approvals', Home's Awaiting approval card 10, the inbox's My Pending tab 10 and the approvals API 10; the card's View all opened /_console/apps/com.example.showcase/system/approvals inside the Showcase app. The knownGap, step 1 and clause 3's verify now say so", "ref": "#24036" },
-        { "revision": 3, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" }
+        { "revision": 3, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
+        { "revision": 4, "date": "2026-11-01", "change": "negative[1] moved to fixtures.knownGaps[1]: it was a scope note (the bell's and Home's 'View all' links are out of this item's scope), which no run can decide, so it could only score skipped; it carries the tracked objectui#4074 routing defect, so it lands with the known gaps rather than as a source cross-ref. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries). No clause changed. Wave anchor #27377", "ref": "#28345" }
       ]
     },
     {
