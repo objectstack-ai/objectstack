@@ -86,17 +86,6 @@ const PROBE_DRAFT_NAME = 'connection_test_draft';
  */
 const RECORD_JUDGED_PATCH_KEYS = ['driver', 'schemaMode', 'config', 'external', 'pool'] as const;
 
-/**
- * [#28549] The top-level body keys a credential arrives under that the record
- * projection ({@link DatasourceAdminService.toRecord}, the update merge) would
- * otherwise drop without a word: a `password`, and a `connectionString` that
- * can carry one as URL userinfo. `DatasourceSchema` refuses both at the build
- * door; these doors judge exactly these keys through it. Not every key the
- * projection drops: those carry no credential, and a closed body at these
- * doors is a change of its own.
- */
-const TOP_LEVEL_CREDENTIAL_KEYS = ['password', 'connectionString'] as const;
-
 /** A copy of `record` carrying the binding a supplied secret is about to create. */
 function withPendingSecretRef(record: StoredDatasource): StoredDatasource {
   return { ...record, external: { ...(record.external ?? {}), credentialsRef: PENDING_SECRET_REF } };
@@ -635,6 +624,14 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   }
 
   async testConnection(input: DatasourceDraft, secret?: SecretInput): Promise<TestConnectionResult> {
+    // [#28612] First, and as a refusal (a `400` at the route) rather than a
+    // failed probe: the probe below is built from the known keys only, so a
+    // top-level `password` or any other key the schema refuses would vanish
+    // and the answer would be about a different connection than the one
+    // described.
+    if (input && typeof input === 'object') {
+      this.assertNoUndeclaredTopLevelKey('This connection draft is not a valid datasource.', input);
+    }
     if (!input?.driver) {
       return { ok: false, error: 'A driver is required to test a connection.' };
     }
@@ -678,7 +675,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   async createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary> {
     this.assertValidName(input?.name);
     this.assertNoDraftCredentialsRef(input);
-    this.assertNoTopLevelCredential(input.name, input);
+    this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${input.name}'.`, input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
     this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
@@ -740,10 +737,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     if (existing.origin !== 'runtime') {
       throw new Error(`Datasource '${name}' is code-defined and cannot be edited at runtime.`);
     }
-    // [#28549] Whatever else the patch touches, a `label`/`active`-only edit
-    // included: that exemption spares a row stored before a gate, and this
-    // judges a credential the author is writing now.
-    this.assertNoTopLevelCredential(existing.name, patch);
+    // [#28549 · #28612] Whatever else the patch touches, a `label`/`active`-only
+    // edit included: that exemption spares a row stored before a gate, and this
+    // judges a key the author is writing now.
+    this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${existing.name}'.`, patch);
 
     // Merge patch over the existing record; `name`/`origin` are never patched.
     const merged: StoredDatasource = {
@@ -1261,23 +1258,29 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   }
 
   /**
-   * [#28549] Refuse a body that writes a credential at the top level
-   * ({@link TOP_LEVEL_CREDENTIAL_KEYS}). The record is built from the known
-   * keys only, so such a key would vanish and the write answer success over a
-   * datasource that cannot connect, while the build door refuses the same
-   * datasource by name.
+   * [#28549 · #28612] Refuse a body that carries a top-level key
+   * `DatasourceSchema` does not declare: a credential (`password`, a
+   * `connectionString` with URL userinfo), a connection key one level too high
+   * (`url`, `host`, …), an alias (`type`), a retired block, or any unknown key.
+   * The record and the probe are built from the known keys only, so such a key
+   * would vanish and the door answer success (or probe) over a datasource
+   * other than the one described, while the build door refuses it by name.
    *
-   * The verdict and its prescription are `DatasourceSchema`'s own refusal of
-   * those keys, the one `os compile` prints, under the heading
-   * {@link assertValidRecord} gives. Only the key names are judged, never the
-   * values, so the answer names the key and cannot echo the credential. ⛔ No
-   * prescription is restated here; the spec is the one copy. Thrown before
-   * anything is read or written (a `400` at the route).
+   * The key set and the prescription are `DatasourceSchema`'s own: the body's
+   * key names, each with `null` for its value, are parsed through the strict
+   * shape and only its root `unrecognized_keys` refusal is kept, the one
+   * `os compile` prints. A key the schema declares passes here even when the
+   * projection leaves it out (`origin`, `description`, …). Only key names are
+   * judged, never values, so the answer cannot echo a credential. ⛔ No key
+   * list or prescription is restated here; the spec is the one copy. Thrown
+   * before anything is read, written or probed (a `400` at the route).
+   *
+   * `secret` never reaches this check: the route splits it off the body
+   * (`splitSecret`) before the service sees the draft, and it stays the one
+   * credential channel.
    */
-  private assertNoTopLevelCredential(name: string, body: object): void {
-    const present = TOP_LEVEL_CREDENTIAL_KEYS.filter(
-      (key) => (body as Record<string, unknown>)[key] !== undefined,
-    );
+  private assertNoUndeclaredTopLevelKey(heading: string, body: object): void {
+    const present = Object.keys(body).filter((key) => (body as Record<string, unknown>)[key] !== undefined);
     if (present.length === 0) return;
     const result = DatasourceSchema.safeParse(Object.fromEntries(present.map((key) => [key, null])));
     const detail = result.success
@@ -1286,7 +1289,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
           .filter((issue) => issue.code === 'unrecognized_keys' && issue.path.length === 0)
           .map((issue) => issue.message);
     if (detail.length === 0) return;
-    throw new Error(`Invalid datasource '${name}'.\n${detail.join('\n')}`);
+    throw new Error(`${heading}\n${detail.join('\n')}`);
   }
 
   private toRecord(input: DatasourceDraft): StoredDatasource {
