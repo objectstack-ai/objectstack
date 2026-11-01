@@ -36,7 +36,7 @@
  * | door | caller | the owner it passes |
  * |:--|:--|:--|
  * | `build` | the stack schema's refinement (`ObjectStackDefinitionSchema`, `stack.zod.ts`): `defineStack`, `os validate`, `os build`, the artifact door's parse | the stack's `manifest.id` (none without a manifest); each `packages[]` body's own `id` |
- * | `register` | `ObjectQL.registerApp`'s collection loop, its seed datasets and its `viewItems:` channel, and the `manifest` service's residual registration (`@objectstack/objectql`) | the package id it registers under |
+ * | `register` | `ObjectQL.registerApp`'s collection loop, its seed datasets, its `viewItems:` channel, its objects and its apps (and a nested plugin's), the `manifest` service's residual registration (`@objectstack/objectql`), and the metadata plugin's body registration (`@objectstack/metadata`) | the package id it registers under |
  *
  * `@objectstack/spec` is the one layer both callers already depend on, so the
  * judge lives here and nowhere else. ⛔ Do not write a second comparison at a
@@ -48,10 +48,11 @@
  * ## Which collections
  *
  * {@link OWNER_STAMP_JUDGED_COLLECTIONS}: the stack collections whose items the
- * registration door files through `registerItem` and judges, the seed `data`
- * datasets included. The build door judges exactly these, so it refuses what
- * the boot refuses and nothing the boot accepts. An objectql test holds the
- * list equal to what `registerApp` refuses, key by key.
+ * registration door files under their package and judges, the seed `data`
+ * datasets, the `objects` and the `apps` included. The build door judges
+ * exactly these, so it refuses what the boot refuses and nothing the boot
+ * accepts. An objectql test holds the list equal to what `registerApp`
+ * refuses, key by key.
  *
  * ## The words
  *
@@ -85,14 +86,19 @@ export interface CollectionItemOwnerStampRefusal {
  * package and judges by {@link judgeCollectionItemOwnerStamp}, in the stack
  * schema's spelling.
  *
+ * `objects` and `apps` file through verbs of their own (`registerObject`,
+ * `registerApp`) and are judged there, before the body registers anything: an
+ * app's stamp is what the per-package and disabled-package filters read, and
+ * an object's is read by the object registration's action-parse predicate.
+ *
  * Not judged, because the registration door files them through a path of its
- * own and does not judge their stamp: `objects` and `objectExtensions` (the
- * object-merge path), `apps` (registered by their own verb),
- * `picklistExtensions` (merged into the list they name, not filed as items),
- * and `datasources`, `datasourceMapping` and `translations` (configuration,
- * not registry items).
+ * own and does not judge their stamp: `objectExtensions` (the object-merge
+ * path, keyed by the object it extends), `picklistExtensions` (merged into the
+ * list they name, not filed as items), and `datasources`, `datasourceMapping`
+ * and `translations` (configuration, not registry items).
  */
 export const OWNER_STAMP_JUDGED_COLLECTIONS = Object.freeze([
+  'objects', 'apps',
   'picklists',
   'actions', 'views', 'pages', 'dashboards', 'reports', 'datasets',
   'flows', 'webhooks', 'jobs',

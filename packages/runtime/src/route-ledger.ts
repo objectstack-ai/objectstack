@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 115 rows.
+ * CENSUS (generated): this list holds 116 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -634,6 +634,13 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── auth (better-auth passthrough) ────────────────────────────────────────
   { route: '* /auth/**', domain: '/auth', disposition: 'sdk', client: 'auth.me',
     note: 'wholesale delegate to the auth service. Not enumerable route-by-route HERE, but no longer unenumerated: plugin-auth/src/auth-route-ledger.ts carries the 55 SDK-reached routes plus the full mounted inventory, read off better-auth\'s live auth.api table' },
+  // [#28709] Not a better-auth endpoint, so neither half of plugin-auth's ledger
+  // can carry it: that ledger is held to better-auth's live table and to the
+  // routes auth-plugin.ts mounts. Without this exact row the SDK method rests on
+  // the `* /auth/**` family above, which `client-url-conformance` refuses.
+  { route: 'GET /auth/me/permissions', domain: '/auth', disposition: 'sdk', client: 'auth.mePermissions',
+    responseSchema: 'MePermissionsResponseSchema',
+    note: "The caller's effective permissions, the body the console reads once per session for its whole permission layer: the whole body (no `{ success, data }` envelope), discriminated on `authenticated` (an anonymous caller is `{ authenticated: false }` at 200). ⚠️ Served by plugin-hono-server, NOT by `dispatch()`: `registerCurrentUserEndpoints` mounts it with `rawApp.get()` on the Hono app, ahead of plugin-auth's `/auth/*` catch-all, and the `/auth` domain here only relays a request to the auth service, which does not serve this path. So it never passes through the `IHttpServer` port and the live-mount parity gate pins it as unobservable. Conformance: `plugin-hono-server/src/current-user-endpoints-has-any-queue.test.ts` drives THIS handler and parses every body it provokes (full, degraded, closed, anonymous) through the strict `MePermissionsResponseSchema`; the client method over the real handler in `packages/client/src/auth-me-permissions.test.ts`" },
 
   // ── approvals action page (ADR-0043, the hosted door) ─────────────────────
   { route: 'GET /approvals/act', domain: '/approvals/act', disposition: 'public',

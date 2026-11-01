@@ -31,6 +31,7 @@ import {
   PublishPackageDraftsResponse,
   LoginRequest,
   SessionResponse,
+  MePermissionsResponse,
   GetPresignedUrlRequest,
   PresignedUrlResponse,
   CompleteUploadRequest,
@@ -4989,6 +4990,26 @@ export class ObjectStackClient {
             headers: { Origin: this.baseUrl },
         });
         return normalizeSessionResponse(await res.json());
+    },
+
+    /**
+     * [#28709] The caller's effective permissions: `GET /auth/me/permissions`,
+     * the body the console reads once per session for its whole permission
+     * layer, declared strictly by `MePermissionsResponseSchema`
+     * (`@objectstack/spec/api`). Served by plugin-hono-server, not better-auth.
+     *
+     * Discriminate on `authenticated`: an anonymous caller RESOLVES
+     * `{ authenticated: false }` (the route answers it at 200, so a client can
+     * tell "signed out" from a fault), unlike {@link me}, which rejects. The
+     * authenticated answer carries `hasAnyQueue` among the rest;
+     * `systemPermissions` / `tabPermissions` are absent only on a server
+     * without SecurityPlugin, where absent means unknown and an empty array
+     * means none.
+     */
+    mePermissions: async (): Promise<MePermissionsResponse> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/me/permissions`);
+        return (await res.json()) as MePermissionsResponse;
     },
 
     /**
