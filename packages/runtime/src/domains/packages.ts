@@ -217,6 +217,11 @@ export type PackagesDomainProtocol =
          * declare is a compile error.
          */
         revertStoredPackage?: ObjectStackProtocolImplementation['revertStoredPackage'];
+        /**
+         * [#28409] The per-package layer the export reads, typed from the
+         * producer's own signature as above.
+         */
+        getMetaItemsPerPackage?: ObjectStackProtocolImplementation['getMetaItemsPerPackage'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -2923,7 +2928,15 @@ context: HttpProtocolContext,
             // getMetaItems applies the packageId filter at the
             // registry/overlay query level, so the returned items are
             // already scoped to this package — no client-side re-filter.
-            const res = await protocol.getMetaItems({ type: singular, packageId });
+            // [#28409, ADR-0146 D8 item 3] A package exports its OWN items:
+            // the per-package layer, where the protocol serves one, never the
+            // effective read that serves a base's name with its pair's
+            // declared override. So the base's export carries the base
+            // unchanged, and its `.custom` pair's export carries the
+            // overriding item with its `overrides` block.
+            const res = typeof protocol.getMetaItemsPerPackage === 'function'
+                ? await protocol.getMetaItemsPerPackage({ type: singular, packageId })
+                : await protocol.getMetaItems({ type: singular, packageId });
             items = Array.isArray(res?.items) ? res.items : [];
         } catch {
             // Unknown/unsupported type for this runtime — skip.
