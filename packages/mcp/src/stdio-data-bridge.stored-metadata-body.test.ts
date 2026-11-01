@@ -464,6 +464,7 @@ const BRIDGE_MEMBERS: Record<string, string> = {
   listObjects: 'no row body — object definitions from the metadata service',
   listObjectsDiagnosed: 'no row body — object definitions from the metadata service',
   describeObject: 'no row body — one object definition from the metadata service',
+  optionFieldsOf: 'no row body — field names from the same object definition describeObject reads',
   query: 'seam — serveStoredMetadataRows; filter / sort on the body column refused',
   get: 'seam — serveStoredMetadataRow',
   aggregate: 'refuses — group / filter / aggregate member on the body column',

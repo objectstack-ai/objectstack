@@ -113,8 +113,8 @@ async function callTool(bridge: McpDataBridge, name: string, args: Record<string
     }),
     { bridge, parsedBody: body } as never,
   );
-  const json = await res.json();
-  return JSON.parse(json.result.content[0].text);
+  const json = (await res.json()) as { result: { content: Array<{ text: string }> } };
+  return JSON.parse(json.result.content[0]!.text);
 }
 
 const validate = (bridge: McpDataBridge, expression: string, site?: string) =>
