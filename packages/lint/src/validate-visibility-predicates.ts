@@ -526,6 +526,27 @@
  * and only the ROOT quoted inside two of their hints changes (`record.x` →
  * `data.x` on a schema-bound form, which is the fix, not a side effect).
  * `runtime-gate.test.ts` pins that error/advisory boundary as a property.
+ *
+ * ## A `page.NAME` the page does not declare (#28725)
+ *
+ * `page` is a declared root on a page component (`VIEW_PAGE_EXTRA_ROOTS`), so
+ * `visibility-bare-identifier` never questions what is read THROUGH it. The
+ * console binds `page` to the page's variable store and nothing else
+ * (`buildNodeEvaluationScope` → `PageVariablesProvider`): the store is seeded
+ * from the declarations alone, and its only writers — a bound element
+ * (`usePageVariableBinding`, by a declaration's `source`) and the dashboard
+ * filter bar (its own declared filters) — write declared names. So a member
+ * of `page` that no `variables[].name` declares is never present: the read
+ * faults and the element renders unconditionally, exactly the fail-open the
+ * other gating ids here exist to refuse. `visibility-page-variable-undeclared`
+ * refuses it, located at the component, naming the first such read.
+ *
+ * Judged from the same AST the `has()` check reads (no second parse), on page
+ * components only — a view declares no variables, so there is no list to
+ * resolve against. Every stand-down is a missed catch, never a false error:
+ * an index read (`page['x']`) is not judged, and neither is any predicate in
+ * which a comprehension binds `page` as its own loop variable
+ * (`[1].exists(page, page > 0)`), since `page.x` there is not the page's.
  */
 
 import {
@@ -540,7 +561,7 @@ import type { CelAstNode, CelBoundsOverrun, UnknownFunctionCall } from '@objects
 
 import { collectionEntries } from './collection-entries.js';
 import { walkPageComponents } from './page-walk.js';
-import { bareRhsOnlyIdentifiers, schemaIdOf } from './predicate-rhs-position.js';
+import { COMPREHENSION_MACROS, bareRhsOnlyIdentifiers, schemaIdOf } from './predicate-rhs-position.js';
 import { formViewSites } from './view-walk.js';
 
 export const VISIBILITY_ROOT_MISLAYERED = 'visibility-root-mislayered';
@@ -571,6 +592,13 @@ export const VISIBILITY_PREDICATE_UNKNOWN_FUNCTION = 'visibility-predicate-unkno
  * one: the source parses, and the fix is a different edit.
  */
 export const VISIBILITY_PREDICATE_HAS_ARGUMENT = 'visibility-predicate-has-argument';
+/**
+ * A page component predicate reading `page.NAME` where the page declares no
+ * variable `NAME` — #28725; see the module note's §A `page.NAME` the page does
+ * not declare. A separate id because the fix is a different edit: declare the
+ * variable, or correct the name.
+ */
+export const VISIBILITY_PAGE_VARIABLE_UNDECLARED = 'visibility-page-variable-undeclared';
 
 export type VisibilitySeverity = 'error' | 'warning';
 
@@ -602,10 +630,10 @@ export interface VisibilityOptions {
 export interface VisibilityFinding {
   /**
    * `warning` for the ADR-0089 D3b advisory (`visibility-root-mislayered`);
-   * `error` for the five rules that gate — `visibility-predicate-syntax`,
+   * `error` for the six rules that gate — `visibility-predicate-syntax`,
    * `visibility-predicate-over-budget`, `visibility-predicate-unknown-function`,
-   * `visibility-predicate-has-argument` and `visibility-bare-identifier` (see
-   * module note).
+   * `visibility-predicate-has-argument`, `visibility-page-variable-undeclared`
+   * (#28725) and `visibility-bare-identifier` (see module note).
    */
   severity: VisibilitySeverity;
   /** Diagnostic rule id, e.g. `visibility-root-mislayered`. */
@@ -1273,6 +1301,47 @@ const MISLAYER_BY_LAYER: Record<
 };
 
 /**
+ * [#28725] The first `page.NAME` / `page.?NAME` member read whose `NAME` is not
+ * in `declared`, in source order, or `null` when every one resolves — or when a
+ * comprehension anywhere in the predicate binds `page` as its loop variable
+ * (then `page.x` is not the page's, and the predicate is not judged).
+ */
+function firstUndeclaredPageRead(ast: unknown, declared: ReadonlySet<string>): string | null {
+  const reads: string[] = [];
+  let shadowed = false;
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (!isNode(node)) return;
+    const args = node.args;
+    if (node.op === 'rcall' && Array.isArray(args) && typeof args[0] === 'string' && COMPREHENSION_MACROS.has(args[0])) {
+      const bound = Array.isArray(args[2]) ? args[2][0] : undefined;
+      if (isNode(bound) && bound.op === 'id' && bound.args === 'page') shadowed = true;
+    }
+    if ((node.op === '.' || node.op === '.?') && Array.isArray(args) && typeof args[1] === 'string') {
+      const receiver = args[0];
+      if (isNode(receiver) && receiver.op === 'id' && receiver.args === 'page') reads.push(args[1]);
+    }
+    visit(args);
+  };
+  visit(ast);
+  if (shadowed) return null;
+  return reads.find((name) => !declared.has(name)) ?? null;
+}
+
+/** [#28725] The names a page's `variables` list declares. */
+function declaredPageVariables(page: AnyRec): Set<string> {
+  const names = new Set<string>();
+  if (!Array.isArray(page.variables)) return names;
+  for (const v of page.variables) {
+    if (v && typeof v === 'object' && typeof (v as AnyRec).name === 'string') names.add((v as AnyRec).name as string);
+  }
+  return names;
+}
+
+/**
  * Inspect one element carrying a visibility predicate. Emits the mis-layered-root
  * finding (when the effective predicate's binding root does not match `layer`),
  * the syntax / over-budget finding, the unknown-function finding (#13594), the
@@ -1289,6 +1358,7 @@ function checkElement(
   layer: VisibilityLayer,
   findings: VisibilityFinding[],
   literalRhs = false,
+  pageVariables?: ReadonlySet<string>,
 ): void {
   // (1) mis-layered binding root — check the effective predicate (canonical wins)
   // against the root expected for this layer.
@@ -1432,6 +1502,28 @@ function checkElement(
     });
   }
 
+  // (3c) #28725 — a page component reading a `page.NAME` the page does not
+  // declare. GATES: `page` binds the declared variables and nothing else, so
+  // the read faults and the element renders (module note §A `page.NAME` the
+  // page does not declare). Only on a page component — the one caller that
+  // passes the page's declared names — and only on a source the front end
+  // accepted, from the AST (3b) already holds.
+  const undeclaredRead = ast && pageVariables ? firstUndeclaredPageRead(ast, pageVariables) : null;
+  if (source && undeclaredRead !== null) {
+    findings.push({
+      severity: 'error',
+      rule: VISIBILITY_PAGE_VARIABLE_UNDECLARED,
+      where,
+      path,
+      message:
+        `visibility predicate reads \`page.${undeclaredRead}\`, but this page declares no variable ` +
+        `\`${undeclaredRead}\`, so the read never resolves and the element always renders`,
+      hint:
+        `Declare it in the page's \`variables\` (\`{ name: '${undeclaredRead}', type: … }\`), or read a ` +
+        'variable the page declares',
+    });
+  }
+
   // (4) #6128 — a reference no binding root can resolve. Unlike (1) this one
   // GATES: a mis-rooted predicate is at least a statement about a namespace
   // someone binds somewhere, while a bare identifier resolves nowhere, on no
@@ -1515,7 +1607,8 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  * (`warning`); `visibility-predicate-syntax` (#6253),
  * `visibility-predicate-over-budget` (#7217),
  * `visibility-predicate-unknown-function` (#13594),
- * `visibility-predicate-has-argument` (#25281) and
+ * `visibility-predicate-has-argument` (#25281),
+ * `visibility-page-variable-undeclared` (#28725) and
  * `visibility-bare-identifier` (#6128) are `error` and the caller is expected to
  * fail the build on them.
  *
@@ -1610,11 +1703,13 @@ export function validateVisibilityPredicates(
   for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     const pageName = typeof page.name === 'string' ? page.name : undefined;
     const where = `page "${pageName ?? pagePath}"`;
+    // #28725 — what `page.NAME` can resolve to on this page.
+    const pageVariables = declaredPageVariables(page);
     for (const walked of walkPageComponents(page, pagePath)) {
       // No per-site derivation here: a page component declares no data source of
       // its own, so nothing in the metadata states a layer for it and
       // `opts.layer` is the only answer available (#7815).
-      checkElement(walked.component, where, walked.path, declaredLayer, findings);
+      checkElement(walked.component, where, walked.path, declaredLayer, findings, false, pageVariables);
     }
   }
 
