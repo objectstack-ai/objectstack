@@ -112,13 +112,13 @@
 
 **Priority**:
 1. Security and data integrity always come first and do not wait for the road.
-2. The road broken, or a capability on the checklist broken ⇒ P0/P1; runs but goes wrong ⇒ P2; neither on the road nor on the checklist ⇒ p3 or not done. Grading reads "Features on the road": change that table to change priority, ⛔ never re-grade card by card.
+2. The road broken, or a capability on the checklist broken ⇒ P0/P1; runs but goes wrong ⇒ P2; neither on the road nor on the checklist ⇒ p3 or not taken on. Grading reads "Features on the road": change that table to change priority, ⛔ never re-grade card by card.
 3. While a lane's queue still holds an open P0/P1, that lane dispatches no p2/p3 tooling card or contract-hygiene card; an instrument card that unblocks a product P0/P1 inherits its priority along the chain.
 4. Because AI writes it and AI uses it: the ontology must be writable by AI — what is wrong must be loudly refused with a prescription, never silently stored; and usable by people and agents — declared objects, actions and agent / tool / skill metadata are honoured at runtime, what the MCP surface exposes is what the application really can do, and an agent that oversteps is stopped by permissions and leaves a trace. The half people use has a standard too: an author who writes not one line of UI code gets a UI that looks as if a designer had handled it — one design system, one layout; looking wrong is as much a defect as failing to render, and is refused at the "see it" step. One wrong sentence in the documentation and skills written for AI is a product defect.
 
 **Stage posture**: speed over compatibility. Few people use it: a retirement takes effect at once, with no transition window and no alias double-spelling; compatibility layers, migration windows and the like default to p3; keys declared but not honoured are retired in batches per release, not one card per key.
 
-**Instruments serve the fleet**: a card that changes the PM protocol, a gate, a ratchet or a skill is graded by "which decision or action of the fleet will differ once it lands" — if that can be said (a dispatch that would otherwise have gone wrong, a landing that could not land, a review that let a fake through, a seat that got stuck), it is graded by the rules above and competes with product cards on the same field; if it cannot be said, it is not done.
+**Instruments serve the fleet**: a card that changes the PM protocol, a gate, a ratchet or a skill is graded by "which decision or action of the fleet will differ once it lands" — if that can be said (a dispatch that would otherwise have gone wrong, a landing that could not land, a review that let a fake through, a seat that got stuck), it is graded by the rules above and competes with product cards on the same field; if it cannot be said, it is not taken on.
 
 **Not now**: the cloud service's journey (sign-up, control plane, hosting) has its own checklist; the enterprise edition's built-in agent belongs to the cloud repository and is not on this repository's road or checklist; billing is not built.
 
