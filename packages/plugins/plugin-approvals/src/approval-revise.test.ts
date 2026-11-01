@@ -44,7 +44,10 @@ const ROUTED_USERS = ['u1', 'u2'];
 function makeFakeEngine() {
   const tables = new Map<string, any[]>([['sys_user', ROUTED_USERS.map((id) => ({ id }))]]);
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
-  const matches = (row: any, where: any) => Object.entries(where ?? {}).every(([k, v]) => {
+  const matches = (row: any, where: any): boolean => Object.entries(where ?? {}).every(([k, v]) => {
+    // The participant probe behind the read door asks "acted on it" as one
+    // `$or` (the person, or a slot they act under) — the real engine composes it.
+    if (k === '$or') return (v as any[]).some((sub) => matches(row, sub));
     if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter operator ${k}`);
     if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
     if (v && typeof v === 'object' && '$ne' in (v as any)) return row[k] !== (v as any).$ne;
@@ -565,7 +568,8 @@ describe('Send back for revision (ADR-0044)', () => {
     registerReviseFlow();
     const { req } = await startFlow();
 
-    await expect(service.sendBack(req.id, { actorId: 'intruder' }, asUser('intruder'))).rejects.toThrow(/FORBIDDEN/);
+    // No participant, so no reader of the request: answered as for a missing id.
+    await expect(service.sendBack(req.id, { actorId: 'intruder' }, asUser('intruder'))).rejects.toThrow(/^REQUEST_NOT_FOUND: /);
     await expect(service.sendBack(req.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/FORBIDDEN/);
 
     await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'));

@@ -1602,7 +1602,10 @@ describe('ApprovalService (node era)', () => {
 
   it('reassign: blocks a non-holder and duplicate targets', async () => {
     const req = await svc.openNodeRequest(openInput(['u9', 'u2']), CTX);
-    await expect(svc.reassign(req.id, { actorId: 'intruder', to: 'u7' }, asUser('intruder'))).rejects.toThrow(/FORBIDDEN/);
+    // No participant, so no reader of the request: answered as for a missing id.
+    await expect(svc.reassign(req.id, { actorId: 'intruder', to: 'u7' }, asUser('intruder'))).rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    // A reader who holds no slot — the submitter — is refused by the door's own rule.
+    await expect(svc.reassign((req as { id: string }).id, { actorId: 'u1', to: 'u7' }, CTX)).rejects.toThrow(/^FORBIDDEN/);
     await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
   });
 
@@ -1710,13 +1713,21 @@ describe('ApprovalService (node era)', () => {
 
     it('a caller who may not move the slot is refused FORBIDDEN before the target is resolved: no directory answer leaks', async () => {
       const id = await openOn(['u9']);
-      const reads = engine._finds.length;
-      await expect(svc.reassign(id, { actorId: 'intruder', to: 'nobody-at-all' }, asUser('intruder')))
+      const targetLookups = (from: number) => engine._finds.slice(from)
+        .filter(f => JSON.stringify(f.options?.where ?? f.options?.filter ?? {}).includes('nobody-at-all'));
+      // A reader of the request who holds no slot — the submitter.
+      let reads = engine._finds.length;
+      await expect(svc.reassign(id, { actorId: 'u1', to: 'nobody-at-all' }, CTX))
         .rejects.toThrow(/^FORBIDDEN:/);
       // The caller's OWN account is read (its email is an acting address);
       // the target is never looked up.
-      expect(engine._finds.slice(reads).filter(f => JSON.stringify(f.options?.where ?? f.options?.filter ?? {})
-        .includes('nobody-at-all'))).toEqual([]);
+      expect(targetLookups(reads)).toEqual([]);
+      // A caller who cannot read the request is answered as for a missing id,
+      // and the target is not looked up for them either.
+      reads = engine._finds.length;
+      await expect(svc.reassign(id, { actorId: 'intruder', to: 'nobody-at-all' }, asUser('intruder')))
+        .rejects.toThrow(/^REQUEST_NOT_FOUND:/);
+      expect(targetLookups(reads)).toEqual([]);
     });
 
     it('moves the slot to a user id of a member here, and to one with no membership rows at all (no tenancy fact, as the sibling screens read it)', async () => {
@@ -1810,8 +1821,9 @@ describe('ApprovalService (node era)', () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
     await svc.comment(req.id, { actorId: 'u1', comment: 'Numbers attached.' }, CTX);
     await svc.comment(req.id, { actorId: 'u9', comment: 'Thanks, reviewing.' }, asUser('u9'));
+    // An outsider does not read the request: answered as for a missing id.
     await expect(svc.comment(req.id, { actorId: 'outsider', comment: 'hi' }, asUser('outsider')))
-      .rejects.toThrow(/FORBIDDEN/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
     const actions = await svc.listActions(req.id, SYS);
     expect(actions.filter(a => a.action === 'comment')).toHaveLength(2);
   });
@@ -2474,9 +2486,13 @@ describe('ApprovalService — admin override (#3424)', () => {
   it('the stuck request is undecidable by any normal user (repro)', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX);
     expect(req.pending_approvers).toEqual(['position:sales_manager']);
-    // Even the org owner-by-id is not in the resolved (empty) slate.
+    // Even the org owner-by-id is not in the resolved (empty) slate — and no
+    // participant, so no reader of it: answered as for a missing id.
     await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'nobody' }, MEMBER))
-      .rejects.toThrow(/FORBIDDEN/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    // The submitter reads it, and is refused by the door's own rule.
+    await expect(svc.decideNode((req as { id: string }).id, { decision: 'approve' } as any, CTX))
+      .rejects.toThrow(/^FORBIDDEN/);
   });
 
   it('a tenant admin can approve a stuck request, finalizing it (which releases the lock)', async () => {
@@ -2530,8 +2546,10 @@ describe('ApprovalService — admin override (#3424)', () => {
 
   it('a tenant admin of a DIFFERENT org cannot override (privilege is org-scoped)', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX); // organization_id = t1
+    // Behind the tenancy wall for them, and no override here: answered as for a missing id.
     await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'owner2' }, OTHER_TENANT_ADMIN))
-      .rejects.toThrow(/FORBIDDEN/);
+      .rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    expect((await svc.getRequest((req as { id: string }).id, SYS))?.status).toBe('pending');
   });
 
   it('viewer.can_override reflects the privilege, and drops once finalized', async () => {
@@ -2632,7 +2650,8 @@ describe('approval_comment — its visible gate is the comment route\'s admissio
       ['pending · a pending approver', pending, asUser('u9'), true, true],
       ['pending · a holder of a position slot', stuck, SALES_MANAGER, true, true],
       ['pending · an override admin on no slot', pending, PLATFORM_ADMIN, false, 'FORBIDDEN'],
-      ['pending · a stranger', pending, asUser('u_stranger'), false, 'FORBIDDEN'],
+      // Not served the request, and answered by the route as for a missing id.
+      ['pending · a stranger', pending, asUser('u_stranger'), false, 'REQUEST_NOT_FOUND'],
       ['approved · the submitter', approved, CTX, false, 'INVALID_STATE'],
       ['approved · the approver who decided', approved, asUser('u9'), false, 'INVALID_STATE'],
       ['recalled · the submitter', recalled, CTX, false, 'INVALID_STATE'],
@@ -2734,22 +2753,38 @@ describe('ApprovalService — org-filtered read-back refuses loudly (#12769)', (
     expect(String(err.message)).toContain('NOT rolled back');
   });
 
-  it('decide: an ordinary org-scoped slot holder hits the same refusal — no override involved', async () => {
+  it('decide: the override actor\'s decision lands and the echo refuses the same way', async () => {
     const req = await openOrgless();
-    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, ORG_APPROVER))
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'root' }, PLATFORM_ADMIN))
       .rejects.toThrow(/^READ_BACK_FAILED: /);
     const after = await svc.getRequest(req.id, SYS);
     expect(after?.status).toBe('approved'); // the decision landed
   });
 
-  it('comment (thread interaction): same refusal shape', async () => {
+  it('comment (thread interaction): same refusal shape, for an org-scoped system context', async () => {
     const req = await openOrgless();
-    await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_APPROVER))
+    // A system context that names an organization — what a flow running in one
+    // carries — acts under the slot it names, and its echo narrows to 't1'.
+    const ORG_SYSTEM = { isSystem: true, tenantId: 't1', positions: [], permissions: [] } as any;
+    await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_SYSTEM))
       .rejects.toThrow(/^READ_BACK_FAILED: /);
     const acts = await svc.listActions(req.id, SYS);
     // `[length - 1]`, not `.at(-1)`: this package's test layer type-checks under
     // lib ES2021 in the TEST_DEBT re-measure, where `.at` is a TS2550 (#5278).
-    expect(acts[acts.length - 1]).toMatchObject({ action: 'comment', actor_id: 'u9' }); // the comment landed
+    expect(acts[acts.length - 1]).toMatchObject({ action: 'comment', acted_as: 'u9' }); // the comment landed
+  });
+
+  it('an ordinary org-scoped slot holder does not read the org-less row, so the act doors answer it as a missing id — before any write', async () => {
+    const req = await openOrgless();
+    // The read door's own verdict first: the org narrowing hides the row.
+    expect(await svc.getRequest(req.id, ORG_APPROVER)).toBeNull();
+    const actionsBefore = (await svc.listActions(req.id, SYS)).length;
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'u9' }, ORG_APPROVER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_APPROVER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    expect((await svc.getRequest(req.id, SYS))?.status).toBe('pending');
+    expect(await svc.listActions(req.id, SYS)).toHaveLength(actionsBefore);
   });
 
   it('control: an org-less caller (trigger/system context shape) reads back fine — no narrowing, no refusal', async () => {
@@ -4944,8 +4979,15 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     ({ userId, tenantId: 't1', positions, permissions: [], ...extra }) as any;
   /** Staffed into the routed position; neither the submitter nor an admin. */
   const HOLDER = holding('u_holder', ['sales_manager']);
-  /** Holds a position — just not the routed one. */
+  /** Holds a position — just not the routed one. A participant of nothing, so no reader either. */
   const BYSTANDER = holding('u_bystander', ['finance']);
+  /**
+   * A bystander who READS the request — its submitter (`u1`), holding another
+   * position — so a refusal of theirs is the slot test's, not the read rule's.
+   */
+  const READING_BYSTANDER = holding('u1', ['finance']);
+  /** The submitter, holding the position whose name a retired `role:` slot spells. */
+  const READING_HOLDER = holding('u1', ['sales_manager']);
   /** `CTX` (u1) submits every request here and holds no position. */
   const SUBMITTER = CTX;
   /** A platform admin who holds no slot — the #3424 override, not a slot holder. */
@@ -5001,7 +5043,14 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
       // route passes when the body names nobody).
       const decided = await svc.decideNode(req.id, { decision: 'approve' } as any, ctx).then(
         () => (actionsOf(engine, req.id, 'approve')[0]?.via_override ? 'override' : 'slot'),
-        (err: Error) => { expect(err.message, label).toMatch(/^FORBIDDEN: actor '.+' is not a pending approver$/); return 'refused'; },
+        (err: Error) => {
+          // The bystander does not read the request (see `served` above), so the
+          // door answers as for a missing id; a reader is refused by the slot test.
+          expect(err.message, label).toMatch(label === 'bystander'
+            ? new RegExp(`^REQUEST_NOT_FOUND: ${req.id}$`)
+            : /^FORBIDDEN: actor '.+' is not a pending approver$/);
+          return 'refused';
+        },
       );
       expect(decided, `${label}: decision`).toBe(want.decides);
       // ⭐ The rule the docblock states: can_act IS "admitted as a slot holder".
@@ -5035,14 +5084,21 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     // nothing there, under the default actor either.
     const legacy = await open(svc, toPosition);
     await storeLegacyRoleSlot(engine, svc, legacy.id);
+    // The slot test, on a holder who READS the request — its submitter.
+    await expect(svc.decideNode(legacy.id, { decision: 'reject' } as any, READING_HOLDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
+    // A holder with no other part in it does not even read it: answered as for a missing id.
     await expect(svc.decideNode(legacy.id, { decision: 'reject' } as any, HOLDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_holder' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${legacy.id}`);
     expect(actionsOf(engine, legacy.id, 'reject')).toEqual([]);
 
-    // This widens nobody: holding A position is not holding THIS one.
+    // This widens nobody: holding A position is not holding THIS one — asked
+    // of a bystander who reads the request, so the slot test is what answers.
     const req = await open(svc, toPosition);
+    await expect(svc.decideNode(req.id, { decision: 'approve' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
     await expect(svc.decideNode(req.id, { decision: 'approve' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'role:sales_manager' }, BYSTANDER))
       .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
   });
@@ -5054,25 +5110,33 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     // Send back's slot test runs before it looks for the flow's revise edge,
     // so the holder gets PAST it (to the missing-flow refusal) and the
     // bystander does not.
+    await expect(svc.sendBack(req.id, { comment: 'rework' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
     await expect(svc.sendBack(req.id, { comment: 'rework' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await expect(svc.sendBack(req.id, { comment: 'rework' } as any, HOLDER))
       .rejects.toThrow(/^VALIDATION_FAILED: send-back requires the owning flow definition/);
 
+    await expect(svc.requestInfo(req.id, { comment: 'why?' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: actor 'u1' is not a pending approver");
     await expect(svc.requestInfo(req.id, { comment: 'why?' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await svc.requestInfo(req.id, { comment: 'why?' } as any, HOLDER);
     const [asked] = actionsOf(engine, req.id, 'request_info');
     expect([asked.actor_id, asked.acted_as]).toEqual(['u_holder', SLOT]);
 
+    // The reading bystander is the submitter, whom comment admits; the other
+    // bystander does not read the request.
     await expect(svc.comment(req.id, { comment: 'hi' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_bystander' is not on this request");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await svc.comment(req.id, { comment: 'hi' } as any, HOLDER);
     const [said] = actionsOf(engine, req.id, 'comment');
     expect([said.actor_id, said.acted_as]).toEqual(['u_holder', SLOT]);
 
+    await expect(svc.reassign(req.id, { to: 'u_next' } as any, READING_BYSTANDER))
+      .rejects.toThrow("FORBIDDEN: 'u1' is not a pending approver on this request");
     await expect(svc.reassign(req.id, { to: 'u_next' } as any, BYSTANDER))
-      .rejects.toThrow("FORBIDDEN: 'u_bystander' is not a pending approver on this request");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     // With `from` unnamed, the slot handed over is the one the holder takes.
     staffDirectory(engine, 'u_next');
     const moved = await svc.reassign(req.id, { to: 'u_next' } as any, HOLDER);
@@ -5129,8 +5193,9 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     // Control: another account's email is not this slot.
     expect(await svc.getRequest(req.id, OTHER)).toBeNull();
     expect(await servedCanAct(svc, req, OTHER)).toBe(false);
+    // Not served the request, so answered as for a missing id.
     await expect(svc.decideNode(req.id, { decision: 'approve' } as any, OTHER))
-      .rejects.toThrow("FORBIDDEN: actor 'u_other' is not a pending approver");
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
 
     const out = await svc.decideNode(req.id, { decision: 'approve' } as any, MAIL);
     expect(out.finalized).toBe(true);
@@ -5265,8 +5330,9 @@ describe('ApprovalService — the `role:` arm retired; the override decides what
       }
       expect(await svc.getRequest(id, HOLDER)).toBeNull();
       expect(await servedCanAct(svc, row, HOLDER)).toBe(false);
+      // Not served the request, so answered as for a missing id.
       await expect(svc.decideNode(id, { decision: 'approve' } as any, HOLDER))
-        .rejects.toThrow("FORBIDDEN: actor 'u_holder' is not a pending approver");
+        .rejects.toThrow(`REQUEST_NOT_FOUND: ${id}`);
       await expect(svc.decideNode(id, { decision: 'approve', actorId: 'role:sales_manager' }, HOLDER))
         .rejects.toThrow(/^FORBIDDEN: cannot act as 'role:sales_manager'/);
       expect(actionsOf(engine, id, 'approve')).toEqual([]);
@@ -5918,9 +5984,12 @@ describe('ApprovalService — the act doors answer an unreadable request as a mi
     const crossOrg = await open(svc, engine);
     // The read door does not serve it to the platform admin in their own organization…
     expect(await svc.getRequest(crossOrg.id, PLATFORM_ADMIN_ELSEWHERE)).toBeNull();
-    // …and their override still decides it, as it did.
-    const overridden = await svc.decideNode(crossOrg.id, { decision: 'approve' } as any, PLATFORM_ADMIN_ELSEWHERE);
-    expect(overridden.request.status).toBe('approved');
+    // …and their override still decides it, as it did: the decision lands, and
+    // the echo — read inside their own organization — refuses as it always has
+    // (`READ_BACK_FAILED`, the #12769 block above), never as a missing request.
+    await expect(svc.decideNode(crossOrg.id, { decision: 'approve' } as any, PLATFORM_ADMIN_ELSEWHERE))
+      .rejects.toThrow(/^READ_BACK_FAILED: /);
+    expect((await svc.getRequest(crossOrg.id, SYS))?.status).toBe('approved');
     const [act] = (engine._tables['sys_approval_action'] ?? [])
       .filter((a) => a.request_id === crossOrg.id && a.action === 'approve');
     expect(act.via_override).toBe(true);

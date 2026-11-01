@@ -322,15 +322,20 @@ describe('#4839 evidence — the sanctioned admin path covers an unavailable app
   it('a NON-privileged member gets none of this — the override is a real gate, not an open door', async () => {
     const req = await svc.openNodeRequest(staffedInput(), SUBMITTER);
     const member = { userId: 'nobody', tenantId: 't1', positions: [], permissions: [] } as any;
-    await expect(svc.reassign(req.id, { actorId: 'nobody', to: 'u7', from: 'u9' }, member)).rejects.toThrow(/FORBIDDEN/);
-    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'nobody' }, member)).rejects.toThrow(/FORBIDDEN/);
+    // No participant of the request, so not a reader of it either: every door
+    // that acts on it answers as it answers an id that names no request.
+    await expect(svc.reassign(req.id, { actorId: 'nobody', to: 'u7', from: 'u9' }, member)).rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'nobody' }, member)).rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    expect((await svc.getRequest((req as { id: string }).id, SYS))?.status).toBe('pending');
   });
 
   it('a `roles: [admin]` session gets none of it either — the retired dialect grants nothing anywhere', async () => {
     const req = await svc.openNodeRequest(staffedInput(), SUBMITTER);
     const fakeAdmin = { userId: 'pretender', tenantId: 't1', positions: [], permissions: [], roles: ['admin'] } as any;
-    await expect(svc.reassign(req.id, { actorId: 'pretender', to: 'u7', from: 'u9' }, fakeAdmin)).rejects.toThrow(/FORBIDDEN/);
-    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'pretender' }, fakeAdmin)).rejects.toThrow(/FORBIDDEN/);
+    // Answered exactly as the plain member above: no reader of the request.
+    await expect(svc.reassign(req.id, { actorId: 'pretender', to: 'u7', from: 'u9' }, fakeAdmin)).rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'pretender' }, fakeAdmin)).rejects.toThrow(/^REQUEST_NOT_FOUND: /);
+    expect((await svc.getRequest((req as { id: string }).id, SYS))?.status).toBe('pending');
   });
 });
 
