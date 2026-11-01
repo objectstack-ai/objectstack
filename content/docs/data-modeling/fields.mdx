@@ -212,6 +212,13 @@ primary_contact: Field.lookup('contact', {
   ],
 }),
 
+// A pick fills sibling fields: the picked product's list_price lands in unit_price
+product: Field.lookup('product', {
+  label: 'Product',
+  required: true,
+  lookupAutofill: [{ target: 'unit_price', source: 'list_price' }],
+}),
+
 // Master-detail (cascade delete)
 project: Field.masterDetail('project', {
   label: 'Project',
@@ -236,6 +243,40 @@ order: Field.masterDetail('order', {
 | `inlineEdit` | `boolean \| 'grid' \| 'form'` | Render child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
 | `inlineColumns` | `array` | Optional explicit columns for the inline grid |
 | `inlineAmountField` | `string` | Optional numeric child field for the inline running total |
+| `lookupAutofill` | `{ target, source, overwrite? }[]` | Fields of this object a pick fills from the picked record (single-value `lookup` / `master_detail` only) — see below |
+
+#### Lookup-pick autofill: `lookupAutofill`
+
+A single-value `lookup` / `master_detail` can declare `lookupAutofill: [{ target,
+source, overwrite? }]`. When a user picks a record in that field, each pair copies
+the picked record's `source` field (a field of the `reference` object) into this
+object's `target` field — in the record form, and in a line-item grid column over
+the field. The example above fills a quote line's `unit_price` from the picked
+product's `list_price`.
+
+- **`target`** is a field of this object that an author writes: not the lookup
+  itself, not `readonly`, and not computed (`formula`, `summary`, `autonumber`, or
+  a stored field with an `expression`). Each target is named once per field. The
+  object's parse refuses anything else.
+- **`source`** is a field the referenced object declares and the record carries
+  (not `internal`), and its value must be one the target can hold: the same type
+  and multiplicity (a list only into a list),
+  a string-valued field into a text target, `number` and `currency` into each
+  other, a relationship only into a relationship over the same object. `os
+  validate` / `os build` judge the source against the referenced object.
+- **Overwrite rule.** By default a pick never replaces a value somebody wrote: the
+  target is filled only while it is empty or still holds the value an earlier pick
+  filled in. A pair with `overwrite: true` replaces the target on every pick.
+- **Client-side only.** The fill edits the form, and the filled value is saved as an
+  ordinary write. Nothing on the write path reads the key: an import or an API
+  write that sets the lookup fills nothing.
+- **In a line-item grid**, the column key `autofill` still governs only the grid's
+  same-named copy; a declared pair applies under its own overwrite rule and takes
+  its target out of that copy. A master-detail collection whose `relationshipField`
+  is set and whose every column carries its `type` loads no child fields, so it
+  sees no pairs and keeps only the same-named copy.
+
+The key's full contract is in the [Field reference](/docs/references/data/field).
 
 #### Referential integrity
 
