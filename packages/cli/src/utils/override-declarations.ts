@@ -37,6 +37,7 @@
  */
 
 import { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem } from '@objectstack/metadata-protocol';
+import { OverrideDeclarationSchema } from '@objectstack/spec/kernel';
 
 import { artifactPackages } from './artifact-packages.js';
 
@@ -112,8 +113,10 @@ export function findOverrideDeclarationRefusals(parsed: Record<string, unknown>)
     for (const walked of pkg.items) {
       const key = `${walked.type}\u0000${walked.identity}`;
       const shippers = dependencies.filter((d) => shipped.get(d)?.has(key));
-      const declared = isRecord(walked.item) && isRecord(walked.item.overrides) ? walked.item.overrides : undefined;
-      const base = typeof declared?.package === 'string' ? declared.package : undefined;
+      // A malformed `overrides` is no declaration (the schema step reports
+      // it), so it names no base here either, as the gate reads it.
+      const declared = isRecord(walked.item) ? OverrideDeclarationSchema.safeParse(walked.item.overrides) : undefined;
+      const base = declared?.success ? declared.data.package : undefined;
       // A declared base the closure names but this artifact does not carry:
       // whether it ships the name is read at the publish door.
       if (base !== undefined && dependencies.includes(base) && !byId.has(base) && !shippers.includes(base)) {

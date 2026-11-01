@@ -43,6 +43,7 @@ import {
     customizationPackageId,
     getOverrideTypeClassification,
     isCustomizationPairOf,
+    OverrideDeclarationSchema,
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
@@ -137,13 +138,15 @@ export function refusePackagedBaseOverride(
         // the write meant to do: the door cannot tell a create from an edit.
         //
         // [ADR-0146 D2] On a type a declared override can replace, the
-        // sentence names the two fixes the author has — declare the override
-        // from the base's paired `.custom`, or rename — in place of the bare
-        // seal: the override write gate ({@link judgeOverrideWrite}) admits
-        // exactly that declaration, so the seal is no longer the whole story.
+        // sentence names the fixes the writer has — the pair (or a write
+        // naming no package) may declare the override from the base's paired
+        // `.custom` or rename; any other package may only rename — in place
+        // of the bare seal: the override write gate ({@link judgeOverrideWrite})
+        // admits exactly the pair's declaration, so the seal is no longer the
+        // whole story.
         const err = new Error(
             managedItemSealedSentence(request.type, request.name, 'save')
-            + sealedDeclareOrRenameTail(request.type, this.packagedArtifactOwner(request)),
+            + sealedDeclareOrRenameTail(request.type, this.packagedArtifactOwner(request), request.packageId),
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
@@ -153,16 +156,27 @@ export function refusePackagedBaseOverride(
 
 /**
  * [ADR-0146 D2] The sealed write's second sentence on a type whose override
- * channel is open: declare the override from the base's paired `.custom`, or
- * rename. Empty for a type with no open channel — `flow` and `action` wait for
+ * channel is open, chosen by who writes:
+ * - the base's paired `.custom`, or a write that names no package (the
+ *   administrator's package-less write, which may still move to the pair):
+ *   declare the override from the pair, or rename;
+ * - any other named package: rename. Only the pair declares an override
+ *   (ruling A on #28390), so a dependent's one fix is a new name, and the
+ *   declare advice would send it to a refusal (`declared_outside_pair`).
+ *
+ * Empty for a type with no open channel — `flow` and `action` wait for
  * ADR-0146 D9's conditions (their regime rows keep their own routes), and an
  * excluded type has none — and when the shipping package has no pair id.
  */
-function sealedDeclareOrRenameTail(type: string, basePackageId: unknown): string {
+function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerPackageId: unknown): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return '';
     const pair = customizationPackageId(basePackageId);
     if (!pair.ok) return '';
+    const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
+    if (writer !== undefined && writer !== pair.value) {
+        return ` To change it, rename the item: only '${pair.value}' may declare an override of '${basePackageId}'.`;
+    }
     return ` To change it, declare an override from '${pair.value}' `
         + `(overrides: { package: '${basePackageId}', basedOn }), or rename the item.`;
 }
@@ -235,15 +249,22 @@ export type OverrideWriteVerdict =
 
 const NOT_CONCERNED: OverrideWriteVerdict = { verdict: 'not_concerned' };
 
-/** The `overrides` value an item body carries, or `undefined` when it carries none. */
+/**
+ * The declaration an item body carries: its `overrides` value when that value
+ * is one the spec's {@link OverrideDeclarationSchema} accepts, else none.
+ *
+ * A malformed `overrides` (null, not an object, no `package`, a `.custom`
+ * package named as the base, a missing `basedOn`, an unknown key) is NOT a
+ * declaration here: the gate is not concerned with it, and the door's schema
+ * gate answers it with its own 400 `VALIDATION_ERROR`, which is the fact. The
+ * gate runs before that schema gate, so judging the malformed value as a
+ * declaration would answer `403 NOT_OVERRIDABLE` in its place.
+ */
 function declarationOf(item: unknown): { present: boolean; base: string | undefined } {
     if (item === null || typeof item !== 'object' || !('overrides' in item)) return { present: false, base: undefined };
-    const declared = (item as { overrides?: unknown }).overrides;
-    if (declared === undefined) return { present: false, base: undefined };
-    const base = declared !== null && typeof declared === 'object'
-        ? (declared as { package?: unknown }).package
-        : undefined;
-    return { present: true, base: typeof base === 'string' && base.length > 0 ? base : undefined };
+    const declared = OverrideDeclarationSchema.safeParse((item as { overrides?: unknown }).overrides);
+    if (!declared.success) return { present: false, base: undefined };
+    return { present: true, base: declared.data.package };
 }
 
 /**

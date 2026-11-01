@@ -759,15 +759,60 @@ describe('the override write gate — only the base\'s paired .custom declares a
 
     // ── the sealed write's sentence ─────────────────────────────────────────
 
-    it('the sealed write of an overridable type says declare or rename, not clone; code and status stay', async () => {
+    it('the pair\'s sealed write of an overridable type says declare or rename, not clone; code and status stay', async () => {
         const { protocol } = gateProtocol();
-        const e = await thrown(protocol.saveMetaItem({ type: 'page', name: 'crm_home', packageId: UNRELATED, item: body('page', 'crm_home') }));
+        const e = await thrown(protocol.saveMetaItem({ type: 'page', name: 'crm_home', packageId: PAIR, item: body('page', 'crm_home') }));
         expect(shape(e)).toEqual(REFUSED);
-        expect(String(e.message)).toContain(`'${PAIR}'`);
-        expect(String(e.message)).toMatch(/or rename the item/);
+        expect(String(e.message)).toMatch(/ To change it, declare an override from '[^']+' \(overrides: \{ package: '[^']+', basedOn \}\), or rename the item\.$/);
+        expect(String(e.message)).toContain(`declare an override from '${PAIR}' (overrides: { package: '${BASE}', basedOn })`);
         expect(String(e.message).toLowerCase()).not.toContain('clone');
         expect(String(e.message).length).toBeLessThan(500);
     });
+
+    it('any other package\'s sealed write of an overridable type says rename only — only the pair declares (#28390 A)', async () => {
+        // A non-pair package that declared would meet `declared_outside_pair`,
+        // so the sealed sentence never advises it to declare.
+        const { protocol } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'page', name: 'crm_home', packageId: UNRELATED, item: body('page', 'crm_home') }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message).endsWith(` To change it, rename the item: only '${PAIR}' may declare an override of '${BASE}'.`)).toBe(true);
+        expect(String(e.message)).not.toContain('declare an override from');
+        expect(String(e.message)).not.toMatch(/basedOn/);
+        expect(String(e.message).toLowerCase()).not.toContain('clone');
+    });
+
+    it('a sealed write naming no package keeps the declare-or-rename advice (the administrator may move it to the pair)', async () => {
+        const { protocol } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'page', name: 'crm_home', item: body('page', 'crm_home') }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toContain(`declare an override from '${PAIR}' (overrides: { package: '${BASE}', basedOn }), or rename the item.`);
+    });
+
+    // ── a malformed `overrides` is the schema gate's, not this gate's ───────
+    // (should-fix 3 of the contract review on #28554)
+
+    for (const [label, overrides] of [
+        ['null', null],
+        ['a string', 'com.acme.crm'],
+        ['no package', { basedOn: '1.0.0' }],
+        ['an empty package', { package: '', basedOn: '1.0.0' }],
+        ['no basedOn', { package: 'com.acme.crm' }],
+    ] as const) {
+        it(`a partner's view whose \`overrides\` is malformed (${label}) is not judged as a declaration: no declared_outside_pair`, async () => {
+            const { protocol, stored } = gateProtocol();
+            const e = await thrown(protocol.saveMetaItem({
+                type: 'view', name: 'partner_own_list', packageId: PARTNER,
+                item: { ...body('view', 'partner_own_list'), overrides },
+            }));
+            // The door's schema gate answers the malformed value (its
+            // `INVALID_METADATA` / 422, naming the key); the override gate
+            // never answers `403 NOT_OVERRIDABLE` for it.
+            expect(shape(e)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(String(e.message)).toMatch(/overrides/);
+            expect(String(e.message)).not.toMatch(/carries `overrides`/);
+            expect(stored()).toEqual([]);
+        });
+    }
 
     // ── the promotion doors: a draft stored before the gate ─────────────────
 
