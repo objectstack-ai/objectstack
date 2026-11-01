@@ -104,6 +104,7 @@ import {
   resolveFlowNodeExpressions,
   flowNodeValueTemplateRefusals,
   flowNodeTextSlotSources,
+  flowTextSlotSources,
   textSlotTemplateRefusal,
   structuralConditionRefusal,
   closedScopeTemplateRefusal,
@@ -2715,6 +2716,25 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       }
       return { refused: false };
     };
+
+    // [#28054] The flow's OWN text slots — `successMessage` / `errorMessage`,
+    // which the engine renders at the run's terminal exit — judged by the same
+    // two checks `registerFlow` runs on them, the node text slots' pair below:
+    // the spec's one single-brace judge, then the `template` compile. A
+    // finding carries the flow key's path (`flows[0].successMessage`).
+    for (const slot of flowTextSlotSources(flow)) {
+      // `flow 'NAME' successMessage` — the key, not the label, so the word `flow` is said once.
+      const slotWhere = `flow '${flowName}' ${slot.path}`;
+      const path = flowIndex >= 0 ? { path: `flows[${flowIndex}].${slot.path}` } : {};
+      const tokenRefusal = textSlotTemplateRefusal(slot.source);
+      if (tokenRefusal !== undefined) {
+        issues.push({ where: slotWhere, message: tokenRefusal, source: slot.source, severity: 'error', ...path });
+        continue;
+      }
+      for (const e of validateExpression('template', slot.source).errors) {
+        issues.push({ where: slotWhere, message: e.message, source: e.source, severity: 'error', ...path });
+      }
+    }
 
     for (const graph of graphs) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;

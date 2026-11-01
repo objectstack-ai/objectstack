@@ -674,10 +674,12 @@ export interface AutomationResult {
      */
     screen?: ScreenSpec;
     /**
-     * Friendly terminal messages copied from the flow definition
+     * Friendly terminal messages rendered from the flow definition
      * (`flow.successMessage` / `flow.errorMessage`) so a screen-flow runner can
      * show a meaningful toast instead of a generic "Done" / the raw error.
      * `successMessage` is set on terminal success, `errorMessage` on failure.
+     * Each is the flow's `{{ }}` template already rendered over the run's
+     * variables, in the run's locale (#28054), so a runner draws it as served.
      */
     successMessage?: string;
     errorMessage?: string;

@@ -245,6 +245,8 @@ describe('the area\'s form editor in the builder (objectstack#28569)', () => {
       basedOn: '4.0.0',
       walled: false,
       pairId: null,
+      // objectstack#28572 — the base's served customization read, which the rails mark rows from.
+      marks: expect.any(Object),
     });
     expect(screen.getByTestId('form-editor-door')).toHaveTextContent('function');
   });

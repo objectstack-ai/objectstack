@@ -280,8 +280,8 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
@@ -455,8 +455,8 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
@@ -692,8 +692,8 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
@@ -899,8 +899,8 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |

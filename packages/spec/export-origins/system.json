@@ -793,6 +793,7 @@
     "emailTemplateForm": "src/system/email-template.form.ts#emailTemplateForm (const)",
     "flowRefusalMessageKey": "src/system/i18n-resolver.ts#flowRefusalMessageKey (function)",
     "flowScreenCopyKey": "src/system/i18n-resolver.ts#flowScreenCopyKey (function)",
+    "flowTerminalMessageKey": "src/system/i18n-resolver.ts#flowTerminalMessageKey (function)",
     "gcsStorageExample": "src/system/object-storage.zod.ts#gcsStorageExample (const)",
     "globalFilterKey": "src/system/i18n-resolver.ts#globalFilterKey (function)",
     "hasMovedFileColumns": "src/system/migration.zod.ts#hasMovedFileColumns (function)",
