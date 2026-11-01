@@ -10885,8 +10885,7 @@ export function AutomationsPillar({
                     restore={
                       flowInPair
                         ? {
-                            disabled:
-                              restoring || (customizePair === null && !pairsByFlowRef.current.has(current.name)),
+                            disabled: restoring,
                             onSelect: () => setRestoreOpen(true),
                           }
                         : undefined
