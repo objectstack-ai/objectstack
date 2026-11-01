@@ -3083,8 +3083,7 @@ const RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION: RuleExplanation = {
 
 /**
  * Where R13 runs since it became a gate — `lintSummaryRollups`, on all three
- * commands and the runtime publish gate's `object` writes. The two roll-up ids
- * share it.
+ * commands and the runtime publish gate's `object` writes.
  */
 const ROLLUP_GATE_REACH =
   'Reach: `os validate`, `os build`, `os lint` and the metadata write door\'s publish gate (an ' +
@@ -3112,25 +3111,9 @@ const ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION: RuleExplanation = {
       'that succeeded. Their accepted children are exactly that table\'s rows.',
     'Judged: `min`, `max`, `sum` and `avg` — `count` reads no value off the field. Silent when the ' +
       'child field does not resolve, or the child object does not resolve in this stack (another ' +
-      'package, a partial load): a rule that cannot answer does not block.',
+      'package, a partial load, or an install that writes the parent before its child): a rule that ' +
+      'cannot answer does not block.',
     ROLLUP_GATE_REACH,
-  ],
-};
-
-const ROLLUP_UNKNOWN_CHILD_OBJECT_EXPLANATION: RuleExplanation = {
-  rule: 'rollup/unknown-child-object',
-  covers: 'why a roll-up must name a child object that exists',
-  paragraphs: [
-    '`summaryOperations.object` names the child object the roll-up aggregates. A name the deployment ' +
-      'does not have publishes as a field that reads nothing, for good: no child write ever triggers ' +
-      'a recompute, and nothing reports why the value stays empty.',
-    'Judged at the metadata write door\'s publish gate only, against every object the deployment ' +
-      'has — its registered objects, its stored ones and the drafts published in the same batch. A ' +
-      'child that a package outside the written package\'s dependencies declares still exists, so it ' +
-      'is not refused. `os validate`, `os build` and `os lint` judge one app, which may roll up a ' +
-      'dependency package\'s object, so they do not report this.',
-    'Fix: name the child whose `lookup` or `master_detail` field points at the parent. If that child ' +
-      'is still a draft, publish it first, or publish the package\'s drafts together.',
   ],
 };
 
@@ -5429,7 +5412,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [UNIQUE_DOUBLE_DECLARATION_EXPLANATION.rule]: UNIQUE_DOUBLE_DECLARATION_EXPLANATION,
   [RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION.rule]: RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION,
   [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
-  [ROLLUP_UNKNOWN_CHILD_OBJECT_EXPLANATION.rule]: ROLLUP_UNKNOWN_CHILD_OBJECT_EXPLANATION,
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
   [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,

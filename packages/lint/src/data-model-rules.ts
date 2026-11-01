@@ -274,13 +274,6 @@ export const RELATIONSHIP_DELETE_BEHAVIOR = 'relationship/delete-behavior';
 export const ROLLUP_NON_NUMERIC_AGGREGAND = 'rollup/non-numeric-aggregand';
 
 /**
- * The rule id R13 reports under when a roll-up's `summaryOperations.object`
- * names an object the deployment does not have — judged at the runtime publish
- * gate only (see {@link lintSummaryRollups}).
- */
-export const ROLLUP_UNKNOWN_CHILD_OBJECT = 'rollup/unknown-child-object';
-
-/**
  * The rule id R14 reports under: an object field of type `composite` /
  * `repeater` that declares sub-fields or columns.
  *
@@ -737,31 +730,14 @@ function acceptedChildTypesOf(fn: AggregationFunction): string {
   return row.length > 1 ? `${row.slice(0, -1).join(', ')} or ${row[row.length - 1]}` : row.join('');
 }
 
-/** What {@link lintSummaryRollups} is told beyond the objects it walks. */
-export interface SummaryRollupOptions {
-  /**
-   * Every object name the deployment has — set by the runtime publish gate
-   * only, read off its WHOLE object collection before the package-closure
-   * narrowing (`AuthoringRuleContext.deployedObjectNames`).
-   *
-   * Present, a `summaryOperations.object` that names an object neither in the
-   * walked `objects` nor in this set exists nowhere in the deployment, and is
-   * refused ({@link ROLLUP_UNKNOWN_CHILD_OBJECT}). Absent — the three CLI
-   * commands — an unresolved child is SILENCE, as it has always been: the CLI's
-   * stack is one app, and the child may be a dependency package's object.
-   */
-  deployedObjectNames?: ReadonlySet<string>;
-}
-
 /**
  * R13 — a roll-up must aggregate a child field the platform can store or
- * compute into the summary column, out of a child object that exists.
+ * compute into the summary column.
  *
  * `FieldSchema.summaryOperations` is `{ object, function, field }` with each a
  * bare string, and the object parse cannot see another object's fields, so
  * nothing between the author and the first recompute correlated the three. Two
- * questions are asked of a resolved child field, one per function family, and
- * a third of the child object itself.
+ * questions are asked of a resolved child field, one per function family.
  *
  * ## `min` / `max` — does the ANSWER fit the column?
  *
@@ -788,15 +764,16 @@ export interface SummaryRollupOptions {
  * every recompute would. The answer of a pair the table accepts is a number,
  * which the column stores.
  *
- * ## The child object — does it exist?
+ * ## The child object — not judged
  *
- * Judged only when the caller states the deployment's object names
- * ({@link SummaryRollupOptions.deployedObjectNames}) — the runtime publish
- * gate, whose universe is the deployment's registry plus its stored rows (and
- * the batch's own pending drafts). A name missing from it reads nothing and
- * stays empty for good. A child outside the written package's closure (a
- * downstream package whose child points in) still EXISTS, so it is not refused;
- * its fields are simply not judged.
+ * A `summaryOperations.object` naming no object the walk holds is SILENCE, at
+ * every door. #28661 measured a legitimate order that needs it admitted: the
+ * unmanaged install (`install-local --unmanaged`) saves a package's items one
+ * active save at a time, so a parent's roll-up is written before the child it
+ * reads exists (`crm_opportunity.line_total` before
+ * `crm_opportunity_line_item`); on the CLI the child may be a dependency
+ * package's object. A child that never arrives reads nothing — the roll-up
+ * stays 0 / null — but nothing fails.
  *
  * ## Silence, never a guess
  *
@@ -809,7 +786,7 @@ export interface SummaryRollupOptions {
  * runtime publish gate's `object` writes. `lintDataModel` no longer calls it,
  * so `os lint` reports each finding exactly once.
  */
-export function lintSummaryRollups(objects: any[], options: SummaryRollupOptions = {}): LocatedLintIssue[] {
+export function lintSummaryRollups(objects: any[]): LocatedLintIssue[] {
   const issues: LocatedLintIssue[] = [];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
 
@@ -830,24 +807,8 @@ export function lintSummaryRollups(objects: any[], options: SummaryRollupOptions
       const fieldPath = `objects[${i}].fields.${fieldName}`;
       const child = objectsByName[childName];
 
-      if (!child) {
-        const deployed = options.deployedObjectNames;
-        if (deployed !== undefined && !deployed.has(childName)) {
-          issues.push({
-            severity: 'error',
-            rule: ROLLUP_UNKNOWN_CHILD_OBJECT,
-            where: fieldWhere(obj, fieldName),
-            message:
-              `summary field "${obj.name}.${fieldName}" rolls up from "${childName}", which names no object ` +
-              'in this deployment: the roll-up reads nothing',
-            path: `${fieldPath}.summaryOperations.object`,
-            fix:
-              `Name the child object whose lookup or master_detail field points at "${obj.name}", or publish ` +
-              'that object first if it is still a draft.',
-          });
-        }
-        continue;
-      }
+      // Not judged — see the docblock's "The child object" section.
+      if (!child) continue;
 
       const childFieldName = ops?.field;
       if (typeof childFieldName !== 'string' || childFieldName === '') continue;

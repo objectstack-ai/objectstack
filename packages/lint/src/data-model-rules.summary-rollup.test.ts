@@ -32,7 +32,6 @@ import {
   lintDataModel,
   lintSummaryRollups as lintSummaryRollupsUnrecorded,
   ROLLUP_NON_NUMERIC_AGGREGAND,
-  ROLLUP_UNKNOWN_CHILD_OBJECT,
 } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
 
@@ -211,36 +210,6 @@ describe('rollup/non-numeric-aggregand — sum / avg judged by the table the eng
   });
 });
 
-describe('rollup/unknown-child-object — a roll-up from an object the deployment does not have', () => {
-  const unknownChild = (objects: unknown[], deployed?: string[]) =>
-    lintSummaryRollups(objects as any[], deployed ? { deployedObjectNames: new Set(deployed) } : {})
-      .filter((i) => i.rule === ROLLUP_UNKNOWN_CHILD_OBJECT);
-  const parentOnly = () => model('number', 'sum').slice(0, 1);
-
-  it('refuses a child named nowhere in the deployment, at the object key', () => {
-    const found = unknownChild(parentOnly(), ['invoice']);
-    expect(found).toHaveLength(1);
-    expect(found[0]!.severity).toBe('error');
-    expect(found[0]!.path).toBe('objects[0].fields.rolled_up.summaryOperations.object');
-    expect(found[0]!.message).toBe(
-      'summary field "invoice.rolled_up" rolls up from "invoice_line", which names no object in this ' +
-        'deployment: the roll-up reads nothing',
-    );
-  });
-
-  it('admits a child the deployment has outside the walked objects (a package outside the closure)', () => {
-    expect(unknownChild(parentOnly(), ['invoice', 'invoice_line'])).toEqual([]);
-  });
-
-  it('admits a child the walked objects carry, whatever the deployment set says', () => {
-    expect(unknownChild(model('number', 'sum'), [])).toEqual([]);
-  });
-
-  it('is silent when the deployment\'s object names are not stated — the CLI, one app', () => {
-    expect(unknownChild(parentOnly())).toEqual([]);
-  });
-});
-
 describe('rollup/non-numeric-aggregand — stays silent where it cannot resolve, and outside its scope', () => {
   // "A consumer that cannot resolve a field's type must NOT call the predicate
   // with a guess" — `aggregate-field-type-compatibility.ts`. A refusal fired on
@@ -248,6 +217,14 @@ describe('rollup/non-numeric-aggregand — stays silent where it cannot resolve,
   it('is silent on the aggregand when the child object is not in the pass\'s object set', () => {
     const objects = model('datetime').slice(0, 1); // parent only — no `invoice_line`
     expect(findings(objects)).toEqual([]);
+  });
+
+  // [#28661] A child object nothing holds is not refused under ANY rule id: an
+  // unmanaged install saves the parent before its child (measured on the
+  // `install-local-unmanaged-mode` dogfood: `crm_opportunity.line_total`
+  // before `crm_opportunity_line_item`).
+  it('raises nothing at all for a sum whose child object is not in the pass — a parent written before its child', () => {
+    expect(lintSummaryRollups(model('number', 'sum').slice(0, 1))).toEqual([]);
   });
 
   it('is silent when the named field is not declared on the child', () => {
@@ -326,13 +303,4 @@ describe('[#22161] one-line verdicts — rollup/non-numeric-aggregand', () => {
     }
   });
 
-  it('`os explain rollup/unknown-child-object` says where it is judged and why the CLI does not', () => {
-    expect(ROLLUP_UNKNOWN_CHILD_OBJECT).toBe('rollup/unknown-child-object');
-    const entry = explainRule(ROLLUP_UNKNOWN_CHILD_OBJECT);
-    expect(entry, 'no `os explain rollup/unknown-child-object` entry').toBeDefined();
-    const text = entry!.paragraphs.join('\n');
-    for (const fact of ['publish gate only', 'still exists', 'judge one app', 'publish it first']) {
-      expect(text, `explanation names ${fact}`).toContain(fact);
-    }
-  });
 });

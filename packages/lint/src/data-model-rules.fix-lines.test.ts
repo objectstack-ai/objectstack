@@ -22,7 +22,6 @@ import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   ROLLUP_NON_NUMERIC_AGGREGAND,
-  ROLLUP_UNKNOWN_CHILD_OBJECT,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_LEGACY_ORGANIZATION_COMPOSITE,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
@@ -40,7 +39,6 @@ const IDS = [
   MISSING_NAME_FIELD,
   SELECT_MISSING_OPTIONS,
   ROLLUP_NON_NUMERIC_AGGREGAND,
-  ROLLUP_UNKNOWN_CHILD_OBJECT,
   FIELD_EMBEDDED_SUB_FIELDS,
 ];
 
@@ -205,21 +203,8 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
     record(lintSummaryRollups(rollup('percent', LONG_OBJECT, 'sum')));
   });
 
-  it('rollup/unknown-child-object: one line naming the parent the child points at', () => {
-    const parentOnly = rollup('number', LONG_OBJECT, 'sum').slice(0, 1);
-    expect(
-      fixOf(
-        record(lintSummaryRollups(parentOnly, { deployedObjectNames: new Set([LONG_OBJECT]) })),
-        ROLLUP_UNKNOWN_CHILD_OBJECT,
-      ),
-    ).toBe(
-      `Name the child object whose lookup or master_detail field points at "${LONG_OBJECT}", or publish ` +
-        'that object first if it is still a draft.',
-    );
-  });
-
   it('every fix the cases above fired is one line of at most 200 characters', () => {
-    // The coverage control first: all eight ids fired.
+    // The coverage control first: all seven ids fired.
     expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
     for (const f of fired) {
       expect(f.fix, f.rule).toBeTruthy();

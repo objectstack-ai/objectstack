@@ -11,9 +11,8 @@
  * TEXT field saved 200, its draft read `_diagnostics: { valid: true }`, and
  * `publish-drafts` answered `published`. From then on every create, update
  * and delete of the child answered 500 although each write had landed: the
- * recompute's `engine.aggregate` refuses the pair after the commit. A roll-up
- * naming a child object that does not exist (`qsf_nope`) published the same
- * way and read nothing for good. `os lint` judged neither; no door did.
+ * recompute's `engine.aggregate` refuses the pair after the commit. `os lint`
+ * judged none of it; no door did.
  *
  * ## What is pinned
  *
@@ -22,8 +21,9 @@
  *   path of the field; a `sum` over a number field is admitted.
  * - The draft still SAVES (#4463 D1), and its read reports the publish's
  *   verdict.
- * - A child object that exists nowhere is refused the same way; a child that
- *   is a draft published in the same package publish is not.
+ * - A roll-up whose child object does not exist yet is ADMITTED, by an active
+ *   save and by a publish: an unmanaged install saves the parent before its
+ *   child (the card's `qsf_nope` half, left open — see the rule's docblock).
  *
  * Harness: the package-aware stub engine of `protocol.draft-publish-verdict.test.ts`
  * (kept local, the established shape). Nothing on the save, read or publish
@@ -221,7 +221,6 @@ const draftDiagnostics = async (protocol: ObjectStackProtocolImplementation, nam
 };
 
 const AGGREGAND_PATH = 'objects.qsf_parent.fields.probe_sf.summaryOperations.field';
-const CHILD_OBJECT_PATH = 'objects.qsf_parent.fields.probe_sf.summaryOperations.object';
 
 describe('a roll-up over a field the engine does not aggregate is refused at the object door (#28661)', () => {
     let warn: ReturnType<typeof vi.spyOn>;
@@ -294,7 +293,7 @@ describe('a roll-up over a field the engine does not aggregate is refused at the
     });
 });
 
-describe('a roll-up from a child object the deployment does not have is refused at the object door (#28661)', () => {
+describe('a roll-up from a child object that does not exist yet is admitted (#28661)', () => {
     let warn: ReturnType<typeof vi.spyOn>;
     beforeEach(() => {
         warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -303,25 +302,20 @@ describe('a roll-up from a child object the deployment does not have is refused 
 
     const nope = () => parentWith({ object: 'qsf_nope', function: 'sum', field: 'amount' });
 
-    it('the active save refuses it 422 at the object key', async () => {
+    it('the active save admits it — an unmanaged install writes the parent before its child', async () => {
         const protocol = new ObjectStackProtocolImplementation(makeStubEngine().engine);
-        const refusal = await refusalOf(saveActive(protocol, nope()));
-        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
-        expect(refusal.issues.map((i: any) => [i.rule, i.path])).toContainEqual(['rollup/unknown-child-object', CHILD_OBJECT_PATH]);
+        await expect(saveActive(protocol, nope())).resolves.toMatchObject({ success: true });
     });
 
-    it('the draft saves, reads valid:false, and the package publish refuses it', async () => {
+    it('the draft reads valid:true and the package publish admits it', async () => {
         const protocol = new ObjectStackProtocolImplementation(makeStubEngine().engine);
         await expect(saveDraft(protocol, nope())).resolves.toMatchObject({ success: true, state: 'draft' });
-        const diagnostics = await draftDiagnostics(protocol, 'qsf_parent');
-        expect(diagnostics.valid).toBe(false);
-        expect((diagnostics.errors ?? []).map((e) => e.code)).toContain('rollup/unknown-child-object');
+        expect((await draftDiagnostics(protocol, 'qsf_parent')).valid).toBe(true);
         const batch: any = await protocol.publishPackageDrafts({ packageId: PKG });
-        expect(batch).toMatchObject({ success: false, publishedCount: 0 });
-        expect(JSON.stringify(batch.failed)).toContain('rollup/unknown-child-object');
+        expect(batch, JSON.stringify(batch.failed)).toMatchObject({ outcome: 'published', publishedCount: 1, failedCount: 0 });
     });
 
-    it('a child that is a draft of the same package publish is not refused — the natural authoring order', async () => {
+    it('a child that is a draft of the same package publish is judged with it — the natural authoring order', async () => {
         const protocol = new ObjectStackProtocolImplementation(makeStubEngine().engine);
         const draftChild = { ...liveChildObject, name: 'qsf_line', fields: { ...liveChildObject.fields } };
         await saveDraft(protocol, parentWith({ object: 'qsf_line', function: 'sum', field: 'amount' }));
@@ -329,5 +323,16 @@ describe('a roll-up from a child object the deployment does not have is refused 
         expect((await draftDiagnostics(protocol, 'qsf_parent')).valid).toBe(true);
         const batch: any = await protocol.publishPackageDrafts({ packageId: PKG });
         expect(batch, JSON.stringify(batch.failed)).toMatchObject({ outcome: 'published', publishedCount: 2, failedCount: 0 });
+    });
+
+    it('…and a sum over that draft child\'s TEXT field is refused by the same package publish', async () => {
+        const protocol = new ObjectStackProtocolImplementation(makeStubEngine().engine);
+        const draftChild = { ...liveChildObject, name: 'qsf_line', fields: { ...liveChildObject.fields } };
+        await saveDraft(protocol, parentWith({ object: 'qsf_line', function: 'sum', field: 'memo' }));
+        await saveDraft(protocol, draftChild);
+        expect((await draftDiagnostics(protocol, 'qsf_parent')).valid).toBe(false);
+        const batch: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(batch).toMatchObject({ success: false, publishedCount: 0 });
+        expect(JSON.stringify(batch.failed)).toContain('rollup/non-numeric-aggregand');
     });
 });

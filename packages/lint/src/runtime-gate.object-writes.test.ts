@@ -701,8 +701,7 @@ describe('a roll-up the engine would refuse at every recompute is refused at the
   // A published `sum` over a text child field made every write of the child
   // answer 500 although each write landed: the recompute's aggregate is
   // refused after the commit. These are the door's own controls — the
-  // per-write snapshot, the differential and the deployment's object names,
-  // not the rule called directly.
+  // per-write snapshot and the differential, not the rule called directly.
   const child = (memoType = 'text') => ({
     name: 'qsf_child',
     sharingModel: 'controlled_by_parent',
@@ -746,12 +745,13 @@ describe('a roll-up the engine would refuse at every recompute is refused at the
     expect(rollupErrors(parent({ object: 'qsf_child', function: 'sum', field: 'amount' }), [child()])).toEqual([]);
   });
 
-  it('refuses a child object that exists nowhere, with or without a package closure in force', () => {
+  it('admits a parent whose child object does not exist yet — an unmanaged install writes the parent first', () => {
+    // [#28661] Measured on `install-local-unmanaged-mode.dogfood.test.ts`: the
+    // install saves `crm_opportunity` (a roll-up over
+    // `crm_opportunity_line_item`) before that child exists.
     const body = parent({ object: 'qsf_nope', function: 'sum', field: 'amount' });
     for (const scope of [undefined, { packageId: 'pkg.qsf', dependencies: [] }]) {
-      expect(rollupErrors(body, [child()], scope).map((f) => [f.rule, f.path]), JSON.stringify(scope)).toEqual([
-        ['rollup/unknown-child-object', 'objects.qsf_parent.fields.probe_sf.summaryOperations.object'],
-      ]);
+      expect(rollupErrors(body, [child()], scope), JSON.stringify(scope)).toEqual([]);
     }
   });
 
