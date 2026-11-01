@@ -96,9 +96,10 @@ const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
   if (meta) return json({ success: true, data: ALL.find((o) => o.name === meta[1]) ?? null });
   const page = /\/api\/v1\/data\/([^/?]+)\/([^/?]+)\/page$/.exec(path);
   if (page) return json({ success: true, data: { object: page[1], id: page[2], record: { id: page[2], name: `Contact ${page[2]}` }, related: [] } });
-  const one = /\/api\/v1\/data\/([^/?]+)\?.*\["id","=","([^"]+)"\]/.exec(path);
+  // The record read of a page that asks no payload (`findOne`), as a get by id.
+  const one = /^\/api\/v1\/data\/([^/?]+)\/([^/?]+)$/.exec(path);
   if (one && one[1] === SYS_APPROVAL_REQUEST_OBJECT) {
-    return json({ success: true, data: { records: [{ id: one[2], process_label: `Request ${one[2]}`, status: 'pending' }], total: 1 } });
+    return json({ success: true, data: { object: one[1], id: one[2], record: { id: one[2], process_label: `Request ${one[2]}`, status: 'pending' } } });
   }
   return json({ success: true, data: { records: [], total: 0 } });
 });
@@ -144,8 +145,13 @@ async function open(objectName: string, recordId: string, upcoming: readonly str
 }
 
 const pageRequests = () => wire.filter((w) => /^POST \/api\/v1\/data\/[^/?]+\/[^/?]+\/page$/.test(w));
+/** The page's own read of one record (`findOne`), by id or as a one-row list. */
 const recordReads = (object: string, id: string) =>
-  wire.filter((w) => w.startsWith(`GET /api/v1/data/${object}?`) && w.includes(`["id","=","${id}"]`));
+  wire.filter(
+    (w) =>
+      w === `GET /api/v1/data/${object}/${id}` ||
+      (w.startsWith(`GET /api/v1/data/${object}?`) && w.includes(`["id","=","${id}"]`)),
+  );
 
 describe("objectstack#28546 — an approval request's own page asks no record page payload", () => {
   it('reads the request by findOne and sends no page request', async () => {
