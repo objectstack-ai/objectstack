@@ -89,6 +89,20 @@ describe('FlowSchema — a save_notice node stands only in a flow a record creat
     expect(issues[0].message).toContain('no write waits on the run');
   });
 
+  it('names the ARRAY triggerType form and asks for one trigger type (#28786)', () => {
+    const flow = flowWith(undefined);
+    (flow.nodes[0] as any).config = { objectName: 'deal', triggerType: ['record-after-create', 'record-after-update'] };
+    const issues = placementIssues(FlowSchema.safeParse(flow));
+    expect(issues.map((i) => i.path)).toEqual([['nodes', 1, 'type']]);
+    expect(issues[0].message).toContain(
+      "This flow's start writes `triggerType` as an array (`['record-after-create', 'record-after-update']`). "
+        + 'That form is not supported and never binds, so no write waits on the run and the notice would reach '
+        + "nobody. Give the start node ONE trigger type: `'record-after-write'` fires on both a create and an "
+        + 'update.',
+    );
+    expect(issues[0].message).not.toContain('no record trigger');
+  });
+
   it('is refused inside a region body too, at that node', () => {
     const flow = {
       name: 'deal_loop', label: 'Deal loop', type: 'autolaunched',
