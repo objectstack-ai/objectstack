@@ -116,6 +116,8 @@ import type {
     InstallPackageResponse,
     ImportUnmanagedPackageRequest,
     ImportUnmanagedPackageResponse,
+    EnsureCustomizationPackageRequest,
+    EnsureCustomizationPackageResponse,
 } from '@objectstack/spec/api';
 // [ADR-0131 D6] The `unmanaged` install mode: its request is PARSED through
 // the published declaration, and the pure half of the import (what a package
@@ -448,6 +450,9 @@ import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagel
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
 import { deletePackage } from './protocol-package-uninstall.js';
+// ADR-0146 D3 — the ensure door of a base's paired `.custom` package, and the
+// pair-shaped-id predicate the duplicate asks before it reads a row.
+import { customizationPairManifestRefusal, ensureCustomizationPackage } from './protocol-customization-package.js';
 // [#25467 cut 35] The unmanaged import: the names it would collide with, and the rollback of a failed one.
 import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-unmanaged-import.js';
 // [#27762] The own-reference rule for a datasource body's `external.credentialsRef` on the save door.
@@ -11696,6 +11701,45 @@ export class ObjectStackProtocolImplementation implements
             ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
             ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
         };
+    }
+
+    /**
+     * [#28337, ADR-0048] The layered view's door refusal: what
+     * `GET /meta/:type/:name/layers` (and the deprecated `?layers=true`)
+     * answers when it names no package and the item's ACTIVE rows are bound
+     * to two or more packages. The refusal the package-less save and delete
+     * answer for the same rows ({@link packagelessAddressAmbiguityRefusal},
+     * `409 RESOURCE_CONFLICT`, the holders sorted and the `?package=`
+     * prescription), asked of the same resolution
+     * ({@link packagelessAddress} at `active`, at the addressed bundle member,
+     * read in full): one answer to one ambiguity. `undefined` for a name one
+     * package holds, none does, or only the package-unbound row does, and for
+     * every request that names a package (the caller asks only without one).
+     *
+     * Before, {@link getMetaItemLayered} naming no package took its overlay
+     * from {@link packagelessReadAddress}, which answers no package for such
+     * a name, so the layer was the first row a package-agnostic lookup met:
+     * one holder's stack, picked silently, while the Studio editor that loads
+     * this view and the save it then sends were refused for the same name.
+     *
+     * Asked by the DOOR (the shared layered chain in `@objectstack/rest`,
+     * `createMetaLayeredAnswer`), ⛔ never inside {@link getMetaItemLayered}:
+     * its in-process resolution readers (the security catalog echo, the
+     * packaged-permission-set lock gate, `/published`) read the layers of a
+     * name with no package and keep the answer they had.
+     */
+    async packagelessLayeredReadRefusal(request: {
+        type: string;
+        name: string;
+        /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
+        member?: string;
+    }): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
+        const { type, name } = canonicalizeMetaRequestType(request);
+        const member = resolveBundleMemberSelector(type, request.member);
+        const address = await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
+        return address.candidates.length > 1
+            ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
+            : undefined;
     }
 
     /**
@@ -25478,6 +25522,19 @@ export class ObjectStackProtocolImplementation implements
             );
         }
 
+        // [ADR-0146 D3] A copy into a paired customization package id must carry
+        // what the pair's ensure door writes — the base's pair namespace and the
+        // dependency on the base — judged on the record this verb WOULD install,
+        // before a row is read. `installPackage` asks the same predicate of the
+        // record it is handed; asking here as well covers a source with no
+        // registered manifest, whose copy mints no record for that gate to judge
+        // and would otherwise land items under a pair id no package holds.
+        const pairRefusal = customizationPairManifestRefusal(
+            { id: request.targetPackageId, namespace: targetNs, dependencies: srcPkg?.manifest?.dependencies },
+            (id) => registry?.getPackage?.(id),
+        );
+        if (pairRefusal !== undefined) throw Object.assign(new Error(pairRefusal), { statusCode: 400 });
+
         // [ADR-0131 D6] The source's ENVIRONMENT rows — the ones every `/meta`
         // read serves. A legacy organization-scoped row is served by none of
         // them and waits for the promotion ceremony (ADR-0131 C7); copying it
@@ -29462,6 +29519,42 @@ export class ObjectStackProtocolImplementation implements
             packagePersistService: (...a) => this.packagePersistService(...a),
         };
         return installPackage.call(host, request);
+    }
+
+    /**
+     * ADR-0146 D3 — ensure the paired customization package `<base>.custom` of
+     * an installed, read-only base: answer it when it is installed, create it
+     * when it is absent. The ONE creation path of the pair ("no second door
+     * builds the pair"), served over HTTP as `POST
+     * /api/v1/packages/:id/ensure-customization` and called in-process by the
+     * doors that customize a base.
+     *
+     * The created pair is a writable package whose id, namespace
+     * (`<base namespace>_custom`, set explicitly and never derived from the
+     * pair's id) and dependency (`^<major>` of the base's version) are the
+     * base's, through the pairing rules of `@objectstack/spec/kernel`; it is
+     * installed through {@link installPackage}, so it lands in the registry
+     * and in `sys_packages` together. An existing pair is returned unchanged,
+     * or refused when it lacks the namespace or the dependency — never
+     * adopted. Concurrent calls for one pair leave one pair: each waits for the
+     * call in flight and judges afresh.
+     *
+     * Refused, before anything is written: a malformed request or a base id
+     * with no pair (`400`), a base not installed (`404`), a writable base, a
+     * base with no pair namespace or no SemVer version, an existing pair that
+     * lacks the namespace or the dependency (`409`), and a pair namespace
+     * another package owns (`422 NAMESPACE_CONFLICT`). The request and the
+     * answer are `EnsureCustomizationPackageRequestSchema` /
+     * `EnsureCustomizationPackageResponseSchema` (`@objectstack/spec/api`).
+     */
+    ensureCustomizationPackage(request: EnsureCustomizationPackageRequest): Promise<EnsureCustomizationPackageResponse> {
+        // The body lives in `protocol-customization-package.ts` (see `CustomizationPackageHost`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof ensureCustomizationPackage> = {
+            get engine() { return readEngine(); },
+            installPackage: (...a) => this.installPackage(...a),
+        };
+        return ensureCustomizationPackage.call(host, request);
     }
 
     /**

@@ -5,6 +5,7 @@
     "BorrowedConnectorAuth": "src/integration/connector-provider.ts#BorrowedConnectorAuth (type)",
     "BorrowedConnectorCredential": "src/integration/connector-provider.ts#BorrowedConnectorCredential (interface)",
     "CONNECTOR_CREDENTIAL_REJECTED": "src/integration/connector-provider-errors.ts#CONNECTOR_CREDENTIAL_REJECTED (const)",
+    "CONNECTOR_UPSTREAM_CHANGED": "src/integration/connector-provider-errors.ts#CONNECTOR_UPSTREAM_CHANGED (const)",
     "CONNECTOR_UPSTREAM_UNAVAILABLE": "src/integration/connector-provider-errors.ts#CONNECTOR_UPSTREAM_UNAVAILABLE (const)",
     "Connector": "src/integration/connector.zod.ts#Connector (type)",
     "ConnectorAction": "src/integration/connector.zod.ts#ConnectorAction (type)",
@@ -66,6 +67,7 @@
     "ConnectorState": "src/integration/connector-descriptor.ts#ConnectorState (type)",
     "ConnectorType": "src/integration/connector.zod.ts#ConnectorType (type)",
     "ConnectorTypeSchema": "src/integration/connector.zod.ts#ConnectorTypeSchema (const)",
+    "ConnectorUpstreamChangedError": "src/integration/connector-provider-errors.ts#ConnectorUpstreamChangedError (class)",
     "ConnectorUpstreamUnavailableError": "src/integration/connector-provider-errors.ts#ConnectorUpstreamUnavailableError (class)",
     "DeclarativeConnectorEntry": "src/integration/connector.zod.ts#DeclarativeConnectorEntry (type)",
     "DeclarativeConnectorEntryParsed": "src/integration/connector.zod.ts#DeclarativeConnectorEntryParsed (type)",
@@ -78,6 +80,7 @@
     "connectorFetchOptions": "src/integration/connector-fetch-policy.ts#connectorFetchOptions (function)",
     "defineConnector": "src/integration/connector.zod.ts#defineConnector (function)",
     "isConnectorCredentialRejected": "src/integration/connector-provider-errors.ts#isConnectorCredentialRejected (function)",
+    "isConnectorUpstreamChanged": "src/integration/connector-provider-errors.ts#isConnectorUpstreamChanged (function)",
     "isConnectorUpstreamUnavailable": "src/integration/connector-provider-errors.ts#isConnectorUpstreamUnavailable (function)",
     "readConnectorResponse": "src/integration/connector-fetch-policy.ts#readConnectorResponse (function)"
   }

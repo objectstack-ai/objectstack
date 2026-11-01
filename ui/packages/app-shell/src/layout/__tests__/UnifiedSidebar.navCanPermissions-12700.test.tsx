@@ -26,7 +26,7 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { NavigationItem } from '@object-ui/types';
 import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
-import { __resetVisibilityPredicateWarnings } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

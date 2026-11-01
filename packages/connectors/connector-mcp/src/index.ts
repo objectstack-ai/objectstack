@@ -40,3 +40,8 @@ export {
     type McpProviderDeps,
     type McpDeclarativeStdioPolicy,
 } from './mcp-provider.js';
+export {
+    computeMcpToolsSnapshot,
+    mcpToolDigest,
+    type McpToolsSnapshot,
+} from './tool-snapshot.js';
