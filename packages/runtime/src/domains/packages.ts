@@ -3205,10 +3205,15 @@ async function readPackageCustomizations(
  *  - **flow** — the metadata registry's flows (`listItems('flow')`, which
  *    already leaves a disabled package's out), whose `start` node's
  *    `config.objectName` is a base-owned object, attributed to the package
- *    stamp the registration put on it when that stamp is a code package's
- *    ({@link isCodeArtifactBody}: not the package-less `sys_metadata`
- *    sentinel, not a tenant-authored overlay). A flow authored in this
- *    environment is the environment's, not a package's, and is not listed.
+ *    stamp the registration put on it (its `_packageId`).
+ *
+ * Both kinds ask ONE question of their stamp, {@link codePackageOf}: is it a
+ * code package's ({@link isCodeArtifactBody}: not the package-less
+ * `sys_metadata` sentinel, not a tenant-authored body), and neither the base
+ * nor its pair? Only where the stamp is read differs: the contributor's
+ * `packageId` beside its `definition`, or the flow's own `_packageId`. An item
+ * authored in this environment is the environment's, not a package's, and is
+ * not listed, whichever kind it is.
  *
  * Ordered by object, kind, name and package.
  */
@@ -3220,8 +3225,14 @@ function readBaseContributions(
     type Contribution = GetPackageCustomizationsResponse['contributions'][number];
     const contributions: Contribution[] = [];
     if (typeof registry?.getAllObjects !== 'function') return contributions;
-    const isContributor = (packageId: unknown): packageId is string =>
-        typeof packageId === 'string' && packageId !== '' && packageId !== baseId && packageId !== pairId;
+    // The one stamp reading both kinds share: the package `packageId` names
+    // when `body` is a code package's item and the package is neither the base
+    // nor its pair; `undefined` otherwise.
+    const codePackageOf = (packageId: unknown, body: unknown): string | undefined => {
+        if (typeof packageId !== 'string' || packageId === baseId || packageId === pairId) return undefined;
+        const stamped = { _packageId: packageId, _provenance: (body as { _provenance?: unknown } | null | undefined)?._provenance };
+        return isCodeArtifactBody(stamped) ? packageId : undefined;
+    };
 
     const owned = new Set<string>();
     for (const object of registry.getAllObjects(baseId) as Array<{ name?: unknown }>) {
@@ -3231,22 +3242,25 @@ function readBaseContributions(
 
     for (const name of owned) {
         for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
-            if (contributor.ownership !== 'extend' || !isContributor(contributor.packageId)) continue;
+            if (contributor.ownership !== 'extend') continue;
+            const packageId = codePackageOf(contributor.packageId, contributor.definition);
+            if (packageId === undefined) continue;
             for (const field of Object.keys(contributor.definition?.fields ?? {})) {
-                contributions.push({ kind: 'field', object: name, name: field, packageId: contributor.packageId });
+                contributions.push({ kind: 'field', object: name, name: field, packageId });
             }
         }
     }
 
     if (owned.size > 0 && typeof registry.listItems === 'function') {
         for (const flow of registry.listItems('flow') as Array<{ name?: unknown; nodes?: unknown; _packageId?: unknown }>) {
-            if (!isCodeArtifactBody(flow) || !isContributor(flow._packageId) || typeof flow.name !== 'string') continue;
+            const packageId = codePackageOf(flow._packageId, flow);
+            if (packageId === undefined || typeof flow.name !== 'string') continue;
             const start = Array.isArray(flow.nodes)
                 ? flow.nodes.find((node: any) => node?.type === 'start')
                 : undefined;
             const object = start?.config?.objectName;
             if (typeof object !== 'string' || !owned.has(object)) continue;
-            contributions.push({ kind: 'flow', object, name: flow.name, packageId: flow._packageId });
+            contributions.push({ kind: 'flow', object, name: flow.name, packageId });
         }
     }
 
