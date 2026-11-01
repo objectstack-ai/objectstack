@@ -18,7 +18,8 @@ import { RecalcEstimatesFlow, RecalcTaskEstimateFlow } from './recalc-estimate.f
  *    logger-backed stubs that delivered nothing.
  *  - **`notify`** is the real delivery mechanism: it hands the messaging service
  *    the notification (the in-app inbox by default, email once
- *    `@objectstack/plugin-email` is installed).
+ *    `@objectstack/plugin-email` is installed). *  - **`save_notice`** tells the person who marked the task done what the save
+ *    set in motion; the update answer carries it as `notice`.
  */
 export const TaskCompletedFlow = defineFlow({
   name: 'showcase_task_completed',
@@ -61,6 +62,16 @@ export const TaskCompletedFlow = defineFlow({
       },
     },
     {
+      // The sentence the person who marked the task done reads with the save
+      // (the update answer's `notice`). It runs inside that write, so it stands
+      // before any node that could suspend the run; translated under
+      // `flows.showcase_task_completed.notices.tell_saver.message`.
+      id: 'tell_saver',
+      type: 'save_notice',
+      label: 'Tell the saver',
+      config: { message: 'Marked {{ record.title }} done; its assignee is being notified' },
+    },
+    {
       id: 'notify',
       type: 'notify',
       label: 'Notify the assignee',
@@ -85,7 +96,8 @@ export const TaskCompletedFlow = defineFlow({
   ],
   edges: [
     { id: 'e1', source: 'start', target: 'summarize' },
-    { id: 'e2', source: 'summarize', target: 'notify' },
+    { id: 'e2', source: 'summarize', target: 'tell_saver' },
+    { id: 'e2b', source: 'tell_saver', target: 'notify' },
     { id: 'e3', source: 'notify', target: 'end' },
   ],
 });

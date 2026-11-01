@@ -1308,6 +1308,10 @@ export const ShowcaseTranslationBundle = {
           },
         },
       },
+      // The save notice the person who marks a task done reads with the save.
+      showcase_task_completed: {
+        notices: { tell_saver: { message: '已将 {{ record.title }} 标记为完成，正在通知负责人' } },
+      },
       // The approval flows: the flow's name and each approval step's name, as
       // the approvals inbox, the record's approval panel and the request page
       // show them in the reader's locale.

@@ -791,6 +791,7 @@
     "deriveImplicitPackageBook": "src/system/book.zod.ts#deriveImplicitPackageBook (function)",
     "docAudienceAllows": "src/system/book.zod.ts#docAudienceAllows (function)",
     "emailTemplateForm": "src/system/email-template.form.ts#emailTemplateForm (const)",
+    "flowNoticeMessageKey": "src/system/i18n-resolver.ts#flowNoticeMessageKey (function)",
     "flowRefusalMessageKey": "src/system/i18n-resolver.ts#flowRefusalMessageKey (function)",
     "flowScreenCopyKey": "src/system/i18n-resolver.ts#flowScreenCopyKey (function)",
     "flowTerminalMessageKey": "src/system/i18n-resolver.ts#flowTerminalMessageKey (function)",

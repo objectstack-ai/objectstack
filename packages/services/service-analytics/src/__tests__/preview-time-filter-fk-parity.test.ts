@@ -21,6 +21,11 @@
  *   two dimensions through one relationship, with the native strategy's
  *   groups. Before, it handed the engine a groupBy naming one column twice and
  *   answered `INVALID_QUERY`.
+ * - #28744. The ObjectQL strategy answers two dataset dimensions over one
+ *   column (`region`, and `zone` declared over `region`) with one group per
+ *   value, keyed by both names, as native and the preview do, on its direct
+ *   path and beside a cross-object dimension. Before, it answered
+ *   `INVALID_QUERY` for the same duplicate groupBy column.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -248,6 +253,15 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       );
     });
 
+    it('reads a filter on a measure key from the measure\'s column, as the live faces resolve it', async () => {
+      // `total` is a measure over `amount`; the strategies' filter-member
+      // lookup falls through to the measures, so the row filter is `amount > 60`.
+      await answeredAlike(FACES, UNBACKED, { dimensions: ['region'], measures: ['total'], runtimeFilter: { total: { $gt: 60 } } }, {
+        rows: [{ region: 'amer', total: 100 }],
+        fields: ['region:string', 'total:number'],
+      });
+    });
+
     it('filters on zone beside a time-dimension-only bucket', async () => {
       await answeredAlike(
         FACES,
@@ -294,6 +308,63 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
         code: 'INVALID_FIELD',
         status: 400,
         member: 'account.id',
+      });
+    });
+  });
+  describe('#28744 — the ObjectQL strategy groups a column once when two dimensions read it', () => {
+    it.each([
+      ['region, zone', ['region', 'zone']],
+      ['zone, region', ['zone', 'region']],
+    ])('serves dimensions %s over one column with one group per value, where it answered INVALID_QUERY', async (_label, dimensions) => {
+      await answeredAlike(FACES, UNBACKED, { dimensions, measures: ['total'] }, {
+        rows: [
+          { region: 'amer', zone: 'amer', total: 150 },
+          { region: 'emea', zone: 'emea', total: 30 },
+        ],
+        fields: [...dimensions.map((d) => `${d}:string`), 'total:number'],
+      });
+    });
+
+    it('serves them beside a month bucket', async () => {
+      await answeredAlike(
+        FACES,
+        UNBACKED,
+        { dimensions: ['region', 'zone'], measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }] },
+        {
+          rows: [
+            { region: 'amer', zone: 'amer', closed_at: '2026-03', total: 100 },
+            { region: 'amer', zone: 'amer', closed_at: '2026-04', total: 50 },
+            { region: 'emea', zone: 'emea', closed_at: '2026-04', total: 30 },
+          ],
+          fields: ['region:string', 'zone:string', 'closed_at:time', 'total:number'],
+        },
+      );
+    });
+
+    it("still hands the engine a column raw beside its bucket, which it refuses (two values under one name)", async () => {
+      // `closed_at` raw and `OBJECT.closed_at` bucketed by month are different
+      // keys over one column: nothing is merged, and the engine's
+      // duplicate-column refusal stands on both live faces.
+      for (const face of LIVE) {
+        await expect(
+          ask(face, UNBACKED, {
+            dimensions: ['closed_at'],
+            measures: ['total'],
+            timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }],
+          }),
+          face,
+        ).rejects.toMatchObject({ code: 'INVALID_QUERY', status: 400 });
+      }
+    });
+
+    it("serves them beside a cross-object 'account.name' dimension", async () => {
+      await answeredAlike(LIVE, BACKED, { dimensions: ['region', 'zone', 'account.name'], measures: ['total'] }, {
+        rows: [
+          { region: 'amer', zone: 'amer', 'account.name': 'Acme', total: 100 },
+          { region: 'amer', zone: 'amer', 'account.name': 'Globex', total: 50 },
+          { region: 'emea', zone: 'emea', 'account.name': 'Acme', total: 30 },
+        ],
+        fields: ['region:string', 'zone:string', 'account.name:string', 'total:number'],
       });
     });
   });

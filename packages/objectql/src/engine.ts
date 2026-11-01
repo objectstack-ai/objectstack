@@ -442,6 +442,7 @@ import {
 // members it reads (`ValidateHost`). Imported after every module that body
 // imports, so the engine's module evaluation order is what it was.
 import { validate } from './engine-validate.js';
+import { bindHookNotice } from './hook-notice.js';
 import {
   applyHaving,
   aggregatedRowColumns,
@@ -5744,7 +5745,10 @@ export class ObjectQL implements IObjectQLEngine {
    */
   public async triggerHooks(event: string, context: HookContext) {
     const entries = this.hooks.get(event) || [];
-    
+    // [#28251] `ctx.notice` — the write's own `onNotice` listener, bound here
+    // so every insert / update dispatch site carries it (see hook-notice.ts).
+    bindHookNotice(event, context);
+
     if (entries.length === 0) {
       this.logger.debug('No hooks registered for event', { event });
       return;
