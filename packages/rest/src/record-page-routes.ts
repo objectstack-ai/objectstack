@@ -13,7 +13,12 @@
  * `findData` with `count` after the child's own exposure gate, filtered by the
  * parent condition this route composes AND the list's declared scope; then
  * `getRecordFieldAccess`, the security service's `explain` and the approval
- * service's `listRequests` / `getRequest` / `getRecordLock`. Object
+ * service's `listRequests` / `getRequest` / `getRecordLock`. [#28470] A
+ * related list's `expand` is that list read's own `$expand`; the record's
+ * streams — `discussion`, `activity`, `attachments` — are `findData` over
+ * `sys_comment` (then `sys_comment_reaction`), `sys_activity` and
+ * `sys_attachment`, each after that object's own exposure gate, scoped to this
+ * record and ordered as the spec module's stream table spells it. Object
  * permissions, row-level security, sharing and field-level security are
  * therefore whatever those calls apply, by construction.
  *
@@ -45,6 +50,12 @@ export const RECORD_PAGE_PARAMS: readonly string[] = [];
 
 /** The relationship field types a related list follows back to its parent. */
 const RELATIONSHIP_TYPES = new Set(['lookup', 'master_detail']);
+
+/** [#28470] The objects the record's stream parts read. */
+const COMMENT_OBJECT = 'sys_comment';
+const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
+const ACTIVITY_OBJECT = 'sys_activity';
+const ATTACHMENT_OBJECT = 'sys_attachment';
 
 /**
  * The `RestServer` members {@link registerRecordPageEndpoints} reads — every
@@ -141,9 +152,18 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 // caller may not reach through the API is not judged on its
                 // field: its read below answers that refusal.
                 const related = body.related ?? [];
-                const childItems = await measureServerTiming('meta', () => Promise.all(
-                    related.map((entry) => this.loadObjectItem(p, environmentId, entry.object)),
-                ), 'Metadata reads');
+                // [#28470] The stream objects' items too, for their exposure
+                // gates — read in the same metadata wave as the children's.
+                const streamObjects = [
+                    ...(body.discussion ? [COMMENT_OBJECT, COMMENT_REACTION_OBJECT] : []),
+                    ...(body.activity ? [ACTIVITY_OBJECT] : []),
+                    ...(body.attachments ? [ATTACHMENT_OBJECT] : []),
+                ];
+                const [childItems, streamItemList] = await measureServerTiming('meta', () => Promise.all([
+                    Promise.all(related.map((entry) => this.loadObjectItem(p, environmentId, entry.object))),
+                    Promise.all(streamObjects.map((name) => this.loadObjectItem(p, environmentId, name))),
+                ]), 'Metadata reads');
+                const streamItems = new Map(streamObjects.map((name, index) => [name, streamItemList[index]]));
                 const malformed: Array<{ field: string; code: string; message: string }> = [];
                 const declaredFilters = related.map((entry, index) => {
                     if (entry.filter === undefined) return undefined;
@@ -207,6 +227,9 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                                 limit: entry.top,
                                 count: true,
                                 ...(entry.sort && entry.sort.length > 0 ? { orderBy: entry.sort } : {}),
+                                // [#28470] the list read's own `$expand`, so
+                                // its rows carry the names the list draws.
+                                ...(entry.expand && entry.expand.length > 0 ? { expand: entry.expand } : {}),
                             },
                             ...scope,
                         } satisfies ServerScopedDataRequest<FindDataRequest>);
@@ -216,6 +239,78 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     } catch (error) {
                         return { ...head, error: refusalOf(error, entry.object) };
                     }
+                };
+
+                // [#28470] One stream read: `findData` over `name` as the
+                // caller, behind that object's own exposure gate. A refusal is
+                // the read's own, carried as the part's answer.
+                const readStream = async (
+                    name: string,
+                    query: Record<string, unknown>,
+                ): Promise<{ records: any[]; total: number } | { error: PartRefusal }> => {
+                    const item = streamItems.get(name);
+                    const denial = item ? apiAccessDenialFromEnable(item.enable, name, 'list') : null;
+                    if (denial) {
+                        const nested = nestedRefusalEnvelope(denial);
+                        return { error: { code: nested.code, status: nested.status, message: nested.message } };
+                    }
+                    try {
+                        const found: any = await p.findData({
+                            object: name,
+                            query: { object: name, ...query },
+                            ...scope,
+                        } satisfies ServerScopedDataRequest<FindDataRequest>);
+                        const records = Array.isArray(found?.records) ? found.records : [];
+                        const total = typeof found?.total === 'number' ? found.total : records.length;
+                        return { records, total };
+                    } catch (error) {
+                        return { error: refusalOf(error, name) };
+                    }
+                };
+
+                // The thread, as the record feed reads it (no page size), then
+                // its comments' reactions; the reactions' refusal leaves the
+                // comments answered.
+                const answerDiscussion = async () => {
+                    const comments = await readStream(COMMENT_OBJECT, {
+                        where: { thread_id: `${object}:${id}` },
+                        orderBy: [{ field: 'created_at', order: 'asc' }],
+                    });
+                    if ('error' in comments) return { error: comments.error };
+                    const ids = comments.records
+                        .map((row: any) => row?.id)
+                        .filter((value: unknown) => typeof value === 'string' || typeof value === 'number')
+                        .map(String);
+                    if (ids.length === 0) return { comments: comments.records, reactions: { records: [] } };
+                    const reactions = await readStream(COMMENT_REACTION_OBJECT, {
+                        where: { comment_id: { $in: ids } },
+                        orderBy: [{ field: 'created_at', order: 'asc' }],
+                    });
+                    return {
+                        comments: comments.records,
+                        reactions: 'error' in reactions ? { error: reactions.error } : { records: reactions.records },
+                    };
+                };
+
+                const answerActivity = async (top: number) => {
+                    const answer = await readStream(ACTIVITY_OBJECT, {
+                        where: { object_name: object, record_id: id },
+                        orderBy: [{ field: 'timestamp', order: 'desc' }],
+                        limit: top,
+                        count: true,
+                        expand: ['actor_id'],
+                    });
+                    return 'error' in answer ? answer : { total: answer.total, records: answer.records };
+                };
+
+                const answerAttachments = async (top: number) => {
+                    const answer = await readStream(ATTACHMENT_OBJECT, {
+                        where: { parent_object: object, parent_id: id },
+                        orderBy: [{ field: 'created_at', order: 'desc' }],
+                        limit: top,
+                        count: true,
+                    });
+                    return 'error' in answer ? answer : { total: answer.total, records: answer.records };
                 };
 
                 const answerFieldAccess = async () => {
@@ -282,11 +377,14 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     }
                 };
 
-                const [relatedAnswers, fieldAccess, explain, approvals] = await Promise.all([
+                const [relatedAnswers, fieldAccess, explain, approvals, discussion, activity, attachments] = await Promise.all([
                     Promise.all(related.map(answerRelated)),
                     body.fieldAccess ? answerFieldAccess() : Promise.resolve(undefined),
                     body.explain && body.explain.length > 0 ? answerExplain() : Promise.resolve(undefined),
                     body.approvals ? answerApprovals() : Promise.resolve(undefined),
+                    body.discussion ? answerDiscussion() : Promise.resolve(undefined),
+                    body.activity ? answerActivity(body.activity.top) : Promise.resolve(undefined),
+                    body.attachments ? answerAttachments(body.attachments.top) : Promise.resolve(undefined),
                 ]);
 
                 sendOk(res, {
@@ -297,6 +395,9 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     ...(fieldAccess !== undefined ? { fieldAccess } : {}),
                     ...(explain !== undefined ? { explain } : {}),
                     ...(approvals !== undefined ? { approvals } : {}),
+                    ...(discussion !== undefined ? { discussion } : {}),
+                    ...(activity !== undefined ? { activity } : {}),
+                    ...(attachments !== undefined ? { attachments } : {}),
                 });
             } catch (error: any) {
                 const mapped = mapDataError(error, object);
@@ -305,7 +406,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
             }
         },
         metadata: {
-            summary: 'Record page payload: the record, its related lists\' counts and first rows, its field projection, access verdicts and approval state in one request',
+            summary: 'Record page payload: the record, its related lists\' counts and first rows, its field projection, access verdicts, approval state, discussion, activity and attachments in one request',
             tags: ['data'],
         },
     });

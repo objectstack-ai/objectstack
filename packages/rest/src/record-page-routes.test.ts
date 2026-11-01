@@ -18,7 +18,11 @@
  *   related list the caller may not read carries neither a count nor rows;
  * - an entry that is not a relationship of the child pointing at this object
  *   is a located 400 before anything is read;
- * - the body is strict, and the query-parameter set is closed and empty.
+ * - the body is strict, and the query-parameter set is closed and empty;
+ * - [#28470] a related list's `expand` is its read's own `$expand`, and each
+ *   stream part — the discussion (the thread, then its reactions), the
+ *   activity and the attachments — is the `findData` the console's own read of
+ *   it makes, behind that object's exposure gate, refused on its own.
  *
  * The end-to-end half, under row-level and field-level security as a member who
  * is not an admin, is `record-page.dogfood.test.ts`.
@@ -52,7 +56,16 @@ const HIDDEN = {
     enable: { apiEnabled: false },
     fields: { account: { name: 'account', type: 'lookup', reference: 'account' } },
 };
-const ITEMS: Record<string, any> = { account: ACCOUNT, note: NOTE, hidden: HIDDEN };
+const systemObject = (name: string) => ({ name, label: name, fields: { id: { name: 'id', type: 'text' } } });
+const ITEMS: Record<string, any> = {
+    account: ACCOUNT,
+    note: NOTE,
+    hidden: HIDDEN,
+    sys_comment: systemObject('sys_comment'),
+    sys_comment_reaction: systemObject('sys_comment_reaction'),
+    sys_activity: systemObject('sys_activity'),
+    sys_attachment: systemObject('sys_attachment'),
+};
 
 const CTX = { userId: 'u1', permissions: ['member_default'] };
 const RECORD = { id: 'a1', name: 'Acme' };
@@ -87,6 +100,7 @@ function mockRes() {
 }
 
 interface BootOpts {
+    items?: Record<string, any>;
     getData?: (req: any) => Promise<unknown>;
     findData?: (req: any) => Promise<unknown>;
     security?: unknown;
@@ -106,8 +120,11 @@ function boot(opts: BootOpts = {}) {
             version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
         }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
-        getMetaItems: vi.fn().mockResolvedValue({ items: Object.values(ITEMS) }),
-        getMetaItem: vi.fn(async ({ name }: any) => (ITEMS[name] ? { type: 'object', name, item: ITEMS[name] } : null)),
+        getMetaItems: vi.fn().mockResolvedValue({ items: Object.values(opts.items ?? ITEMS) }),
+        getMetaItem: vi.fn(async ({ name }: any) => {
+            const items = opts.items ?? ITEMS;
+            return items[name] ? { type: 'object', name, item: items[name] } : null;
+        }),
         getData,
         findData,
     };
@@ -333,5 +350,174 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
         expect(answer.body?.error?.message).toBe(unknownQueryParamMessage(['top'], []));
         expect(getData).not.toHaveBeenCalled();
+    });
+});
+
+const objectNotFound = (name: string) => Object.assign(new Error(`Object '${name}' not found`), {
+    code: 'OBJECT_NOT_FOUND', status: 404,
+});
+
+describe('[#28470] the record\'s streams and the related rows\' names ride in the payload', () => {
+    // Answers each stream read with rows of its own object, so a part that
+    // carried another read's rows would show.
+    const rowsOf = (req: any) => {
+        if (req.object === 'sys_comment') return { records: [{ id: 'c1' }, { id: 'c2', parent_id: 'c1' }], total: 2 };
+        if (req.object === 'sys_comment_reaction') return { records: [{ id: 'x1', comment_id: 'c1', emoji: '👍', user_id: 'u1' }], total: 1 };
+        if (req.object === 'sys_activity') return { records: [{ id: 'act1', type: 'updated' }], total: 9 };
+        if (req.object === 'sys_attachment') return { records: [{ id: 'f1', name: 'a.pdf' }], total: 4 };
+        return { records: [{ id: `${req.object}-1`, owner: { id: 'user-1', name: 'Una' } }], total: 7 };
+    };
+
+    it('answers each stream with the read the console makes for it, as the caller, in the schema\'s shape', async () => {
+        const { call, findData } = boot({ findData: async (req) => rowsOf(req) });
+        const answer = await call({
+            related: [{ object: 'note', field: 'account', top: 3, expand: ['owner'] }],
+            discussion: true,
+            activity: { top: 200 },
+            attachments: { top: 100 },
+        });
+        expect(answer.status).toBe(200);
+        const data = RecordPageResponseSchema.parse(answer.body.data);
+        const reads = findData.mock.calls.map(([req]) => req);
+
+        // The related list's read carries its own `$expand`, and its rows the
+        // resolved references.
+        expect(reads).toContainEqual({
+            object: 'note',
+            query: { object: 'note', where: { account: 'a1' }, limit: 3, count: true, expand: ['owner'] },
+            context: CTX,
+        });
+        expect(data.related[0]).toEqual({ object: 'note', field: 'account', total: 7, records: [{ id: 'note-1', owner: { id: 'user-1', name: 'Una' } }] });
+
+        // The discussion: the whole thread (no page size), oldest first; then
+        // the reactions of exactly those comments, oldest first.
+        expect(reads).toContainEqual({
+            object: 'sys_comment',
+            query: { object: 'sys_comment', where: { thread_id: 'account:a1' }, orderBy: [{ field: 'created_at', order: 'asc' }] },
+            context: CTX,
+        });
+        expect(reads).toContainEqual({
+            object: 'sys_comment_reaction',
+            query: { object: 'sys_comment_reaction', where: { comment_id: { $in: ['c1', 'c2'] } }, orderBy: [{ field: 'created_at', order: 'asc' }] },
+            context: CTX,
+        });
+        expect(data.discussion).toEqual({
+            comments: [{ id: 'c1' }, { id: 'c2', parent_id: 'c1' }],
+            reactions: { records: [{ id: 'x1', comment_id: 'c1', emoji: '👍', user_id: 'u1' }] },
+        });
+
+        // The activity: the newest `top` rows with their count, the actor expanded.
+        expect(reads).toContainEqual({
+            object: 'sys_activity',
+            query: {
+                object: 'sys_activity',
+                where: { object_name: 'account', record_id: 'a1' },
+                orderBy: [{ field: 'timestamp', order: 'desc' }],
+                limit: 200,
+                count: true,
+                expand: ['actor_id'],
+            },
+            context: CTX,
+        });
+        expect(data.activity).toEqual({ total: 9, records: [{ id: 'act1', type: 'updated' }] });
+
+        // The attachments: the newest `top` rows with their count.
+        expect(reads).toContainEqual({
+            object: 'sys_attachment',
+            query: {
+                object: 'sys_attachment',
+                where: { parent_object: 'account', parent_id: 'a1' },
+                orderBy: [{ field: 'created_at', order: 'desc' }],
+                limit: 100,
+                count: true,
+            },
+            context: CTX,
+        });
+        expect(data.attachments).toEqual({ total: 4, records: [{ id: 'f1', name: 'a.pdf' }] });
+        expect(reads).toHaveLength(5);
+    });
+
+    it('a thread with no comment asks no reaction read, and answers no reactions', async () => {
+        const { call, findData } = boot({ findData: async (req) => (req.object === 'sys_comment' ? { records: [], total: 0 } : rowsOf(req)) });
+        const answer = await call({ discussion: true });
+        const data = RecordPageResponseSchema.parse(answer.body.data);
+        expect(data.discussion).toEqual({ comments: [], reactions: { records: [] } });
+        expect(findData.mock.calls.map(([req]) => req.object)).toEqual(['sys_comment']);
+    });
+
+    it('a stream whose read refuses carries the refusal alone; the record and the other parts answer', async () => {
+        const { call } = boot({
+            findData: async (req) => {
+                if (req.object === 'sys_activity') throw permissionDenied();
+                return rowsOf(req);
+            },
+        });
+        const answer = await call({ related: [{ object: 'note', field: 'account', top: 1 }], discussion: true, activity: { top: 5 }, attachments: { top: 5 } });
+        expect(answer.status).toBe(200);
+        const data = RecordPageResponseSchema.parse(answer.body.data);
+        expect(data.record).toEqual(RECORD);
+        expect(data.activity).toEqual({ error: { code: 'PERMISSION_DENIED', status: 403, message: expect.any(String) } });
+        expect(data.discussion).toMatchObject({ comments: [{ id: 'c1' }, { id: 'c2', parent_id: 'c1' }] });
+        expect(data.attachments).toEqual({ total: 4, records: [{ id: 'f1', name: 'a.pdf' }] });
+        expect(data.related[0]).toMatchObject({ total: 7 });
+    });
+
+    it('a refused comment read refuses the discussion and asks no reaction read', async () => {
+        const { call, findData } = boot({ findData: async () => { throw permissionDenied(); } });
+        const data = RecordPageResponseSchema.parse((await call({ discussion: true })).body.data);
+        expect(data.discussion).toEqual({ error: { code: 'PERMISSION_DENIED', status: 403, message: expect.any(String) } });
+        expect(findData.mock.calls.map(([req]) => req.object)).toEqual(['sys_comment']);
+    });
+
+    it('a refused reaction read leaves the comments answered (a deployment without sys_comment_reaction)', async () => {
+        const items = { ...ITEMS };
+        delete items.sys_comment_reaction;
+        const { call } = boot({
+            items,
+            findData: async (req) => {
+                if (req.object === 'sys_comment_reaction') throw objectNotFound('sys_comment_reaction');
+                return rowsOf(req);
+            },
+        });
+        const data = RecordPageResponseSchema.parse((await call({ discussion: true })).body.data);
+        expect(data.discussion).toEqual({
+            comments: [{ id: 'c1' }, { id: 'c2', parent_id: 'c1' }],
+            reactions: { error: { code: expect.any(String), status: 404, message: expect.any(String) } },
+        });
+    });
+
+    it('a stream on an object the API does not expose is refused as its list read is, and never read', async () => {
+        const items = {
+            ...ITEMS,
+            sys_activity: { ...ITEMS.sys_activity, enable: { apiEnabled: false } },
+            sys_attachment: { ...ITEMS.sys_attachment, enable: { apiEnabled: false } },
+            sys_comment: { ...ITEMS.sys_comment, enable: { apiEnabled: false } },
+        };
+        const { call, findData } = boot({ items, findData: async (req) => rowsOf(req) });
+        const data = RecordPageResponseSchema.parse((await call({ discussion: true, activity: { top: 5 }, attachments: { top: 5 } })).body.data);
+        for (const part of [data.discussion, data.activity, data.attachments]) {
+            expect(part).toEqual({ error: expect.objectContaining({ code: 'OBJECT_API_DISABLED', status: 404 }) });
+        }
+        expect(findData).not.toHaveBeenCalled();
+    });
+
+    it('the widened body stays strict: a window past its cap, an undeclared key or a non-boolean flag is a 400 and nothing is read', async () => {
+        const { call, getData, findData } = boot();
+        for (const body of [
+            { activity: { top: 201 } },
+            { activity: { top: 0 } },
+            { activity: { top: 5, sort: 'asc' } },
+            { attachments: { top: 101 } },
+            { attachments: { top: 5, filter: {} } },
+            { discussion: 'yes' },
+            { related: [{ object: 'note', field: 'account', top: 3, expand: 'owner' }] },
+            { mentions: { top: 50 } },
+        ]) {
+            const answer = await call(body);
+            expect(answer.status, JSON.stringify(body)).toBe(400);
+            expect(answer.body.error.code).toBe('VALIDATION_FAILED');
+        }
+        expect(getData).not.toHaveBeenCalled();
+        expect(findData).not.toHaveBeenCalled();
     });
 });
