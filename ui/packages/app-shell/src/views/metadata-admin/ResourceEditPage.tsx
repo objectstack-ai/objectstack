@@ -164,6 +164,7 @@ import { PositionHoldersSetupLink } from './SetupAssignmentsLink.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
+import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 
 /** What an environment section is handed: the item's name and its definition on screen. */
@@ -558,6 +559,9 @@ function MetadataResourceEditPageImpl({
   // as the step's error.
   const layeredScope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
   const client = useMetadataClient();
+  // objectstack#28680 — a page or dashboard this editor publishes for the
+  // first time, or deletes, writes app navigation here, at the site.
+  const navigationWrites = useNavigationWrites();
   const { entries, loading: typesLoading } = useMetadataTypes(client);
   const entry: RichMetadataTypeEntry | undefined = entries.find((t) => t.type === type);
   const config = resolveResourceConfig(type, entry);
@@ -2162,6 +2166,9 @@ function MetadataResourceEditPageImpl({
       // `409 RESOURCE_CONFLICT`, which the `catch` below shows with the door's
       // own sentence, as every refused write on this page is shown.
       const activePackage = readActivePackageBinding();
+      // The body being deleted, read before the DELETE: its provenance decides
+      // whether the delete writes navigation (objectstack#28680).
+      const deletedBody = layered?.effective;
       await client.reset(type, name, {
         ...(activePackage ? { packageId: activePackage } : {}),
         ...memberScope,
@@ -2169,6 +2176,13 @@ function MetadataResourceEditPageImpl({
       // objectui#11773 — the buffer below is re-read from the layers, with no
       // draft read behind it, so nothing pins its next save.
       forgetDraftVersion();
+      // objectstack#28680 — a real delete (no baseline remains) of a
+      // package-less page or dashboard drops it from app navigation. A reset
+      // leaves the item in place, so it writes nothing. Not awaited: each app
+      // write reports itself (a toast with Undo, or its failure).
+      if (!resetSemantic && !activePackage) {
+        void navigationWrites.deleted(type, name, deletedBody);
+      }
       if (resetSemantic) {
         const lay = await client.layered<any>(type, name, layeredScope);
         setLayered(lay);
@@ -2206,6 +2220,9 @@ function MetadataResourceEditPageImpl({
       // package pins the draft lookup to unbound rows and a packaged draft
       // stops being found (`no_draft`) — see objectstack `9e04c3e35`'s own warning.
       const activePackage = readActivePackageBinding();
+      // objectstack#28680 — whether this publish is the item's first: before
+      // it, the item held no layer at all (its body lived only in the draft).
+      const firstPublish = holdsNoLayer(layered);
       await client.publish<any>(type, name, {
         ...(activePackage ? { packageId: activePackage } : {}),
         ...memberScope,
@@ -2218,6 +2235,13 @@ function MetadataResourceEditPageImpl({
       ]);
       const draftResp = draftRead.answer;
       setLayered(lay);
+      // objectstack#28680 — a package-less page or dashboard published for the
+      // first time is created: it joins app navigation here. A later publish
+      // of the same item is an update and writes nothing. Not awaited: each
+      // app write reports itself (a toast with Undo, or its failure).
+      if (firstPublish && !activePackage) {
+        void navigationWrites.created(type, name, lay.effective);
+      }
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
       setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);

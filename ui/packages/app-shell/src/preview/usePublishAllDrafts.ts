@@ -32,6 +32,7 @@ import { useMetadataClient } from '../views/metadata-admin/useMetadata.js';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { lintDraftCapabilityReferences } from './capabilityLint.js';
 import { refusedItemsText } from './publishRefusal.js';
+import { isNavigationTargetType, useNavigationWrites } from '../hooks/useNavigationSync.js';
 // The one authority for the narrowed `t` (objectui#8261) — imported, not
 // re-declared. The local copy this replaces differed only in its parameter's
 // NAME (`opts`), which TypeScript does not compare, so no caller's contract moves.
@@ -45,6 +46,7 @@ export interface PublishAllResult {
 
 export function usePublishAllDrafts(t: TranslateFn) {
   const client = useMetadataClient();
+  const navigationWrites = useNavigationWrites();
   const [publishing, setPublishing] = useState(false);
 
   const publishAll = useCallback(async (): Promise<PublishAllResult> => {
@@ -119,12 +121,20 @@ export function usePublishAllDrafts(t: TranslateFn) {
         ...orphans.filter((d) => d.type !== 'seed'),
         ...orphans.filter((d) => d.type === 'seed'),
       ];
+      /** Package-less pages and dashboards this run published for the first time. */
+      const created: { type: string; name: string }[] = [];
       for (const d of ordered) {
+        // objectstack#28680 — a package-less page or dashboard whose draft is
+        // its only layer is CREATED by this publish, and joins app navigation
+        // below. Asked before the publish, because after it the item has a
+        // layer either way; an item that already had one is an update.
+        const firstPublish = isNavigationTargetType(d.type) && (await holdsNoPublishedLayer(client, d));
         // A member row publishes THAT member (`?member=`); a by-name publish
         // naming none promotes the canonical member's draft instead. A row
         // without one sends no selector — the door refuses it on a type with
         // no members.
         const res = await client.publishDraft(d.type, d.name, d.member ? { member: d.member } : {});
+        if (firstPublish) created.push({ type: d.type, name: d.name });
         const seedApplied = (res as any)?.seedApplied;
         if (seedApplied && seedApplied.success === false) {
           seedProblems.push(seedApplied.error ?? `${d.name}: sample data failed to load`);
@@ -163,6 +173,9 @@ export function usePublishAllDrafts(t: TranslateFn) {
       // objectui#5801 — announce the publish so every pending-drafts surface
       // (home banner, Studio topbar, chat bar) converges without a reload.
       emitMetadataRefresh();
+      // objectstack#28680 — each first-published page or dashboard joins app
+      // navigation. Each app write reports itself (a toast with Undo).
+      for (const c of created) await navigationWrites.created(c.type, c.name);
       return { ok: true, attempted: pending.length };
     } catch (e) {
       toast.error(
@@ -172,7 +185,26 @@ export function usePublishAllDrafts(t: TranslateFn) {
     } finally {
       setPublishing(false);
     }
-  }, [client, t]);
+  }, [client, navigationWrites, t]);
 
   return { publishAll, publishing };
+}
+
+/**
+ * Whether a package-less draft's item holds no layer yet: no packaged
+ * baseline, no published row, no effective value. That is what
+ * `MetadataClient.layered()` resolves for the server's 404. A read that fails
+ * answers `false`, so an unknown item is never taken for a new one (a second
+ * navigation entry is worse than a missing one, which the author can add).
+ */
+async function holdsNoPublishedLayer(
+  client: ReturnType<typeof useMetadataClient>,
+  d: { type: string; name: string; member?: string },
+): Promise<boolean> {
+  try {
+    const lay = await client.layered<unknown>(d.type, d.name, d.member ? { member: d.member } : {});
+    return lay.code == null && lay.overlay == null && lay.effective == null;
+  } catch {
+    return false;
+  }
 }

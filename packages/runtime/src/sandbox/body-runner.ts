@@ -1299,6 +1299,11 @@ function buildSandboxContext(
     // dispatches for one write, and its params bag has no caller options.
     dispatch,
     inputOptions,
+    // [#28251] Hook face only: the engine's `ctx.notice`, bound from the
+    // write's own `onNotice` listener on insert / update dispatches. Handed
+    // over as the engine's function, so the body reaches the one listener and
+    // the member's own refusal of a non-string message — never a copy here.
+    ...(typeof engineCtx?.notice === 'function' ? { notice: engineCtx.notice as (message: string) => void } : {}),
     // [commit 34ce8e7db] The declared referential-cleanup marker, carried across the
     // sandbox boundary BY CONTRACT — copied only in its declared shape
     // (`true`), the same unrecognised-shape rule as `dispatch` above: anything

@@ -279,6 +279,7 @@ export {
   VISIBILITY_PREDICATE_OVER_BUDGET,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
   VISIBILITY_PREDICATE_HAS_ARGUMENT,
+  VISIBILITY_PAGE_VARIABLE_UNDECLARED,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,
@@ -675,12 +676,14 @@ export {
 export type { PrintPageBlockFinding } from './validate-print-page-blocks.js';
 
 // #28663 — a page's `variables` declarations: unique, named, and seeded with
-// a `defaultValue` of the declared `type`.
+// a `defaultValue` of the declared `type`; #28725 — a `source` naming a
+// component the page holds.
 export {
   validatePageVariables,
   PAGE_VARIABLE_NAME_DUPLICATE,
   PAGE_VARIABLE_NAME_EMPTY,
   PAGE_VARIABLE_DEFAULT_TYPE,
+  PAGE_VARIABLE_SOURCE_UNKNOWN,
 } from './validate-page-variables.js';
 export type { PageVariableFinding } from './validate-page-variables.js';
 
@@ -713,6 +716,14 @@ export {
   REPORT_DATE_RANGE_DIMENSION_NONE,
 } from './validate-report-date-range.js';
 export type { ReportDateRangeFinding } from './validate-report-date-range.js';
+
+// [#28473] ADR-0146 D3: a package namespace too long to have a paired
+// customization namespace, judged with `customizationNamespace` itself.
+export {
+  validateCustomizationNamespace,
+  NAMESPACE_NO_CUSTOMIZATION_PAIR,
+} from './validate-customization-namespace.js';
+export type { CustomizationNamespaceFinding } from './validate-customization-namespace.js';
 
 // [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
 // own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,
