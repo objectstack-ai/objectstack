@@ -180,6 +180,25 @@ describe('publish-drafts records the change note and the session user (ADR-0146 
         expect(published.map((r) => [r.name, r.change_note])).toEqual([['notes_open', 'Open notes list']]);
     });
 
+    it('a body that is not a JSON object is refused 400 VALIDATION_ERROR: nothing is published and no history row is written', async () => {
+        // [#28541] It used to publish every draft with the default note.
+        const env = await boot();
+        await draftViews(env.protocol, ['notes_open']);
+
+        for (const body of [[], 'x', 42]) {
+            const result = await env.dispatcher.handlePackages(`/${PKG}/publish-drafts`, 'POST', body, {}, caller('u_alice'));
+            const response: any = result.response;
+            expect(response?.status, JSON.stringify(body)).toBe(400);
+            expect(response?.body?.error?.code, JSON.stringify(body)).toBe('VALIDATION_ERROR');
+        }
+        const history = (await env.engine.find('sys_metadata_history', { where: {} })) as any[];
+        expect(history.filter((r) => r.operation_type === 'publish')).toEqual([]);
+        expect(await env.engine.find('sys_metadata_commit', { where: { package_id: PKG } })).toEqual([]);
+        // The draft is still pending, and an object body publishes it.
+        const { history: published } = await publish(env, { message: 'Open notes list' });
+        expect(published.map((r) => [r.name, r.change_note])).toEqual([['notes_open', 'Open notes list']]);
+    });
+
     it('a caller with no user id records no actor, never the body’s', async () => {
         const env = await boot();
         await draftViews(env.protocol, ['notes_open']);

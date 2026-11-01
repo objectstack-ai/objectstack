@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — whole-package import: the beforeAll imports the apply and plan commands' module graph, and the first command run pays oclif's config load (every command module of the package, where no manifest is on disk); after that each of the 16 runs over a stubbed stack takes well under a second; slowest CI reading 25.7 s (run 41217827347, while each run still waited out the 2 s stderr drain this file no longer leaves unanswered) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * #23848 — `os migrate plan` and `os migrate apply` on a primary whose
@@ -138,7 +139,14 @@ async function run(
     if (cb) cb();
     return true;
   }) as typeof process.stdout.write);
-  vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as typeof process.stderr.write);
+  // Discarded, but its callback still fires, as the stdout spy's does: both commands end in
+  // `exitOneShotCommand`, which waits for each stream's drain callback and gives up only after
+  // its 2 s timeout. A spy that never calls back cost every run here that 2 s (#23181 slice 24).
+  vi.spyOn(process.stderr, 'write').mockImplementation(((_chunk: unknown, ...rest: unknown[]) => {
+    const cb = rest.find((a) => typeof a === 'function') as (() => void) | undefined;
+    if (cb) cb();
+    return true;
+  }) as typeof process.stderr.write);
   const capture = (...parts: unknown[]) => { said.push(parts.map(String).join(' ')); };
   vi.spyOn(console, 'log').mockImplementation(capture);
   vi.spyOn(console, 'warn').mockImplementation(capture);

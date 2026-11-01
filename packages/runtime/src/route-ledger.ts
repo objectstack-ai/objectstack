@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 114 rows.
+ * CENSUS (generated): this list holds 115 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -529,7 +529,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /packages/:id/publish-drafts', domain: '/packages', disposition: 'sdk', client: 'packages.publishDrafts',
     requestSchema: 'PublishPackageDraftsRequestSchema',
     responseSchema: 'PublishPackageDraftsResponseSchema',
-    note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — the protocol result AFTER the door\'s own mutations (seedApplied back-fill, ADR-0045 unhiddenApps/unhideError, rebindError). Fillable because packages-publish-drafts-response-conformance.test.ts drives THIS handler and parses the payload it answers; the producer half is pinned in objectql\'s publish-package-drafts-response-conformance.test.ts. `probes` is deliberately opaque in the declaration, upgraded to a modeled schema only when a consumer needs a field of it. `requestSchema` is the body the door reads (`message`, parsed with the schema\'s own member so a non-string note is refused 400 VALIDATION_ERROR before anything is published; `backfill`, judged by the protocol; a body `actor` is ignored, so the schema strips unknown keys rather than refusing them), filled because packages-publish-drafts-request-conformance.test.ts drives THIS handler and pins what each body member does' },
+    note: 'dispatch() answers through the { success, data } envelope, so the named schema is the `data` — the protocol result AFTER the door\'s own mutations (seedApplied back-fill, ADR-0045 unhiddenApps/unhideError, rebindError). Fillable because packages-publish-drafts-response-conformance.test.ts drives THIS handler and parses the payload it answers; the producer half is pinned in objectql\'s publish-package-drafts-response-conformance.test.ts. `probes` is deliberately opaque in the declaration, upgraded to a modeled schema only when a consumer needs a field of it. `requestSchema` is the body the door reads (a present body that is not a JSON object is refused 400 VALIDATION_ERROR with the schema\'s own whole-body issue, an absent one publishes with no note; `message`, parsed with the schema\'s own member so a non-string note is refused 400 VALIDATION_ERROR before anything is published; `backfill`, judged by the protocol; a body `actor` is ignored, so the schema strips unknown keys rather than refusing them), filled because packages-publish-drafts-request-conformance.test.ts drives THIS handler and pins what each body member does' },
   { route: 'POST /packages/:id/discard-drafts', domain: '/packages', disposition: 'sdk', client: 'packages.discardDrafts',
     responseSchema: 'DiscardPackageDraftsResponseSchema',
     note: 'Enveloped — the named schema is the `data`: `discardPackageDrafts`\'s declared return, transcribed describe-only. Conformance: spec `api/package-lifecycle.test.ts`' },
@@ -546,6 +546,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /packages/:id/export', domain: '/packages', disposition: 'sdk', client: 'packages.export',
     responseSchema: 'PackageExportManifestSchema',
     note: 'Enveloped — the named schema is the `data`: the ADR-0070 portable manifest. Four fixed keys (`id`, `name`, `version`, `label?`) plus an OPEN catch-all — the remaining keys are registry-derived per metadata type present, deliberately not enumerated (freezes nothing). Conformance: spec `api/package-lifecycle.test.ts`' },
+  // [#28411, ADR-0146 D8 item 4] The per-package customization read.
+  { route: 'GET /packages/:id/customizations', domain: '/packages', disposition: 'sdk', client: 'packages.customizations',
+    responseSchema: 'GetPackageCustomizationsResponseSchema',
+    note: 'Enveloped — the named schema is the `data`. A new route whose declaration is its contract, not a transcription: for an installed base, its `.custom` pair\'s served overrides (the served-override predicate the effective read asks, never re-derived), the fields, validations and indexes the pair\'s object extensions add to objects the base owns, and the base\'s `active: false` activation-ledger rows, with each list\'s length. Same read gate and 404 wording as `GET /packages/:id`; closed query set (none), declared with the path id in `GetPackageCustomizationsRequestSchema` (no `requestSchema` here: that field names a JSON body, and a GET reads none); a `.custom` id refused 400 `VALIDATION_ERROR` naming its base; no pair answers empty lists and never creates one. Pinned in `domains/packages-customizations.test.ts`, which drives THIS handler over the real protocol and parses the payload through the response schema' },
   { route: 'POST /packages/:id/adopt-orphans', domain: '/packages', disposition: 'sdk', client: 'packages.adoptOrphans',
     responseSchema: 'ReassignOrphanedMetadataResponseSchema',
     note: 'Enveloped — the named schema is the `data`: `reassignOrphanedMetadata`\'s declared return, transcribed describe-only. Conformance: spec `api/package-lifecycle.test.ts`' },
