@@ -128,9 +128,9 @@ document **whole** for every read that serves the base's name
   override, `effective` = the override), the list scoped to the base and the
   environment-wide list all serve the override, stamped `_packageId: 'hotcrm'`. The
   declaration counts only from the pair — the stored row's own `package_id` must be
-  `hotcrm.custom` — and today only for a `view`, `dashboard`, `report`, `email_template`
-  or `translation`: the rest of `OVERRIDABLE_METADATA_TYPES` (`@objectstack/spec/kernel`)
-  — `page`, `app`, `dataset`, `doc`, `book`, `mapping`, `flow` and `action` — waits for
+  `hotcrm.custom` — and today only for a `view`, `dashboard`, `report`, `email_template`,
+  `translation` or `flow`: the rest of `OVERRIDABLE_METADATA_TYPES` (`@objectstack/spec/kernel`)
+  — `page`, `app`, `dataset`, `doc`, `book`, `mapping` and `action` — waits for
   its doors and is not served yet. A declaration from any other package is ignored.
 - **A new locale is not an override.** An `email_template` the pair saves at a locale the
   base does not ship is the pair's own member, served under `hotcrm.custom`, and carries no
