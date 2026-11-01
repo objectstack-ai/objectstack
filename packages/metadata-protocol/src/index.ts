@@ -7,7 +7,6 @@ export { ObjectStackProtocolImplementation, ConcurrentUpdateError, normalizeView
 export { recordNotFoundError } from './protocol.js';
 // [#28661] The answer a data write earned, carried on the stale-roll-up
 // refusal its engine call threw — read by the HTTP data doors.
-export { earnedAnswerOf, isSummaryRecomputeRefusal, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from './summary-recompute-answer.js';
 // [#8443] The ADR-0112 disclosure rule (#8086 / #8136 / #8333), exported for
 // the SECOND seed-apply producer: `@objectstack/runtime`'s package-publish door
 // keeps a fallback apply for protocols that do not self-apply, and it reports

@@ -6,7 +6,7 @@
  *
  * The engine reports that case as `ERR_SUMMARY_RECOMPUTE` ("the triggering
  * records WERE written"), and the protocol's data method attaches the answer
- * the write earned to it (`earnedAnswerOf`, `@objectstack/metadata-protocol`).
+ * the write earned to it (`earnedAnswerOf`, `@objectstack/types`).
  * Answering the refusal's 500 told a client a write failed that had landed,
  * so a retried create made a duplicate. The door answers the earned body with
  * the write's success status instead: the body the same write answers when
@@ -14,21 +14,23 @@
  * log, at `error` (`staleSummaryAnswerLines`).
  */
 
-import { earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/metadata-protocol';
+import { earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
 import { applyDroppedFieldsHeader } from './error-response.js';
 import { logError } from './log.js';
 
 /**
- * Answer the write `error` earned, when it is a stale-roll-up refusal carrying
- * one: `true` once `res` is answered with `status`, the earned body and the
- * dropped-fields header the success path sets, `false` for every other error
- * (the caller's own error mapping answers it).
+ * The answer the write `error` earned, when it is a stale-roll-up refusal
+ * carrying one — logged once per stale field and with the dropped-fields
+ * header the success path sets already applied to `res`, so the caller only
+ * relays it with the write's own success status; `undefined` for every other
+ * error (the caller's own error mapping answers it). The body is the
+ * protocol's result, relayed as the success path relays it, so this module
+ * writes no response of its own.
  */
-export function answerEarnedWriteDespiteStaleSummary(error: unknown, res: any, status: number, object: string | undefined): boolean {
+export function earnedWriteDespiteStaleSummary(error: unknown, res: any, object: string | undefined): Record<string, unknown> | undefined {
   const earned = earnedAnswerOf(error);
-  if (earned === undefined) return false;
+  if (earned === undefined) return undefined;
   for (const line of staleSummaryAnswerLines(error as SummaryRecomputeRefusal, object)) logError(`[REST] ${line}`);
   applyDroppedFieldsHeader(res, earned);
-  res.status(status).json(earned);
-  return true;
+  return earned;
 }

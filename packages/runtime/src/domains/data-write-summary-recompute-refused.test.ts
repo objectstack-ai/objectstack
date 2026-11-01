@@ -107,8 +107,8 @@ async function send(method: string, path: string, body?: Record<string, unknown>
     }
 }
 
-const parentRow = async () => (await engine.findOne(PARENT, { where: { id: 'p1' } } as any)) as any;
-const childRows = async (where: Record<string, unknown>) => (await engine.find(CHILD, { where } as any)) as any[];
+const parentRow = async () => (await engine.findOne(PARENT, { where: { id: 'p1' } })) as any;
+const childRows = async (where: Record<string, unknown>) => (await engine.find(CHILD, { where })) as any[];
 
 describe('[#28661] the dispatcher /data door — a child write under a failing roll-up answers its success', () => {
     it('POST answers 201 with the created record, persisted once, and the valid roll-ups recompute', async () => {

@@ -120,6 +120,12 @@ export * from './share-link-resolve-answer.js';
 // with. Producer and consumer are two services neither of which may import
 // the other; both already depend on this package, so the seam adds no edge.
 export * from './connector-credential-source.js';
+// [#28661] The answer a data write EARNED, carried on the engine's stale
+// roll-up refusal (`ERR_SUMMARY_RECOMPUTE`): attached by the protocol's data
+// methods, answered by `RestServer`'s data routes and the runtime dispatcher's
+// `/data` domain. `rest` has the protocol as a dev dependency only; all three
+// already depend on this package, so the seam adds no edge.
+export * from './summary-recompute-answer.js';
 // [#27966] The one sentence a refused switched-off packaged item reads as,
 // action or flow. Its producers (objectql, service-automation) cannot import
 // each other; both already depend on this package.

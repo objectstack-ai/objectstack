@@ -50,7 +50,7 @@ import { CreateDataRequestSchema, FindDataRequestSchema, UpdateDataRequestSchema
 // [#28661] A write that landed answers its success even when a parent's
 // roll-up could not be recomputed after it — the answer the protocol attached
 // to the engine's refusal, the body `RestServer`'s twin routes answer too.
-import { earnedAnswerOf, staleSummaryAnswerLines } from '@objectstack/metadata-protocol';
+import { earnedAnswerOf, staleSummaryAnswerLines } from '@objectstack/types';
 
 /**
  * [#28661] Run one `/data` write through `callData`, answering the body the

@@ -28,15 +28,16 @@
  * write's own success status; nothing is added to it, so the door answers no
  * new shape. A caller that does not ask for it reads the refusal unchanged.
  *
- * Matched by `code`, never `instanceof`: objectql depends on this package, so
- * importing the class back would cycle (the seed loader's reason too).
+ * Matched by `code`, never `instanceof`: the class lives in objectql, which
+ * depends on this package, so importing it back would cycle (the seed
+ * loader's reason too).
  */
 
 /** objectql's `SUMMARY_RECOMPUTE_CODE`, re-spelled for the reason in the module header. */
 const SUMMARY_RECOMPUTE_CODE = 'ERR_SUMMARY_RECOMPUTE';
 
 /** Where the earned answer rides on the refusal — a symbol, so it never serializes. */
-const EARNED_ANSWER = Symbol.for('@objectstack/metadata-protocol:summary-recompute-earned-answer');
+const EARNED_ANSWER = Symbol.for('@objectstack/types:summary-recompute-earned-answer');
 
 /** Structural view of objectql's `SummaryRecomputeError`: what a write's caller reads off it. */
 export interface SummaryRecomputeRefusal extends Error {
@@ -52,20 +53,18 @@ export function isSummaryRecomputeRefusal(e: unknown): e is SummaryRecomputeRefu
 }
 
 /**
- * Run an engine write. If it throws only because a roll-up could not be
- * recomputed after it landed, answer the written result beside the refusal
- * instead, so the caller can build the answer the write earned; every other
- * error propagates.
+ * An engine write's `.catch`: hand back the stale-roll-up refusal — a write
+ * that landed, whose `written` is the result the call would have answered —
+ * so the caller can build the answer the write earned; rethrow every other
+ * error unchanged.
+ *
+ * A `.catch` on the engine call, not a wrapper taking it as a closure: the
+ * call stays in the data method's own body, where the by-id write-seam scan
+ * (`check:engine-double-contract`, #8194) reads it.
  */
-export async function writeAnsweringStaleSummary<T>(
-  write: () => Promise<T>,
-): Promise<{ result: T; stale?: SummaryRecomputeRefusal }> {
-  try {
-    return { result: await write() };
-  } catch (e) {
-    if (!isSummaryRecomputeRefusal(e)) throw e;
-    return { result: e.written as T, stale: e };
-  }
+export function staleSummaryRefusalOrThrow(e: unknown): SummaryRecomputeRefusal {
+  if (!isSummaryRecomputeRefusal(e)) throw e;
+  return e;
 }
 
 /** Attach the answer the write earned to its refusal, and hand the refusal back to be thrown. */

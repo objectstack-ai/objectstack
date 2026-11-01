@@ -141,8 +141,8 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const parentRow = async () => (await engine.findOne(PARENT, { where: { id: 'p1' } } as any)) as any;
-const childRows = async (where: Record<string, unknown>) => (await engine.find(CHILD, { where } as any)) as any[];
+const parentRow = async () => (await engine.findOne(PARENT, { where: { id: 'p1' } })) as any;
+const childRows = async (where: Record<string, unknown>) => (await engine.find(CHILD, { where })) as any[];
 
 describe('[#28661] a child write under a failing roll-up answers its success answer', () => {
   it('POST answers 201 with the created record, persisted once, and the valid roll-ups recompute', async () => {
