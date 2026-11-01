@@ -156,7 +156,7 @@ auth: { type: 'oauth2', grant: 'authorization_code', authorizationUrl: 'https://
         tokenUrl: 'https://account.docusign.com/oauth/token', scopes: ['signature'],
         clientId: 'objectstack-prod', credentialRef: 'DOCUSIGN_CLIENT_SECRET' }
 // Server to server: grant: 'client_credentials' with tokenUrl, clientId, credentialRef (`resource` optional).
-// Vendor app id + app secret:
+// Vendor app id + app secret (`vendor`: `feishu` / `dingtalk` / `wecom`):
 auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialRef: 'FEISHU_APP_SECRET' }
 ```
 

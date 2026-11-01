@@ -920,14 +920,15 @@ export const CEILINGS = new Map([
   // Arithmetic after the contract-review patch round (the vendor token
   // placements, the token lifecycle clause and the status triple restated
   // the connectors page and are gone; the Holds `auth` bullet points at
-  // recipe 6): 8938 -> 9905 (+967 net: -308 cut, +1275 added) ->
-  // ceil(9905 / 4) = 2477; the ceiling moves +241, pinned AT the
+  // recipe 6; the delta round restored the three `vendor` values in the
+  // app-credential comment): 8938 -> 9949 (+1011 net: -308 cut, +1319 added) ->
+  // ceil(9949 / 4) = 2488; the ceiling moves +252, pinned AT the
   // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
   // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim
   // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
   // ruling record 6513306068 on #27847.
-  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(9905 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2477],
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(9949 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2488],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching
