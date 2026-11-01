@@ -285,7 +285,7 @@ export const AggregationNodeSchema = lazySchema(() => strictObject(
   {
     surface: 'this aggregation entry',
     history:
-      'Until this shape was closed (#28609), an undeclared key here was dropped silently and the '
+      'Until this shape was closed, an undeclared key here was dropped silently and the '
       + 'aggregation answered as if it had not been sent — a `where` meant as the entry\'s own `filter` '
       + 'computed over every row of the group under an ordinary 200.',
     // `where` is the QUERY's filter one level up; the entry's own predicate is
