@@ -89,7 +89,7 @@ export interface ServedOverrideEntry {
  *         An unprovisioned table answers `[]`.
  */
 export async function listServedOverrides(
-    this: ServedOverridesHost,
+    this: Pick<ServedOverridesHost, 'findEnvironmentRows' | 'declinesStoredRow' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
     request: { packageId: string },
 ): Promise<ServedOverrideEntry[]> {
     const base = request.packageId;
@@ -102,8 +102,10 @@ export async function listServedOverrides(
             context: { isSystem: true },
         });
     } catch (error) {
+        // [#5532] An unprovisioned store holds no row, so no override; any
+        // other failure is a read that did not happen, never "nothing
+        // overridden".
         this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        return [];
     }
     const entries = new Map<string, ServedOverrideEntry>();
     for (const row of rows ?? []) {
