@@ -31,6 +31,7 @@ const en = {
       manage_org_users: 'Manage Organization Users',
       manage_metadata: 'Manage Metadata',
       manage_mailboxes: 'Manage Mailboxes',
+      manage_connector_connections: 'Manage Connector Connections',
       manage_platform_settings: 'Manage Platform Settings',
       setup_access: 'Setup Access',
       setup_write: 'Write Settings',
@@ -264,6 +265,9 @@ const en = {
     // evaluate, so it leaves the field empty and omits it (objectui#12108).
     // Shown only while the field is empty: a typed value is saved instead.
     serverDefaultHint: 'Set automatically when saved.',
+    // Under an empty field that a visible update action's static `patch` would
+    // make required (objectstack#28382). `{{action}}` is the action's label.
+    requiredForAction: 'Required to run “{{action}}”.',
     // The size-limit hint the flat `ObjectForm` appends to a `file` or `image`
     // field's description when the field declares `maxSize` (objectui#12156).
     // `{{size}}` is the formatted limit ("10.0 MB"); only the words translate.
@@ -956,6 +960,7 @@ const en = {
       undonePrefix: 'Undone \u2014 ',
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
+      succeededRecords: 'Records that succeeded',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
@@ -1060,6 +1065,7 @@ const en = {
     firstRunMessage: 'Create your first record to get started.',
     noMatches: 'No matching records',
     noMatchesMessage: 'No records match your current filters or search. Try adjusting or clearing them.',
+    clearSearch: 'Clear search',
     viewFilterNoMatchesMessage: 'No records match this view’s filter.',
     ownedNoneTitle: 'Nothing of yours yet',
     ownedNoneMessage: 'This view lists only records that are yours, and you don’t have any yet.',
@@ -1433,6 +1439,13 @@ const en = {
     pathStageLostCurrent: '{{stage}}, closed lost, current stage',
     pathStageLostUpcoming: '{{stage}}, closed lost, not reached',
     pathStageWonUpcoming: '{{stage}}, goal stage, not reached',
+    pathStageChangeAction: 'Move to {{stage}}',
+    pathStageChangeTitle: 'Change stage?',
+    pathStageChangeDescription: 'Move this record to {{stage}}?',
+    pathStageChangeConfirm: 'Move',
+    pathStageChangeConflict: 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
+    pathStageChangeDenied: "You don't have permission to change this record's stage.",
+    pathStageChangeFailed: 'The stage could not be changed.',
     linkCopied: 'Link copied to clipboard',
     commentFailed: 'Your comment was not posted. Nothing was saved — please try again.',
     reactionFailed: 'Your reaction was not saved. Please try again.',
@@ -1506,6 +1519,18 @@ const en = {
     maximize: 'Maximize',
     restoreSize: 'Restore size',
     recordOf: '{{current}} of {{total}}',
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: '{{current}} of {{total}} in {{scope}}',
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: 'Filter {{title}}…',
+    relatedChips: 'Show',
+    relatedChipAll: 'All',
+    relatedChipMine: 'Mine',
+    relatedChipOverdue: 'Overdue',
+    relatedExport: 'Export',
+    relatedRows: '{{count}} rows',
+    relatedRows_one: '{{count}} row',
+    relatedRows_other: '{{count}} rows',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
     goBack: 'Go back',
@@ -1524,9 +1549,12 @@ const en = {
     new: 'New',
     add: 'Add',
     activity: 'Activity',
-    timeline: 'Timeline',
-    timelineFolded: 'Activity',
-    relatedColumn: 'Related column',
+    // objectstack#27524 — 动态 (was 时间线), the record page's stream: its
+    // panel, its tab and the strip's label; the right column's ⊟, and the
+    // 动态 panel's one-line composer.
+    timeline: 'Activity',
+    relatedColumn: 'Right column',
+    timelineComposer: 'Write a note… @ to mention',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} empty sections',
     emptySections_one: '{{count}} empty section',
@@ -1554,7 +1582,12 @@ const en = {
     relatedHiddenCount_one: '{{count}} hidden',
     relatedHiddenCount_other: '{{count}} hidden',
     relatedShowHidden: 'Show',
-    relatedEnlargedBack: 'Back',
+    recordTabs: 'Record tabs',
+    recordTabOverview: 'Overview',
+    recordTabsMore: '{{count}} more tabs',
+    recordTabsMore_one: '{{count}} more tab',
+    recordTabsMore_other: '{{count}} more tabs',
+    recordTabsHidden: 'Hidden',
     bodyTableTotals: 'Totals (this page)',
     streamAll: 'All',
     streamActivity: 'Activity',
@@ -1771,6 +1804,7 @@ const en = {
   report: {
     total: 'Total',
     totals: 'Totals',
+    subtotal: 'Subtotal',
     loading: 'Loading…',
     // objectui#12330 — the report's no-access state; its title is `dashboard.widgetForbiddenTitle`.
     forbiddenMessage: 'You don’t have permission to view the data behind this report.',
@@ -2315,6 +2349,10 @@ const en = {
       // The `newTabUrl` fast path's refusal when no record id resolves
       // (`createConsoleServerActionHandler`, objectui#13397).
       noRecordId: 'This action runs on a single record — no record id available.',
+      // A refused action whose answer named required fields: what to do next,
+      // after the server's own sentence (`createConsoleServerActionHandler`).
+      fillRequiredThenRetry: 'Fill in {{fields}}, then run “{{action}}” again.',
+      fillRequiredFirst: 'Fill in {{fields}} first.',
     },
     shortcuts: {
       title: 'Keyboard Shortcuts',
@@ -2331,8 +2369,7 @@ const en = {
       newChat: 'New chat',
       toggleChatsList: 'Toggle conversations list',
       goHome: 'Back to home',
-      toggleTimeline: 'Show / hide timeline',
-      toggleRelated: 'Show / hide related',
+      toggleRelated: 'Show / hide the right column',
     },
     reportIndex: {
       title: 'Reports',
@@ -2778,7 +2815,7 @@ const en = {
       objectNotFoundDescription: 'The object "{{objectName}}" does not exist in the current configuration.',
       objectNotFoundHint: 'Check your app navigation settings or select a different object from the sidebar.',
       objectPackageDisabled: 'The object "{{objectName}}" belongs to a package that is disabled, so it is not being served.',
-      filterOrNotSavable: 'This filter uses OR between conditions, which a saved view cannot store yet. It still applies to this list — remove the OR grouping to save it to the view.',
+      filterOrGroupNotEditable: 'This filter has an OR group beside other conditions, which the filter editor cannot show, so it is read-only here. The view still applies it.',
       filterNestedNotSavable: 'This filter uses nested condition groups, which a saved view cannot store. Flatten it to a single list of conditions to save it to the view.',
       systemViewReadonly: 'System view defined in code — read-only.',
       // ObjectView.tsx references ONE edit-denied key from four call sites
@@ -3209,9 +3246,11 @@ const en = {
       // Same pair as `auth.login.socialButton` / `orText`, for sign-up.
       socialButton: 'Sign up with {provider}',
       orText: 'or continue with email',
+      captchaRetry: 'Retry',
       errors: {
         userExists: 'An account with this email already exists. Try signing in instead.',
         selfRegistrationClosed: 'Self-registration is not open on this system. Ask an administrator for an invitation.',
+        captchaFailed: 'The security check did not complete. Please try it again.',
         emailDomainNotAllowed: "This email's domain is not allowed to register here. Use your organization email, or ask an administrator for an invitation.",
         // #27509 — `selfRegistrationClosed` for a visitor holding an invitation
         // link; `{{email}}` is the MASKED address the preview returns.
@@ -3383,6 +3422,7 @@ const en = {
         submitting: 'Updating…',
         mismatch: 'New passwords do not match.',
         sameAsTemporary: 'Choose a new password that is different from your temporary password.',
+        wrongPassword: 'The password you entered is incorrect. Check it and try again.',
         failed: 'Could not change password.',
       },
       mfa: {
@@ -3877,6 +3917,8 @@ const en = {
       confirmNoteSeparate_one: 'Publishing releases the {{count}} pending draft on its own: if it fails, it stays pending.',
       confirmNoteSeparate_other: 'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
       publishConfirm: 'Publish all',
+      noteLabel: 'Change note (optional)',
+      notePlaceholder: 'What changed and why. It is shown in each item’s history.',
       // objectui#12517 — the confirm posture's summary line above the list:
       // the item count, then one `{{n}} {{type}}` per type group.
       summaryItems: '{{count}} items',
@@ -4026,6 +4068,7 @@ const en = {
     bulkDeleteConfirmTitle_one: 'Delete {{count}} {{label}} record?',
     bulkDeleteConfirmTitle_other: 'Delete {{count}} {{label}} records?',
     deleteConfirmButton: 'Delete',
+    deleteCascade: 'This also deletes their related records in: {{objects}}.',
     bulkDeleteSuccess: 'Deleted {{count}} {{label}} records',
     bulkDeleteSuccess_one: 'Deleted {{count}} {{label}} record',
     bulkDeleteSuccess_other: 'Deleted {{count}} {{label}} records',
@@ -5023,6 +5066,7 @@ const en = {
     approveOneTitle: 'Approve "{{title}}"?',
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
+    submittedByYou: 'You submitted this',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',
@@ -5228,6 +5272,8 @@ const en = {
     selectField: 'Select field',
     ascending: 'A → Z',
     descending: 'Z → A',
+    oldestFirst: 'Oldest → Newest',
+    newestFirst: 'Newest → Oldest',
     addSort: 'Add sort',
     removeSort: 'Remove sort',
   },
@@ -5594,6 +5640,30 @@ const en = {
     skippedTitle: 'Skipped for now',
     skippedBody: 'The connectors that use them stay disconnected until each one is set.',
     openPage: 'Set them in Connector credentials',
+  },
+  // Setup → People & organization: Position holders and Permission set
+  // assignment (ADR-0146 D7).
+  setupAssignments: {
+    positionsTitle: 'Position holders',
+    positionsSubtitle: 'Pick a position to see who holds it, and add or remove holders. What a position grants is defined on the position itself.',
+    positionsList: 'Positions',
+    positionsFilter: 'Filter positions',
+    positionsEmptyTitle: 'No positions',
+    positionsEmptyBody: 'No position is defined in this environment yet.',
+    positionsPick: 'Pick a position to see its holders.',
+    positionsLoadFailed: 'Could not read the positions.',
+    setsTitle: 'Permission set assignment',
+    setsSubtitle: 'Pick a permission set to see who holds it, directly or through a position, and assign or unassign users. What a set grants is defined on the set itself.',
+    setsList: 'Permission sets',
+    setsFilter: 'Filter permission sets',
+    setsEmptyTitle: 'No permission sets',
+    setsEmptyBody: 'No permission set is defined in this environment yet.',
+    setsPick: 'Pick a permission set to see its users.',
+    setsLoadFailed: 'Could not read the permission sets.',
+    noMatch: 'Nothing matches the filter.',
+    notFound: '"{{name}}" is not in this list.',
+    retry: 'Try again',
+    refresh: 'Refresh',
   },
   element: {
     // objectui#10951 — `element:number` authored with an aggregate and no

@@ -1,7 +1,7 @@
 ---
 title: App schema — UI Protocol property reference
 navTitle: App
-description: "App schemas of the ObjectStack UI Protocol: ActionNavItem, App, AppBranding and 12 more — each property with its type, default and a TypeScript example."
+description: "App schemas of the ObjectStack UI Protocol: ActionNavItem, App, AppBranding and 13 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "App schemas of the ObjectStack UI Protocol: ActionNavItem, App, Ap
 ## TypeScript Usage
 
 ```typescript
-import { ActionNavItemSchema, AppSchema, AppBrandingSchema, AppContextSelectorSchema, ComponentNavItemSchema, DashboardNavItemSchema, DocNavItemSchema, GroupNavItemSchema, NavigationAreaSchema, NavigationContributionSchema, NavigationItemSchema, ObjectNavItemSchema, PageNavItemSchema, ReportNavItemSchema, UrlNavItemSchema } from '@objectstack/spec/ui';
-import type { ActionNavItem, App, AppBranding, AppContextSelector, ComponentNavItem, DashboardNavItem, DocNavItem, GroupNavItem, NavigationArea, NavigationContribution, NavigationItem, ObjectNavItem, PageNavItem, ReportNavItem, UrlNavItem } from '@objectstack/spec/ui';
+import { ActionNavItemSchema, AppSchema, AppBrandingSchema, AppContextSelectorSchema, AppLandingEntrySchema, ComponentNavItemSchema, DashboardNavItemSchema, DocNavItemSchema, GroupNavItemSchema, NavigationAreaSchema, NavigationContributionSchema, NavigationItemSchema, ObjectNavItemSchema, PageNavItemSchema, ReportNavItemSchema, UrlNavItemSchema } from '@objectstack/spec/ui';
+import type { ActionNavItem, App, AppBranding, AppContextSelector, AppLandingEntry, ComponentNavItem, DashboardNavItem, DocNavItem, GroupNavItem, NavigationArea, NavigationContribution, NavigationItem, ObjectNavItem, PageNavItem, ReportNavItem, UrlNavItem } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ActionNavItemSchema.parse(data);
@@ -78,6 +78,7 @@ const result = ActionNavItemSchema.parse(data);
 | **navigation** | `({ id: string; label?: string \| Record<string, string>; icon?: string; order?: number; … } \| { type: 'separator'; id?: string; order?: number } \| … +8 more)[]` | optional | Full navigation tree for the app sidebar |
 | **areas** | `{ id: string; label: string \| Record<string, string>; icon?: string; description?: string \| Record<string, string>; … }[]` | optional | Navigation areas for partitioning navigation by business domain |
 | **contextSelectors** | `{ id: string; label: string \| Record<string, string>; icon?: string; optionsSource: object; … }[]` | optional | App-level scope dropdowns whose value is injected into nav items as `{<id>}` template vars |
+| **landing** | `{ item: string; visible: string \| object }[]` | optional | [PLANNED — not yet rendered] Per-audience landing: the first entry whose `visible` (CEL) holds for the reader names the navigation entry (`item`, an `id` of this app's own `navigation` or `areas[].navigation`) the app opens on. An `item` that names no entry of this app, or a `group` / `separator` / `action` entry, is refused at parse. No match, or no key: the app opens on its first navigation item by `order`, as before. No console reads this list yet, so until the landing redirect ships every reader still opens on the first navigation item. |
 | **requiredPermissions** | `string[]` | optional | Permissions required to access this app |
 | **defaultAgent** | `string` | optional | Platform agent bound to this app's ambient chat ('ask' is the implicit default; 'build' for authoring surfaces) — ADR-0063 §1 |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this app. |
@@ -88,6 +89,7 @@ const result = ActionNavItemSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 ### Nested Shape: `App.branding`
 
@@ -302,6 +304,13 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **allValue** | `string` | optional (default: `""`) | Sentinel value meaning "no concrete selection yet" (empty string is almost always right) |
 | **persist** | `Enum<'query' \| 'session' \| 'none'>` | optional (default: `"query"`) | Persist selection via URL query, sessionStorage, or not at all |
 
+### Nested Shape: `App.landing[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **item** | `string` | ✅ | Id of the app's own navigation entry this audience lands on (any depth of `navigation` or `areas[].navigation`). Refused at parse when no such entry exists, or when it is a `group`, `separator` or `action` entry, which open nothing. |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Audience predicate (CEL), the dialect of a navigation entry's `visible`, e.g. P`'service_agent' in current_user.positions`. Required. It reads the signed-in reader (`current_user`, `features`); there is no `data` here, and a `visible` that reads `data` is refused at parse. |
+
 ### Nested Shape: `App.protection`
 
 | Property | Type | Required | Description |
@@ -309,6 +318,13 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
+### Nested Shape: `App.overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
 
 
 ---
@@ -348,6 +364,18 @@ Documentation entry on the app menu (ADR-0046). Targets a `book` and/or a `doc` 
 | **valueKey** | `string` | optional (default: `"id"`) | Row property used as the option value (dotted path allowed, e.g. "manifest.id") |
 | **labelKey** | `string` | optional (default: `"name"`) | Row property used as the option label (dotted path allowed, e.g. "manifest.name") |
 | **filter** | `{ key: string; op?: Enum<'eq' \| 'ne' \| 'in' \| 'nin'>; value: string \| string[] }[]` | optional | Predicates (AND) each option row must satisfy |
+
+
+---
+
+## AppLandingEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **item** | `string` | ✅ | Id of the app's own navigation entry this audience lands on (any depth of `navigation` or `areas[].navigation`). Refused at parse when no such entry exists, or when it is a `group`, `separator` or `action` entry, which open nothing. |
+| **visible** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | ✅ | Audience predicate (CEL), the dialect of a navigation entry's `visible`, e.g. P`'service_agent' in current_user.positions`. Required. It reads the signed-in reader (`current_user`, `features`); there is no `data` here, and a `visible` that reads `data` is refused at parse. |
 
 
 ---

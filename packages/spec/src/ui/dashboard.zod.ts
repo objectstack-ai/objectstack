@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { strictObject } from '../shared/strict-object';
 import type { KeySetGuidance } from '../shared/suggestions.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
@@ -780,10 +781,12 @@ export const DASHBOARD_WIDGET_MULTI_MEASURE_TYPES = [
 
 /**
  * The chart `type`s that draw ONE series whatever the widget's `dimensions` —
- * the single-series set. Module-private, like the metric family's list above,
- * and the only list of it in this package:
- * {@link checkDashboardWidgetChartMeasureArity} reads it, that check's refusal
- * text reads it, and the `values` doc string reads it.
+ * the single-series set. One exported constant, and the only list of it in
+ * this package: {@link checkDashboardWidgetChartMeasureArity} reads it, that
+ * check's refusal text reads it, the `values` doc string reads it, and the
+ * report's chart reads it too — `ReportSchema` refuses a `chart.seriesBy`
+ * split on any of these types, since the split derives one series per value
+ * and these types draw one. Import it; ⛔ never restate it.
  *
  * Measured in objectui's shared chart renderer (`AdvancedChartImpl` in
  * `@object-ui/plugin-charts`; recorded in `packages/spec/liveness/dashboard.json`,
@@ -805,7 +808,7 @@ export const DASHBOARD_WIDGET_MULTI_MEASURE_TYPES = [
  * remove a member to make a document parse — only when a renderer draws every
  * measure.
  */
-const SINGLE_SERIES_CHART_TYPES = [
+export const SINGLE_SERIES_CHART_TYPES = [
   'pie',
   'donut',
   'funnel',
@@ -1795,6 +1798,8 @@ export const DashboardSchema = lazySchema(() => strictObject({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 
 }));
 

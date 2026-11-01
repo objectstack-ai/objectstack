@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import {
-  ViewFilterRuleSchema,
+  ViewFilterElementSchema,
   ViewDataSchema,
   GanttConfigSchema,
   TreeConfigSchema,
@@ -78,7 +78,7 @@ import {
   ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE,
   actionCopyRefusals,
   actionCopyTemplateSlot,
-  type ActionCopyKey,
+  type ActionRowCopyKey,
 } from './action-copy-template';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 // [#21464] `object-metric.aggregate.groupBy` is the chart aggregate's own
@@ -1713,7 +1713,7 @@ export const RecordRelatedListProps = strictObject({
     }))
   ]).optional().describe('Sort order for related records'),
   limit: z.number().int().positive().default(5).describe('Number of records to display initially'),
-  filter: z.array(ViewFilterRuleSchema).optional().describe('Additional filter criteria for related records'),
+  filter: z.array(ViewFilterElementSchema).optional().describe('Additional filter criteria for related records'),
   title: I18nLabelSchema.optional().describe('Custom title for the related list'),
   showViewAll: z.boolean().default(true).describe('Show "View All" link to see all related records'),
   actions: z.array(z.string()).optional().describe('Action IDs available for related records'),
@@ -1749,7 +1749,7 @@ export const RecordRelatedListProps = strictObject({
       object: z.string().describe('Object to pick records from (the far side of an m2m, or the child object for a 1:m re-parent).'),
       valueField: z.string().default('id').describe('Field on the picked record used as the link value (default `id`).'),
       labelField: z.string().optional().describe('Field shown in the picker rows (defaults to the object title field).'),
-      filter: z.array(ViewFilterRuleSchema).optional().describe('Restrict which records the picker offers.'),
+      filter: z.array(ViewFilterElementSchema).optional().describe('Restrict which records the picker offers.'),
     }).describe('Where the Add affordance sources records from.'),
     linkField: z.string().optional().describe('Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent.'),
     label: I18nLabelSchema.optional().describe('Label for the Add button (default "Add").'),
@@ -2533,7 +2533,7 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
     .describe('Render the grid read-only: cells locked, no Save button, and no adding or removing lines (renderer default: editable)'),
   minRows: z.number().optional().describe('Minimum number of rows'),
   maxRows: z.number().optional().describe('Maximum number of rows'),
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterElementSchema).optional()
     .describe('Additional criteria for the child rows — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the parent relationship condition, never substituted for it: it can only narrow this record\'s lines'),
   sort: z.array(SortItemSchema).optional()
     .describe('Load order for the child rows — the SortItem array form `[{ field, order }, ...]` (renderer default: storage order)'),
@@ -3428,10 +3428,10 @@ const elementListHistory = (type: string) =>
  * built HERE, at the declaring file, so the expression-surface census sees each
  * row's position. A factory, so each row's key carries its own instance.
  */
-const actionRowCopy = (key: ActionCopyKey) => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key)), key);
+const actionRowCopy = (key: ActionRowCopyKey) => actionCopyTemplateSlot(templateExpressionInput(ExpressionSchema, actionCopyRefusals(key)), key);
 
 /** The describe of each row copy key — the row's wording, then the slot's grammar and roots. */
-const ACTION_ROW_COPY_DESCRIBE: Record<ActionCopyKey, string> = {
+const ACTION_ROW_COPY_DESCRIBE: Record<ActionRowCopyKey, string> = {
   confirmText: `Confirmation question asked before the action runs — ${ACTION_CONFIRM_TEXT_TEMPLATE_DESCRIBE}`,
   successMessage: `Toast shown when the action succeeds — ${ACTION_SUCCESS_MESSAGE_TEMPLATE_DESCRIBE}`,
   errorMessage: `Toast shown when the action fails, in place of the raw error — ${ACTION_ERROR_MESSAGE_TEMPLATE_DESCRIBE}`,
@@ -4999,7 +4999,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `filter`; the migration prescription is the
    * `element-data-source-and-object-block-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-grid`',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -5737,7 +5737,7 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * at `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-metric`',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -5793,12 +5793,15 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * - `neutral`: neither; the badge keeps its arrow and percentage, muted.
    *
    * The arrow always shows which way the NUMBER moved; polarity decides only
-   * the colour. Nothing infers a polarity from the aggregated field's name.
+   * the colour. Both read the aggregated value BEFORE `invert`, so polarity is
+   * declared against the raw aggregate: an error rate shown as uptime is
+   * `lower`. Nothing infers a polarity from the aggregated field's name.
    */
   polarity: DatasetMeasurePolarity.optional().describe(
     'Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) '
     + 'or neutral (no good/bad colour). Colours the trend badge, computed (`compareTo`) or static (`trend`); '
-    + 'undeclared keeps rise green, fall red',
+    + 'undeclared keeps rise green, fall red. The badge and polarity read the aggregate before `invert`, so '
+    + 'declare polarity against the raw value: an error rate shown as uptime is lower',
   ),
 }));
 /** Author state (ADR-0122: the bare name is the author state). */
@@ -5920,7 +5923,7 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-kanban`',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -6171,11 +6174,12 @@ const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
   ...COMPONENT_LEVEL_GUIDANCE,
   {
     name: 'OBJECT_CALENDAR_FLAT_FIELD_KEYS',
-    keys: ['startDateField', 'dateField', 'endDateField', 'endField', 'titleField', 'colorField', 'allDayField'],
+    keys: ['startDateField', 'dateField', 'endDateField', 'endField', 'titleField', 'colorField', 'allDayField', 'initialDate'],
     examples: ['startDateField', 'titleField'],
     prescription:
       'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '
-      + 'endDateField, titleField, colorField, allDayField }`. `ObjectView`/`ListView` hand the binding '
+      + 'endDateField, titleField, colorField, allDayField }`, and `initialDate`, the date it opens on, '
+      + 'in the same block. `ObjectView`/`ListView` hand the binding '
       + 'off in that block too, and the renderer reads the binding there only: the flat spelling is not '
       + 'read and not a second authorable spelling (one key per concept, Prime Directive #12).',
   },
@@ -6207,7 +6211,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `endField` aliases among them — was never read.
    */
   calendar: ListViewSchema.shape.calendar
-    .describe('Calendar field config `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` — the same block a list view\'s `calendar` declares; `startDateField` is required'),
+    .describe('Calendar config `{ startDateField, endDateField?, titleField?, colorField?, allDayField?, initialDate? }` — the same block a list view\'s `calendar` declares; `startDateField` is required'),
   defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
   /**
    * Base query filter — the `ViewFilterRule` ARRAY form, the one filter
@@ -6219,7 +6223,7 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-calendar`',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -7492,7 +7496,7 @@ export const ObjectMapPropsSchema = lazySchema(() => strictObject({
    * does for the kanban and the calendar. The record form is refused at
    * `filter`.
    */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-map`',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -7693,7 +7697,7 @@ export const ObjectGanttPropsSchema = lazySchema(() => strictObject({
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-gantt`',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -7902,7 +7906,7 @@ export const ObjectTreePropsSchema = lazySchema(() => strictObject({
   staticData: z.array(z.unknown()).optional()
     .describe("Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config"),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-tree`',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -8272,7 +8276,7 @@ export const ObjectTimelinePropsSchema = lazySchema(() => strictObject({
   timeline: TimelineConfigSchema.optional()
     .describe('Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: { startDateField, endDateField, titleField, groupByField, colorField, scale }. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling'),
   /** Base query filter — the family's one `ViewFilterRule` array orthography (#15449). */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this `object-timeline`',
       migration: 'element-data-source-and-object-block-filter-rule-array',

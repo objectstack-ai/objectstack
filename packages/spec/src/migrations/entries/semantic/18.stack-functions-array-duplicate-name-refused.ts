@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // author's call.
 export const entry: SemanticMigration = {
   id: 'stack-functions-array-duplicate-name-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'stack.functions in the ARRAY form — two or more entries that author the same name, e.g. '
     + "functions: [{ name: 'sync', handler: a }, { name: 'sync', handler: b }]",

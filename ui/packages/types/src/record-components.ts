@@ -17,7 +17,7 @@
  * @packageDocumentation
  */
 
-import type { ElementDataSource, EmptyState, I18nLabel, ViewFilterRule } from '@objectstack/spec/ui';
+import type { ElementDataSource, EmptyState, I18nLabel, ViewFilterElement } from '@objectstack/spec/ui';
 
 /**
  * ARIA props shared across all record components.
@@ -524,7 +524,7 @@ export interface RecordRelatedListComponentProps {
    * ## Why this face carries the array and the consumer carries a union
    *
    * `@object-ui/plugin-detail`'s `RelatedList` types the same key
-   * `ViewFilterRule[] | FilterNode`, and it keeps that union on purpose
+   * `ViewFilterElement[] | FilterNode`, and it keeps that union on purpose
    * (objectui#10199, ruled protocol first). The `FilterNode` half is a RUNTIME
    * value: `ElementDataSourceGate` writes the composed component-AND-view-AND-
    * binding filter onto this key after it resolves a `dataSource` binding, and
@@ -539,8 +539,14 @@ export interface RecordRelatedListComponentProps {
    * constrains. objectui#9964 moved `add.picker.filter` below for the same
    * reason; there the consumer already agreed with the protocol, here only the
    * authoring half does.
+   *
+   * The element is the contract's `ViewFilterElement` — a flat rule or an
+   * any-of group `{ or: [rule, ...] }` — since objectstack#28020 added the
+   * group to every carrier of a view filter list (objectstack#28462 widened
+   * this face, the `RelatedList` props and the related-actions input together;
+   * the consumers lower the group through `toFilterNode`, objectstack#28370).
    */
-  filter?: ViewFilterRule[];
+  filter?: ViewFilterElement[];
   /**
    * Section title — the spec's `I18nLabel` (`RecordRelatedListProps.title`), a
    * plain string or an inline per-locale map. `RecordRelatedListRenderer`
@@ -584,8 +590,12 @@ export interface RecordRelatedListComponentProps {
      * at parse today. This is a narrowing being UNDONE, and it is the
      * contract-first direction AGENTS.md #0.1 requires — the producer moves to
      * the contract, never the renderer to a lenient dialect.
+     *
+     * The element is the contract's `ViewFilterElement` (a flat rule or an
+     * any-of group `{ or: [rule, ...] }`, objectstack#28020), the same element
+     * as the list's own `filter` above (objectstack#28462).
      */
-    picker: { object: string; valueField?: string; labelField?: string; filter?: ViewFilterRule[] };
+    picker: { object: string; valueField?: string; labelField?: string; filter?: ViewFilterElement[] };
     linkField?: string;
     /**
      * The Add button's text — the spec's `I18nLabel`

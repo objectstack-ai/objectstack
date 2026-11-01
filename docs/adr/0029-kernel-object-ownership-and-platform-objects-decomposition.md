@@ -1,6 +1,6 @@
 # ADR-0029: Kernel Object Ownership — First-Party Capabilities as Plugins That Own Their Data, and Decomposing the `platform-objects` Monolith
 
-**Status**: Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cleanup remaining (proposed 2026-06-01 · calibrated 2026-06-12) · **Amended** (2026-08-09, [#6853](https://github.com/objectstack-ai/objectstack/issues/6853) — **D9**: a tenant `sys_metadata` overlay of an `object` registers as its own `overlay` contributor layer instead of taking the packaged `own` slot and splicing the packaged definition out. D3's single-owner invariant is unchanged. **Design only — nothing is implemented yet**; see **"Amendment (2026-08-09, #6853)"** at the end for the measurement, the semantics, the blast radius, and what is deliberately left open.) · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13 — two security objects in D1's `plugin-sharing` row, `sys_permission_set` and `sys_position_permission_set` (one of the `sys_*_permission_set` tables), are retired as row objects by #15204 stage 8 (`66949b7729`, 2026-10-13); see the note under D1.)
+**Status**: Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cleanup remaining (proposed 2026-06-01 · calibrated 2026-06-12) · **Amended** (2026-08-09, [#6853](https://github.com/objectstack-ai/objectstack/issues/6853) — **D9**: a tenant `sys_metadata` overlay of an `object` registers as its own `overlay` contributor layer instead of taking the packaged `own` slot and splicing the packaged definition out. D3's single-owner invariant is unchanged. **Design only — nothing is implemented yet**; see **"Amendment (2026-08-09, #6853)"** at the end for the measurement, the semantics, the blast radius, and what is deliberately left open.) · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3/D13 — two security objects in D1's `plugin-sharing` row, `sys_permission_set` and `sys_position_permission_set` (one of the `sys_*_permission_set` tables), are retired as row objects by #15204 stage 8 (`66949b7729`, 2026-10-13); see the note under D1.) · **Amended by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — D7's contributed items, when the base package they contribute to is open in Studio, are drawn greyed with their source package named (ADR-0146 D3); the contribution model is unchanged.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0019](./0019-app-as-consumer-unit.md) (app as the consumer-facing unit), [ADR-0025](./0025-plugin-package-distribution.md) (plugin package distribution + dependencies)
 **Related**: [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) (metadata naming & namespace isolation) **depends on** this ADR — its D5/D6 (reserved `sys` namespace, single-owner-per-object, apps-cannot-define-kernel) assume the kernel is properly owned. This ADR is sequenced **first** and is independently valuable; ADR-0028 owns the naming model, this ADR owns kernel object *ownership*.
@@ -539,6 +539,42 @@ Binding consequences:
 - Options B (status quo — the extension keeps winning) and C (refuse the write)
   were considered and **rejected**. Dropping scalars from the fold entirely
   (#8284's arm B) remains rejected and is not this clause.
+
+> **Note (2026-10-30, #27949; ruling of record 6524229156, letter C′; where the
+> refusal sits: ruling of record 6545641964, letter B, 2026-10-31): "validations
+> stay additive" means rules of DIFFERENT names add. A same-named rule merges by
+> name, with the condition owned by the package.**
+>
+> A validation rule's identity within an object is its `name` (the schema's
+> "unique rule name"). The fold therefore merges `validations` by name across the
+> layers, the way `fields` merge by key, instead of concatenating them: two rules
+> of one name in one object are one rule. Measured before this note: a tenant
+> overlay that reworded an extension's rule (the Studio GET → edit → PUT of the
+> folded object stores a copy of every rule it served) held a copy beside the
+> extension's original, and both ran, so a refused write reported the rule twice.
+>
+> - **What the tenant owns.** A tenant overlay's copy of a packaged or
+>   extension-contributed rule supplies the rule's `message` and `active`
+>   (`active: false` is the explicit, visible deactivation). Everything else —
+>   the `type`, the condition and every other key the evaluator reads — is the
+>   package's: the fold enforces the code layer's rule with the tenant's
+>   sentence and switch, so a later package fix to the rule reaches the tenant.
+>   This is the opposite of whole-rule replacement, which would freeze the
+>   enforced rule against package fixes.
+> - **A changed condition or type is refused, loudly, at the save door, with the
+>   prescription "to change the condition, add a rule under a new name, or change
+>   it in the package"** — never two rules running beside each other, never a
+>   silent replacement. The overlay LOAD path never refuses: a copy stored before
+>   the condition changed (a package upgrade) is indistinguishable from one the
+>   tenant changed, so the fold never runs a copy's condition and names each such
+>   copy once, at `error`, with that prescription; it never drops the tenant's
+>   layer for it, so an upgrade never fails on stored data.
+> - **Different names stay additive**, as this clause has always protected: an
+>   extender's or a tenant's rule of a new name is added. A rule the overlay
+>   leaves out stays out, as D9.2's replace means. Between two code layers a
+>   later layer's same-named rule replaces the earlier one, as a field does.
+> - **Idempotence (#8027) holds by the merge itself:** a folded base re-folds to
+>   the same rules, so `validations` are no longer subtracted before the fold.
 
 #### D9.3 — selection is by KIND; priority stays descriptive
 

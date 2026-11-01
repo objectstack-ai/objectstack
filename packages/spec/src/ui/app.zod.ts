@@ -8,6 +8,7 @@ import { ElementApiDataSourceSchema } from './page.zod';
 import { strictObject, type StrictObjectOptions } from '../shared/strict-object';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { requiredOneOf } from '../shared/refinement-projection';
 
@@ -1574,6 +1575,174 @@ export type AppContextSelector = z.input<typeof AppContextSelectorSchema>;
 export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
 
 /**
+ * One entry of an app's per-audience landing list, {@link AppSchema}`.landing`
+ * (#28022, ruling record 6545223246, letter A).
+ *
+ * An app shared by several audiences opens on ONE page for all of them: its
+ * first navigation item by `order`. Moving Sales above Service to suit the
+ * sales team moves service staff's landing to Leads. `landing` lets the app
+ * say, per audience, which of its own navigation entries it opens on: the
+ * console asks the entries in order and opens the first whose `visible`
+ * holds for the reader.
+ *
+ * ## Why an id into `navigation`, and why it cannot dangle
+ *
+ * The retired `homePageId` (see `HOME_PAGE_ID_RETIRED` below) was condemned
+ * for its SHAPE: an id cross-reference into `navigation` with no referential
+ * integrity, which a renderer resolved by falling back to the first item when
+ * the id dangled — one fact with two sources, the wrong one failing quietly.
+ * `item` is an id into the same tree, and the difference is the refusal:
+ * {@link checkAppLandingItems} runs on every app parse, so an `item` that
+ * names no entry of this app's own `navigation` or `areas[].navigation`, or
+ * names an entry that opens nothing (a `group`, a `separator`, an `action`),
+ * is refused at its own path before the app is stored. The landing is a
+ * sidebar entry, so the sidebar highlights what the reader landed on; carrying
+ * the target inline instead would have made a second copy of a navigation
+ * target that the sidebar knows nothing about.
+ *
+ * ## Why `visible` is required
+ *
+ * The key exists for "each audience its own landing". An entry with no
+ * predicate would land EVERY reader there, which is `homePageId` again under
+ * a new name; "open somewhere other than the first item for everyone" is
+ * still `navigation` order. A catch-all is unnecessary: when no entry
+ * matches, the reader lands where the app lands today.
+ */
+export const AppLandingEntrySchema = lazySchema(() => strictObject(
+  {
+    surface: 'this landing entry',
+    aliases: {
+      navigationid: 'item',
+      navitem: 'item',
+      itemid: 'item',
+      target: 'item',
+      page: 'item',
+      visiblewhen: 'visible',
+      visibleon: 'visible',
+      when: 'visible',
+      condition: 'visible',
+    },
+    history:
+      'A new key: there is no earlier shape whose keys were dropped silently. Strict from its first release so a '
+      + 'mis-spelled entry is refused, not shipped as an entry that lands nobody.',
+  },
+  {
+  /**
+   * The navigation entry this audience lands on, by its `id`. Must name an
+   * entry of this app's own `navigation` tree or of one of its
+   * `areas[].navigation` trees (any depth); an item a package contributes
+   * through `navigationContributions` is not part of the app being parsed
+   * and cannot be named here.
+   */
+  item: SnakeCaseIdentifierSchema
+    .describe("Id of the app's own navigation entry this audience lands on (any depth of `navigation` or `areas[].navigation`). Refused at parse when no such entry exists, or when it is a `group`, `separator` or `action` entry, which open nothing.")
+    .meta({ title: 'Navigation item' }),
+
+  /**
+   * Who lands on `item` (CEL), the same predicate dialect and the same reader
+   * roots as a navigation entry's own `visible`. Required: see the schema's
+   * docblock.
+   */
+  visible: EvaluatedExpressionInputSchema
+    .describe("Audience predicate (CEL), the dialect of a navigation entry's `visible`, e.g. P`'service_agent' in current_user.positions`. Required. It reads the signed-in reader (`current_user`, `features`); there is no `data` here, and a `visible` that reads `data` is refused at parse.")
+    .meta({ title: 'Visible' }),
+}));
+
+export type AppLandingEntry = z.input<typeof AppLandingEntrySchema>;
+/** Post-parse shape of {@link AppLandingEntry} — defaults applied, transforms run (ADR-0122). */
+export type AppLandingEntryParsed = z.infer<typeof AppLandingEntrySchema>;
+
+/** Navigation entry types a landing may not name: none of them opens a page. */
+const LANDING_TARGET_REFUSED_TYPES: ReadonlySet<string> = new Set(['group', 'separator', 'action']);
+
+/** Every navigation entry of one tree, at any depth, by `id`, first declaration wins. */
+function collectNavEntriesById(items: unknown, into: Map<string, string>): void {
+  if (!Array.isArray(items)) return;
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const entry = item as { id?: unknown; type?: unknown; children?: unknown };
+    if (typeof entry.id === 'string' && !into.has(entry.id)) {
+      into.set(entry.id, typeof entry.type === 'string' ? entry.type : '');
+    }
+    collectNavEntriesById(entry.children, into);
+  }
+}
+
+/**
+ * The referential half of {@link AppSchema}`.landing`: every entry's `item`
+ * names a navigation entry of THIS app that opens something, and no entry's
+ * `visible` reads `data` (#28022).
+ *
+ * This is the refusal the `homePageId` tombstone asked of any future landing
+ * key: a dangling target is refused at its own path
+ * (`landing.N.item`), with the ids that do exist, instead of resolving to the
+ * first navigation item without a word. It reads the app's own `navigation`
+ * and every `areas[].navigation`, at any depth through `children`.
+ *
+ * A landing entry has no `dataSource`, so nothing binds `data` in its
+ * predicate; the same lexer that refuses a navigation entry's unbound `data`
+ * read ({@link navItemVisibleDataNeedsDataSource}) refuses it here.
+ *
+ * Mounted once, on {@link AppSchema}. EXPORTED for the same reason as
+ * {@link navItemVisibleDataNeedsDataSource}: a hand-written mirror of the app
+ * attaches this function rather than restating the rule. It accepts the
+ * authored bare-string `visible` as well as the parsed envelope.
+ */
+export function checkAppLandingItems(app: unknown, ctx: z.RefinementCtx): void {
+  if (!app || typeof app !== 'object') return;
+  const { landing, navigation, areas } = app as { landing?: unknown; navigation?: unknown; areas?: unknown };
+  if (!Array.isArray(landing) || landing.length === 0) return;
+  const entries = new Map<string, string>();
+  collectNavEntriesById(navigation, entries);
+  if (Array.isArray(areas)) {
+    for (const area of areas) {
+      if (area && typeof area === 'object') collectNavEntriesById((area as { navigation?: unknown }).navigation, entries);
+    }
+  }
+  const openable = [...entries].filter(([, type]) => !LANDING_TARGET_REFUSED_TYPES.has(type)).map(([id]) => `\`${id}\``);
+  landing.forEach((raw, index) => {
+    if (!raw || typeof raw !== 'object') return;
+    const entry = raw as { item?: unknown; visible?: unknown };
+    if (typeof entry.item === 'string') {
+      const type = entries.get(entry.item);
+      if (type === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['landing', index, 'item'],
+          message:
+            `\`landing[${index}].item\` names \`${entry.item}\`, but this app declares no navigation entry with that id `
+            + '(its own `navigation` and `areas[].navigation`, at any depth). A landing must be an entry of this app: '
+            + (openable.length > 0
+              ? `name one of ${openable.join(', ')}, or add the entry to \`navigation\` first.`
+              : 'add the entry to `navigation` first.'),
+        });
+      } else if (LANDING_TARGET_REFUSED_TYPES.has(type)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['landing', index, 'item'],
+          message:
+            `\`landing[${index}].item\` names \`${entry.item}\`, a \`${type}\` navigation entry, which opens no page, `
+            + 'so a reader could not land on it. Name an entry that opens something (an object, page, dashboard, report, '
+            + 'component, doc or url entry), e.g. one of the entries inside that group.',
+        });
+      }
+    }
+    const visible = (typeof entry.visible === 'string'
+      ? authoredVisibleEnvelope(entry.visible)
+      : entry.visible) as { dialect?: unknown; source?: unknown } | undefined;
+    if (visible && visible.dialect === 'cel' && typeof visible.source === 'string' && celReadsRootData(visible.source)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['landing', index, 'visible'],
+        message:
+          `\`landing[${index}].visible\` reads \`data\`, but a landing entry binds no \`data\`: it has no \`dataSource\`, `
+          + 'and its predicate is asked of the signed-in reader alone. Gate on `current_user` or `features` instead.',
+      });
+    }
+  });
+}
+
+/**
  * Schema for Applications (Apps).
  * A logical container for business functionality (e.g., "Sales CRM", "HR Portal").
  * 
@@ -1640,6 +1809,16 @@ export type AppContextSelectorParsed = z.infer<typeof AppContextSelectorSchema>;
  * `isDefault` routing (objectui's `RootLandingRedirect`, which was always
  * correct here). Retiring the key left a dead `if (homePageId)` branch in
  * objectui, tracked for removal in objectstack-ai/objectui#3264.
+ *
+ * Landing per AUDIENCE came back as `app.landing` (#28022, ruling record
+ * 6545223246, letter A), and it answers both objections above. It cannot
+ * dangle: {@link checkAppLandingItems} refuses, at parse, an `item` that
+ * names no entry of the app's own navigation, so the id is checked rather
+ * than trusted. And it is not a second "where everyone lands": every entry
+ * carries a required audience predicate, so "everyone" is still the first
+ * navigation item. The maintainer ruled it spec-first rather than
+ * enforce-first, so it lands `planned` in the liveness ledger, which warns an
+ * author that no console reads it until the landing redirect ships.
  */
 const HOME_PAGE_ID_RETIRED =
   '`app.homePageId` was removed in @objectstack/spec 17.0.0 (ADR-0049). '
@@ -1649,7 +1828,8 @@ const HOME_PAGE_ID_RETIRED =
   + 'app\'s landing page IS its first navigation item (by `order`), and the root landing '
   + 'follows `isDefault` routing. Delete the key; to change where an app opens, '
   + 'reorder `navigation` so the intended entry is first, and set `isDefault` on the app that '
-  + 'should own the root landing. '
+  + 'should own the root landing. To open a different entry for each audience, declare '
+  + '`landing: [{ item, visible }]`, whose `item` must name an entry of the app\'s own navigation. '
   + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
 /**
@@ -1698,6 +1878,8 @@ export const AppSchema = lazySchema(() => strictObject(
       enabled: 'active',
       default: 'isDefault',
       selectors: 'contextSelectors',
+      landings: 'landing',
+      landingpages: 'landing',
     },
     guidance: {
       pages:
@@ -1844,7 +2026,32 @@ export const AppSchema = lazySchema(() => strictObject(
    */
   contextSelectors: z.array(AppContextSelectorSchema).optional()
     .describe('App-level scope dropdowns whose value is injected into nav items as {<id>} template vars'),
-  
+
+  /**
+   * Per-audience landing (#28022, ruling record 6545223246, letter A): which
+   * of this app's own navigation entries a reader opens on, by audience. The
+   * console asks the entries in order and opens the first whose `visible`
+   * holds for the reader and whose `item` the reader can see (an entry the
+   * reader's own navigation gates hide is passed over). When none matches, or
+   * the key is absent, the app opens where it always has: its first
+   * navigation item by `order`. Every `item` must name an entry of this app,
+   * refused at parse otherwise ({@link checkAppLandingItems}).
+   *
+   * PLANNED: declared spec-first; the console's landing redirect that reads it
+   * is its own card. Until it lands, an app opens on its first navigation item
+   * whatever this list says, and the liveness ledger tells the author so.
+   *
+   * @example Sales staff open on Leads, service staff on the service console
+   * ```ts
+   * landing: [
+   *   { item: 'nav_service_console', visible: "'service_agent' in current_user.positions" },
+   *   { item: 'nav_leads', visible: "'sales_rep' in current_user.positions" },
+   * ]
+   * ```
+   */
+  landing: z.array(AppLandingEntrySchema).min(1).optional()
+    .describe('[PLANNED — not yet rendered] Per-audience landing: the first entry whose `visible` (CEL) holds for the reader names the navigation entry (`item`, an `id` of this app\'s own `navigation` or `areas[].navigation`) the app opens on. An `item` that names no entry of this app, or a `group` / `separator` / `action` entry, is refused at parse. No match, or no key: the app opens on its first navigation item by `order`, as before. No console reads this list yet, so until the landing redirect ships every reader still opens on the first navigation item.'),
+
   /** 
    * Access Control
    * List of permissions required to access this app.
@@ -1902,7 +2109,9 @@ export const AppSchema = lazySchema(() => strictObject(
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
-}));
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
+}).superRefine(checkAppLandingItems));
 
 /**
  * App Factory Helper

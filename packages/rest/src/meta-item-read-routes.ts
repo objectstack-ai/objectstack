@@ -129,6 +129,8 @@ import {
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
 import * as metaReadGate from './meta-item-read-gate.js';
 import { metaMemberSelector, type MetaReadGatePolicy } from './meta-item-read-gate.js';
+import { measureMetaRead } from './meta-read-timing.js';
+import { sendMetaRepresentation } from './meta-representation-validator.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import {
@@ -751,7 +753,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             ...(environmentId ? { environmentId } : {}),
                             // [#9454] The cached door is the `view` arm, and
                         };
-                        const result = await p.getMetaItemCached(cachedRequest);
+                        const result = await measureMetaRead(() => p.getMetaItemCached!(cachedRequest));
                         // [#23316] The automation engine's verdict on a
                         // FLOW, beside the document and never inside it:
                         // this branch is the default door of
@@ -780,11 +782,24 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         const cachedDisabledActions = metaType === 'object' && result.disabledActions !== undefined
                             ? { disabledActions: result.disabledActions }
                             : {};
-                        const cachedBeside = { ...cachedRegistration, ...cachedDisabledActions };
+                        // [#28001] …and the objects a delete of one of its
+                        // records can cascade into, beside the document on
+                        // the same terms as `disabledActions`: read live,
+                        // folded into the validator below
+                        // (`cascadeDeleteObjectsFingerprint`), so an object
+                        // registered later that cascades into this one moves
+                        // the ETag.
+                        const cachedCascadeDeleteObjects = metaType === 'object' && result.cascadeDeleteObjects !== undefined
+                            ? { cascadeDeleteObjects: result.cascadeDeleteObjects }
+                            : {};
+                        const cachedBeside = { ...cachedRegistration, ...cachedDisabledActions, ...cachedCascadeDeleteObjects };
                         // Only what is beside the document and in NO
                         // validator stands the 304 down — `registration`.
                         const besideJudged = Object.keys(cachedRegistration).length > 0;
                         const disabledActionsFingerprint = cachedDisabledActionsFingerprint(cachedDisabledActions.disabledActions);
+                        const cascadeDeleteObjectsFingerprint = cachedDisabledActionsFingerprint(
+                            cachedCascadeDeleteObjects.cascadeDeleteObjects,
+                        );
 
                         if (result.notModified) {
                             res.status(304).send();
@@ -880,18 +895,24 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // does the switched-off list served beside an
                             // object: a switch flipped off or on is never
                             // answered a `304` for the list it replaced.
+                            // [#28001] …and so does the cascade list served
+                            // beside an object: a cascading object registered
+                            // or removed is never answered a `304`.
                             const value = foldVisibilityFingerprintIntoEtag(
                                 foldVisibilityFingerprintIntoEtag(
                                     foldVisibilityFingerprintIntoEtag(
                                         foldVisibilityFingerprintIntoEtag(
-                                            foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
-                                            runtimeView.fingerprint,
+                                            foldVisibilityFingerprintIntoEtag(
+                                                foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
+                                                runtimeView.fingerprint,
+                                            ),
+                                            intakeFingerprint,
                                         ),
-                                        intakeFingerprint,
+                                        audienceFingerprint,
                                     ),
-                                    audienceFingerprint,
+                                    disabledActionsFingerprint,
                                 ),
-                                disabledActionsFingerprint,
+                                cascadeDeleteObjectsFingerprint,
                             );
                             const etagValue = result.etag.weak
                                 ? `W/"${value}"`
@@ -979,7 +1000,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // [#22877] The member, read once above.
                             ...memberSelector,
                         };
-                        const envelope = await p.getMetaItem(itemRequest) as Record<string, any>;
+                        const envelope = await measureMetaRead(() => p.getMetaItem(itemRequest)) as Record<string, any>;
 
                         // [#20408] Everything this read does to the envelope
                         // after the store read is ONE chain,
@@ -1033,9 +1054,14 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // [ADR-0106 D6 tier 2] Visibility undetermined → the
                         // body is unmasked, so it must not be stored or
                         // revalidated under a shared validator.
-                        if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
+                        // [#27627] Otherwise the chain's validator of the
+                        // served envelope, `private, no-cache`, and a `304`
+                        // when the caller already holds it. This exit is the
+                        // one `app`, `dashboard`, `doc` and `book` always take
+                        // (their gates keep them off the shared cache above),
+                        // so before this they were served with no validator.
                         res.header('Vary', 'Accept-Language');
-                        res.json(answer.envelope);
+                        sendMetaRepresentation(req, res, answer.envelope, answer, metadata.enableCache !== false);
                     }
                 } catch (error: any) {
                     // [#18402] THE one absence answer, whichever arm
@@ -1247,6 +1273,9 @@ function anonymousFormIntakeFingerprint(warnings: ReadonlyArray<{ path: string; 
  * the representation sent. Absent (no ledger answered) folds nothing and keeps
  * the ETag byte-identical; `[]` (a ledger that switches none of them off) folds
  * a fingerprint of its own, so a ledger attaching or detaching moves it too.
+ *
+ * [#28001] The same dimension, on the same terms, for the
+ * `cascadeDeleteObjects` served beside an object: a name list hashed as served.
  */
 function cachedDisabledActionsFingerprint(disabledActions: readonly string[] | undefined): string {
     return disabledActions === undefined ? '' : objectFieldVisibilityFingerprint([JSON.stringify(disabledActions)]);

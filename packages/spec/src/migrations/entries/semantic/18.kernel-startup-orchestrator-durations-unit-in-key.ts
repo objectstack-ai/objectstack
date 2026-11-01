@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'kernel-startup-orchestrator-durations-unit-in-key',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface: 'the three startup-orchestration durations whose name carried no unit: '
     + 'StartupOptions.timeout, PluginStartupResult.duration and '
     + 'StartupOrchestrationResult.totalDuration (kernel/startup-orchestrator.zod.ts)',

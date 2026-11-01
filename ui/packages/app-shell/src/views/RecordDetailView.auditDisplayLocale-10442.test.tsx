@@ -19,9 +19,9 @@
  * The real `I18nProvider` runs with an ENGLISH UI in every case, and the
  * display locale is declared through `LocalizationProvider`, so the display
  * locale is the only thing that differs between the `de-CH` pin and the
- * `en-US` control. The page is the synthesized one, opened on its History tab
- * through the `tab` URL param; the diff line is read off the rendered
- * timeline, the way a user sees it.
+ * `en-US` control. The page is the synthesized one, opened on its 动态 tab
+ * through the `related` URL param; the diff line is read off the rendered
+ * stream, the way a user sees it.
  */
 
 import * as React from 'react';
@@ -135,7 +135,7 @@ function renderHistory(locale: string) {
   return render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <LocalizationProvider value={{ locale }}>
-        <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
+        <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
           <MetadataCtx.Provider value={makeMetadata()}>
             <RecordDetailView
               dataSource={makeDataSource()}
@@ -155,7 +155,7 @@ function renderHistory(locale: string) {
 /**
  * The rendered diff line for `close_date`, under an ENGLISH UI with `locale` as
  * the display locale. Since objectstack#27055 the record page draws the audit
- * entries in the Timeline tab's one stream, each change as one compact line
+ * entries in the one 动态 stream, each change as one compact line
  * (`data-stream-change`).
  */
 async function diffLine(locale: string): Promise<string> {

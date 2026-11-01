@@ -9,7 +9,7 @@
       "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -38,7 +38,7 @@
       "steps": [
         "read the three Zod shapes FIRST and pin the requireds: AgentSchema needs name/label/role/instructions (packages/spec/src/ai/agent.zod.ts), ToolSchema needs name/label/description/parameters and is .strict() (tool.zod.ts), SkillSchema needs name/label/tools (skill.zod.ts) — if these have drifted, revise this item before running",
         "author one valid item per kind in the writable package: defineAgent({ name: 'qa_probe_agent', label, role, instructions, skills: ['qa_probe_skill'] }), defineTool({ name: 'qa_probe_tool', label, description, parameters: { type: 'object', properties: {} } }), defineSkill({ name: 'qa_probe_skill', label, tools: ['qa_probe_tool'], instructions: 'probe instructions' }); build — the build WARNS agent-authoring-withdrawn on the agent (ADR-0063 §2: the runtime filters a non-platform agent out of the agent catalog and refuses to load it), which is expected and no build failure. The agent still lists and reads over /api/v1/meta/agent with _provenance 'package': a meta listing is not the agent catalog",
-        "author the tombstone probes from `variants` (one broken copy per retired key, e.g. tool with `permissions: []`, agent with `tools: [{...}]`, skill with `triggerPhrases: ['x']`); capture each build/parse error text verbatim",
+        "author the tombstone probes from `variants` (one broken copy per retired key, e.g. tool with `permissions: []`, agent with `tools: [{...}]`, skill with `triggerPhrases: ['x']`), plus one agent with `lifecycle: {}`, the surviving agent tombstone; capture each build/parse error text verbatim",
         "boot; sign in as admin; GET /api/v1/meta (meta.getTypes) and GET /api/v1/meta/types — capture which kinds are registered",
         "GET /api/v1/meta/agent, /api/v1/meta/tool, /api/v1/meta/skill (route ledger: meta.getItems) and locate the three authored probes",
         "GET /api/v1/meta/skill/qa_probe_skill (meta.getItem) and field-diff against the authored source, noting applied defaults (surface:'ask', active:true)",
@@ -50,7 +50,7 @@
         {
           "clause": "each kind's valid probe parses at build and each tombstone probe is rejected LOUDLY with the retired key NAMED and its prescription attached — never silently stripped",
           "oracle": "build",
-          "verify": "tool.permissions error contains 'promised a capability gate on tool invocation that nothing ever enforced' (TOOL_RETIRED_KEY_GUIDANCE, tool.zod.ts); agent.tools error prescribes `skills` + ADR-0064 + 'os migrate meta --from 16' (retiredKey, agent.zod.ts); skill.triggerPhrases error says phrases were never matched and routes intent to triggerConditions (skill.zod.ts); the valid trio builds clean",
+          "verify": "tool.permissions error contains 'promised a capability gate on tool invocation that nothing ever enforced' (TOOL_RETIRED_KEY_GUIDANCE, tool.zod.ts — every tool probe still carries its own per-key prescription); skill.permissions and skill.trigger carry their guidance sentences (SkillSchema's guidance map, skill.zod.ts); agent.lifecycle is the surviving agent tombstone, its error naming the removal and 'os migrate meta --from 17' (retiredKey, agent.zod.ts). agent.tools, agent.knowledge and skill.triggerPhrases aged out of their tombstones (#25767): each is now a plain unrecognized key whose error names the key and carries the upgrade-guide pointer 'see the protocol upgrade guide: https://objectstack.ai/docs/protocol-upgrade' (RETIRED_KEY_UPGRADE_GUIDE_SENTENCE, packages/spec/src/shared/protocol-upgrade-guide.ts). That pointer is their prescription now — they no longer prescribe `skills`, ADR-0064 or triggerConditions — and a refusal missing it fails this clause as surely as a silent strip; the valid trio builds clean",
           "evidence": "per-variant error texts keyed by variant + the clean build output"
         },
         {
@@ -125,7 +125,8 @@
           "date": "2026-10-26",
           "change": "source anchors re-pointed after the ≤16.x retirement kits aged out (#25767): `skill.triggerPhrases` and `agent.tools`/`agent.knowledge` are no longer declared — their probes are strict unknown keys whose refusal names the protocol upgrade guide, not tombstones; the skill anchor now cites SkillSchema and the agent line names the surviving `lifecycle` tombstone. The negative clause holds as written: a probe accepted with a clean parse is still a FAIL.",
           "ref": "#25767"
-        }
+        },
+        { "revision": 8, "date": "2026-10-31", "change": "acceptance[0].verify and steps[2] follow the refusal texts at head. Checklist-accuracy finding of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377): the verify still expected agent.tools to prescribe `skills` + ADR-0064 + 'os migrate meta --from 16' and skill.triggerPhrases to route to triggerConditions, but since #25767 those keys (and agent.knowledge) are plain unrecognized keys whose refusal names the key and the protocol upgrade guide. Per-key prescriptions survive for the tool guidance map, skill.permissions / skill.trigger and the agent.lifecycle tombstone, which steps[2] now probes too. Re-read at base 488b3ed0: packages/spec/src/shared/suggestions.zod.ts (every strict refusal appends RETIRED_KEY_UPGRADE_GUIDE_SENTENCE), packages/spec/src/ai/agent.zod.ts lifecycle retiredKey, packages/spec/src/ai/tool.zod.ts TOOL_RETIRED_KEY_GUIDANCE, packages/spec/src/ai/skill.zod.ts SkillSchema guidance. The clause is unchanged: a probe accepted with a clean parse is still a FAIL", "ref": "#27392" }
       ]
     },
     {
@@ -133,7 +134,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -184,7 +185,7 @@
           "evidence": "the 401 response incl. headers"
         },
         {
-          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, resume_run, validate_expression",
+          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set over /api/v1/mcp (the HTTP door) is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, resume_run, validate_expression. The stdio door on the same build serves 9 of these, without the action family (list_actions, run_action, resume_run): the tool set is a function of the bridge (wireBridgeTools, packages/mcp/src/mcp-http-tools.ts), and the stdio data bridge implements no action methods (createStdioDataBridge, packages/mcp/src/stdio-data-bridge.ts), so a stdio count of 9 is not a shortfall against this clause",
           "oracle": "network",
           "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it, and resume_run only when the host cannot resume runs — both graceful degradation; record which)",
           "evidence": "the session trace + tool-name list"
@@ -223,7 +224,8 @@
           "date": "2026-10-28",
           "change": "automated.ref and variants[2] corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B). (1) The ref said no named file scores a clause alone, but mcp-skill-method-not-allowed.hono.integration.test.ts asserts acceptance[2] in full (status, Allow: GET, the exact envelope message) over a real Hono socket and the real dispatcher, and a 405 never reaches the faked services; the ref now says it scores that clause. (2) The ref gains packages/cli/test/serve-mcp-capability-collision.e2e.test.ts as corroboration (spawned server, osk_ key, initialize + tools/list, /mcp/skill 200) and says the scopes test's fake bridge has no resumeRun, so it counts 11 tools. (3) variants[2] omitted resume_run, which the same actions:execute scope grants. Re-read at base fd246c22: packages/mcp/src/mcp-http-tools.ts registerActionTools (canResume, 'the same actions:execute scope grants both'), mcp-http-tools.scopes.test.ts ACTION_TOOLS. No clause changed",
           "ref": "#25807"
-        }
+        },
+        { "revision": 8, "date": "2026-10-31", "change": "acceptance[4] names its transport. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the HTTP door listed the twelve, while the stdio door on the same build listed 9 with no action family, and the clause did not say which door 'the documented twelve' meant. It now names /api/v1/mcp and says why stdio serves 9. Re-read at base 488b3ed0: packages/mcp/src/mcp-http-tools.ts wireBridgeTools (the action pair registers only when the bridge implements listActions and runAction), packages/mcp/src/stdio-data-bridge.ts createStdioDataBridge (an McpDataBridge, no action methods). The HTTP assertion is unchanged", "ref": "#27409" }
       ]
     },
     {
@@ -365,7 +367,7 @@
       "title": "MCP run_action requires ai.exposed (fail-closed with the prescription), filters list_actions to exposed+permitted, refuses system objects, and logs the trusted-elevation audit line",
       "since": "v15.1",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -373,11 +375,13 @@
         "requires": [
           "the showcase's ONE ai-exposed action: showcase_portfolio_snapshot (global script action, ai: { exposed: true }, examples/app-showcase/src/ui/actions/index.ts) — the exposed side",
           "any showcase action WITHOUT an ai block (e.g. showcase_mark_done on showcase_task) — the undeclared side",
-          "MCP reachable with an osk_ key (see ai.mcp-http-surface)"
+          "MCP reachable with an osk_ key (see ai.mcp-http-surface)",
+          "acceptance[1]'s PERMITTED half has no stock producer: showcase_portfolio_snapshot gates no permission, so nothing exposed is ever held back. Stage one at runtime as the admin: PUT /api/v1/meta/action/qa_ai_gated { name: 'qa_ai_gated', label: 'QA AI gated', objectName: 'showcase_task', operation: 'update', patch: { progress: 50 }, execution: 'perRecord', ai: { exposed: true, description: 'QA probe: an AI-exposed action behind a capability gate' }, requiredPermissions: ['manage_metadata'] }. It is a DECLARATIVE update because the listing drops a script action with no registered handler before it asks the permission (listActions, packages/runtime/src/domains/mcp.ts), and it requires manage_metadata because the admin holds that capability and a member persona does not (actionPermissionError, packages/runtime/src/action-execution.ts). The member side needs an osk_ key of a member persona (Mei Phone, phone.demo@example.com), minted as ai.mcp-http-surface mints the admin's. DELETE /api/v1/meta/action/qa_ai_gated in teardown"
         ]
       },
       "steps": [
         "over MCP, call list_actions with NO arguments (its input schema is strict and empty: an objectName argument is refused — the tool result is isError with 'MCP error -32602: Input validation error … Unrecognized key(s) on this list_actions call: `objectName`'); record which actions appear",
+        "permitted half (only when fixtures.requires[3] is staged): call list_actions again with the member persona's osk_ key; record which actions appear in each persona's list",
         "call run_action on the UNDECLARED action (actionName: 'showcase_mark_done', a real recordId); capture the refusal",
         "verify the refusal left zero side effects: read the task over REST — status unchanged",
         "call run_action on the exposed action (actionName: 'showcase_portfolio_snapshot'); capture the result payload ({ ok, scope: 'global', accounts, projects, invoices })",
@@ -395,7 +399,7 @@
         {
           "clause": "list_actions returns ONLY actions that are both ai-exposed and permitted to the caller — showcase_portfolio_snapshot present, showcase_mark_done absent",
           "oracle": "api",
-          "verify": "the list_actions payload against the fixture's declared ai blocks (mcp-http-tools.ts: 'actions that are BOTH declared ai-exposed and that the caller is permitted to run'). On the stock showcase only the ai-exposed half discriminates: showcase_portfolio_snapshot is the one exposed action and no persona lacks a permission it needs, so no exposed-but-unpermitted action exists to be held back. Score the permitted half not-run(fixture) unless the run stages such an action",
+          "verify": "the list_actions payload against the fixture's declared ai blocks (mcp-http-tools.ts: 'actions that are BOTH declared ai-exposed and that the caller is permitted to run'). On the stock showcase only the ai-exposed half discriminates: showcase_portfolio_snapshot is the one exposed action and no persona lacks a permission it needs, so no exposed-but-unpermitted action exists to be held back. The staged qa_ai_gated action (fixtures.requires[3]) discriminates it: present in the admin's list_actions, absent from the member's, while showcase_portfolio_snapshot is in both. Without that staging, score the permitted half not-run(fixture)",
           "evidence": "the list_actions response"
         },
         {
@@ -438,7 +442,8 @@
           "date": "2026-10-28",
           "change": "acceptance[1].verify says which half the stock fixture discriminates. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B): the clause's 'permitted' filter was not discriminated, because no stock action pairs ai.exposed with a permission gate a persona lacks. Re-read at base fd246c22: examples/app-showcase/src/ui/actions/index.ts carries one ai: { exposed: true } block (showcase_portfolio_snapshot). The clause is unchanged; the verify names the fixture gap",
           "ref": "#25807"
-        }
+        },
+        { "revision": 6, "date": "2026-10-31", "change": "fixtures.requires[3], steps[1] and acceptance[1].verify stage the permitted half of the list_actions filter. Fixture gap of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad), parked on sweep anchor #27377: the permitted half scored blocked(fixture) because no stock action pairs ai.exposed with a permission some persona lacks. The recipe is a runtime declarative update action, ai-exposed, requiring manage_metadata, listed for the admin and held back from a member. Derived from source at base 488b3ed0: packages/runtime/src/domains/mcp.ts listActions (the handler check precedes the permission check, which a declarative update skips), packages/runtime/src/action-execution.ts actionPermissionError, packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). Not yet run live: the first run that stages it proves the recipe. The clause is unchanged", "ref": "#27392" }
       ]
     },
     {
@@ -446,7 +451,7 @@
       "title": "MCP validate_expression returns build-accurate errors/warnings/inferred type + in-scope context for every site variant, and fail-closes on unknown/system objects",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
       "fixtures": {
@@ -468,6 +473,7 @@
         "call it with a text field misused in arithmetic ('record.title * 2'); capture the WARNING (not error)",
         "call the flow_condition site with bare fields ('estimate_hours > 8') — must validate clean",
         "call it against a nonexistent object and against a sys_* object; capture both refusals",
+        "call it with a blank and a whitespace-only expression ('' and '   ') at site formula, and with '' at site template; capture each verdict (negative[1])",
         "record the inScope payload (dialect/roots/fields/functions) returned alongside each verdict"
       ],
       "acceptance": [
@@ -497,7 +503,8 @@
         }
       ],
       "negative": [
-        "a validation verdict that DIFFERS from the build gate for the same expression is a FAIL — the tool's one job is build-accuracy (api-backend.formula-gates is the same engine)"
+        "a validation verdict that DIFFERS from the build gate for the same expression is a FAIL — the tool's one job is build-accuracy (api-backend.formula-gates is the same engine)",
+        "a blank or whitespace-only expression ('' or '   ') answering ok:true is a FAIL: the save/build gate refuses a source that is blank after trimming, and the tool parses with that gate's slot schema first (VALIDATE_SITE_MAP's slot, packages/mcp/src/mcp-http-tools.ts), so it answers ok:false with ONE error carrying the schema's own issue — code invalid_union and the EVALUATED_EXPRESSION_SOURCE_REQUIRED sentence (packages/spec/src/shared/expression.zod.ts) at formula, validation and flow_condition, the template sentence at site template — and no inferredType (pinned in packages/mcp/src/mcp-validate-expression.test.ts, 'a blank or whitespace-only expression gets the save gate verdict'). validateExpression alone treats a blank source as not authored and answers ok, which is the split #27411 recorded and #27534 closed"
       ],
       "automated": { "kind": "unit", "ref": "packages/mcp/src/mcp-validate-expression.test.ts — MCPServerRuntime.handleHttpRequest over a fake McpDataBridge whose describeObject returns a crm_opportunity schema: a plugin unit, not the served MCP door the api oracle names, so it corroborates acceptance[0], [1] and [3] and never scores them pass (RUNNER rule 6). Its sound-formula case asserts ok, errors, warnings and inScope only, never inferredType, so acceptance[0]'s inferredType half has no pin at any layer; acceptance[2] is not pinned (see its verify)" },
       "source": [
@@ -515,7 +522,8 @@
           "date": "2026-10-28",
           "change": "variants[2] and automated.ref corrected. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B). (1) variants[2] said a record.-prefixed ref is an error under flow_condition; live, 'record.estimate_hours > 8' there answered ok:true with no errors, because the flattened scope binds the scope roots as maps beside the bare fields. Acceptance[2] is unaffected: it compares the bare form across the two sites. (2) The pin's sound-formula case never checks inferredType, so the ref now says acceptance[0]'s inferredType half is unpinned. Re-read at base fd246c22: packages/formula/src/cel-engine.ts buildTypedEnv (flattened: SCOPE_ROOTS registered as map), packages/mcp/src/mcp-http-tools.ts VALIDATE_SITE_MAP, packages/mcp/src/mcp-validate-expression.test.ts 'accepts a sound formula'. No clause changed",
           "ref": "#25807"
-        }
+        },
+        { "revision": 6, "date": "2026-10-31", "change": "negative[1] and steps[5] add the blank-input boundary. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377), whose product half #27411 was closed by #27534: the item had no clause for an empty or blank expression. The tool now answers the save gate's verdict for it, so the clause asks for exactly that. Re-read at base 488b3ed0: packages/mcp/src/mcp-http-tools.ts (validate_expression parses the slot schema before validateExpression), packages/spec/src/shared/expression.zod.ts EVALUATED_EXPRESSION_SOURCE_REQUIRED, packages/mcp/src/mcp-validate-expression.test.ts (the blank-input block). Existing clauses unchanged", "ref": "#27409" }
       ]
     },
     {
@@ -767,13 +775,13 @@
       "title": "the MCP OAuth transport rule is judged on the DEPLOYMENT's own host: a private / link-local plain-HTTP deployment serves the OAuth track and logs the accepted-transport warning; a public plain-HTTP one is still refused, fail-closed, and logs its own public-plaintext warning",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
         "app": "any",
         "requires": [
-          "THREE boots of the same build, differing only in the deployment base URL: (a) a PRIVATE address the host actually holds — a LAN address under `os dev`, e.g. http://192.168.x.x:PORT or http://10.x.x.x:PORT; (b) a PUBLIC host spelling — http://example.com or an http:// public IP literal, which needs no reachability because every clause here is about what the deployment ADVERTISES; (c) loopback (http://localhost:PORT), the unchanged control. The deployment base URL is set with OS_AUTH_URL (BETTER_AUTH_URL and OS_BASE_URL are read too, in that order: packages/cli/src/commands/serve.ts AUTH_BASE_URL_ENV_NAMES). A host that holds no RFC 1918 or link-local address cannot stage boot (a): record its clauses blocked(fixture). An address outside the eligible blocks, such as 192.0.2.2 (TEST-NET-1), is PUBLIC to the rule (auth-manager.ts PLAIN_HTTP_ELIGIBLE_IPV4_CIDRS), so it serves boot (b)",
+          "THREE boots of the same build, differing only in the deployment base URL: (a) a PRIVATE address literal, e.g. http://192.168.x.x:PORT or http://10.x.x.x:PORT; (b) a PUBLIC host spelling — http://example.com or an http:// public IP literal, which needs no reachability because every clause here is about what the deployment ADVERTISES; (c) loopback (http://localhost:PORT), the unchanged control. The deployment base URL is set with OS_AUTH_URL (BETTER_AUTH_URL and OS_BASE_URL are read too, in that order: packages/cli/src/commands/serve.ts AUTH_BASE_URL_ENV_NAMES). Boot (a) does NOT need the host to hold that address: the transport rule judges the HOST LITERAL of the configured base URL, never the interfaces the process binds (isOAuthEligibleBaseUrl and isPrivateOrLoopbackHostLiteral, packages/plugins/plugin-auth/src/auth-manager.ts), and every clause on (a) reads what the deployment ADVERTISES and LOGS. So OS_AUTH_URL=http://10.0.0.5:PORT on a host that holds only 127.0.0.1 stages acceptance[0] and the private leg of acceptance[2] whole; QA run #27409 reproduced the whole (a) shape on such an unheld address. Record in the run env whether the address was held. Only steps[3]'s real-client leg needs an address the host holds, because a second machine has to reach it; without one, that leg alone is blocked(fixture). An address outside the eligible blocks, such as 192.0.2.2 (TEST-NET-1), is PUBLIC to the rule (auth-manager.ts PLAIN_HTTP_ELIGIBLE_IPV4_CIDRS), so it serves boot (b)",
           "the MCP HTTP surface at its default (on — served unless OS_MCP_SERVER_ENABLED=false) and the embedded AS at its default (follows the MCP surface — packages/plugins/plugin-auth/src/auth-manager.ts#resolveOidcProviderEnabled)",
           "the boot log of each boot, captured from the first line — the transport warning is emitted ONCE at discovery-route mount and is not repeated per request",
           "a second machine (or container) on the same private network for the (a) boot, if the run also drives a real MCP client end to end"
@@ -873,7 +881,8 @@
           "date": "2026-10-28",
           "change": "fixtures.requires[0] and steps[6] name the base-URL door and the no-private-address case. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the item never said how to set the deployment base URL, which is OS_AUTH_URL (then BETTER_AUTH_URL, OS_BASE_URL), nor how to stage the https re-boot (OS_AUTH_URL=https://… behind a terminator, or os dev --cert/--key); and the runner's container held only 127.0.0.1 and 192.0.2.2, which cannot stage boot (a) but, being outside the eligible CIDR list, stages boot (b). Re-read at base fd246c22: packages/cli/src/commands/serve.ts AUTH_BASE_URL_ENV_NAMES, packages/cli/src/commands/dev.ts cert/key flags, packages/plugins/plugin-auth/src/auth-manager.ts PLAIN_HTTP_ELIGIBLE_IPV4_CIDRS. The run's missing-clause note (the AS metadata issuer should equal authorization_servers[0]) is not added here: it is the open product defect #26472, whose fix owns that clause. No clause changed",
           "ref": "#25807"
-        }
+        },
+        { "revision": 6, "date": "2026-10-31", "change": "fixtures.requires[0] says which reading scores boot (a). Checklist-accuracy finding and fixture gap of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the line demanded a held private address and scored (a) blocked(fixture) without one, but the clauses judge only what is advertised and logged, and an unheld OS_AUTH_URL=http://10.0.0.5 reproduced the whole (a) shape (both protected-resource paths 200 with that origin, the 401 resource_metadata pointer, the accepted-transport warning at WARN). A held address stays required for the real-client leg (steps[3]). Re-read at base 488b3ed0: packages/plugins/plugin-auth/src/auth-manager.ts isOAuthEligibleBaseUrl, which judges the base URL's host literal. No clause changed", "ref": "#27409" }
       ]
     },
     {
@@ -881,7 +890,7 @@
       "title": "MCP on v18: a coded refusal on the data tools, list_actions and the record resource renders {error:{code,message,status}} (not the bare message), both MCP doors honour a runtime-authored object's apiEnabled:false including after a restart, and run_action withholds PERMISSION_DENIED details",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -892,13 +901,14 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "MCP enabled on the boot (ai.mcp-http-surface names the switch)",
-          "a runtime-authored scratch object (PUT /api/v1/meta/object/NAME on a scratch boot) with enable: { apiEnabled: false } — the key lives under `enable` (a top-level apiEnabled is refused 422 unrecognized key) — and a sharingModel (security-owd-unset refuses an object without one, 422)"
+          "a runtime-authored scratch object (PUT /api/v1/meta/object/NAME on a scratch boot) with enable: { apiEnabled: false } — the key lives under `enable` (a top-level apiEnabled is refused 422 unrecognized key) — and a sharingModel (security-owd-unset refuses an object without one, 422)",
+          "acceptance[3]'s producer: no stock action refuses a persona at run_action, because the showcase's one AI-exposed action (showcase_portfolio_snapshot) is ungated. Stage a runtime DECLARATIVE update action exposed to AI on showcase_task, as QA run #27409 did: PUT /api/v1/meta/action/qa_ai_mark { name: 'qa_ai_mark', label: 'QA AI mark', objectName: 'showcase_task', operation: 'update', patch: { progress: 50 }, execution: 'perRecord', ai: { exposed: true, description: 'QA probe: a declared write run as the caller' } }, and run it as Ada Auditor (auditor.demo@example.com, with an osk_ key of hers) against a real task. The declared write runs as the CALLER (executeDeclarativeUpdateAction, packages/runtime/src/action-execution.ts) and the auditor holds no edit on showcase_task, so run_action answers PERMISSION_DENIED; the admin's run of the same action is the control. DELETE /api/v1/meta/action/qa_ai_mark in teardown"
         ]
       },
       "steps": [
         "call the MCP get_record tool for a missing id — its arguments are { objectName, recordId } (an `id` argument is refused -32602 with a did-you-mean naming recordId); call query_records on the enable.apiEnabled: false object",
         "restart the boot (same file DB) and repeat",
-        "call run_action on an action the caller may not run"
+        "call run_action on an action the caller may not run: the staged qa_ai_mark (fixtures.requires[3]) as auditor.demo, with a real showcase_task recordId, then the same call as the admin (the control)"
       ],
       "acceptance": [
         {
@@ -948,7 +958,8 @@
           "change": "fixtures.requires[2] and steps[0] name the spellings the doors accept — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24540 and #24558, ai.mcp-coded-refusals-and-runtime-exposure; wave anchor #24579 §3). Re-derived at base 9a7838edf5: get_record takes recordId (packages/mcp/src/mcp-http-tools.ts aliases id → recordId), apiEnabled sits under ObjectSchema.enable, and a runtime object needs a sharingModel (packages/lint security-owd-unset, error tier). No clause changed; step 3's missing PERMISSION_DENIED subject is a fixture gap left for §4",
           "ref": "#24649"
         },
-        { "revision": 3, "date": "2026-10-26", "change": "automated.ref extended — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807). acceptance[1]: mcp-coded-refusal.test.ts asserts the clause at plugin-unit layer but was not in the ref. acceptance[2]: the record found no pin driving query_records on an apiEnabled false runtime object across a restart; re-read on main at b4199c96, packages/qa/dogfood/test/mcp-stdio-runtime-object-exposure.test.ts does, on the stdio door at engine layer, so it joins the ref and the ref now names each pin's layer. No clause changed, no status changed", "ref": "#25836" }
+        { "revision": 3, "date": "2026-10-26", "change": "automated.ref extended — checklist-accuracy findings of the 18.2.0 sweep, Tier 1 record #25815 at 6679644a (wave anchor #25807). acceptance[1]: mcp-coded-refusal.test.ts asserts the clause at plugin-unit layer but was not in the ref. acceptance[2]: the record found no pin driving query_records on an apiEnabled false runtime object across a restart; re-read on main at b4199c96, packages/qa/dogfood/test/mcp-stdio-runtime-object-exposure.test.ts does, on the stdio door at engine layer, so it joins the ref and the ref now names each pin's layer. No clause changed, no status changed", "ref": "#25836" },
+        { "revision": 4, "date": "2026-10-31", "change": "fixtures.requires[3] and steps[2] name acceptance[3]'s producer. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the fixtures named no recipe for the PERMISSION_DENIED arm, and the run staged it with a runtime declarative update action on showcase_task, ai-exposed, run as auditor.demo. Re-read at base 488b3ed0: packages/runtime/src/action-execution.ts (the declarative update writes as the caller), packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). The clause is unchanged", "ref": "#27409" }
       ]
     }
   ]

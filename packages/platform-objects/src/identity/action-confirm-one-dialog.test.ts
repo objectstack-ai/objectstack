@@ -34,6 +34,29 @@ import { SysAccount } from './sys-account.object.js';
 import { SysOrganization } from './sys-organization.object.js';
 import { SysSsoProvider } from './sys-sso-provider.object.js';
 import { SysTeamMember } from './sys-team-member.object.js';
+import { templateSlotSource } from '@objectstack/spec/automation';
+
+// [#27948] An action's `description`, each param's `helpText` and each
+// `outcomeMessages` entry are `template` slots: the parsed object carries the
+// `{ dialect: 'template', source }` envelope, so the copy is read as written
+// through the template judge's one reader, `templateSlotSource` (a locale map
+// is kept as it is).
+function copyAsWritten<T>(declared: T): T {
+  const a = declared as Record<string, any> | undefined;
+  if (!a) return declared;
+  const text = (v: unknown) => templateSlotSource(v) ?? v;
+  return {
+    ...a,
+    ...(a.description !== undefined ? { description: text(a.description) } : {}),
+    ...(Array.isArray(a.params)
+      ? { params: a.params.map((p: any) => (p && p.helpText !== undefined ? { ...p, helpText: text(p.helpText) } : p)) }
+      : {}),
+    ...(a.outcomeMessages && typeof a.outcomeMessages === 'object'
+      ? { outcomeMessages: Object.fromEntries(Object.entries(a.outcomeMessages).map(([k, v]) => [k, text(v)])) }
+      : {}),
+  } as T;
+}
+
 
 const OBJECTS = [
   ['sys_user', SysUser],
@@ -45,7 +68,7 @@ const OBJECTS = [
   ['sys_team_member', SysTeamMember],
 ] as const;
 
-const actionsOf = (obj: any): any[] => (obj?.actions ?? []) as any[];
+const actionsOf = (obj: any): any[] => ((obj?.actions ?? []) as any[]).map(copyAsWritten);
 const collects = (a: any) => Array.isArray(a.params) && a.params.length > 0;
 
 const byName = (obj: any, name: string) => {
@@ -105,9 +128,13 @@ describe('#7309 — an action that collects params opens ONE dialog', () => {
     // `ai.description` is the LLM-facing contract (≥40 chars, required when
     // `ai.exposed`) — the same word one level down. Putting the question there
     // would arm a tool description while the dialog fell back to its generic line.
+    // An action ADR-0011's 2026-10-30 addendum exposes carries its own
+    // `ai.description`, written for the model — never the dialog question.
     for (const [name, obj] of OBJECTS) {
       for (const action of CONVERTED[name] ?? []) {
-        expect(byName(obj, action).ai?.description, `${name}.${action}.ai.description`).toBeUndefined();
+        const a = byName(obj, action);
+        expect(a.description, `${name}.${action}.description`).toBeTruthy();
+        expect(a.ai?.description, `${name}.${action}.ai.description`).not.toBe(a.description);
       }
     }
   });

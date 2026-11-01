@@ -252,8 +252,12 @@ function splitRefusal(
  * Issue a partial-record update through whichever method the DataSource
  * exposes. Mirrors the update/updateOne/patch fallback + `ifMatch` OCC token
  * that `record:details` used for its per-field save.
+ *
+ * Exported for the package's other in-place writer, `record:path`'s stage
+ * press, so the record page has one update path; not re-exported from
+ * `src/index.tsx`.
  */
-async function updateVia(
+export async function updateVia(
   ds: any,
   objectName: string,
   recordId: string | number,

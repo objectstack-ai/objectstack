@@ -49,6 +49,23 @@
       "verifiedAt": "2026-09-27",
       "evidence": "packages/spec/src/system/book.zod.ts#matchesInclude (`Array.isArray(doc.tags) && doc.tags.includes(include.tag)` — the tag branch of `include`); packages/spec/src/system/book.zod.ts#resolveBookTree (the caller that decides membership from it); packages/rest/src/meta-item-read-gate.ts#createMetaBookTreeAnswer (`tags: d.tags` in the tree corpus the route hands `audience.readableTree(book, docs)` — the transport half); packages/rest/src/meta-item-read-gate.ts#resolveBookTree (`resolveBookTree(book, docs, book._packageId, books)` — where that corpus reaches the resolver)",
       "note": "DECLARED 2026-08-02 (#4509, ADR-0049) — the enforce half of enforce-or-remove. The consumer, the transport and the resolver-side interface all predated this key: matchesInclude compared `doc.tags` against a group's `include: { tag }`, the book route already forwarded `tags: d.tags`, and ResolverDoc declared `tags?: string[]` marked '(P3d; absent today)'. What was missing was one line HERE — DocSchema is strict, so authoring `tags:` was a parse error, every doc reached the resolver with tags undefined, and the `{ tag }` include variant could never match. Removing the variant was the alternative and was rejected: a union member has no clean tombstone (retiredKey covers object keys), so authors would have gotten a bare union error, and it would have discarded working matcher code. Live on arrival — the branch it feeds is reachable the moment a doc carries a tag. 2026-08-28: RE-ANCHORED (commit 8cb96ec41) and REPOINTED — `book.zod.ts:213` is `description?: string;` in the `ResolvedEntry` interface, and the parenthetical claiming it was \"matchesInclude tag branch\" named the right function ~61 lines away; the \"reached from :255 and :281\" hops were prose the ledger never bounded. `rest-server.ts:3218` had rotted onto `this.registerSecurityEndpoints(bp)` — a route-registration call, ~1,700 lines from the corpus that forwards the tags. Re-closed by hand against 93ea19bca."
+    },
+    "overrides": {
+      "status": "planned",
+      "verifiedAt": "2026-10-31",
+      "note": "PLANNED RECORD (ADR-0146 D2, the spec card N-08): the override declaration `overrides: { package, basedOn }`, one field set (`OverrideDeclarationFields`, packages/spec/src/kernel/override-declaration.zod.ts) spread on the thirteen types `OVERRIDE_TYPE_CLASSIFICATION` classifies `overridable`. CARRIED today, measured: it survives the metadata save's schema parse, `defineStack()` and `GET /packages/:id/export` (packages/spec/src/kernel/override-declaration.test.ts; packages/runtime/src/domains/packages-export-override-declaration.test.ts). ACTED ON by nothing yet: the write gate that admits a declared override from the paired `<base>.custom` and refuses an undeclared same-named item, and the effective read that serves the declared document over the base's, are later cards of ADR-0146's Rollout (P1). Flip to `live` on the commit that lands the reader, citing it.",
+      "children": {
+        "package": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row): the base package id the declaring item replaces an item of. The pair predicate the write gate will read is `isCustomizationPairOf` (packages/spec/src/kernel/customization-package.ts). The schema refuses a `.custom` id here at parse."
+        },
+        "basedOn": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row). RECORDED, NEVER JUDGED by contract (ADR-0146 D2, 'Decided here' item 2): no door compares it with the installed base, produces an upgrade diff from it, or refuses on it. Its whole reading is a person's (Studio's override chip, the export); it stays `planned` until that reader lands, and must never gain a gate."
+        }
+      }
     }
   }
 }

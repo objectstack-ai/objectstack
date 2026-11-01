@@ -55,7 +55,7 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { InlineFieldInput } from './InlineFieldInput';
 import { headerColorClass } from './headerColor';
-import { framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
+import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
 import { hasCellValue } from './emptiness';
 import {
   enrichDetailField,
@@ -204,6 +204,8 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // drawn frameless: a title, a hairline and the field grid, no card. Paper
   // keeps the card face (objectui#12732), so a print page never takes it.
   const frameless = useDefaultRecordPage() && !isPrintPage;
+  // The record page's two-column tier caps the grid at two (objectstack#27524).
+  const framelessColumnCap = React.useContext(DetailsColumnCapContext);
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState<number | undefined>(undefined);
   // objectstack#25883 — "Show N empty fields" is the reader's choice for the
@@ -445,10 +447,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // column count (objectui#2578) can exceed a section's visible count when
   // empty fields are hidden; a lone field shouldn't sit at 1/N width.
   // A frameless section (objectstack#27055) takes 1–3 columns by the fields it
-  // shows, never the object-wide count: it shares the page row with the
-  // timeline and related columns.
+  // shows, never the object-wide count, and at most two beside the right
+  // column of the two-column tier (objectstack#27524).
   const effectiveColumns = frameless
-    ? framelessSectionColumns(visibleFields.length)
+    ? framelessSectionColumns(visibleFields.length, framelessColumnCap)
     : Math.min(rawColumns, Math.max(1, visibleFields.length));
 
   const renderField = (field: DetailViewField) => {
@@ -652,6 +654,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
               value={value}
               field={enrichedField as unknown as FieldMetadata}
               deadlineSettled={isDeadlineSettled(enrichedField, data, { scope: predicateScope, fields: objectSchema?.fields })}
+              // A record page writes every date one way. The highlights strip
+              // above writes the year on a current-year date (objectui#13331),
+              // so a section row does too: "Dec 31, 2026" in the strip beside
+              // "Oct 2" in a section was two formats on one page. Grid cells
+              // keep the shared face that drops it.
+              alwaysShowYear
             />
           );
         }

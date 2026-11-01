@@ -1,0 +1,75 @@
+---
+title: Override Declaration — Kernel Protocol
+navTitle: Override Declaration
+description: "A customization of an installed base package (HotCRM) is an item of the base's paired writable package <base>.custom."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+## The override declaration (ADR-0146 D2)
+
+A customization of an installed base package (HotCRM) is an item of the
+base's paired writable package `<base>.custom` (ADR-0146 D3). An item of that
+package that bears a base item's name and carries
+
+```ts
+overrides: { package: '<base package id>', basedOn: '<the base package's manifest.version>' }
+```
+
+replaces the base's item WHOLE for every read that serves the base's name
+(ADR-0146 D8). The declaration lives in the item body, so it travels with the
+item through export and git: what a developer writes into `hotcrm.custom` in a
+repository and what an administrator does in Studio produce the same
+document. Only the paired `<base>.custom` package declares an override (the
+ruling recorded on #28390, ruling A); the pairing helpers in
+`customization-package.ts` are what a door asks.
+
+### Why a leaf module
+
+It imports nothing but zod and `strictObject`, on purpose. Every overridable
+type's schema spreads `OverrideDeclarationFields`, and some of those
+schemas are imported by `manifest.zod.ts` (`ui/app.zod.ts`); importing the
+manifest or the registry from here would close a module cycle that the eager
+schema build (`OS_EAGER_SCHEMAS=1`) evaluates in temporal-dead-zone order.
+The helpers that need the manifest grammar live in `customization-package.ts`,
+which no schema imports.
+
+### What this module does NOT do
+
+It declares the shape. Admitting a declared override, refusing an undeclared
+same-named item, refusing a declaration from a package that is not the pair,
+and serving the declared document are the doors' (ADR-0146 Rollout, P1:
+the write gate, the effective read, the ensure door). Which types may carry
+the declaration is the closed list `OVERRIDE_TYPE_CLASSIFICATION`, never a
+judgement a door makes.
+
+<Callout type="info">
+**Source:** `packages/spec/src/kernel/override-declaration.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { OverrideDeclarationSchema } from '@objectstack/spec/kernel';
+import type { OverrideDeclaration } from '@objectstack/spec/kernel';
+
+// Validate data
+const result = OverrideDeclarationSchema.parse(data);
+```
+
+---
+
+## OverrideDeclaration
+
+Override declaration (ADR-0146 D2): this item, of the base's paired "`<base>`.custom" package and bearing a base item's name, replaces that base item whole for every read that serves the name.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+
+
+---
+

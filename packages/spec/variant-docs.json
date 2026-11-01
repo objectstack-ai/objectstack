@@ -106,7 +106,7 @@
       "note": "The `oauth2` member of connector-instance auth, one strict shape per grant (ADR-0143 D2.1): `authorizationUrl` exists only on authorization_code, and client_credentials requires `credentialRef`."
     },
     {
-      "key": "scheme:aliyun-acs3-hmac-sha256",
+      "key": "scheme:alipay-v3|aliyun-acs3-hmac-sha256|tencentcloud-tc3-hmac-sha256",
       "label": "connector instance signing scheme",
       "docs": [
         "content/docs/automation/connectors.mdx"

@@ -294,6 +294,8 @@ const ActionButtonRenderer = forwardRef<
           // generic "Action parameters" prompt.
           label: schema.label,
           description: (schema as any).description,
+          // The param dialog's submit-button verb, read by the same dialog.
+          submitText: schema.submitText,
           target: schema.target,
           // Static "open in new tab" switch for url actions — forward so the
           // runner's executeUrl honors it (dropped, the toggle is silently lost).

@@ -193,6 +193,7 @@ export function bucketCardsIntoColumns(
 export type { KanbanCard, KanbanColumn, CardTemplate, InlineFieldDefinition } from './types';
 export { ObjectKanban };
 export type { ObjectKanbanComponentProps } from './ObjectKanban';
+export type { KanbanLaneRows } from './KanbanImpl';
 
 /**
  * @deprecated Use `ObjectKanbanComponentProps`. Renamed in objectui#4650

@@ -616,6 +616,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "桁区切り",
         helpText: "表示する値の桁区切り（3 桁ごとの区切り記号）。未設定の場合はレンダラーが決めます。一度も操作していないスイッチは何も書き込まないため、レンダラーが区切る場合でもオフと表示されます。オフ：区切りません（例：年や ID）。オン：常に区切ります。"
       },
+      percentDisplay: {
+        label: "パーセント表示",
+        helpText: "読み取り専用時の表示方法（リストのセルとレコードページ）。未設定の場合はパーセントの横に進捗バーを表示します。バー：常に進捗バーを表示します（進捗向け）。プレーン：パーセントのみを表示します（率や確率向け）。"
+      },
       currencyConfig: {
         label: "通貨設定",
         helpText: "このフィールドの通貨（通貨フィールド、または戻り値型が「通貨」の数式フィールド）。未設定の場合は dynamic モードです。どのモードでも、値は単なる数値です。"
@@ -1803,6 +1807,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "説明",
         helpText: "このアクションのパラメーターダイアログのタイトル下に表示される説明文。パラメーターを収集するアクションでは、確認の問いを confirmText ではなくここに書きます（ダイアログは 2 つではなく 1 つ）。AI エージェントが読む ai.description とは別物です。"
       },
+      submitText: {
+        label: "送信ボタンのラベル",
+        helpText: "このアクションのパラメーターダイアログにある送信ボタンのラベル。ボタンが行う操作を表す動詞です（例：「送信」「通話を記録」）。パラメーターを収集するアクションでのみ使用します。空のままにすると「確認」と表示されます。"
+      },
       confirmText: {
         label: "確認文",
         helpText: "確認メッセージ（例: \"Are you sure?\"）"
@@ -1817,7 +1825,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       outcomeMessages: {
         label: "結果別の成功メッセージ",
-        helpText: "ハンドラーの結果ごとの成功メッセージ（JSON で記述）。各キーはハンドラーが成功時のペイロードで返す snake_case の `outcome` 値、各値はその結果に表示するラベルです（例：{\"archived\": \"アーカイブしました\", \"already_archived\": \"すでにアーカイブ済みです\"}）。ラベルには ${result.*} を埋め込めます。対応する項目がない結果には成功メッセージが表示され、ハンドラーが返さないキーは表示されることがありません。結果ダイアログや `operation: 'update'` とは併用できません。"
+        helpText: "ハンドラーの結果ごとの成功メッセージ（JSON で記述）。各キーはハンドラーが成功時のペイロードで返す snake_case の `outcome` 値、各値はその結果に表示するラベルです（例：{\"archived\": \"アーカイブしました\", \"already_archived\": \"すでにアーカイブ済みです\"}）。ラベルには {{ result.* }} を埋め込めます。対応する項目がない結果には成功メッセージが表示され、ハンドラーが返さないキーは表示されることがありません。結果ダイアログや `operation: 'update'` とは併用できません。"
       },
       onSuccess: {
         label: "成功後の遷移",

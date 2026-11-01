@@ -129,6 +129,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 ### Nested Shape: `CreateFlowRequest.variables[number]`
 
@@ -185,6 +186,13 @@ const result = AutomationApiErrorCode.parse(data);
 | **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
+### Nested Shape: `CreateFlowRequest.overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
 
 
 ---
@@ -249,6 +257,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 
 ---
@@ -347,7 +356,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +353 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +355 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -483,8 +492,10 @@ const result = AutomationApiErrorCode.parse(data);
 * `ERR_CURRENCY_CODE_REQUIRED`
 * `ERR_DATASOURCE_UNAVAILABLE`
 * `ERR_DRIVER_CONNECT`
+* `ERR_EXCHANGE_RATE_MISSING`
 * `ERR_FILE_CONSTRAINT`
 * `ERR_FILE_REFERENCE_COPY`
+* `ERR_HOME_CURRENCY_UNSET`
 * `ERR_HOOK_TARGET_REBIND`
 * `ERR_READONLY_FIELD_REJECTED`
 * `ERR_SUMMARY_RECOMPUTE`
@@ -787,6 +798,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 
 ---
@@ -1096,6 +1108,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 
 ---
@@ -1160,6 +1173,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 
 ---

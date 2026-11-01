@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'kernel-health-check-and-hot-reload-durations-unit-in-key',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface: 'the three plugin-lifecycle durations whose unit lived in a source JSDoc only: '
     + 'PluginHealthCheck.interval, PluginHealthCheck.timeout and HotReloadConfig.debounceDelay '
     + '(kernel/plugin-lifecycle-advanced.zod.ts)',

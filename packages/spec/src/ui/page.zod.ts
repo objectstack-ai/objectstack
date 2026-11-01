@@ -12,7 +12,7 @@ import {
   UserActionsConfigSchema,
   AppearanceConfigSchema,
   UserFiltersSchema,
-  ViewFilterRuleSchema,
+  ViewFilterElementSchema,
   AddRecordConfigSchema,
   ListColumnSchema,
   EmptyStateSchema,
@@ -22,6 +22,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { ruleArrayFilterError } from './filter-rule-array';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { PAGE_TYPE_DEFAULT, misplacedDefaultPageRefusal } from './default-record-page';
 
 /**
@@ -327,7 +328,7 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
    * form is refused at `filter`; the migration prescription is the
    * `element-data-source-and-object-block-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema, {
+  filter: z.array(ViewFilterElementSchema, {
     error: ruleArrayFilterError({
       surface: 'this element data source',
       migration: 'element-data-source-and-object-block-filter-rule-array',
@@ -872,7 +873,7 @@ export const PageRecordBindingSchema = lazySchema(() => strictObject({
 }, {
   object: z.string().describe('Object the page row is read from'),
   view: z.string().optional().describe('Named view to apply'),
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterElementSchema).optional()
     .describe('Filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the filter of the named view'),
   sort: z.array(SortItemSchema).optional().describe('Sort order — the page row is the FIRST row of the bound set under it'),
 }));
@@ -1055,7 +1056,7 @@ export const InterfacePageConfigSchema = lazySchema(() => strictObject({
     .describe('Columns shown by the page. Blank = all object fields. Defined directly on the page (no view inheritance).'),
   sort: z.array(SortItemSchema).optional()
     .describe('Default sort order for the page, defined directly on the page.'),
-  filterBy: z.array(ViewFilterRuleSchema).optional().describe('Always-on page filter (base filter).'),
+  filterBy: z.array(ViewFilterElementSchema).optional().describe('Always-on page filter (base filter).'),
   levels: z.number().int().min(1).optional().describe('Number of hierarchy levels to display'),
 
   /** @deprecated Back-compat only. Pre-revision pages inherited columns/filter/sort
@@ -2169,6 +2170,8 @@ export const PageSchema = lazySchema(() => strictObject({
   // parse — protection metadata lost on round-trip, and a hard 422 the day this
   // shape closed.
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 })
   // ADR-0080/0081 + ADR-0078 (completeness): an html/react page with no
   // `source` is silently inert — fail loudly at author time, never render empty.

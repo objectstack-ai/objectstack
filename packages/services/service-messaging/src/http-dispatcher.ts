@@ -26,11 +26,15 @@ import type { HttpAckResult, HttpClaimCredential, HttpDelivery, IHttpOutbox } fr
  * only while that claim still holds the row; a lost claim's ack is refused,
  * logged and absorbed, never written over the live attempt (#17634).
  *
- * ## What an idle tick costs (#17623)
+ * ## What an idle tick costs (#17623, #28383)
  *
- * Against an empty outbox one tick is `1 + partitionCount` store round trips:
- * ONE visibility-timeout reap for the whole environment, then a candidate probe
- * per partition. The reap used to open every partition's claim —
+ * Against an empty outbox one tick is TWO reads, whatever `partitionCount` is:
+ * the reap's "anything expired?" read and one "anything due?" read across every
+ * partition ({@link IHttpOutbox.hasDueWork}); neither finds a row, so neither
+ * the reap's UPDATE nor any partition's candidate probe runs. Before #28383 it
+ * was `2 + partitionCount` on a kernel — the reap's predicate UPDATE (a
+ * matched-row read plus the write, unconditionally), then a candidate probe per
+ * partition: 10 with the default 8. Before #17623 the reap opened every partition's claim —
  * `partitionCount` identical environment-wide UPDATEs a tick, 8 of the 16
  * statements a tick issued with the default 8 partitions — on a fixed 500 ms
  * interval that never let up, one loop per warm kernel: the shape #17610 had
@@ -198,6 +202,13 @@ export class HttpDispatcher {
             await outbox.reap({ claimTtlMs: this.opts.claimTtlMs, now: this.opts.now?.() });
             reapedForTick = true;
         }
+
+        // [#28383] One read across every partition before any partition's
+        // probe — `NotificationDispatcher.runTick`'s arrangement, with the
+        // reasoning stated there. An idle tick used to pay one candidate probe
+        // per partition (8 with the default) to learn there was nothing to do.
+        // A store without `hasDueWork` probes every partition, as before.
+        if (outbox.hasDueWork && !(await outbox.hasDueWork({ now: this.opts.now?.() }))) return 0;
 
         const partitionCount = this.opts.partitionCount;
         const offset = stableNodeOffset(this.opts.nodeId, partitionCount);

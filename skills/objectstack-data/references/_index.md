@@ -23,6 +23,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/automation/flow-function.zod.ts` — The contract for a **named handler function a `script` node invokes** —
 - `node_modules/@objectstack/spec/src/data/column-apply-on.zod.ts` — Exports: ColumnApplyOnSchema
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
+- `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/driver-sql.zod.ts` — Exports: SQLDialectSchema, DataTypeMappingSchema, SSLConfigSchema, SQLDriverConfigSchema, SQLiteDataTypeMappingDefaults
 - `node_modules/@objectstack/spec/src/data/driver.zod.ts` — Exports: DriverOptionsSchema, DriverCapabilitiesSchema, DriverInterfaceSchema, PoolConfigSchema, DriverConfigSchema
 - `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes.
@@ -41,6 +42,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/identity/eval-user.zod.ts` — EvalUser — the one user-context contract (ADR-0068 D1).
 - `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Exports: AuthGateCodeSchema, AuthGateScopeSchema, ExecutionContextSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
+- `node_modules/@objectstack/spec/src/kernel/override-declaration.zod.ts` — The override declaration (ADR-0146 D2)
 - `node_modules/@objectstack/spec/src/security/explain.zod.ts` — [ADR-0090 D6] Access-explanation contract — `explain(principal, object,
 - `node_modules/@objectstack/spec/src/security/rls.zod.ts` — Row-Level Security (RLS) Protocol
 - `node_modules/@objectstack/spec/src/shared/conditional-formatting.zod.ts` — The **single declaration** of a conditional formatting rule —

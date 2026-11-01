@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'cli-organization-ownership-apply-plan-file-required',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'os migrate organization-ownership --apply, invoked without --plan-file (the bare --apply --backup-taken that '
     + '@objectstack/cli 18.0.0-next.1 shipped, with or without --fate-supplement)',

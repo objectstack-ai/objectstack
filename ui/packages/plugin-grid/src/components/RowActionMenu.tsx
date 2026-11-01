@@ -537,22 +537,34 @@ const RowActionInlineButton: React.FC<{
   );
 };
 
-export const RowActionMenu: React.FC<RowActionMenuProps> = ({
-  row,
-  rowActions,
-  rowActionDefs,
-  canEdit,
-  canDelete,
-  editPredicates,
-  deletePredicates,
-  onEdit,
-  onDelete,
-  onAction,
-  onActionDef,
-  maxInlineActions = 1,
-  objectFields,
-}) => {
-  const t = useRowActionTranslation();
+/**
+ * THE row-action resolver (objectstack#28434): what ONE row offers, read by
+ * both of its entry points — the "⋮" cell ({@link RowActionMenu}) and the row
+ * context menu (`./RowContextMenu`). Both menus call this hook, so a
+ * `list_item` action shows in both or in neither: same capability gate
+ * (ADR-0066 D4), same switch-off, same per-record predicates, same order.
+ *
+ * `maxInlineActions` is the only input the two read differently: the cell has
+ * a width budget for inline primaries, the context menu has none and passes
+ * `0`, which folds every surviving primary into the list in the position the
+ * plan always gives them — above the secondaries.
+ */
+export function useRowActionPlan(
+  props: Omit<RowActionMenuProps, 'maxInlineActions' | 'onAction' | 'onActionDef'>,
+  maxInlineActions: number,
+): RowActionMenuPlan {
+  const {
+    row,
+    rowActions,
+    rowActionDefs,
+    canEdit,
+    canDelete,
+    editPredicates,
+    deletePredicates,
+    onEdit,
+    onDelete,
+    objectFields,
+  } = props;
   // [ADR-0066 D4 / framework#3923] Capability gate, applied ONCE to the whole
   // declared set so the inline CTA, the overflow menu and `hasMenu` all agree.
   // This surface filters its own actions instead of going through
@@ -589,7 +601,7 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = ({
   // "全部" view. The capability gate above was already folded in for exactly
   // this reason (objectstack-ai/objectstack#3923); the per-record predicates were not.
   const scope = usePredicateScope();
-  const plan = React.useMemo(
+  return React.useMemo(
     () =>
       planRowActionMenu({
         row,
@@ -620,6 +632,75 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = ({
       objectFields,
     ],
   );
+}
+
+/**
+ * The menu items of ONE row's plan — Edit, Delete, the surviving custom
+ * actions, the legacy string actions — as `DropdownMenuItem`s, for whichever
+ * menu content hosts them: the "⋮" menu below and the row context menu
+ * (objectstack#28434) render this one list, so the two cannot drift.
+ */
+export const RowActionMenuItems: React.FC<{
+  plan: RowActionMenuPlan;
+  props: RowActionMenuProps;
+}> = ({ plan, props }) => {
+  const t = useRowActionTranslation();
+  const { row, editPredicates, deletePredicates, objectFields, onEdit, onDelete, onAction, onActionDef } = props;
+  return (
+    <>
+      {/* Rendered off the PLAN, the same object the trigger's existence
+          was decided from — the items and the "⋮" cannot drift apart
+          (#3562). Each item component re-reads the shared visibility
+          function too, so it stays correct when used standalone. */}
+      {plan.edit && (
+        <BuiltinRowActionItem
+          name="edit"
+          predicates={editPredicates}
+          row={row}
+          icon={<Edit className="mr-2 h-4 w-4" />}
+          label={t('grid.edit')}
+          objectFields={objectFields}
+          onSelect={(r) => onEdit?.(r)}
+        />
+      )}
+      {plan.remove && (
+        <BuiltinRowActionItem
+          name="delete"
+          predicates={deletePredicates}
+          row={row}
+          icon={<Trash2 className="mr-2 h-4 w-4" />}
+          label={t('grid.delete')}
+          objectFields={objectFields}
+          onSelect={(r) => onDelete?.(r)}
+        />
+      )}
+      {plan.custom.map(def => (
+        <RowActionMenuItem
+          key={def.name}
+          def={def}
+          row={row}
+          objectFields={objectFields}
+          onActionDef={onActionDef}
+        />
+      ))}
+      {plan.legacy.map(action => (
+        <DropdownMenuItem
+          key={action}
+          onClick={() => onAction?.(action, row)}
+          data-testid={`row-action-${action}`}
+        >
+          {formatActionLabel(action)}
+        </DropdownMenuItem>
+      ))}
+    </>
+  );
+};
+
+export const RowActionMenu: React.FC<RowActionMenuProps> = (props) => {
+  const { row, objectFields, onActionDef, maxInlineActions = 1 } = props;
+  const t = useRowActionTranslation();
+  // The one resolver both of this row's menus read (objectstack#28434).
+  const plan = useRowActionPlan(props, maxInlineActions);
   // Nothing left to show → no trigger. An affordance that opens empty reads as
   // a broken page, which is the whole of #3562. The wrapper `<div>` is still
   // returned, so the `_actions` cell stays present and every row keeps the same
@@ -655,50 +736,7 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-            {/* Rendered off the PLAN, the same object the trigger's existence
-                was decided from — the items and the "⋮" cannot drift apart
-                (#3562). Each item component re-reads the shared visibility
-                function too, so it stays correct when used standalone. */}
-            {plan.edit && (
-              <BuiltinRowActionItem
-                name="edit"
-                predicates={editPredicates}
-                row={row}
-                icon={<Edit className="mr-2 h-4 w-4" />}
-                label={t('grid.edit')}
-                objectFields={objectFields}
-                onSelect={(r) => onEdit?.(r)}
-              />
-            )}
-            {plan.remove && (
-              <BuiltinRowActionItem
-                name="delete"
-                predicates={deletePredicates}
-                row={row}
-                icon={<Trash2 className="mr-2 h-4 w-4" />}
-                label={t('grid.delete')}
-                objectFields={objectFields}
-                onSelect={(r) => onDelete?.(r)}
-              />
-            )}
-            {plan.custom.map(def => (
-              <RowActionMenuItem
-                key={def.name}
-                def={def}
-                row={row}
-                objectFields={objectFields}
-                onActionDef={onActionDef}
-              />
-            ))}
-            {plan.legacy.map(action => (
-              <DropdownMenuItem
-                key={action}
-                onClick={() => onAction?.(action, row)}
-                data-testid={`row-action-${action}`}
-              >
-                {formatActionLabel(action)}
-              </DropdownMenuItem>
-            ))}
+            <RowActionMenuItems plan={plan} props={props} />
           </DropdownMenuContent>
         </DropdownMenu>
       )}

@@ -1241,6 +1241,7 @@ export type {
   DeclaredActionsResolution,
   ActionContext,
   ActionResult,
+  ActionFieldError,
   // The `undo` payload of `ActionResult`, moved down from `@object-ui/core`'s
   // `UndoManager` with it (objectui#6349, batch 4); core re-exports it.
   UndoableOperation,

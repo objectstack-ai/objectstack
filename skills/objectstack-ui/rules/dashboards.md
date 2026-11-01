@@ -282,8 +282,7 @@ The **dataset dimension carries the default; a widget's
 `options.dateGranularity` overrides it for that widget only.** Give a date
 dimension a `dateGranularity` and any presentation that selects it groups by that
 bucket server-side — without it every distinct timestamp becomes its own
-category, collapsing a 12-row seed into a 12-point flat line. (The old widget-level
-`categoryGranularity` was removed in the single-form cutover.)
+category, collapsing a 12-row seed into a 12-point flat line.
 
 <!-- os:check -->
 ```typescript
@@ -295,14 +294,15 @@ defineDataset({
   dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
   measures: [{ name: 'signed_count', aggregate: 'count' }],
 });
-// A money measure may set `currency` (ISO 4217), e.g. `currency: 'USD'`.
-// Chain: measure `currency` → the field's `defaultCurrency` (`fixed`
-// only) → tenant `localization.currency`; omit it for counts. A
-// `currencyMode: 'record'` amount refuses `currency` and ungrouped
-// sum/avg/min/max; grouped by its code field, the column carries
-// `currencyField` (per-row code column); a `count` never does. A `fixed`
-// field refuses a different `currency` (delete it; restating is fine), and
-// a derived measure refuses operands in two `fixed` codes (derive from one
+// A money measure may set `currency` (ISO 4217, e.g. `'USD'`). Chain:
+// measure `currency` → the field's `defaultCurrency` (`fixed` only) →
+// tenant `localization.currency`; omit it for counts. A
+// `currencyMode: 'record'` amount refuses `currency`, and sum/avg/min/max
+// unless grouped by its code field; then the column carries
+// `currencyField` (the per-row code column); a `count` never does. A `fixed`
+// field, or a derived sum/difference over one `fixed` code, refuses another
+// `currency` (delete it, the column takes that code; restating is fine); a
+// derived measure refuses operands in two `fixed` codes (derive from one
 // currency or drop one). Not judged: `currency` over a `dynamic` field, a
 // `fixed` code against the tenant's.
 

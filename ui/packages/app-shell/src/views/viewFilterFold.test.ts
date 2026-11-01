@@ -17,6 +17,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { ListViewSchema } from '@objectstack/spec/ui';
+import type { ViewFilterRule } from '@objectstack/spec/ui';
 import { foldFilterGroupToSpecRules, FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold';
 
 /**
@@ -119,7 +120,8 @@ describe('foldFilterGroupToSpecRules — flat AND group → ViewFilterRule[]', (
             })),
         });
         expect(result.ok).toBe(true);
-        expect(result.ok && result.rules.map(r => r.operator)).toEqual([
+        // An AND group folds to flat rules only, so each element is a rule here.
+        expect(result.ok && result.rules.map(r => (r as ViewFilterRule).operator)).toEqual([
             'equals', 'not_equals', 'contains', 'not_contains',
             'is_empty', 'is_not_empty', 'greater_than', 'less_than',
             'greater_than_or_equal', 'less_than_or_equal', 'before', 'after', 'between',
@@ -133,7 +135,7 @@ describe('foldFilterGroupToSpecRules — flat AND group → ViewFilterRule[]', (
             conditions: [{ id: 'a', field: 'f', operator: 'sounds_like', value: 'x' }],
         });
         // NOT silently rewritten to `equals` — the spec enum is the judge.
-        expect(result.ok && result.rules[0].operator).toBe('sounds_like');
+        expect(result.ok && (result.rules[0] as ViewFilterRule).operator).toBe('sounds_like');
     });
 
     it('drops the blank row `Add filter` inserts before a column is picked', () => {
@@ -179,8 +181,8 @@ describe('foldFilterGroupToSpecRules — empty conditions', () => {
     });
 });
 
-describe('foldFilterGroupToSpecRules — loud refusal, never a silent downgrade (A1)', () => {
-    it("refuses `logic: 'or'` over two conditions instead of writing them as AND", () => {
+describe('foldFilterGroupToSpecRules — OR folds to a group; nesting is a loud refusal, never a silent downgrade (A1)', () => {
+    it("folds `logic: 'or'` over two conditions to ONE any-of group, never to AND (objectstack#28370)", () => {
         const result = foldFilterGroupToSpecRules({
             id: 'root',
             logic: 'or',
@@ -189,13 +191,18 @@ describe('foldFilterGroupToSpecRules — loud refusal, never a silent downgrade 
                 { id: 'b', field: 'status', operator: 'equals', value: 'blocked' },
             ],
         });
-        expect(result).toEqual({ ok: false, reason: 'or_logic' });
-        // The refusal reaches the user through a translated string, not a
-        // console throw: the toolbar surfaces this key as a toast.
-        expect(FILTER_FOLD_REFUSAL_KEYS.or_logic).toBe('console.objectView.filterOrNotSavable');
+        expect(result).toEqual({
+            ok: true,
+            rules: [{ or: [
+                { field: 'status', operator: 'equals', value: 'open' },
+                { field: 'status', operator: 'equals', value: 'blocked' },
+            ] }],
+        });
+        // OR is no longer a refusal reason: only nesting is.
+        expect(Object.keys(FILTER_FOLD_REFUSAL_KEYS)).toEqual(['nested_group']);
     });
 
-    it('refuses OR however many conditions there are beyond one', () => {
+    it('folds OR over three conditions into the one group, in row order', () => {
         const result = foldFilterGroupToSpecRules({
             id: 'root', logic: 'or',
             conditions: [
@@ -204,7 +211,11 @@ describe('foldFilterGroupToSpecRules — loud refusal, never a silent downgrade 
                 { id: 'c', field: 'c', operator: 'equals', value: 3 },
             ],
         });
-        expect(result.ok).toBe(false);
+        expect(result.ok && result.rules).toEqual([{ or: [
+            { field: 'a', operator: 'equals', value: 1 },
+            { field: 'b', operator: 'equals', value: 2 },
+            { field: 'c', operator: 'equals', value: 3 },
+        ] }]);
     });
 
     it("folds `logic: 'or'` over ONE condition — OR and AND select the same records there", () => {
@@ -245,7 +256,7 @@ describe('foldFilterGroupToSpecRules — loud refusal, never a silent downgrade 
     });
 
     it('every refusal reason has a user-readable key — no reason can surface untranslated', () => {
-        const reasons: Array<keyof typeof FILTER_FOLD_REFUSAL_KEYS> = ['or_logic', 'nested_group'];
+        const reasons: Array<keyof typeof FILTER_FOLD_REFUSAL_KEYS> = ['nested_group'];
         for (const reason of reasons) {
             expect(FILTER_FOLD_REFUSAL_KEYS[reason]).toMatch(/^console\.objectView\./);
         }

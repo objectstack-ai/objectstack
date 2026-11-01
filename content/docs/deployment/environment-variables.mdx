@@ -110,6 +110,7 @@ Read by `@objectstack/service-print` when `PrintServicePlugin` is composed; see 
 | `OS_TRUSTED_ORIGINS` | csv | — | Comma-separated list of origins permitted for auth callbacks / CSRF. |
 | `OS_TERMS_URL` | url | — | URL shown next to the "Terms of Service" link on the sign-up form. Empty string hides the link. |
 | `OS_PRIVACY_URL` | url | — | URL shown next to the "Privacy Policy" link on the sign-up form. Empty string hides the link. |
+| `OS_TURNSTILE_SITE_KEY` / `OS_TURNSTILE_SECRET_KEY` | string | — | Opt-in Cloudflare Turnstile on email sign-up. Set **both** and `/sign-up/email` (the register page and the first-run setup) requires a verified Turnstile token, the Console renders the challenge, and its content-security-policy admits `https://challenges.cloudflare.com`; sign-in and password reset are not challenged. Only the site key is served to the browser (`features.turnstileSiteKey`); the secret never leaves the server. With either unset nothing changes (one boot `warn` names the missing one). |
 
 Auth settings precedence:
 

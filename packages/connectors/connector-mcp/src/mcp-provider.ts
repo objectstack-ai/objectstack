@@ -1,8 +1,23 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { ConnectorProviderFactory, ResolvedConnectorAuth } from '@objectstack/spec/integration';
+import type {
+  BorrowedConnectorAuth,
+  ConnectorCredentialHandle,
+  ConnectorCredentialRequest,
+  ConnectorProviderFactory,
+  ResolvedConnectorAuth,
+} from '@objectstack/spec/integration';
 import { ConnectorCredentialRejectedError, ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
-import { createMcpConnector, type McpConnectorOptions, type McpToolDescriptor, type McpTransport } from './mcp-connector.js';
+import { callWithBorrowedCredential } from '@objectstack/types';
+import {
+  createMcpConnector,
+  defaultMcpClientFactory,
+  DEFAULT_MCP_CLIENT_INFO,
+  type McpClientLike,
+  type McpConnectorOptions,
+  type McpToolDescriptor,
+  type McpTransport,
+} from './mcp-connector.js';
 import { compareToolsSnapshot, parseToolsSnapshot, type ToolsSnapshotDrift } from './tool-snapshot.js';
 
 /**
@@ -124,6 +139,69 @@ function normalizeTransport(
 }
 
 /**
+ * ADR-0143 D4 — the credential request the instance's tool discovery
+ * (`tools/list` at materialization) asks its credential handle with.
+ * Discovery runs outside any run, so there is no run organization: it asks
+ * with none. The host answers an ask that names none, made while the
+ * instance materializes, from the connection connected earliest (ruled B on
+ * #26702), so an instance several organizations connected still lists; every
+ * dispatch asks in its own run's organization.
+ */
+export const MCP_DISCOVERY_CREDENTIAL_REQUEST: ConnectorCredentialRequest = Object.freeze({});
+
+/** The organization a dispatch runs for (`ctx.automation.tenantId`), when it carries one. */
+function organizationOfDispatch(ctx: unknown): string | undefined {
+  const id = (ctx as { automation?: { tenantId?: unknown } } | null | undefined)?.automation?.tenantId;
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
+/** The request `init` with the borrowed credential applied, and the URL it goes to. */
+function withBorrowedAuth(
+  input: string | URL | Request,
+  init: RequestInit | undefined,
+  auth: BorrowedConnectorAuth,
+): { url: string | URL | Request; init: RequestInit } {
+  const headers = new Headers(init?.headers);
+  let url = input;
+  switch (auth.type) {
+    case 'bearer':
+      headers.set('Authorization', `Bearer ${auth.token}`);
+      break;
+    case 'basic':
+      headers.set('Authorization', `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`);
+      break;
+    case 'api-key':
+      if (auth.paramName) {
+        const target = new URL(input instanceof Request ? input.url : String(input));
+        target.searchParams.set(auth.paramName, auth.key);
+        url = target.toString();
+      } else {
+        headers.set(auth.headerName ?? 'X-API-Key', auth.key);
+      }
+      break;
+  }
+  return { url, init: { ...init, headers } };
+}
+
+/**
+ * The fetch an http transport sends every request through when the instance
+ * borrows its credential (ADR-0143 D4): the handle is asked for `request` on
+ * each one, a `401` refreshes once and is sent once more, and a second `401`
+ * is the seam's `503` naming the instance.
+ */
+function borrowingFetch(handle: ConnectorCredentialHandle, request: ConnectorCredentialRequest, base: typeof fetch = fetch): typeof fetch {
+  return ((input: string | URL | Request, init?: RequestInit) =>
+    callWithBorrowedCredential(
+      handle,
+      (credential) => {
+        const next = withBorrowedAuth(input, init, credential);
+        return base(next.url, next.init);
+      },
+      request.organizationId === undefined ? {} : { organizationId: request.organizationId },
+    )) as typeof fetch;
+}
+
+/**
  * Enforce the {@link McpDeclarativeStdioPolicy} for one declarative instance
  * (#3055). Throws a **plain** Error on violation: a security-policy rejection
  * is a configuration fault — fatal at boot, skipped+logged on reload — and must
@@ -212,6 +290,17 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * {@link credentialRejectionStatus}, #27237). A handshake that carried the
  * instance's credential answers `credentialVerified`.
  *
+ * A grant-bearing instance (`oauth2`, `app-credential`) is handed
+ * `ctx.credentialHandle` and no static credential (ADR-0143 D4). Over http,
+ * every HTTP request of its MCP session then goes through a fetch that asks
+ * the handle: the tools are listed with {@link MCP_DISCOVERY_CREDENTIAL_REQUEST},
+ * and each organization a dispatch runs for opens its own session, asking the
+ * handle in that organization's name, so organizations never share a session
+ * or a token. A `401` refreshes once and the request is sent once more; a
+ * second `401` fails the call with the seam's `503`. A handle on a stdio
+ * transport, or beside a static credential or a request signer, is refused
+ * plain (a configuration fault).
+ *
  * `providerConfig.include` (optional) narrows the actions to an allowlist of
  * tool names, with the `openapi` provider's meaning. An `include` that is not
  * an array of non-empty strings is refused before connecting, and an entry
@@ -262,6 +351,63 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
           `tool names (strings): each the name of a tool the MCP server lists in tools/list.`,
       );
     }
+    // ADR-0143 D4 — a grant-bearing instance (`oauth2`, `app-credential`)
+    // borrows its credential per request. Only an http transport carries one
+    // (a stdio server takes its credentials in `transport.env`), and a
+    // request is authenticated one way.
+    const handle = ctx.credentialHandle;
+    if (handle) {
+      if (transport.kind !== 'http') {
+        throw new Error(
+          `connector-mcp provider: connector '${ctx.name}' borrows its credential per request (a grant-bearing auth kind), ` +
+            `which only an http transport can carry: a stdio server takes its credentials in transport.env. Declare an ` +
+            `http transport, or a static credential for the stdio one.`,
+        );
+      }
+      const ways = [
+        ctx.auth && ctx.auth.type !== 'none' ? `a static '${ctx.auth.type}' credential` : undefined,
+        ctx.requestSigner ? 'a request signer' : undefined,
+      ].filter((w): w is string => w !== undefined);
+      if (ways.length > 0) {
+        throw new Error(
+          `connector-mcp provider: connector '${ctx.name}' is given ${ways.join(' and ')} and a credential handle; a request ` +
+            `is authenticated one way.`,
+        );
+      }
+    }
+    const clientFactory = deps.clientFactory ?? defaultMcpClientFactory;
+    // One client per organization a dispatch runs for (ADR-0143 Q1): an MCP
+    // session is opened with one connection's token, so organizations never
+    // share one. A dispatch that names no organization goes through the
+    // client the tools were listed with: once the instance has materialized,
+    // that client's asks name none, which the host answers as D4 answers a
+    // run with none (the only connection, or refused when there are several).
+    const borrowedClients = new Map<string, Promise<McpClientLike>>();
+    const clientFor = handle && transport.kind === 'http'
+      ? (actionCtx: unknown): Promise<McpClientLike> | undefined => {
+          const organizationId = organizationOfDispatch(actionCtx);
+          if (organizationId === MCP_DISCOVERY_CREDENTIAL_REQUEST.organizationId) return undefined;
+          const key = organizationId ?? '';
+          let client = borrowedClients.get(key);
+          if (!client) {
+            const request: ConnectorCredentialRequest = organizationId === undefined ? {} : { organizationId };
+            client = clientFactory({ ...transport, fetch: borrowingFetch(handle, request) }, DEFAULT_MCP_CLIENT_INFO);
+            // A client that failed to open is not kept: the next dispatch opens another.
+            client.catch(() => { if (borrowedClients.get(key) === client) borrowedClients.delete(key); });
+            borrowedClients.set(key, client);
+          }
+          return client;
+        }
+      : undefined;
+    const discoveryTransport: McpTransport = handle && transport.kind === 'http'
+      ? { ...transport, fetch: borrowingFetch(handle, MCP_DISCOVERY_CREDENTIAL_REQUEST) }
+      : transport;
+    const closeBorrowedClients = async () => {
+      const open = [...borrowedClients.values()];
+      borrowedClients.clear();
+      await Promise.all(open.map((c) => c.then((client) => client.close()).catch(() => {})));
+    };
+
     const includeList = cfg.include as readonly string[] | undefined;
     // The pin is read before connecting too, and a pinned name `include`
     // leaves out is refused here: the instance never exposes that tool, so its
@@ -300,15 +446,17 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         name: ctx.name,
         label: ctx.label,
         description: ctx.description,
-        transport,
+        transport: discoveryTransport,
         include,
         clientFactory: deps.clientFactory,
+        ...(clientFor ? { clientFor } : {}),
       });
     } catch (err) {
       // A credential the server rejects (HTTP 401 / 403 on connect, handshake
       // or tools/list) is a configuration fault on ADR-0097's configuration /
-      // operational split, like an unresolvable credentialRef and like the
-      // openapi provider's 401 on its spec fetch: retrying cannot make a wrong,
+      // operational split, like the openapi provider's 401 on its spec fetch
+      // (an unresolvable credentialRef never reaches this factory: the
+      // materializer degrades its instance first): retrying cannot make a wrong,
       // missing or under-scoped credential valid, and a degraded instance
       // retried with backoff reads as "server down", hiding the misconfiguration
       // the author has to fix. Credential-protected remote servers are the
@@ -379,7 +527,10 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     return {
       def: bundle.def,
       handlers: bundle.handlers,
-      close: bundle.close,
+      close: async () => {
+        await closeBorrowedClients();
+        await bundle.close();
+      },
       ...(credentialVerified ? { credentialVerified } : {}),
     };
   };

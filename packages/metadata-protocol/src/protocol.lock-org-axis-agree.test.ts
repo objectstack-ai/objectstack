@@ -171,8 +171,13 @@ describe('[#21716] pin 2 — an env-wide _lock: full row binds an organization w
                 expect({ code: err.code, status: err.status }, operation)
                     .toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
             }
-            // [ADR-0131 D6] Refused before the `_lock` gate: nothing is written.
-            expect(inserted).toEqual([]);
+            // [ADR-0131 D6] Refused before the `_lock` gate: no metadata row and
+            // no `item_locked` row is written. [#28355] Each refusal leaves its
+            // own `not_overridable` row in the audit trail, and nothing else.
+            expect(inserted.map((i) => [i.table, i.values.operation, i.values.code])).toEqual([
+                ['sys_metadata_audit', 'save', 'not_overridable'],
+                ['sys_metadata_audit', 'delete', 'not_overridable'],
+            ]);
         });
 
         it(`${kernel} kernel: an org-scoped publish and rollback are refused the same way (the shared write gate)`, async () => {

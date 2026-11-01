@@ -85,6 +85,12 @@ export const SysOrganization = ObjectSchema.create({
         { field: 'slug', required: true },
         { field: 'logo' },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Create a new organization (params: name, slug, optionally logo); the caller becomes its owner. Available only where the deployment runs several organizations.',
+      },
     },
     {
       name: 'update_organization',
@@ -110,6 +116,12 @@ export const SysOrganization = ObjectSchema.create({
         { field: 'slug', required: true, defaultFromRow: true },
         { field: 'logo', defaultFromRow: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Edit this organization\'s name, slug and logo (the record). Changing the slug changes the addresses that name the organization; use rename_organization to change only the name or logo.',
+      },
     },
     {
       name: 'delete_organization',
@@ -145,6 +157,12 @@ export const SysOrganization = ObjectSchema.create({
       requiresFeature: 'multiOrgEnabled',
       successMessage: 'Active organization switched',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Make this organization (the record) the caller\'s active organization, so the caller\'s later requests run in its context. Use when the user asks to switch to another organization they belong to.',
+      },
     },
     {
       // FOURTH mirror of `invite_user` (sys_user, sys_invitation, sys_member
@@ -197,6 +215,12 @@ export const SysOrganization = ObjectSchema.create({
         { field: 'email', objectOverride: 'sys_invitation', required: true },
         { field: 'role', objectOverride: 'sys_invitation', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Invite a person by email address to join this organization (the record) with a role (params: email, role). They join when they accept the invitation. The role options are only the roles the caller may grant.',
+      },
     },
     {
       // Current user leaves the org. Distinct from `delete_organization`
@@ -224,6 +248,14 @@ export const SysOrganization = ObjectSchema.create({
       confirmText: 'Leave this organization? You will lose access to its environments and members.',
       successMessage: 'You have left the organization',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Remove the caller from this organization (the record): they lose access to its environments and members. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       // Rename the organization: its `name` and `logo`, never its `slug`.
@@ -266,6 +298,12 @@ export const SysOrganization = ObjectSchema.create({
         { field: 'name', required: true, defaultFromRow: true },
         { field: 'logo', defaultFromRow: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Rename this organization or change its logo (the record; params: name, optionally logo). The slug stays as it is.',
+      },
     },
   ],
 

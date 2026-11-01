@@ -198,6 +198,9 @@ export function buildRecordDetailFields(
         // Beside `scale`, whose scale-0 grouping heuristic it overrides in the
         // number cell (objectui#11026).
         useGrouping: def.useGrouping,
+        // A percent field's read-only face: `plain` drops the percent cell's
+        // progress bar (objectstack#28255).
+        percentDisplay: (def as any).percentDisplay,
         format: def.format,
         // Served schemas key the target as `reference` (ObjectStack
         // convention, #2407), the only spelling read here.

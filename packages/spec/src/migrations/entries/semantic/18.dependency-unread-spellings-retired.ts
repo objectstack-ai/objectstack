@@ -7,8 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // reads. One family, one entry; both keys are in `RETIRED_KEYS_BY_MAJOR[18]`.
 export const entry: SemanticMigration = {
   id: 'dependency-unread-spellings-retired',
-  // No backticks in `surface`: build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'PackageDependency.optional (an entry of the marketplace snapshot manifestJson.dependencies[]) '
     + '/ AppManifest.dependencies (the bare-id list on the app install manifest)',

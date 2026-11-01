@@ -399,7 +399,9 @@ export function registerDegradedConnector(
  * degrade record and the `connector_action` refusal.
  */
 export function describeHold(hold: ConnectorHold): string {
-    return hold.kind === 'credential' ? `credential '${hold.ref}' is set again` : 'its declaration is edited';
+    if (hold.kind === 'credential') return `credential '${hold.ref}' is set again`;
+    if (hold.kind === 'connection') return 'an administrator connects it';
+    return 'its declaration is edited';
 }
 
 /** The body of {@link AutomationEngine.assertSameOriginOrFree}, moved unedited; that method's docblock is its contract. */

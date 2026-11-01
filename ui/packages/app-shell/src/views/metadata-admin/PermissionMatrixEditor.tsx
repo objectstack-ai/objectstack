@@ -89,7 +89,7 @@ import {
 } from '@object-ui/components';
 import { CapabilityMultiSelectField, parseCapabilityNames } from '@object-ui/fields';
 import { PageShell } from './PageShell.js';
-import { HistoryPanel } from './ResourceHistoryPage.js';
+import { HistoryPanel } from '../item-tools/ResourceHistoryPage.js';
 import { useMetadataClient, useMetadataTypes, type RichMetadataTypeEntry } from './useMetadata.js';
 // objectui#11773 — the package door's draft save sends the version it was built on.
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';

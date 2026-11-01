@@ -13,8 +13,6 @@ import type { SemanticMigration } from '../../types.js';
 // only the author knows which.
 export const entry: SemanticMigration = {
   id: 'dataset-member-field-expression-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface:
     'datasets[].dimensions[].field and datasets[].measures[].field (ui.DatasetDimensionSchema.field / '
     + 'ui.DatasetMeasureSchema.field) authored as anything but a column reference — a SQL expression '

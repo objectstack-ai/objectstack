@@ -12,4 +12,5 @@ export const STUDIO_ZH_ONLY_FAMILIES: readonly string[] = Object.freeze([
   'engine.flowNode.',
   'engine.enum.type.',
   'engine.packages.form.help.',
+  'engine.validation.spec.',
 ]);

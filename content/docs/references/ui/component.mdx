@@ -484,9 +484,9 @@ const result = ActionButtonPropsSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar field config `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` — the same block a list view's `calendar` declares; `startDateField` is required |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar config `{ startDateField, endDateField?, titleField?, colorField?, allDayField?, initialDate? }` — the same block a list view's `calendar` declares; `startDateField` is required |
 | **defaultView** | `Enum<'month' \| 'week' \| 'day'>` | optional | Initial view mode |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **data** | `any[]` | optional | Pre-fetched records — skips the internal fetch |
 | **staticData** | `any[]` | optional | Static inline records |
@@ -503,8 +503,9 @@ const result = ActionButtonPropsSchema.parse(data);
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
 | **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
+| **initialDate** | `string` | optional | Where the calendar opens: the month, week or day the active view mode shows that holds this date; omit it to open on today. A record anchor: `first_record` opens on the earliest start date (the startDateField value) among the records the view's filter selects, `next_record` on the earliest on or after the viewer's today (a `date` start field compares as a calendar day), and either opens on today when no record qualifies. Or a wrapped date-macro token, resolved each time the calendar opens: `{today}`, `{next_month_start}`, `{current_quarter_start}`, `{3_months_from_now}` (the full vocabulary is `DATE_MACRO_TOKENS` and the parameterised `DATE_MACRO_PARAM_RE` grammar in `@objectstack/spec/data`); a fixed calendar date is not accepted, because it goes stale as time passes. |
 
-### Nested Shape: `ObjectCalendarProps.filter[number]`
+### Nested Shape: `ObjectCalendarProps.filter[number][option 1]`
 
 View filter rule
 
@@ -513,6 +514,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectCalendarProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectCalendarProps.sort[number]`
 
@@ -644,6 +653,14 @@ Sort field and direction pair
 | **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the object's `fieldGroups`. Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `visibleWhen`, and a `true` `collapsible` / `collapsed`) |
 | **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … } \| { name: string; label?: string; description?: string; type?: string; … })[]` | optional | The section's fields, in order — each a field name, the form view's `{ field, … }` entry overriding that object field, or an inline form field `{ name, type, … }`. Omit only when `group` supplies the members |
 
+### Nested Shape: `ObjectFormProps.submitBehavior[kind='thank-you']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'thank-you'` | ✅ |  |
+| **title** | `string` | optional | Heading of the confirmation panel. May name a field of the submitted record as `{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` field, e.g. a case number): a hook-derived value never reaches an anonymous visitor. |
+| **message** | `string` | optional | Body of the confirmation panel. May name a field of the submitted record as `{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` field, e.g. a case number): a hook-derived value never reaches an anonymous visitor. |
+
 ### Nested Shape: `ObjectFormProps.submitBehavior[kind='redirect']`
 
 | Property | Type | Required | Description |
@@ -674,7 +691,7 @@ Sort field and direction pair
 | **objectName** | `string` | optional | Object this gantt binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| value \| schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Task order for the fetched bars — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration, the author face — the same block `ListViewSchema.gantt` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Task-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the four `NavigationModeSchema` values (`drawer` by default). The renderer's own default is `{ mode: 'drawer' }` when the key is absent |
@@ -711,7 +728,7 @@ Sort field and direction pair
 | **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
 | **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
 
-### Nested Shape: `ObjectGanttProps.filter[number]`
+### Nested Shape: `ObjectGanttProps.filter[number][option 1]`
 
 View filter rule
 
@@ -720,6 +737,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectGanttProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectGanttProps.sort[number]`
 
@@ -799,7 +824,7 @@ Sort field and direction pair
 | **emptyState** | `{ title?: string \| Record<string, string>; message?: string \| Record<string, string>; icon?: string; link?: object }` | optional | What the grid draws instead of an empty table: `{ title, message, icon, link }` — the list view's own empty-state shape |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Columns — all field-name strings, or all column entries `{ field, label?, width?, align?, hidden?, sortable?, … }`, the same union a list view's `columns` declares. One spelling per list: an array mixing strings and column objects is refused |
 | **fields** | `string[]` | optional | Field-name fallback the grid reads when `columns` is absent — bare field names (`['name', 'amount']`); write column decoration such as `label` or `width` on `columns` |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **defaultFilters** | `never` | optional | [REMOVED] `object-grid` property `defaultFilters` was removed in @objectstack/spec 18 (ADR-0087 D2) — it was the legacy second spelling of `filter`: the same rules, read only when `filter` lowered to nothing, so one intent had two spellings and a grid authoring both silently ignored this one. Use `filter`. Rename the key where `filter` is empty; the value (a ViewFilterRule array, `[{ field, operator, value }, ...]`) is unchanged. Where `filter` already has rules, delete this key: the grid never read it there. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **defaultSort** | `never` | optional | [REMOVED] `object-grid` property `defaultSort` was removed in @objectstack/spec 17 (ADR-0049) — it was the legacy second spelling of `sort`: a single `{ field, order }` pair read only when `sort` was absent, so one intent had two spellings and a grid authoring both silently ignored this one. Rename the key to `sort` and wrap the value in an array (`defaultSort: { field, order }` becomes `sort: [{ field, order }]`); the pair itself is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -861,7 +886,7 @@ Sort field and direction pair
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
-### Nested Shape: `ObjectGridProps.filter[number]`
+### Nested Shape: `ObjectGridProps.filter[number][option 1]`
 
 View filter rule
 
@@ -870,6 +895,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectGridProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectGridProps.sort[number]`
 
@@ -996,7 +1029,7 @@ Sort field and direction pair
 | **objectName** | `string` | optional | Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead |
 | **groupBy** | `string` | optional | Field whose values become the board columns |
 | **columns** | `string[] \| { id: string; title: string; cards?: object[]; limit?: integer; … }[]` | optional | Swimlane definitions — all lane objects `{ id, title, cards?, limit?, className?, collapsed? }` (one per `groupBy` value), or all bare value strings (drawn only on a board with no `groupBy`). NOT a field projection; one spelling per list |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **limit** | `integer` | optional | Maximum number of records loaded onto the board (row cap); lowered to the query's top-level `$top` (renderer default 100). The component-level `dataSource.limit` wins when both are set; a bound view's `pagination.pageSize` fills this key only when it is unset — and on this face unset is the whole rule, because every cap this key accepts is one the binding gate already treats as authored |
 | **data** | `any[]` | optional | Static inline cards — bypasses the object query |
 | **cardTitle** | `string` | optional | Field rendered as each card title |
@@ -1020,7 +1053,7 @@ Sort field and direction pair
 | **className** | `string` | optional | CSS class names applied to the lane |
 | **collapsed** | `boolean` | optional | Whether the lane first renders collapsed — a title spine with its cards withheld, which the viewer can reopen |
 
-### Nested Shape: `ObjectKanbanProps.filter[number]`
+### Nested Shape: `ObjectKanbanProps.filter[number][option 1]`
 
 View filter rule
 
@@ -1029,6 +1062,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectKanbanProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectKanbanProps.grouping`
 
@@ -1066,7 +1107,7 @@ View filter rule
 | **objectName** | `string` | optional | Object this map binds to — the THIRD record source `getDataConfig` resolves, after `data` and `staticData`. Optional because the component-level `dataSource` binding can supply the object instead |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| value \| schema), read FIRST by `getDataConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `getDataConfig`, wrapped into a `{ provider: 'value' }` config |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Marker order for the fetched records — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map field config, the author face — the same block `ListViewSchema.map` declares, and the one the renderer validates this node against. Taken WHOLE when present: the flat top-level spelling beside it is ignored |
 | **mapStyle** | `string` | optional | MapLibre style URL or spec, overriding the public demo tiles. Read before `map.style`; NOT the base node `style`, which is an inline CSS record |
@@ -1095,7 +1136,7 @@ View filter rule
 | **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
 | **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
 
-### Nested Shape: `ObjectMapProps.filter[number]`
+### Nested Shape: `ObjectMapProps.filter[number][option 1]`
 
 View filter rule
 
@@ -1104,6 +1145,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectMapProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectMapProps.sort[number]`
 
@@ -1210,7 +1259,7 @@ Sort field and direction pair
 | **icon** | `string` | optional | Lucide icon name drawn in the metric tile header, inside the `colorVariant`-tinted square. Read on this component — `ObjectMetricWidget` forwards it to `MetricWidget`, which resolves it with `getLazyIcon` (the `LazyIcon` module: kebab-case or PascalCase, degrading to the `Database` glyph on an unknown name). |
 | **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Icon container color variant |
 | **aggregate** | `{ field?: string; function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; groupBy?: string \| object }` | optional | Aggregation run against the object: `{ field?, function, groupBy? }` — `function` one of count / sum / avg / min / max / count_distinct (`field` needed for all but count), `groupBy` a field name or a `{ field, dateGranularity }` node, absent for one number over every row |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **format** | `string` | optional | Number format pattern (e.g. '0,0', '$0,0', '0%') |
 | **currency** | `string` | optional | ISO currency code (e.g. 'USD') — enables currency formatting |
 | **prefix** | `string` | optional | Static prefix before the formatted value |
@@ -1221,7 +1270,7 @@ Sort field and direction pair
 | **trend** | `{ value: number; label?: string \| Record<string, string>; direction?: Enum<'up' \| 'down' \| 'neutral'> }` | optional | Static trend badge `{ value, label?, direction? }` — `value` painted as a percentage, `direction` up / down / neutral. A `compareTo`-derived trend replaces it |
 | **drillDown** | `{ enabled?: boolean; title?: string; target?: Enum<'drawer' \| 'dialog' \| 'navigate'>; columns?: string[]; … }` | optional | Click-through drill config `{ enabled?, title?, target?, columns?, maxRows?, report? }` — opens the records behind the number, scoped by the metric's own `filter` — or draws the report `report` defines; a present block is on unless `enabled: false`. `filter` and `mode` are refused: a metric tile has no click context and no row |
 | **compareTo** | `{ kind: Enum<'previousPeriod' \| 'previousYear'> }` | optional | Period-over-period comparison `{ kind }` — `previousPeriod` or `previousYear`, shifting the date macros in the tile's own `filter`. `dimension` is refused: this tile never reads a dataset time dimension |
-| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) or neutral (no good/bad colour). Colours the trend badge, computed (`compareTo`) or static (`trend`); undeclared keeps rise green, fall red |
+| **polarity** | `Enum<'higher' \| 'lower' \| 'neutral'>` | optional | Which direction of change is good news: higher (rise green, fall red), lower (fall green, rise red) or neutral (no good/bad colour). Colours the trend badge, computed (`compareTo`) or static (`trend`); undeclared keeps rise green, fall red. The badge and polarity read the aggregate before `invert`, so declare polarity against the raw value: an error rate shown as uptime is lower |
 
 ### Nested Shape: `ObjectMetricProps.aggregate`
 
@@ -1231,7 +1280,7 @@ Sort field and direction pair
 | **function** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | ✅ | Aggregation function — `count`, `sum`, `avg`, `min`, `max` or `count_distinct` |
 | **groupBy** | `string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string }` | optional | Field the rows are grouped by, or a `{ field, dateGranularity }` date-bucket node. Omit it for the one number over every row (`_all`) |
 
-### Nested Shape: `ObjectMetricProps.filter[number]`
+### Nested Shape: `ObjectMetricProps.filter[number][option 1]`
 
 View filter rule
 
@@ -1240,6 +1289,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectMetricProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectMetricProps.trend`
 
@@ -1277,7 +1334,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | optional | Object this timeline binds to. Optional because the component-level `dataSource` binding can supply the object instead — this block registers through `ElementDataSourceGate`, which lowers the binding onto this key before the renderer sees the node |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline configuration, the author face — the same block `ListViewSchema.timeline` declares: `{ startDateField, endDateField, titleField, groupByField, colorField, scale }`. The flat top-level spellings beside it are the runtime handoff, not a second authoring spelling |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Row order for the fetched entries — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array` |
 | **limit** | `integer` | optional | Maximum number of records loaded onto the rail (row cap); lowered to the query's top-level `$top` (renderer default 100). A timeline renders one rail with no pagination control, so this is the author's window rather than a page size |
 | **data** | `any[]` | optional | Pre-fetched records — read FIRST as the rail's row source, ahead of the data-scope binding and the fetch, and composed into entries through the same `timeline` field bindings a fetched row takes; authoring it suppresses the object query entirely. Distinct from `items`, which is the already-composed entry shape and wins over this key when both are written |
@@ -1302,7 +1359,7 @@ View filter rule
 | **colorField** | `string` | optional | Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color |
 | **scale** | `Enum<'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional (default: `"week"`) | Default timeline scale |
 
-### Nested Shape: `ObjectTimelineProps.filter[number]`
+### Nested Shape: `ObjectTimelineProps.filter[number][option 1]`
 
 View filter rule
 
@@ -1311,6 +1368,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectTimelineProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectTimelineProps.sort[number]`
 
@@ -1367,7 +1432,7 @@ Sort field and direction pair
 | **objectName** | `string` | optional | Object this tree binds to — the THIRD record source `resolveRecordSourceConfig` resolves, after `data` and `staticData`. Optional because either of the first two rungs resolves the source without it: `data` can name the object itself (`{ provider: 'object', object }`) and `staticData` needs none. ⚠️ NOT supplied by the component-level `dataSource` binding the sibling blocks name — this renderer registers no such gate |
 | **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source binding (ViewDataSchema — discriminated on `provider`: object \| value \| schema), read FIRST by `resolveRecordSourceConfig`. Static inline rows live at `{ provider: 'value', items: [...] }` or at `staticData`; the bare-array shortcut is refused |
 | **staticData** | `any[]` | optional | Inline records — read SECOND by `resolveRecordSourceConfig`, wrapped into a `{ provider: 'value' }` config |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration, the author face — the same block `ListViewSchema.tree` declares: `{ parentField?, labelField?, fields?, defaultExpandedDepth? }`. `parentField` auto-detects from the object schema when omitted |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Row-click navigation config — the same block `ListViewSchema.navigation` declares (`{ mode, size, openNewTab, preventNavigation }`), `mode` one of the four `NavigationModeSchema` values (`drawer` by default) |
 
@@ -1393,7 +1458,7 @@ Sort field and direction pair
 | **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
 | **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
 
-### Nested Shape: `ObjectTreeProps.filter[number]`
+### Nested Shape: `ObjectTreeProps.filter[number][option 1]`
 
 View filter rule
 
@@ -1402,6 +1467,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `ObjectTreeProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `ObjectTreeProps.tree`
 
@@ -1823,7 +1896,7 @@ Type: `string`
 | **readonly** | `boolean` | optional | Render the grid read-only: cells locked, no Save button, and no adding or removing lines (renderer default: editable) |
 | **minRows** | `number` | optional | Minimum number of rows |
 | **maxRows** | `number` | optional | Maximum number of rows |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional criteria for the child rows — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the parent relationship condition, never substituted for it: it can only narrow this record's lines |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Additional criteria for the child rows — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the parent relationship condition, never substituted for it: it can only narrow this record's lines |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Load order for the child rows — the SortItem array form `[{ field, order }, ...]` (renderer default: storage order) |
 | **limit** | `integer` | optional | Row cap for the child fetch (renderer default: 500). The grid has no pagination, so this is the window of rows that are editable and saved together |
 
@@ -1852,7 +1925,7 @@ Type: `string`
 | **readonlyWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`). |
 | **requiredWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD's own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing. |
 
-### Nested Shape: `RecordLineItemsProps.filter[number]`
+### Nested Shape: `RecordLineItemsProps.filter[number][option 1]`
 
 View filter rule
 
@@ -1861,6 +1934,14 @@ View filter rule
 | **field** | `string` | ✅ | Field name to filter on |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `RecordLineItemsProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
 
 ### Nested Shape: `RecordLineItemsProps.sort[number]`
 
@@ -1962,11 +2043,11 @@ Sort field and direction pair
 | **objectName** | `string` | ✅ | Related object name (e.g., "task", "opportunity") |
 | **relationshipField** | `string` | ✅ | Field on related object that points to this record (e.g., "account_id") |
 | **relationshipValueField** | `string` | optional (default: `"id"`) | Parent-record field whose value relationshipField stores (default 'id'; e.g. 'name' for name-keyed junctions). |
-| **parentDataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … }` | optional | The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page's record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent. |
+| **parentDataSource** | `{ object: string; view?: string; filter?: (object \| object)[]; sort?: object[]; … }` | optional | The PARENT record this related list hangs off, bound by a query of its own: an object binding `{ object, view?, filter?, sort?, limit? }`, the shape `dataSource` takes. Read by the single-record rule: the FIRST row of the bound set by its `sort` is the parent (declare `limit: 1` to say one row is meant), and when no row answers, the block renders a loud absence, never an empty list, which would read as "this record has no related records". `relationshipValueField` is read on that row. When this key is absent, the record page's record context remains the parent. The node-level `dataSource` on this block keeps its published meaning, the CHILD rows the list draws (it fills `objectName`, `columns`, `filter`, `sort` and `limit`), and is never read as the parent. |
 | **columns** | `string[] \| { field: string; label?: string \| Record<string, string>; width?: number; align?: Enum<'left' \| 'center' \| 'right'>; … }[]` | optional | Fields to display in the related list — either plain field-name strings, or the same per-column entries a saved list view declares (`ListColumn`: `field`, plus `label`, `width`, `align`, `hidden`, `sortable`, `summary`, …). A view-supplied list may arrive in the `ListColumn` spelling: objectui composes a saved view's `columns` onto this block verbatim, and this key declares the SAME union as `listViews[].columns`. One spelling per list — the two arms are exclusive, so an array mixing strings and column objects is refused. Optional: when omitted, columns derive from the related object's highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns (field-name strings only) → this inline list. |
 | **sort** | `string \| { field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order for related records |
 | **limit** | `integer` | optional (default: `5`) | Number of records to display initially |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria for related records |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Additional filter criteria for related records |
 | **title** | `string \| Record<string, string>` | optional | Custom title for the related list |
 | **showViewAll** | `boolean` | optional (default: `true`) | Show "View All" link to see all related records |
 | **actions** | `string[]` | optional | Action IDs available for related records |
@@ -1982,7 +2063,7 @@ Sort field and direction pair
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object to query |
 | **view** | `string` | optional | Named view to apply |
-| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
+| **filter** | `({ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] } \| { or: object[] })[]` | optional | Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array` |
 | **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order |
 | **limit** | `integer` | optional | Max records to display |
 
@@ -2005,7 +2086,7 @@ Sort field and direction pair
 | **link** | `boolean` | optional | Functions as the primary navigation link (triggers View navigation) |
 | **action** | `string` | optional | Registered Action ID to execute when clicked |
 
-### Nested Shape: `RecordRelatedListProps.filter[number]`
+### Nested Shape: `RecordRelatedListProps.filter[number][option 1]`
 
 View filter rule
 
@@ -2015,11 +2096,19 @@ View filter rule
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
 | **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
 
+### Nested Shape: `RecordRelatedListProps.filter[number][option 2]`
+
+[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the last 7 days. One level only: its members are flat rules. No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads (the list reports a malformed filter and shows no rows).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **or** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | ✅ | The rules of which ANY may match: a non-empty array of flat filter rules `{ field, operator, value }`, each judged exactly as a rule at the top level of the filter. A group cannot hold a group. |
+
 ### Nested Shape: `RecordRelatedListProps.add`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **picker** | `{ object: string; valueField?: string; labelField?: string; filter?: object[] }` | ✅ | Where the Add affordance sources records from. |
+| **picker** | `{ object: string; valueField?: string; labelField?: string; filter?: (object \| object)[] }` | ✅ | Where the Add affordance sources records from. |
 | **linkField** | `string` | optional | Field on `objectName` that stores the picked record id (junction case). Omit for a 1:m re-parent. |
 | **label** | `string \| Record<string, string>` | optional | Label for the Add button (default "Add"). |
 

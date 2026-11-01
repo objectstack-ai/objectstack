@@ -26,7 +26,10 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
+import * as specApi from '@objectstack/spec/api';
+import { PublicFormSubmitResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server';
+import { REST_ROUTE_LEDGER } from './rest-route-ledger';
 
 // [#10126] Pay the first transform of this dist-resolved workspace dep at MODULE
 // LOAD, as `public-form-routes.test.ts` does for the same routes.
@@ -162,5 +165,130 @@ describe('[#22437] POST /forms/:slug/submit answers the created id, and nothing 
     expect('data' in body).toBe(false);
     expect(typeof body.id).toBe('string');
     expect(body.id).not.toBe('');
+  });
+});
+
+// ── [#28005, ruling B] The thank-you panel's named fields ───────────────────
+//
+// The one widening of the answer above: when the form's `thank-you` panel names
+// fields of the record as `{{record.field_name}}` (`thankYouRecordFieldNames`),
+// the answer carries `fields`, holding exactly those fields' stored values. A
+// name survives only when, AT ANSWER TIME, it is an own field of the object
+// whose type is in `RUNTIME_OWNED_FIELD_TYPES` (today `autonumber`), and the
+// row `createData` answered carries it as a string or a number. Every answer is
+// parsed with `PublicFormSubmitResponseSchema` (strict), the schema the route
+// ledger names for this route.
+
+const CASE_NUMBER = 'CASE-SYNTH-0042';
+
+/** A form whose thank-you panel names `names`, on an object declaring `fields`. */
+function tokenProtocol(opts: {
+  message: string;
+  fields?: Record<string, unknown>;
+  record?: Record<string, unknown>;
+}) {
+  const view = formView();
+  (view.config as any).submitBehavior = { kind: 'thank-you', title: 'Thanks', message: opts.message };
+  const object = {
+    ...requestObject,
+    fields: { ...requestObject.fields, case_number: { type: 'autonumber', label: 'Case number' }, ...opts.fields },
+  };
+  const record = opts.record ?? { ...CREATE_ANSWER.record, case_number: CASE_NUMBER };
+  return {
+    getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
+    getMetaTypes: vi.fn().mockResolvedValue([]),
+    getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+      if (type === 'view') return [view];
+      if (type === 'object') return [object];
+      return [];
+    }),
+    createData: vi.fn().mockResolvedValue({ ...CREATE_ANSWER, record }),
+  };
+}
+
+async function submitThrough(protocol: ReturnType<typeof tokenProtocol>) {
+  const rest = new RestServer(mockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+  (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+  rest.registerRoutes();
+  const submit = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/forms/:slug/submit'))!;
+  const res = mockRes();
+  await submit.handler({ params: { slug: 'answer' }, body: { ...SUBMITTED } } as any, res);
+  // Lit: the write ran, and the answer is the declared shape (strict: no third key).
+  expect(protocol.createData).toHaveBeenCalledTimes(1);
+  expect(res.statusCode).toBe(201);
+  expect(PublicFormSubmitResponseSchema.safeParse(res.body).success, JSON.stringify(res.body)).toBe(true);
+  return res.body as Record<string, unknown>;
+}
+
+/** No stored value other than the id and `allowed` reaches the wire. */
+function expectNoOtherStoredValue(body: unknown, allowed: readonly string[] = []) {
+  const wire = JSON.stringify(body);
+  for (const leak of [DERIVED, STAFF, DEFAULTED, 'droppedFields', 'record', 'someone@example.test', '2026-01-01T00:00:00Z']) {
+    if (allowed.includes(leak)) continue;
+    expect(wire, `${leak} must not reach the anonymous caller`).not.toContain(leak);
+  }
+}
+
+describe('[#28005] POST /forms/:slug/submit answers the engine-generated fields its thank-you panel names', () => {
+  it('a panel naming an autonumber field answers { id, fields: { that_field } }, and nothing else stored', async () => {
+    const body = await submitThrough(tokenProtocol({ message: 'Your case number is {{record.case_number}}.' }));
+    expect(body).toEqual({ id: CREATED_ID, fields: { case_number: CASE_NUMBER } });
+    expect(Object.keys(body)).toEqual(['id', 'fields']);
+    expectNoOtherStoredValue(body);
+  });
+
+  it('a name in the title and the message is answered once', async () => {
+    const protocol = tokenProtocol({ message: 'Again: {{record.case_number}}' });
+    const view = (await protocol.getMetaItems({ type: 'view' }))[0] as any;
+    view.config.submitBehavior.title = 'Case {{record.case_number}}';
+    const body = await submitThrough(protocol);
+    expect(body).toEqual({ id: CREATED_ID, fields: { case_number: CASE_NUMBER } });
+  });
+
+  it('a panel with no token answers { id } only', async () => {
+    const body = await submitThrough(tokenProtocol({ message: 'We received your message.' }));
+    expect(body).toEqual({ id: CREATED_ID });
+    expect(Object.keys(body)).toEqual(['id']);
+    expectNoOtherStoredValue(body);
+  });
+
+  it('drop rule — type: a name whose field was retyped to text after publish is dropped', async () => {
+    const body = await submitThrough(tokenProtocol({
+      message: 'Your case number is {{record.case_number}}.',
+      fields: { case_number: { type: 'text', label: 'Case number' } },
+    }));
+    expect(body).toEqual({ id: CREATED_ID });
+  });
+
+  it('drop rule — type: a name that is no own field of the object (a system column) is dropped, the rest kept', async () => {
+    const body = await submitThrough(tokenProtocol({
+      message: 'Filed {{record.created_at}} by {{record.owner_id}} as {{record.case_number}} ({{record.constructor}})',
+    }));
+    expect(body).toEqual({ id: CREATED_ID, fields: { case_number: CASE_NUMBER } });
+    expectNoOtherStoredValue(body);
+  });
+
+  it('drop rule — value: a name the answered row does not carry (masked or stripped) is dropped', async () => {
+    const { case_number: _omitted, ...withoutCaseNumber } = { ...CREATE_ANSWER.record, case_number: CASE_NUMBER };
+    const body = await submitThrough(tokenProtocol({
+      message: 'Your case number is {{record.case_number}}.',
+      record: withoutCaseNumber,
+    }));
+    expect(body).toEqual({ id: CREATED_ID });
+  });
+
+  it('drop rule — value: a stored value that is neither a string nor a number is dropped, never answered as null', async () => {
+    const body = await submitThrough(tokenProtocol({
+      message: 'Your case number is {{record.case_number}}.',
+      record: { ...CREATE_ANSWER.record, case_number: null },
+    }));
+    expect(body).toEqual({ id: CREATED_ID });
+  });
+
+  it('the route ledger names PublicFormSubmitResponseSchema for this route, the schema parsed above', () => {
+    const row = REST_ROUTE_LEDGER.find((e) => e.route === 'POST /api/v1/forms/:slug/submit');
+    expect(row, 'the submit row must exist in REST_ROUTE_LEDGER').toBeDefined();
+    expect(row!.responseSchema).toBe('PublicFormSubmitResponseSchema');
+    expect((specApi as unknown as Record<string, unknown>)[row!.responseSchema!]).toBe(PublicFormSubmitResponseSchema);
   });
 });

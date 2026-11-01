@@ -7,8 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // conversion: nothing written can be rewritten into the cube the author meant.
 export const entry: SemanticMigration = {
   id: 'analytics-query-empty-cube-name-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'AnalyticsQueryRequestSchema.cube (the body of POST /analytics/query and POST /analytics/sql), '
     + 'sent as the EMPTY string',

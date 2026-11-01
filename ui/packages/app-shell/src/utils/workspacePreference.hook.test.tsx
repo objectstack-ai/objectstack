@@ -18,7 +18,7 @@ import * as React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, act, fireEvent } from '@testing-library/react';
 import {
-  RECORD_TIMELINE_COLUMN_PREFERENCE,
+  RECORD_RELATED_COLUMN_PREFERENCE,
   objectPreferenceScope,
   useWorkspacePreference,
   workspacePreferenceStorageKey,
@@ -28,10 +28,10 @@ import {
 
 const LEAD = objectPreferenceScope('crm_lead');
 const PRODUCT = objectPreferenceScope('crm_product');
-const LEAD_KEY = workspacePreferenceStorageKey(RECORD_TIMELINE_COLUMN_PREFERENCE, LEAD);
+const LEAD_KEY = workspacePreferenceStorageKey(RECORD_RELATED_COLUMN_PREFERENCE, LEAD);
 
 function Probe({ id, scope, fallback }: { id: string; scope: WorkspacePreferenceScope; fallback: PreferenceSwitch }) {
-  const [value, setValue] = useWorkspacePreference(RECORD_TIMELINE_COLUMN_PREFERENCE, scope, fallback);
+  const [value, setValue] = useWorkspacePreference(RECORD_RELATED_COLUMN_PREFERENCE, scope, fallback);
   return (
     <button type="button" data-testid={id} onClick={() => setValue(value === 'on' ? 'off' : 'on')}>
       {value}

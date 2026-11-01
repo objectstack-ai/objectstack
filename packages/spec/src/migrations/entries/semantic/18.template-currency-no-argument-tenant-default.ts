@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // cannot answer is which currency the author meant.
 export const entry: SemanticMigration = {
   id: 'template-currency-no-argument-tenant-default',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'a template hole {{ amount | currency }} with no argument — email_template subject / bodyHtml / '
     + 'bodyText, flow text slots (notify, http, screen, end), action and bulk-action confirmText / successMessage',
   replacement: 'nothing, where the amount is in the organization\'s default currency (Setup → Localization, the '

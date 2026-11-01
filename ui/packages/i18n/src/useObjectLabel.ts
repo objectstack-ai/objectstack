@@ -623,6 +623,22 @@ export function useObjectLabel() {
     },
 
     /**
+     * Resolve the translated label of the submit button in an action's param
+     * dialog — its declared `submitText` (`@objectstack/spec` `ActionSchema`),
+     * the verb the button performs ("Send", "Log Call").
+     * Convention: `{ns}.objects.{objectName}._actions.{actionName}.submitText`;
+     * with no key object, `{ns}.globalActions.{actionName}.submitText`. Falls
+     * back to the metadata's literal string; undefined when nothing resolves,
+     * so the dialog keeps its default "Confirm".
+     */
+    actionSubmitText: (objectName: string | undefined, actionName: string | undefined, fallback?: string) => {
+      const fb = fallback ?? '';
+      if (!actionName) return fb || undefined;
+      const resolved = resolve(actionSuffixes(objectName, actionName, 'submitText'), fb);
+      return resolved || undefined;
+    },
+
+    /**
      * Resolve the translated reason a greyed action gives — its declared
      * `disabledReason` (objectstack#26619), shown while its `disabled`
      * predicate is TRUE. Convention:

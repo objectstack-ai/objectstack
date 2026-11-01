@@ -141,6 +141,12 @@ export const SysUser = ObjectSchema.create({
         // field, so the gate narrows this dialog and no other picker.
         { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS], helpText: MEMBERSHIP_ROLE_PARAM_HELP },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Invite a person by email address to join the current organization with a role (params: email, role). They join when they accept the invitation. Use when the user asks to invite someone who is not a member yet; the role options are only the roles the caller may grant.',
+      },
     },
 
     // ── Platform admin operations (require better-auth `admin` plugin) ─
@@ -206,6 +212,14 @@ export const SysUser = ObjectSchema.create({
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Ban a user (the record; optionally banReason): they are signed out and cannot sign in until unbanned. Platform administrators only. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       name: 'unban_user',
@@ -222,6 +236,14 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'User unbanned',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Lift the ban on a banned user (the record), so they can sign in again. Platform administrators only. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       // ADR-0069 D2 — clear a brute-force lockout early (locked_until auto-
@@ -249,6 +271,14 @@ export const SysUser = ObjectSchema.create({
       recordIdParam: 'userId',
       successMessage: 'Account unlocked',
       refreshAfter: true,
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Release a user (the record) from a sign-in lockout before it expires, at the password and the second-factor stage, and reset the failed-attempt count. Platform administrators only. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
     {
       // #2766 V1 — a platform admin can add a login-capable teammate without
@@ -524,6 +554,14 @@ export const SysUser = ObjectSchema.create({
           helpText: 'The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain.',
         },
       ],
+      // ADR-0011 identity-actions note, bucket C: exposed, and the
+      // confirmation is never relaxed.
+      ai: {
+        exposed: true,
+        description:
+          'Set the manager a user (the record) reports to (param: managerId, a user in the same organization). The reporting chain drives approval routing and the own_and_reports record scope. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
     },
 
     // ── Self-service actions (the row owner only) ─────────────────────
@@ -564,6 +602,12 @@ export const SysUser = ObjectSchema.create({
         { field: 'name', required: false, defaultFromRow: true },
         { field: 'image', required: false, defaultFromRow: true },
       ],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Update the caller\'s own display name and profile image (the record must be the caller\'s own user). Use when the user asks to change how their name or picture appears.',
+      },
     },
     {
       name: 'change_my_password',
@@ -617,6 +661,12 @@ export const SysUser = ObjectSchema.create({
       successMessage: 'Verification email sent — check your inbox.',
       refreshAfter: false,
       params: [],
+      // ADR-0011 identity-actions note, bucket E: exposed by plain declaration.
+      ai: {
+        exposed: true,
+        description:
+          'Send the caller another email-address verification message, for their own account whose email address is not verified yet.',
+      },
     },
     {
       name: 'delete_my_account',
@@ -683,6 +733,8 @@ export const SysUser = ObjectSchema.create({
           { path: 'backupCodes', label: 'Backup Codes', format: 'code-list' },
         ],
       },
+      // ADR-0011 identity-actions note, bucket H: human-only, no `ai` block.
+      // It takes the user's password and answers a new sign-in factor.
     },
     {
       name: 'disable_two_factor',

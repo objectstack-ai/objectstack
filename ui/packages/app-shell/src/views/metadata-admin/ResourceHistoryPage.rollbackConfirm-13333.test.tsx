@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../../scripts/js-comment-mask.mjs';
-import { HistoryPanel } from './ResourceHistoryPage';
+import { HistoryPanel } from '../item-tools/ResourceHistoryPage';
 
 const mask: (source: string) => string = maskComments;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -93,7 +93,7 @@ describe('Setup metadata surfaces call no native confirm() (objectui#13333)', ()
   const FILES = [
     'ResourceEditPage.tsx',
     'MetadataTypeActions.tsx',
-    'ResourceHistoryPage.tsx',
+    '../item-tools/ResourceHistoryPage.tsx',
     'datasource/DatasourceResourcePage.tsx',
   ];
   // A call of the global: bare `confirm(`, or `window.` / `globalThis.` before

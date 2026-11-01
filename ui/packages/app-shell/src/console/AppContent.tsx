@@ -14,7 +14,7 @@ import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
 import { toast } from 'sonner';
-import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
+import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
 import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
@@ -37,6 +37,7 @@ import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { useSignedInUserLocale } from '../hooks/useUserLocale.js';
 import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view';
+import { isPhoneViewportNow } from '../hooks/usePhoneViewport.js';
 import { RECORD_DRAWER_PARAM, RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM } from '../urlParams.js';
 import { appAddressSegment, appRouteSegment, canonicalAppPathname, matchAppBySegment } from '../utils/appRoute.js';
 import { resolveHref, type NavTemplateContext } from '@object-ui/layout';
@@ -386,6 +387,18 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // the same app, and the recent-items tracker below matches it against the URL
   // (objectui#11818).
   const appSegment = appAddressSegment(apps, matchedApp) ?? appName ?? appRouteSegment(activeApp);
+
+  // objectstack#27627 — entering an app loads its metadata bundle, and
+  // re-entering it revalidates the one held (`loadAppBundle`): from then on the
+  // by-name metadata reads of everything the app reaches are answered from it.
+  // Only the app the URL names: a pseudo-route's fallback app is not entered.
+  // A host adapter without the bundle keeps every by-name read.
+  const bundleAppName: string | undefined = typeof matchedApp?.name === 'string' ? matchedApp.name : undefined;
+  useEffect(() => {
+    const load = dataSource?.loadAppBundle;
+    if (!bundleAppName || typeof load !== 'function') return;
+    void load.call(dataSource, bundleAppName);
+  }, [dataSource, bundleAppName]);
 
   // objectstack-ai/objectstack#26183 — a URL that reached the app through its
   // NAME alias moves to the app's one address, path, search, hash and history
@@ -763,9 +776,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     runner.registerHandler('crud_success', async (action: any) => {
       closeRecordForm();
       setRefreshKey(k => k + 1);
-      // `warnings`: the save's own advisory warning lines, which this one
-      // toast carries (objectstack-ai/objectstack#27999).
-      toastRecordSave(toast, action.params?.message ?? 'Record saved successfully', action.params?.warnings);
+      // `warnings` / `notice`: the save's own advisory warning lines and its
+      // hook's notice, which this one toast carries
+      // (objectstack-ai/objectstack#27999, objectstack-ai/objectstack#28252).
+      toastRecordSave(toast, action.params?.message ?? 'Record saved successfully', {
+        warnings: action.params?.warnings,
+        notice: action.params?.notice,
+      });
       return { success: true, reload: true };
     });
 
@@ -909,10 +926,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     };
   }, [dataSource, recordFormParam, formObjectName]);
 
-  const handleCrudSuccess = useCallback((saved?: any, warnings?: string[]) => {
+  const handleCrudSuccess = useCallback((saved?: any, feedback?: RecordSaveFeedback) => {
     executeAction({
       type: 'crud_success',
-      params: { message: recordSaveMessage(saved), warnings },
+      params: { message: recordSaveMessage(saved), warnings: feedback?.warnings, notice: feedback?.notice },
     });
   }, [executeAction, recordSaveMessage]);
 
@@ -933,20 +950,22 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     // the child's open related lists refetch on their own via the
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
-    const warnings = answerWarningClaim.current?.take(saved) ?? [];
+    const feedback = answerWarningClaim.current?.take(saved);
     if (isChildFormTask) {
-      toastRecordSave(toast, recordSaveMessage(saved), warnings);
+      toastRecordSave(toast, recordSaveMessage(saved), feedback);
       closeRecordForm();
       return;
     }
-    handleCrudSuccess(saved, warnings);
+    handleCrudSuccess(saved, feedback);
     if (editingRecord || !currentObjectDef) return;
     const target = resolvePostCreateTarget({
       objectName: currentObjectDef.name,
       baseUrl: appSegment ? `/apps/${appSegment}` : '',
       pathname: location.pathname,
       search: window.location.search,
-      surface: deriveRecordSurface(currentObjectDef),
+      // On a phone the record is always a page (objectstack#27058): the
+      // spec's own rule, asked with the viewport.
+      surface: deriveRecordSurface(currentObjectDef, isPhoneViewportNow() ? { viewport: 'mobile' } : {}),
       recordId: saved?.id ?? saved?._id,
     });
     if (target.kind === 'none') return;

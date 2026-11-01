@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // own entry because the surface an author rewrites is a CEL predicate string.
 export const entry: SemanticMigration = {
   id: 'cel-predicate-one-value-comparand-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
     + 'CEL predicate whose comparison is handed something other than one value: an ordering '

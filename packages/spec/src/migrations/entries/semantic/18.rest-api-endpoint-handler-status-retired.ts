@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'rest-api-endpoint-handler-status-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'RestApiEndpoint.handlerStatus (the implemented / stub / planned marker an '
     + 'endpoint in a REST API plugin route registration could carry), the '

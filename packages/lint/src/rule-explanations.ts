@@ -3302,8 +3302,9 @@ const CHART_AXIS_NOT_SELECTED_EXPLANATION: RuleExplanation = {
       'chart drawn is unaffected. Advisory: the selection may legitimately be widened at runtime. A ' +
       'query position is never reported: it IS the selection, or the query itself.',
     'The selection is per surface. On a page chart it is `values`, the measure set the query asks ' +
-      'for. On a report it is the chart\'s own `chart.yAxis`: the embedded chart queries ' +
-      'exactly one dimension × one measure and derives ONE series, while `report.values` is the ' +
+      'for. On a report it is the chart\'s own `chart.yAxis`: the embedded chart queries its ' +
+      '`chart.xAxis` dimension (and its `chart.seriesBy` split, when set) × that one measure and, ' +
+      'without a split, derives ONE series, while `report.values` is the ' +
       'selection of the table beneath it. So a report\'s `chart.yAxis` is never reported — a chart ' +
       'cannot fail to select what it queries — and a `chart.series[].name` override lands only when ' +
       'it names `chart.yAxis`. With `chart.seriesBy` set the chart derives one series per value of ' +
@@ -4706,7 +4707,12 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       'variable in the open tier) and never stored in metadata (ADR-0097 §3), called from a ' +
       '`connector_action` node. The fix line routes by shape, to a variant the connector auth schema ' +
       'really has: a header credential to `bearer` or a header `api-key`, a query-string key to ' +
-      '`api-key` with `paramName`. A credential in `connectorConfig.input` is dropped instead, ' +
+      '`api-key` with `paramName`. The schema\'s other kinds also take their secret only as a ' +
+      '`credentialRef`, but none is a home a literal moves into by shape: `oauth2` (grant ' +
+      '`authorization_code` or `client_credentials`) and `app-credential` (vendor `feishu`, ' +
+      '`dingtalk` or `wecom`) carry a grant whose token the server obtains per dispatch, and until it ' +
+      'runs that grant such an instance is held degraded and calls no upstream; `signed` signs each ' +
+      'request with its key. A credential in `connectorConfig.input` is dropped instead, ' +
       'because the connector authenticates through its own `auth`. No variant carries a secret in a ' +
       'url path, so a url path is not judged and no fix line promises one.',
     // [#22161] What the fix line stopped saying. The variants are held to the

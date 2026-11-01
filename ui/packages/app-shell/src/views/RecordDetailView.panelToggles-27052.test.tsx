@@ -7,36 +7,36 @@
  */
 
 /**
- * objectstack#27052 — the record page's panel toggles: whether the timeline
- * and the related column are shown is each reader's switch, per object, with
- * a default derived from the object and never metadata.
+ * objectstack#27052 / objectstack#27524 (Target 4) — the record page's
+ * right-column switch ⊟ (「右栏」): whether the right column (the 动态 panel
+ * and the related panels) is drawn beside the details is each reader's
+ * switch, per object, on by default and never metadata.
  *
  * Measured from a real `RecordDetailView` mount (the `recordPageTiers-26678`
  * harness: the view root's measured width is the one input varied).
  *
- *  - a worked object (its status options declare lifecycle kinds) opens with
- *    three columns; switching the timeline off draws details | related with
- *    the timeline folded into a 「动态」 card, and switching it on restores;
- *  - the choice survives a remount (a reload reads the same storage) and is
- *    per object;
- *  - an object that is not worked opens with the timeline off — including
- *    one whose only claim is being another object's `master_detail` parent;
- *  - `⌘⇧.` / `⌘⇧,` flip the switches, matched by the physical key (Shift
- *    types `>` / `<` there) or, for an event that carries no `code`, by the
- *    character it typed (objectstack#27241), and do nothing while a text
- *    field has focus; the browser's own `⌘⇧T` / `⌘⇧R` are not theirs;
- *  - the toggles are ONE segmented control at the end of the record header's
- *    action row (objectstack#27241), in both column tiers — not on the crumb
- *    row, which keeps only the ways back and has no child without one;
- *  - they are drawn only in a column tier: not in the tabbed tier, not in the
- *    drawer / split pane;
- *  - the related switch decides whether the related column exists: OFF in the
- *    two-column tier leaves no rail toggle (objectstack#27241).
+ *  - every object opens with the right column, worked or not: the resident
+ *    timeline column, its switch and its derived default retired;
+ *  - ⊟ off draws the details alone, the full width; on restores; the choice
+ *    survives a remount (a reload reads the same storage) and is per object;
+ *  - `⌘⇧,` flips it, matched by the physical key (Shift types `<` there) or,
+ *    for an event that carries no `code`, by the character it typed
+ *    (objectstack#27241), and does nothing while a text field has focus;
+ *    `⌘⇧.` (the timeline column's) is no longer the page's;
+ *  - ⊟ is ONE icon, named by its label, in the record's top bar
+ *    (objectstack#27524, Target 7: after the step group, before ⤢ / ⤡) — not
+ *    in the header's action row, which keeps the business actions, and the
+ *    crumb row is gone; a record drawn with no top bar of its own (a host's
+ *    plain overlay) keeps it at the end of that row (objectstack#27241);
+ *  - it is drawn only where the tier has a right column: both two-column
+ *    tiers, the embedded record at those widths too, never the one column;
+ *  - the chord is the topmost record view's: a drawer wide enough for its
+ *    own right column flips its own switch, never the page's under it.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
@@ -129,6 +129,8 @@ const OBJECTS = [
 ];
 
 let rootWidth = 0;
+/** A record view inside a dialog (a drawer over the page) measures this, when set. */
+let dialogRootWidth: number | null = null;
 
 function makeDataSource() {
   return {
@@ -140,8 +142,13 @@ function makeDataSource() {
   };
 }
 
-function renderPage({ object = LEAD, width = 1440, embedded = false }: { object?: string; width?: number; embedded?: boolean } = {}) {
-  rootWidth = width;
+function renderPage({
+  object = LEAD,
+  width = 1440,
+  embedded = false,
+  container,
+}: { object?: string; width?: number; embedded?: boolean; container?: HTMLElement } = {}) {
+  if (!container) rootWidth = width;
   const metadata = {
     objects: OBJECTS,
     pages: [],
@@ -166,15 +173,16 @@ function renderPage({ object = LEAD, width = 1440, embedded = false }: { object?
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,
+    container ? { container } : undefined,
   );
 }
 
 const shown = (container: HTMLElement) =>
   container.querySelector('[data-record-columns]')?.getAttribute('data-record-columns-shown') ?? null;
-const toggle = (name: RegExp) => screen.getByRole('button', { name });
-// What a browser hands the page for ⌘⇧. / ⌘⇧, on a US layout: Shift types
-// `>` / `<`, and `code` names the key itself.
-const CHORD_KEYS = { timeline: { key: '>', code: 'Period' }, related: { key: '<', code: 'Comma' } } as const;
+const rightColumnSwitch = () => screen.getByRole('button', { name: /^Right column$/ });
+// What a browser hands the page for ⌘⇧, (and the retired ⌘⇧.) on a US
+// layout: Shift types `<` / `>`, and `code` names the key itself.
+const CHORD_KEYS = { related: { key: '<', code: 'Comma' }, timeline: { key: '>', code: 'Period' } } as const;
 const press = (chord: keyof typeof CHORD_KEYS | { key: string; code: string }, target: Element = document.body) =>
   fireEvent.keyDown(target, {
     ...(typeof chord === 'string' ? CHORD_KEYS[chord] : chord),
@@ -182,9 +190,11 @@ const press = (chord: keyof typeof CHORD_KEYS | { key: string; code: string }, t
     shiftKey: true,
     bubbles: true,
   });
+const RIGHT_KEY = (object: string) => `os:pref:record.columns.related@object:${object}`;
 
 beforeEach(() => {
   cleanup();
+  dialogRootWidth = null;
   window.localStorage.clear();
   RelatedCountStore._reset();
   vi.stubGlobal(
@@ -196,7 +206,8 @@ beforeEach(() => {
   const measure = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
-    return { x: 0, y: 0, top: 0, left: 0, right: rootWidth, bottom: 800, width: rootWidth, height: 800, toJSON: () => ({}) } as DOMRect;
+    const width = dialogRootWidth !== null && this.closest('[role="dialog"]') ? dialogRootWidth : rootWidth;
+    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: 800, width, height: 800, toJSON: () => ({}) } as DOMRect;
   });
 });
 
@@ -205,142 +216,166 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('RecordDetailView — the panel toggles (objectstack#27052)', () => {
-  it('a worked object opens with three columns; timeline off draws details | related with a folded 「动态」 card; on restores', async () => {
+describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, objectstack#27524)', () => {
+  it('one ⊟ icon at the end of the header\'s action row, on; off draws the details alone; on restores', async () => {
     const { container } = renderPage();
     const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    // objectstack#27241 — the end of the header's action row, after ⋯ and a
-    // hairline; the crumb row keeps only the ways back (none on a direct open).
-    expect(group.closest('[data-record-crumb-row]')).toBeNull();
-    const toolbar = group.closest('[role="toolbar"]')!;
-    expect(toolbar).not.toBeNull();
-    expect(toolbar.closest('[data-record-column]')).toBeNull();
-    const trailing = group.closest('[data-page-header-trailing]')!;
-    expect(trailing.querySelector('[role="separator"][aria-orientation="vertical"]')).not.toBeNull();
-    expect(toolbar.lastElementChild).toBe(trailing);
-    expect(container.querySelector('[data-record-crumb-row]')?.childElementCount ?? 0).toBe(0);
-    expect(shown(container)).toBe('details timeline related');
-    expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('true');
-    expect(toggle(/^Related column$/).getAttribute('aria-pressed')).toBe('true');
+    // objectstack#27524, Target 7 — in the page's top bar, among its frame
+    // controls: no list context on a direct open, so no step group before it.
+    const bar = group.closest('[data-record-top-bar]')!;
+    expect(bar).not.toBeNull();
+    expect(group.closest('[data-record-top-bar-controls]')).not.toBeNull();
+    expect(bar.querySelector('[data-record-top-bar-step]')).toBeNull();
+    // Not in the header's action row any more, and the crumb row is gone.
+    expect(group.closest('[role="toolbar"]')).toBeNull();
+    expect(container.querySelector('[data-page-header-trailing]')).toBeNull();
+    expect(container.querySelector('[data-record-crumb-row]')).toBeNull();
+    // The bar sits above the record header.
+    const header = container.querySelector('[role="toolbar"]')!;
+    expect(bar.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // ONE switch, an icon named by its label: the segmented text control and
+    // the timeline segment are gone.
+    expect(group.querySelectorAll('button')).toHaveLength(1);
+    expect(group.querySelector('button')!.getAttribute('aria-label')).toBe('Right column');
+    expect(rightColumnSwitch().textContent).toBe('');
+    expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('true');
+    expect(shown(container)).toBe('details right');
 
-    fireEvent.click(toggle(/^Timeline$/));
-    await waitFor(() => expect(shown(container)).toBe('details related'));
-    expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('false');
-    const related = container.querySelector('[data-record-column="related"]')!;
-    expect(related.querySelector('[data-record-folded-timeline]')).not.toBeNull();
+    fireEvent.click(rightColumnSwitch());
+    await waitFor(() => expect(shown(container)).toBe('details'));
+    expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('false');
+    expect(container.querySelector('[data-record-column="right"]')).toBeNull();
+    expect(container.querySelector('[data-record-timeline-panel]')).toBeNull();
 
-    fireEvent.click(toggle(/^Timeline$/));
-    await waitFor(() => expect(shown(container)).toBe('details timeline related'));
-    expect(container.querySelector('[data-record-folded-timeline]')).toBeNull();
+    fireEvent.click(rightColumnSwitch());
+    await waitFor(() => expect(shown(container)).toBe('details right'));
+    expect(container.querySelector('[data-record-column="right"] > [data-record-timeline-panel]')).not.toBeNull();
   });
 
   it('the choice survives a remount and is per object', async () => {
     const first = renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: /^Timeline$/ }, { timeout: 5000 }));
-    await waitFor(() => expect(shown(first.container)).toBe('details related'));
+    fireEvent.click(await screen.findByRole('button', { name: /^Right column$/ }, { timeout: 5000 }));
+    await waitFor(() => expect(shown(first.container)).toBe('details'));
     first.unmount();
 
     const again = renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(shown(again.container)).toBe('details related');
-    expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('false');
+    expect(shown(again.container)).toBe('details');
+    expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('false');
     again.unmount();
 
-    // The product's switch is its own: still its default.
+    // The product's switch is its own: still on.
     const product = renderPage({ object: PRODUCT });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(window.localStorage.getItem(`os:pref:record.columns.timeline@object:${PRODUCT}`)).toBeNull();
-    expect(shown(product.container)).toBe('details related');
+    expect(window.localStorage.getItem(RIGHT_KEY(PRODUCT))).toBeNull();
+    expect(shown(product.container)).toBe('details right');
   });
 
-  it('an object that is not worked opens with the timeline off: two columns, details | related', async () => {
-    const { container } = renderPage({ object: PRODUCT });
+  it.each([
+    ['an object that is not worked', PRODUCT],
+    ['an object that is only another object\'s `master_detail` parent', PRICE_BOOK],
+  ])('%s opens with the right column too, 动态 first', async (_name, object) => {
+    const { container } = renderPage({ object });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(shown(container)).toBe('details related');
-    expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('false');
-    expect(container.querySelector('[data-record-folded-timeline]')).not.toBeNull();
+    expect(shown(container)).toBe('details right');
+    expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-record-column="right"]')?.firstElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
   });
 
-  it('an object that is only another object\'s `master_detail` parent is not worked: the timeline is off', async () => {
-    const { container } = renderPage({ object: PRICE_BOOK });
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(shown(container)).toBe('details related');
-    expect(toggle(/^Timeline$/).getAttribute('aria-pressed')).toBe('false');
-  });
-
-  it('⌘⇧. / ⌘⇧, flip the switches; with a text field focused they do nothing', async () => {
+  it('⌘⇧, flips ⊟; with a text field focused it does nothing; ⌘⇧. is not the page\'s any more', async () => {
     const { container } = renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
 
     const input = document.createElement('input');
     document.body.appendChild(input);
     input.focus();
-    press('timeline', input);
     press('related', input);
-    expect(shown(container)).toBe('details timeline related');
+    expect(shown(container)).toBe('details right');
     input.remove();
 
-    // The browser's chords are not the page's: reopen-tab and hard-reload.
-    press({ key: 'T', code: 'KeyT' });
+    // The browser's hard reload is not the page's; nor is the retired ⌘⇧.
     press({ key: 'R', code: 'KeyR' });
-    expect(shown(container)).toBe('details timeline related');
+    press('timeline');
+    expect(shown(container)).toBe('details right');
+    expect(window.localStorage.getItem(RIGHT_KEY(LEAD))).toBeNull();
     expect(window.localStorage.getItem(`os:pref:record.columns.timeline@object:${LEAD}`)).toBeNull();
 
-    press('timeline');
-    await waitFor(() => expect(shown(container)).toBe('details related'));
     press('related');
     await waitFor(() => expect(shown(container)).toBe('details'));
-    expect(toggle(/^Related column$/).getAttribute('aria-pressed')).toBe('false');
-    press('timeline');
-    await waitFor(() => expect(shown(container)).toBe('details timeline'));
+    expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('false');
+    press('related');
+    await waitFor(() => expect(shown(container)).toBe('details right'));
   });
 
-  it('an event that carries no `code` still flips the switches by the character it typed (objectstack#27241)', async () => {
+  it('an event that carries no `code` still flips ⊟ by the character it typed (objectstack#27241)', async () => {
     const { container } = renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    press({ key: '>', code: '' });
-    await waitFor(() => expect(shown(container)).toBe('details related'));
-    press({ key: '.', code: '' });
-    await waitFor(() => expect(shown(container)).toBe('details timeline related'));
     press({ key: '<', code: '' });
-    await waitFor(() => expect(shown(container)).toBe('details timeline'));
+    await waitFor(() => expect(shown(container)).toBe('details'));
     press({ key: ',', code: '' });
-    await waitFor(() => expect(shown(container)).toBe('details timeline related'));
+    await waitFor(() => expect(shown(container)).toBe('details right'));
   });
 
-  it('the two-column tier draws the same control in the header row; related OFF leaves no rail toggle (objectstack#27241)', async () => {
+  it('the two-column tier draws the same control; off, the details take the row (no rail to fall back to)', async () => {
     const { container } = renderPage({ width: 900 });
     const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     expect(container.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('two-column');
-    expect(group.closest('[role="toolbar"]')).not.toBeNull();
-    expect(shown(container)).toBe('details timeline');
-    // Related ON with no room: the rail toggle, and it opens the column.
-    fireEvent.click(screen.getByTestId('record-related-rail-toggle'));
-    await waitFor(() => expect(container.querySelector('[data-record-column="related"]')).not.toBeNull());
-    // Related OFF: no column, no rail toggle.
-    fireEvent.click(toggle(/^Related column$/));
-    await waitFor(() => expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull());
-    expect(container.querySelector('[data-record-column="related"]')).toBeNull();
-    expect(shown(container)).toBe('details timeline');
+    expect(group.closest('[data-record-top-bar]')).not.toBeNull();
+    expect(shown(container)).toBe('details right');
+    fireEvent.click(rightColumnSwitch());
+    await waitFor(() => expect(shown(container)).toBe('details'));
+    expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
+    expect(container.querySelector('[data-record-column="right"]')).toBeNull();
   });
 
-  it('the tooltip names each shortcut, and the shortcut is announced', async () => {
+  it('the tooltip names the shortcut, and the shortcut is announced', async () => {
     renderPage();
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(toggle(/^Timeline$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+\.$/);
-    expect(toggle(/^Related column$/).getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+,$/);
+    expect(rightColumnSwitch().getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+,$/);
   });
 
-  it('not drawn in the tabbed tier, nor in the drawer / split pane; the shortcut does nothing there', async () => {
-    const tabbed = renderPage({ width: 700 });
-    expect(await screen.findByRole('tablist', undefined, { timeout: 5000 })).toBeTruthy();
+  it('not drawn in the one column, where there is no right column to hide; the shortcut does nothing there. The embedded record at 1440 px has one, and draws it', async () => {
+    const stacked = renderPage({ width: 700 });
+    await waitFor(() => expect(stacked.container.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('stack'), { timeout: 5000 });
     expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
-    press('timeline');
-    expect(window.localStorage.getItem(`os:pref:record.columns.timeline@object:${LEAD}`)).toBeNull();
-    tabbed.unmount();
+    press('related');
+    expect(window.localStorage.getItem(RIGHT_KEY(LEAD))).toBeNull();
+    // The panels follow the details there, whatever the switch.
+    expect(stacked.container.querySelector('[data-record-column="right"]')).not.toBeNull();
+    stacked.unmount();
 
-    renderPage({ width: 1440, embedded: true });
-    expect(await screen.findByRole('tablist', undefined, { timeout: 5000 })).toBeTruthy();
-    expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
+    const embedded = renderPage({ width: 1440, embedded: true });
+    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    expect(shown(embedded.container)).toBe('details right');
+  });
+
+  it('⌘⇧, flips the topmost record view\'s switch alone: a 1000 px drawer over a 1440 px page (objectstack#27524)', async () => {
+    // A record page keeps its own tree mounted under the drawer its rows and
+    // lookups open (`RecordPageDrawerHost`), and the drawer's sheet is
+    // portaled after it, to the end of the body. A drawer dragged to 1000 px
+    // has a right column of its own, so both views draw ⊟: the chord is the
+    // drawer's, and never writes the hidden page's stored choice.
+    dialogRootWidth = 1000;
+    const page = renderPage();
+    await waitFor(() => expect(shown(page.container)).toBe('details right'), { timeout: 5000 });
+    const sheet = document.createElement('div');
+    sheet.setAttribute('role', 'dialog');
+    document.body.appendChild(sheet);
+    const drawer = renderPage({ object: PRODUCT, embedded: true, container: sheet });
+    await waitFor(() => expect(shown(sheet)).toBe('details right'), { timeout: 5000 });
+    expect(sheet.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('two-column');
+    expect(within(sheet).queryByRole('group', { name: 'Panels' })).not.toBeNull();
+
+    press('related');
+    await waitFor(() => expect(shown(sheet)).toBe('details'));
+    expect(window.localStorage.getItem(RIGHT_KEY(PRODUCT))).toContain('off');
+    expect(shown(page.container)).toBe('details right');
+    expect(window.localStorage.getItem(RIGHT_KEY(LEAD))).toBeNull();
+
+    // The drawer closes: the chord is the page's again.
+    drawer.unmount();
+    sheet.remove();
+    press('related');
+    await waitFor(() => expect(shown(page.container)).toBe('details'));
   });
 });

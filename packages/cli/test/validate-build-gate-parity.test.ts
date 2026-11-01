@@ -327,6 +327,10 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
       // already produced; the same records ride `--json` whether this runs or
       // not.
       'printPicklistReferenceNotices',
+      // The text face's heading over the refusals `judgePicklistReferences`
+      // (a gate above) already produced; `--json` carries the same refusals
+      // without it.
+      'picklistRefusalHeading',
       // [#18780] `compile.ts`' local once-guard around the line above it. It
       // decides WHEN that printer is called — after the per-package pass has
       // appended its survivors, so the closing `N author-time warning(s) — see

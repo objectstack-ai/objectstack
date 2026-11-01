@@ -14,7 +14,7 @@
  * chose is kept per user × object in the console's workspace-preference
  * store, never metadata; this module is the pure rule that lays the author's
  * default order and the reader's choice over each other, so the column, the
- * tabbed tier's 关联 tab and the tests read one answer.
+ * record page's tab row and the tests read one answer.
  *
  * ## The stored value is a DIFF against the default order
  *

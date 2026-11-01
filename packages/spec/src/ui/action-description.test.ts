@@ -13,7 +13,9 @@
 // matching bundle key — so the resolver was looking for a string nothing could
 // author. The mirror image of declared-but-unenforced.
 //
-// These pins hold the key open in the exact shape `label` has, and hold the
+// These pins hold the key open to the input shapes `label` takes (a string or
+// an inline locale map; since #27948 a string is the `template` slot's
+// shorthand and parses to its envelope), and hold the
 // three things this change must NOT do: relax the strict shape, widen the
 // INLINE action surface ahead of its renderer, or re-point the action PARAM's
 // `description` → `helpText` alias, which is a different surface and still
@@ -34,7 +36,7 @@ import { ObjectTranslationDataSchema, TranslationDataSchema } from '../system/tr
 const base = { name: 'approval_reject', label: 'Reject', target: 'rejectApproval' } as const;
 
 describe('ActionSchema.description — the line the param dialog shows', () => {
-  it('accepts a plain string, matching `label`\'s I18nLabel contract', () => {
+  it('accepts a plain string, parsed to the `template` envelope it is shorthand for (#27948)', () => {
     const result = ActionSchema.safeParse({
       ...base,
       description: 'Reject this request? Say why — the requester sees it.',
@@ -42,9 +44,10 @@ describe('ActionSchema.description — the line the param dialog shows', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.success && result.data.description).toBe(
-      'Reject this request? Say why — the requester sees it.',
-    );
+    expect(result.success && result.data.description).toEqual({
+      dialect: 'template',
+      source: 'Reject this request? Say why — the requester sees it.',
+    });
   });
 
   it('accepts the localized-map form, matching `label`\'s I18nLabel contract', () => {
@@ -110,7 +113,7 @@ describe('ActionSchema.description — the line the param dialog shows', () => {
     });
 
     expect(both.success).toBe(true);
-    expect(both.success && both.data.description).toBe('Reject this request?');
+    expect(both.success && both.data.description).toEqual({ dialect: 'template', source: 'Reject this request?' });
     expect(both.success && both.data.ai?.description).toContain('Reject a pending approval request');
 
     // The ≥40-char LLM contract is unaffected: a top-level `description` does

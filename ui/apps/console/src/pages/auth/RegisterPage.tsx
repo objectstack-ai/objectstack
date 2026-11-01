@@ -40,6 +40,7 @@ import type { AuthPublicConfig } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Card } from '@object-ui/components';
 import {
+  signUpCaptchaFailedMessage,
   signUpRefusalMessages,
   decideSignUpOffer,
   isInvitationRedirect,
@@ -355,7 +356,12 @@ export function RegisterPage() {
           // out of i18next's `{{…}}` interpolation on purpose.
           socialButton: t('auth.register.socialButton', { defaultValue: 'Sign up with {provider}' }),
           orText: t('auth.register.orText', { defaultValue: 'or continue with email' }),
+          captchaFailed: signUpCaptchaFailedMessage(t),
+          captchaRetry: t('auth.register.captchaRetry', { defaultValue: 'Retry' }),
         }}
+        // The opt-in Turnstile challenge: served only while the server's
+        // sign-up door requires a token; absent, the form is unchanged.
+        turnstileSiteKey={authConfig?.features?.turnstileSiteKey}
       />
       </Card>
       <AuthFooter privacyUrl={legalLinks.privacyUrl} termsUrl={legalLinks.termsUrl} />

@@ -13,10 +13,11 @@ import { test, expect } from '@playwright/test';
  *   - stageField:false → NO `record:path` stepper despite a `status` field
  *                      named to bait the heuristic
  *   - related-heavy  → related lists surface by prominence (ADR-0085), in the
- *                      tabbed tier as record page v3 draws it (objectstack#27055,
- *                      Target 8): a `relatedList: 'primary'` list is a body
- *                      table in the Details tab, the rest sit behind the
- *                      Related tab and self-fetch when it is shown
+ *                      one-column stack tier (objectstack#27524): a
+ *                      `relatedList: 'primary'` list is a body table in the
+ *                      details (objectstack#27055, Target 8), the rest are
+ *                      panels of the right column below them and read their
+ *                      rows when they come into view
  *
  * Runs against the console the backend serves at /_console (baseURL from
  * playwright.config.ts; storageState carries the admin session). The
@@ -157,27 +158,28 @@ test('stageField:false: status renders as a plain field, no stepper', async ({ p
   expect(errors, 'uncaught page errors on stageField:false detail').toEqual([]);
 });
 
-test('ungrouped + related-heavy: flat details and related-list tabs on Contoso', async ({ page }) => {
+test('ungrouped + related-heavy: flat details and the related panels on Contoso', async ({ page }) => {
   // The synthesized record page lays itself out by the width of the view it
-  // occupies (objectstack#26678): the tab strip this case opens exists only
-  // below the two-column floor, a record view narrower than
-  // `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` (760 px, `@object-ui/plugin-detail`).
-  // The case stays in that tabbed tier on purpose: the column tiers are what
-  // every other page of this smoke draws at the Desktop Chrome viewport, and
-  // the tab strip is also what the drawer and split pane draw at any width.
+  // occupies, by one rule (objectstack#26678, objectstack#27524): details |
+  // the right column from `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` (760 px,
+  // `@object-ui/plugin-detail`), and ONE column below it — the details, then
+  // the right column's panels in their order. No tier draws a tab strip. The
+  // case stays in that stack tier on purpose: the column tiers are what every
+  // other page of this smoke draws at the Desktop Chrome viewport, and the
+  // stack is also what the split pane (720 px) and a phone draw.
   //
   // The window is derived, not picked. Measured on this harness (a fresh
   // browser context, so no stored sidebar cookie): from a 768 px window
   // (`MOBILE_BREAKPOINT`, the desktop shell) to 1000 px the console sidebar
   // came up as its 48 px icon rail, and the record view was the window minus
-  // that rail — two columns at 808 px (760 of view), tabs at 800 px (752).
-  // So the desktop tabbed tier is a window of 768 to 807 px, and an expanded
+  // that rail — two columns at 808 px (760 of view), one at 800 px (752).
+  // So the desktop stack tier is a window of 768 to 807 px, and an expanded
   // sidebar (256 px) only narrows the view further. 780 sits inside it with
   // headroom on both sides: 732 px of view against the 760 floor, 12 px above
   // the mobile breakpoint. ⛔ Not 1200 px: since objectstack#27473 moved the
-  // floor to a 760 px view, 1200 draws columns and no tablist. ⛔ Not below
-  // 768 px: that is the mobile shell, where the off-canvas sidebar gives the
-  // view the whole window (760 px measured as two columns).
+  // floor to a 760 px view, 1200 draws two columns. ⛔ Not below 768 px: that
+  // is the mobile shell, where the off-canvas sidebar gives the view the
+  // whole window (760 px measured as two columns).
   await page.setViewportSize({ width: 780, height: 800 });
   const errors = await openRecord(page, recordUrl('showcase_account', contosoId));
 
@@ -185,28 +187,31 @@ test('ungrouped + related-heavy: flat details and related-list tabs on Contoso',
   // record:path renders a desktop + a mobile variant — assert the visible one.
   await expect(page.locator(PATH_STEPPER).first()).toBeVisible();
 
+  // One column and no tab strip: the details, then the right column.
+  await expect(page.locator('[data-record-page-tier]')).toHaveAttribute('data-record-page-tier', 'stack');
+  await expect(page.locator('[data-record-columns]')).toHaveAttribute('data-record-columns-shown', 'details');
+  await expect(page.getByRole('tab', { name: /Details|Related|Invoices|Projects/i })).toHaveCount(0);
+
   // Related lists surface by prominence (ADR-0085), as record page v3 draws
   // them (objectstack#27055, Target 8): Invoices and Projects are
   // `relatedList: 'primary'` (CORE relationships), so each is a body table in
-  // the Details tab, with its rows read at open; the rest of Contoso's lists
-  // (Contacts and the Field Zoo lookups) sit behind the Related tab.
-  const detailsTab = page.getByRole('tab', { name: /Details/i });
-  const relatedTab = page.getByRole('tab', { name: /^Related/ });
-  await expect(detailsTab).toBeVisible();
-  await expect(detailsTab).toHaveAttribute('aria-selected', 'true');
-  await expect(relatedTab).toBeVisible();
-  await expect(page.getByRole('tab', { name: /Invoices|Projects/i })).toHaveCount(0);
-  const detailsPanel = page.getByRole('tabpanel', { name: /Details/i });
-  const invoicesTable = detailsPanel
+  // the details, with its rows read at open; the rest of Contoso's lists
+  // (Contacts and the Field Zoo lookups) are panels of the right column,
+  // after its first panel, 动态 (objectstack#27524, Target 5).
+  const details = page.locator('[data-record-column="details"]');
+  const invoicesTable = details
     .getByRole('table')
     .filter({ has: page.getByRole('columnheader', { name: 'Invoice Number' }) });
-  const projectsTable = detailsPanel
+  const projectsTable = details
     .getByRole('table')
     .filter({ has: page.getByRole('columnheader', { name: 'Project Name' }) });
   await expect(invoicesTable.getByRole('cell', { name: 'INV-1002', exact: true })).toBeVisible();
   await expect(projectsTable.getByRole('cell', { name: 'Data Platform', exact: true })).toBeVisible();
+  const rightColumn = page.locator('[data-record-column="right"]');
+  await expect(rightColumn.locator(':scope > *').first()).toHaveAttribute('data-record-timeline-panel', '');
+  await expect(rightColumn.getByRole('region', { name: /^(Invoices|Projects)$/ })).toHaveCount(0);
 
-  // Ungrouped shape: the Details body is flat — no fieldGroup section cards.
+  // Ungrouped shape: the details body is flat — no fieldGroup section cards.
   // (Contoso declares no fieldGroups; spot-check a body field label.)
   await expect(page.getByText('Basics', { exact: true })).toHaveCount(0);
 
@@ -220,13 +225,11 @@ test('ungrouped + related-heavy: flat details and related-list tabs on Contoso',
   expect(footerText, 'footer dangles "Created by" without an actor').not.toMatch(/Created by/);
   expect(footerText).toMatch(/Created/);
 
-  // The non-primary lists self-fetch lazily when their tab is shown: the
-  // Related tab's Contacts list reads Contoso's seeded contacts.
-  await relatedTab.click();
-  await expect(relatedTab).toHaveAttribute('aria-selected', 'true');
-  const relatedPanel = page.getByRole('tabpanel', { name: /^Related/ });
-  await expect(relatedPanel).toBeVisible();
-  await expect(relatedPanel.getByRole('cell', { name: 'Carl Fox', exact: true })).toBeVisible();
+  // A panel reads its rows once it is in view: below the details here, so
+  // the Contacts panel reads Contoso's seeded contacts when scrolled to.
+  const contactsPanel = rightColumn.getByRole('region', { name: 'Contacts', exact: true });
+  await contactsPanel.scrollIntoViewIfNeeded();
+  await expect(contactsPanel.locator('[data-related-card-row]').filter({ hasText: 'Carl Fox' })).toBeVisible();
 
   expect(errors, 'uncaught page errors on related-heavy detail').toEqual([]);
 });

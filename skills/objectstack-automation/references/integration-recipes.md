@@ -16,27 +16,33 @@ deployment and to the sender. Scaffolded apps list the three executors in
 - Actions come from the upstream (an OpenAPI `operationId`, an MCP tool name,
   the `rest` provider's single `request`) — authored on the entry, they are refused.
 - `connectorConfig.input` is a value-slot map like `subflow` `input`: a top-level
-  CEL envelope is evaluated, any other value sent as written (`{…}`, `{{ }}` are
-  literal text) — `input: { customer: { dialect: 'cel', source: 'record.stripe_id' } }`.
-  `os validate` does not judge it yet, so a malformed envelope fails at run time.
+  CEL envelope is evaluated, any other value kept as written. `registerFlow` and
+  `os validate` refuse a `{…}` token at `connectorConfig.input.<key>`: a value
+  from the record is a CEL envelope. Before dispatch the result is judged
+  against the action's `inputSchema`: `required`, `type` (with OpenAPI
+  `nullable`), `properties`, `items`; `null` on an optional parameter is
+  absent. A breach fails the step `VALIDATION_ERROR` (`fault`-routable) naming
+  each path, nothing sent. Text is never converted: cast a string-held id,
+  `path: { dialect: 'cel', source: '{"petId": int(record.vendor_id)}' }`.
+  `os validate` does not judge the `inputSchema` fit yet.
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
-  `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value
-  slot: `{ dialect: 'cel', source: 'bal.body.available[0].amount' }`.
+  `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value slot.
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
   default `X-API-Key`, or `paramName` for a query-string key); `basic` (`username`
-  stays in metadata). A secret in a url path has no variant — use a
+  stays in metadata); `signed` on `openapi` / `rest` (`scheme`
+  `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
+  `keyId`) signs each request. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
 - `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
 
 ## 1 · OpenAPI document, static key — Stripe balance, nightly
 
 ```ts
-// Trim the vendor's OpenAPI 3.x document to the operations the app calls and ship
-// it in the package, package-relative.
+// Trim the vendor's OpenAPI 3.x document to the operations the app calls.
 export const StripeConnector = defineConnector({
   name: 'stripe', label: 'Stripe', type: 'api', provider: 'openapi',
-  providerConfig: { spec: './src/connectors/stripe.trimmed.json' },   // holds `GetBalance` alone
-  auth: { type: 'bearer', credentialRef: 'STRIPE_SECRET_KEY' },        // admin sets STRIPE_SECRET_KEY
+  providerConfig: { spec: './src/connectors/stripe.trimmed.json' },
+  auth: { type: 'bearer', credentialRef: 'STRIPE_SECRET_KEY' },
 });
 // crm_account gains `stripe_available` (currency) and `stripe_synced_at` (datetime).
 export const StripeBalanceSweep = defineFlow({
@@ -63,7 +69,7 @@ dereference every `$ref` offline, in-document ones included: the loader skips a
 `$ref` parameter, request body or response, and the derived input/output schema
 silently loses it. `providerConfig.include` allowlists operation keys as the
 `mcp` provider's does (absent = every operation; a non-array or unknown entry is
-fatal); trimming still keeps the package small.
+fatal).
 
 ## 2 · Remote MCP server, static header — GitHub
 
@@ -73,7 +79,7 @@ export const GitHubMcp = defineConnector({
   providerConfig: {
     transport: { kind: 'http', url: 'https://api.githubcopilot.com/mcp/',  // `stdio` spawns a local process:
                  headers: { 'X-MCP-Readonly': 'true' } },   // denied unless the host allowlists the command
-    include: ['search_issues'],                             // tool-name allowlist → the actions
+    include: ['search_issues'],
   },
   auth: { type: 'bearer', credentialRef: 'GITHUB_MCP_TOKEN' }, // folded into the request headers
 });
@@ -103,10 +109,10 @@ export const WarehouseApi = defineConnector({
 ```ts
 export const CarrierCallback = defineFlow({
   name: 'carrier_callback', label: 'Carrier status callback', type: 'api',
-  runAs: 'system',                            // an inbound post carries no trigger user
+  runAs: 'system',  // no trigger user
   nodes: [
     { id: 'start', type: 'start', label: 'POST …/hooks/carrier_callback/carrier',
-      config: { hookId: 'carrier', secretRef: 'CARRIER_HOOK_SECRET' } }, // never a literal secret
+      config: { hookId: 'carrier', secretRef: 'CARRIER_HOOK_SECRET' } },
     { id: 'apply', type: 'update_record', label: 'Apply status', config: {
       objectName: 'shipment', filter: { tracking_no: { dialect: 'cel', source: 'record.tracking_no' } },
       fields: { status: { dialect: 'cel', source: 'record.status' } } } },
@@ -120,14 +126,14 @@ export const CarrierCallback = defineFlow({
 `x-objectstack-signature: t=<unix>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`
 under `CARRIER_HOOK_SECRET`. The door has no unsigned form and verifies no other
 scheme, so a vendor whose webhook signs its own header cannot post here today:
-name the gap and poll its status (recipe 1's shape) until vendor schemes verify.
+poll its status (recipe 1's shape) until vendor schemes verify.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
 ```ts
 export const LegacyErp = defineConnector({
   name: 'legacy_erp', label: 'Legacy ERP', type: 'api', provider: 'openapi',
-  providerConfig: { spec: {                       // inline OpenAPI 3.x
+  providerConfig: { spec: {
     openapi: '3.0.3', info: { title: 'Legacy ERP', version: '1' },
     servers: [{ url: 'https://erp.example.com' }],
     paths: { '/v2/open-orders': { get: { operationId: 'listOpenOrders',
@@ -138,16 +144,15 @@ export const LegacyErp = defineConnector({
 // connector_action { connectorId: 'legacy_erp', actionId: 'listOpenOrders', input: {} }
 ```
 
-Each `operationId` is a named action with its input schema, visible in the flow
-palette and to agents; `provider: 'rest'` instead when the path is per call.
+Each `operationId` is a named action in the flow palette and to agents;
+`provider: 'rest'` instead when the path is per call.
 
 ## Not yet — declare the rest, mark the integration blocked, write no plugin
 
-- **OAuth-protected vendor** (DocuSign, Salesforce, Google): the declarative `auth`
-  union has no `oauth2`; the authorization-code / refresh
-  lifecycle is not delivered in the open tier. Do not park a short-lived access
-  token behind a `bearer` ref. Declare the connector, fields and flows, mark the
-  integration **blocked** on the platform's outbound-OAuth card, and say so.
-- **Signature-authenticated vendor** (Alipay, WeChat Pay, Aliyun — RSA2 / HMAC
-  canonical-request signing): no auth kind signs requests today; same handling,
-  blocked on the request-signing card.
+- **OAuth-protected vendor** (DocuSign, Salesforce, Google): `auth` declares
+  `oauth2` (`authorization_code` / `client_credentials`) and `app-credential`
+  (`feishu` / `dingtalk` / `wecom`), but no server runs the grant yet: the
+  instance is held degraded, calling no upstream. Do not park a short-lived
+  token behind a `bearer` ref. Blocked on the outbound-OAuth card.
+- **WeChat Pay**: no `signed` scheme yet (Alipay's is `alipay-v3`, which also
+  verifies responses).

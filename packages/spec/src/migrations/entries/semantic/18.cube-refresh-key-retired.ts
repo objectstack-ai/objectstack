@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // the author built assumed that cube results were cached or refreshed.
 export const entry: SemanticMigration = {
   id: 'cube-refresh-key-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface:
     'analyticsCubes[].refreshKey (every, sql) — a cube\'s declared refresh cadence and data-change probe',
   replacement:

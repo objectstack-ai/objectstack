@@ -61,6 +61,13 @@ export type McpTransport =
           url: string;
           /** Headers sent on every request — carries credentials (e.g. a bearer token). */
           headers?: Record<string, string>;
+          /**
+           * The fetch every request of the transport goes through, when the
+           * credential is runtime state rather than a header: the `mcp`
+           * provider's credential handle (ADR-0143 D4) applies the token
+           * per request through it. Default the global `fetch`.
+           */
+          fetch?: typeof fetch;
       };
 
 /** A tool as advertised by an MCP server's `tools/list`. */
@@ -116,6 +123,14 @@ export interface McpConnectorOptions {
      * configured transport and returns a connected {@link McpClientLike}.
      */
     clientFactory?: (transport: McpTransport, clientInfo: { name: string; version: string }) => Promise<McpClientLike>;
+    /**
+     * The client a tool call goes to, chosen per call from the dispatch's
+     * context; `undefined` (or no member) sends it through the client the
+     * tools were listed with. The `mcp` provider answers one client per
+     * organization when the instance's credential is a per-organization
+     * connection (ADR-0143 D4, Q1).
+     */
+    clientFor?: (ctx: unknown) => McpClientLike | undefined | Promise<McpClientLike | undefined>;
 }
 
 /**
@@ -132,7 +147,7 @@ export interface McpConnectorBundle {
     close(): Promise<void>;
 }
 
-const DEFAULT_CLIENT_INFO = { name: 'objectstack-connector-mcp', version: '1.0.0' } as const;
+export const DEFAULT_MCP_CLIENT_INFO = { name: 'objectstack-connector-mcp', version: '1.0.0' } as const;
 
 /** Slugify a label into a valid connector `name` (`/^[a-z_][a-z0-9_]*$/`). */
 function slugify(input: string): string {
@@ -192,7 +207,7 @@ export const MCP_TOOLS_LIST_MAX_PAGES = 100;
  * The default {@link McpClientLike} — lazily imports the official MCP SDK so it
  * is only loaded when a real connection is made (tests inject their own client).
  */
-async function defaultClientFactory(
+export async function defaultMcpClientFactory(
     transport: McpTransport,
     clientInfo: { name: string; version: string },
 ): Promise<McpClientLike> {
@@ -217,6 +232,7 @@ async function defaultClientFactory(
         await client.connect(
             new StreamableHTTPClientTransport(new URL(transport.url), {
                 requestInit: transport.headers ? { headers: transport.headers } : undefined,
+                ...(transport.fetch ? { fetch: transport.fetch } : {}),
             }),
         );
     }
@@ -255,8 +271,8 @@ async function defaultClientFactory(
  * tear it down.
  */
 export async function createMcpConnector(opts: McpConnectorOptions): Promise<McpConnectorBundle> {
-    const clientInfo = opts.clientInfo ?? DEFAULT_CLIENT_INFO;
-    const factory = opts.clientFactory ?? defaultClientFactory;
+    const clientInfo = opts.clientInfo ?? DEFAULT_MCP_CLIENT_INFO;
+    const factory = opts.clientFactory ?? defaultMcpClientFactory;
 
     const client = await factory(opts.transport, clientInfo);
 
@@ -311,7 +327,10 @@ export async function createMcpConnector(opts: McpConnectorOptions): Promise<Mcp
     };
 
     for (const tool of selected) {
-        handlers[tool.name] = async (input) => normalizeResult(await client.callTool(tool.name, input));
+        handlers[tool.name] = async (input, ctx) => {
+            const target = (opts.clientFor ? await opts.clientFor(ctx) : undefined) ?? client;
+            return normalizeResult(await target.callTool(tool.name, input));
+        };
     }
 
     return {

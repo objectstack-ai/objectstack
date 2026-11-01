@@ -93,6 +93,8 @@ export const SysTwoFactor = ObjectSchema.create({
           { path: 'backupCodes', label: 'Backup Codes', format: 'code-list' },
         ],
       },
+      // ADR-0011 identity-actions note, bucket H: human-only, no `ai` block.
+      // It takes the user's password and answers a new sign-in factor.
     },
     {
       name: 'disable_two_factor',

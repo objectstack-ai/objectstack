@@ -616,6 +616,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Separador de miles",
         helpText: "Agrupación de dígitos (separador de miles) en los valores mostrados. Sin definir: lo decide el renderizador; un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el renderizador agrupe. Desactivado: nunca se agrupa, p. ej., un año o un ID. Activado: siempre se agrupa."
       },
+      percentDisplay: {
+        label: "Visualización del porcentaje",
+        helpText: "Cómo se muestra el valor en modo de solo lectura, en las celdas de lista y en la página del registro. Sin definir: una barra de progreso junto al porcentaje. Barra: siempre la barra de progreso, para un progreso. Simple: solo el porcentaje, para una tasa o una probabilidad."
+      },
       currencyConfig: {
         label: "Configuración de moneda",
         helpText: "En qué moneda está este campo: un campo de moneda, o una fórmula cuyo tipo de retorno es Moneda. Sin definir: modo dynamic. En todos los modos el valor es un número sin más."
@@ -1803,6 +1807,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Descripción",
         helpText: "Línea explicativa bajo el título del diálogo de parámetros de esta acción. En una acción que recoge parámetros, la pregunta de confirmación va aquí y no en confirmText: un diálogo, no dos. No es ai.description, que es el texto que lee un agente de IA."
       },
+      submitText: {
+        label: "Etiqueta del botón de envío",
+        helpText: "Etiqueta del botón de envío en el diálogo de parámetros de esta acción, el verbo que ejecuta el botón (p. ej., \"Enviar\", \"Registrar llamada\"). Solo para una acción que recoge parámetros. Déjalo vacío para mostrar \"Confirmar\"."
+      },
       confirmText: {
         label: "Texto de confirmación",
         helpText: "Mensaje de confirmación (p. ej., \"Are you sure?\")"
@@ -1817,7 +1825,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       outcomeMessages: {
         label: "Mensajes por resultado",
-        helpText: "Mensaje de éxito por cada resultado del manejador, en JSON: cada clave es un valor `outcome` en snake_case que el manejador devuelve en su carga útil de éxito, y cada valor es la etiqueta que se muestra para ese resultado, p. ej., {\"archived\": \"Archivado\", \"already_archived\": \"Ya estaba archivado\"}. Una etiqueta puede interpolar ${result.*}. Un resultado sin entrada muestra el mensaje de éxito; una clave que el manejador nunca devuelve no se muestra nunca. No se admite junto a un diálogo de resultado ni con `operation: 'update'`."
+        helpText: "Mensaje de éxito por cada resultado del manejador, en JSON: cada clave es un valor `outcome` en snake_case que el manejador devuelve en su carga útil de éxito, y cada valor es la etiqueta que se muestra para ese resultado, p. ej., {\"archived\": \"Archivado\", \"already_archived\": \"Ya estaba archivado\"}. Una etiqueta puede interpolar {{ result.* }}. Un resultado sin entrada muestra el mensaje de éxito; una clave que el manejador nunca devuelve no se muestra nunca. No se admite junto a un diálogo de resultado ni con `operation: 'update'`."
       },
       onSuccess: {
         label: "Al completarse",

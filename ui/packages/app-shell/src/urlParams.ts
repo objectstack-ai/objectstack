@@ -104,6 +104,13 @@ export const RECORD_DETAIL_TAB_PARAM = 'tab';
  */
 export const RECORD_RELATED_ENLARGE_PARAM = 'related';
 
+/**
+ * History-state flag beside {@link RECORD_RELATED_ENLARGE_PARAM}: the record
+ * view pushed the `?related=` entry, so closing the tab pops it. Not a URL
+ * parameter; a navigation that replaces the entry drops it.
+ */
+export const RECORD_RELATED_ENLARGE_PUSHED_STATE = '__relatedEnlargePushed';
+
 /** Command palette overlay (ADR-0054 Phase 1; alias `cmdk`). */
 export const COMMAND_PALETTE_PARAM = 'palette';
 

@@ -430,14 +430,24 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     note: 'Split from `cel-action-visible` rather than sharing one row with it, for the reason the collision assertion encodes: one classification covering both would have to pick one fail-policy, and the two faces are opposites — a faulting `visible` HIDES the action, a `disabled` the renderer cannot evaluate LEAVES IT RUNNABLE. A single row would have stated one of those and silently spoken for the other. ⛔ NOT MEASURED HERE: the renderer, and the `-log` half of `fail-soft-log` — the reading above establishes the soft DIRECTION from the objectui fix that removed the closed face, not that a line is logged; the same posture, and the same limit, as `cel-row-crud-disabled` on the built-in row buttons.',
   },
   {
-    // The key arrived with #27946, its spec half; the console half is a follow-up card.
+    // The key arrived with #27946 (spec half); the console half that draws it is #28242.
     id: 'cel-action-pressed',
     summary: 'registered action pressed state (Action.pressed) — the per-reader toggle face of a button, drawn as aria-pressed',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'Same declaration site and same build-time gate as `cel-action-visible`: `EvaluatedExpressionInputSchema` normalizes a bare string to `{dialect:"cel",source}` and refuses a boolean literal, an `ast`-only envelope and a blank source, and lint/validate-expressions.ts `checkAction` checks it against the `record` scope on every declared action, as a served-row site where a block the object declares under `attachedOnRead` resolves. EVALUATOR: two console (objectui) surfaces, both on @objectstack/formula celEngine (interpret) against the record the client fetched — the record header (`PageHeaderActions` `pressedFor`, through `evalRowPredicate` with `fallback: false` and `warnOnError`) and the declared actions bar (`DeclaredActionButton` `useDeclaredActionPressed`, through `useCondition` with `throwOnError`, the binding its `visible` uses). TRUE draws `aria-pressed="true"` and the pressed face; a predicate that FAULTS answers `false` and is reported once, so the button is drawn unpressed and stays runnable',
+    covers: ['ui/action.zod.ts:actionObject.pressed'],
+    note: 'Display only by contract — it never gates, greys or routes the action — so a fault refuses nothing: the predicate\'s effect (the pressed face) is dropped and the fault is logged, which is `fail-soft-log`, not `fail-closed`. The unpressed face is also the one that never claims the reader acted. Split from `cel-action-visible` / `cel-action-disabled` for the collision rule those two were split on: one row cannot state three fault faces. A menu item (the header overflow, the bar\'s override menu) draws no pressed state at all. Measured here: the ui half is in this checkout and its suites pin the TRUE / FALSE / fault faces on both surfaces.',
+  },
+  {
+    // The key arrived spec-first (card 28022); the console landing redirect that reads it is its own ui card.
+    id: 'cel-app-landing',
+    summary: "app per-audience landing predicate (AppLandingEntry.visible) — the first entry whose predicate holds names the navigation entry the app opens on",
     dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'unevaluated',
     enforcement:
-      'PARSE ONLY — `EvaluatedExpressionInputSchema` normalizes a bare string to `{dialect:"cel",source}` and refuses a boolean literal, an `ast`-only envelope and a blank source; NO EVALUATOR FOUND: no action surface reads the key yet. The build-time gate is in place ahead of the reader: lint/validate-expressions.ts `checkAction` checks it against the `record` scope on every declared action, as a served-row site where a block the object declares under `attachedOnRead` resolves',
-    covers: ['ui/action.zod.ts:actionObject.pressed'],
-    note: 'EXPERIMENTAL until the console draws it: declared spec-first, with the liveness row `planned`. Display only by contract — it never gates, greys or routes the action — so when the reader lands its fault face is a plain, unpressed button, and this row is re-stated as `enforced` with that fail policy, naming the surfaces that evaluate it.',
+      'PARSE ONLY — `EvaluatedExpressionInputSchema` normalizes a bare string to `{dialect:"cel",source}` and refuses an `ast`-only envelope and a blank source, and `checkAppLandingItems` on `AppSchema` refuses a `data` read (a landing entry binds no `data`) and an `item` naming no openable navigation entry of the app. NO EVALUATOR FOUND: no console reads `app.landing` yet; the landing redirect that will ask these predicates is the follow-up ui card',
+    covers: ['ui/app.zod.ts:AppLandingEntrySchema.visible'],
+    note: 'EXPERIMENTAL, declared spec-first by ruling (letter A): the liveness ledger carries `app.landing` as `planned` with an author warning, so an author is told no console reads it yet. Re-classify when the console redirect lands: the predicate decides only where a reader opens, never what they may reach (each navigation entry keeps its own gates), so its fault face is expected to be `fail-soft-log` — a faulting entry is passed over and the app opens on its first navigation item.',
   },
   {
     id: 'cel-record-alert-visible',
@@ -692,7 +702,30 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'ui/component.zod.ts:ActionIconPropsSchema.successMessage',
       'ui/component.zod.ts:actionContainerMemberShape.successMessage',
     ],
-    note: 'The platform\'s own sentences (`sys_invitation` / `sys_member` / `sys_organization` / `sys_user` `invite_user`, the nine `sys_approval_request` decisions) were converted from `${result.*}` to `{{ result.* }}` on the same change. `outcomeMessages` is NOT this row: it stays a `${result.*}` string. ⛔ NOT MEASURED HERE: the runner was read at the pin, not run, and the `-log` half of `fail-soft-log`.',
+    note: 'The platform\'s own sentences (`sys_invitation` / `sys_member` / `sys_organization` / `sys_user` `invite_user`, the nine `sys_approval_request` decisions) were converted from `${result.*}` to `{{ result.* }}` on the same change. `outcomeMessages` is NOT this row: it is `template-action-outcome-message`. ⛔ NOT MEASURED HERE: the runner was read at the pin, not run, and the `-log` half of `fail-soft-log`.',
+  },
+  // #27948 (ruling A, step 2): the param dialog's copy (`description`, each param's `helpText`)
+  // and each `outcomeMessages` entry joined the family, over the roots of the key each stands beside.
+  {
+    id: 'template-action-dialog-copy',
+    summary: 'action param dialog copy (Action.description, ActionParam.helpText) — `{{ record.* }}` holes',
+    dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'PARSE and BUILD-TIME GATE: the same as `template-action-confirm-text`, over `actionConfirmTemplateRoots(action)` (`record`; a registered action\'s `params` is the input list, which binds nothing); `helpText` takes no inline locale map. EVALUATOR: console (objectui) `ActionRunner` hands the param-collection handler the action and params with each envelope reduced to its text (`dialogCopyOf`) and an `interpolate` (`dialogCopyFiller`) that fills a `{{ }}` sentence through `fillTemplateHoles` → @objectstack/formula `templateEngine.evaluate` over `record` and static `params`, read in the `ui/` tree (`ui/packages/core/src/actions/ActionRunner.ts`); a sentence with no `{{ }}` hole keeps the transitional `${…}` reading, so stored copy written before the migration reads as before',
+    covers: [
+      'ui/action.zod.ts:actionObject.description',
+      'ui/action.zod.ts:ActionParamSchema.helpText',
+    ],
+    note: 'Refused at the doors, not at the parse: a `${…}` sentence parsed while the keys were plain strings, so a stored one keeps loading until its next save. ⛔ NOT MEASURED HERE: the runner was read in the `ui/` tree\'s pins, not run against a server, and the `-log` half of `fail-soft-log`.',
+  },
+  {
+    id: 'template-action-outcome-message',
+    summary: 'action per-outcome success toast (Action.outcomeMessages entries) — `{{ result.* }}` and `{{ record.* }}` holes',
+    dialect: 'template', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'PARSE and BUILD-TIME GATE: the same as `template-action-success-message`, per entry, at `outcomeMessages.<outcome>`, over `ACTION_SUCCESS_TEMPLATE_ROOTS` (`result`, then `record`). EVALUATOR: console (objectui) `ActionRunner.composeSuccessMessage` picks the entry the answer\'s `outcome` names (its envelope reduced to its text) and fills a `{{ }}` sentence through `fillTemplateHoles` over `result` and `record`, read in the `ui/` tree; a blank entry falls to `successMessage`, and a sentence with no `{{ }}` hole keeps the transitional `${result.*}` reading',
+    covers: ['ui/action.zod.ts:actionObject.outcomeMessages'],
+    note: 'The platform\'s own entries (the invite actions\' `sent` / `link_only`, the role change\'s `permission_set_granted`) were converted from `${result.*}` to `{{ result.* }}` on the same change. ⛔ NOT MEASURED HERE: the runner was read in the `ui/` tree\'s pins, not run against a server, and the `-log` half of `fail-soft-log`.',
   },
   {
     id: 'template-action-error-message',

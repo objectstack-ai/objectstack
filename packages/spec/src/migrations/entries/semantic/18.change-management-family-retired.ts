@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'change-management-family-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the change-management family, retired whole: the six defs system/ChangeImpact, '
     + 'system/ChangePriority, system/ChangeRequest, system/ChangeStatus, system/ChangeType '

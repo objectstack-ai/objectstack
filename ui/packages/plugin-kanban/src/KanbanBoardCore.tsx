@@ -57,6 +57,12 @@ export interface KanbanBoardCoreProps {
    * that closes the lane.
    */
   dropBlockedReason?: KanbanBoardProps['dropBlockedReason'];
+  /**
+   * The cards each open lane shows — see `KanbanBoardProps.onLaneRowsChange`
+   * (objectstack#28461). A PROP for the same reason: `ObjectKanban` relays it
+   * from its host.
+   */
+  onLaneRowsChange?: KanbanBoardProps['onLaneRowsChange'];
   /** Half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
   quickAdd?: boolean;
   /** The other half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
@@ -107,6 +113,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   cardsMovable,
   canDropCard,
   dropBlockedReason,
+  onLaneRowsChange,
   quickAdd,
   onQuickAdd,
 }) => {
@@ -132,6 +139,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         cardsMovable={cardsMovable}
         canDropCard={canDropCard}
         dropBlockedReason={dropBlockedReason}
+        onLaneRowsChange={onLaneRowsChange}
         onCardClick={schema.onCardClick}
         className={schema.className}
         quickAdd={quickAdd}

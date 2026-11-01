@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 244,
-    "droppedRefinementSites": 906,
+    "publishedSchemasWithDroppedRefinements": 246,
+    "droppedRefinementSites": 948,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -62,6 +62,7 @@
     },
     "api/AppDefinitionResponse": {
       "sites": [
+        "data",
         "data.navigation.element.lazy",
         "data.navigation.element.lazy.options[0]"
       ]
@@ -75,6 +76,7 @@
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
+        "manifest.apps.element",
         "manifest.assignmentRules.element",
         "manifest.assignmentRules.element.entries.element",
         "manifest.assignmentRules.element.entries.element.assignTo",
@@ -133,6 +135,7 @@
         "manifest.views.element.list.bulkActionDefs.element",
         "manifest.views.element.list.emptyState.link.url",
         "manifest.views.element.list.filter.element",
+        "manifest.views.element.list.filter.element.options[0]",
         "manifest.views.element.list.gantt.groupByField",
         "manifest.views.element.list.grouping.fields.element.field",
         "manifest.views.element.list.kanban.groupByField",
@@ -209,6 +212,7 @@
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
+        "data.options[1].manifest.apps.element",
         "data.options[1].manifest.assignmentRules.element",
         "data.options[1].manifest.assignmentRules.element.entries.element",
         "data.options[1].manifest.assignmentRules.element.entries.element.assignTo",
@@ -261,6 +265,7 @@
         "data.options[1].manifest.views.element.list.bulkActionDefs.element",
         "data.options[1].manifest.views.element.list.emptyState.link.url",
         "data.options[1].manifest.views.element.list.filter.element",
+        "data.options[1].manifest.views.element.list.filter.element.options[0]",
         "data.options[1].manifest.views.element.list.gantt.groupByField",
         "data.options[1].manifest.views.element.list.grouping.fields.element.field",
         "data.options[1].manifest.views.element.list.kanban.groupByField",
@@ -297,6 +302,7 @@
         "list.bulkActionDefs.element",
         "list.emptyState.link.url",
         "list.filter.element",
+        "list.filter.element.options[0]",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
         "list.kanban.groupByField",
@@ -339,6 +345,7 @@
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
+        "options[1].manifest.apps.element",
         "options[1].manifest.assignmentRules.element",
         "options[1].manifest.assignmentRules.element.entries.element",
         "options[1].manifest.assignmentRules.element.entries.element.assignTo",
@@ -394,6 +401,7 @@
         "options[1].manifest.views.element.list.bulkActionDefs.element",
         "options[1].manifest.views.element.list.emptyState.link.url",
         "options[1].manifest.views.element.list.filter.element",
+        "options[1].manifest.views.element.list.filter.element.options[0]",
         "options[1].manifest.views.element.list.gantt.groupByField",
         "options[1].manifest.views.element.list.grouping.fields.element.field",
         "options[1].manifest.views.element.list.kanban.groupByField",
@@ -412,6 +420,7 @@
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
+        "data.packages.element.options[1].manifest.apps.element",
         "data.packages.element.options[1].manifest.assignmentRules.element",
         "data.packages.element.options[1].manifest.assignmentRules.element.entries.element",
         "data.packages.element.options[1].manifest.assignmentRules.element.entries.element.assignTo",
@@ -463,6 +472,7 @@
         "data.packages.element.options[1].manifest.views.element.list",
         "data.packages.element.options[1].manifest.views.element.list.bulkActionDefs.element",
         "data.packages.element.options[1].manifest.views.element.list.filter.element",
+        "data.packages.element.options[1].manifest.views.element.list.filter.element.options[0]",
         "data.packages.element.options[1].manifest.views.element.list.gantt.groupByField",
         "data.packages.element.options[1].manifest.views.element.list.kanban.groupByField",
         "data.packages.element.options[1].manifest.views.element.list.timeline.groupByField"
@@ -502,6 +512,7 @@
         "data.listViews.valueType.bulkActionDefs.element",
         "data.listViews.valueType.emptyState.link.url",
         "data.listViews.valueType.filter.element",
+        "data.listViews.valueType.filter.element.options[0]",
         "data.listViews.valueType.gantt.groupByField",
         "data.listViews.valueType.grouping.fields.element.field",
         "data.listViews.valueType.kanban.groupByField",
@@ -963,6 +974,7 @@
         "listViews.valueType.bulkActionDefs.element",
         "listViews.valueType.emptyState.link.url",
         "listViews.valueType.filter.element",
+        "listViews.valueType.filter.element.options[0]",
         "listViews.valueType.gantt.groupByField",
         "listViews.valueType.grouping.fields.element.field",
         "listViews.valueType.kanban.groupByField",
@@ -1298,6 +1310,7 @@
         "operations.element.options[3].object.listViews.valueType.bulkActionDefs.element",
         "operations.element.options[3].object.listViews.valueType.emptyState.link.url",
         "operations.element.options[3].object.listViews.valueType.filter.element",
+        "operations.element.options[3].object.listViews.valueType.filter.element.options[0]",
         "operations.element.options[3].object.listViews.valueType.gantt.groupByField",
         "operations.element.options[3].object.listViews.valueType.grouping.fields.element.field",
         "operations.element.options[3].object.listViews.valueType.kanban.groupByField",
@@ -1325,6 +1338,7 @@
         "object.listViews.valueType.bulkActionDefs.element",
         "object.listViews.valueType.emptyState.link.url",
         "object.listViews.valueType.filter.element",
+        "object.listViews.valueType.filter.element.options[0]",
         "object.listViews.valueType.gantt.groupByField",
         "object.listViews.valueType.grouping.fields.element.field",
         "object.listViews.valueType.kanban.groupByField",
@@ -1374,6 +1388,7 @@
         "options[3].object.listViews.valueType.bulkActionDefs.element",
         "options[3].object.listViews.valueType.emptyState.link.url",
         "options[3].object.listViews.valueType.filter.element",
+        "options[3].object.listViews.valueType.filter.element.options[0]",
         "options[3].object.listViews.valueType.gantt.groupByField",
         "options[3].object.listViews.valueType.grouping.fields.element.field",
         "options[3].object.listViews.valueType.kanban.groupByField",
@@ -1513,6 +1528,7 @@
     },
     "ui/App": {
       "sites": [
+        "",
         "navigation.element.lazy",
         "navigation.element.lazy.options[0]"
       ]
@@ -1578,7 +1594,8 @@
     },
     "ui/ElementDataSource": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/EmptyState": {
@@ -1634,7 +1651,8 @@
     "ui/InterfacePageConfig": {
       "sites": [
         "emptyState.link.url",
-        "filterBy.element"
+        "filterBy.element",
+        "filterBy.element.options[0]"
       ]
     },
     "ui/JoinedReportBlock": {
@@ -1655,6 +1673,7 @@
         "bulkActionDefs.element",
         "emptyState.link.url",
         "filter.element",
+        "filter.element.options[0]",
         "gantt.groupByField",
         "grouping.fields.element.field",
         "kanban.groupByField",
@@ -1681,7 +1700,8 @@
     },
     "ui/ObjectCalendarProps": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/ObjectFormProps": {
@@ -1696,6 +1716,7 @@
     "ui/ObjectGanttProps": {
       "sites": [
         "filter.element",
+        "filter.element.options[0]",
         "gantt.groupByField"
       ]
     },
@@ -1704,12 +1725,14 @@
         "bulkActionDefs.element",
         "emptyState.link.url",
         "filter.element",
+        "filter.element.options[0]",
         "grouping.fields.element.field"
       ]
     },
     "ui/ObjectKanbanProps": {
       "sites": [
         "filter.element",
+        "filter.element.options[0]",
         "grouping.fields.element.field"
       ]
     },
@@ -1719,6 +1742,7 @@
         "bulkActionDefs.element",
         "emptyState.link.url",
         "filter.element",
+        "filter.element.options[0]",
         "gantt.groupByField",
         "grouping.fields.element.field",
         "kanban.groupByField",
@@ -1727,7 +1751,8 @@
     },
     "ui/ObjectMapProps": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/ObjectMasterDetailFormProps": {
@@ -1746,19 +1771,22 @@
         "drillDown.report.blocks.element.runtimeFilter",
         "drillDown.report.runtimeFilter",
         "drillDown.report.runtimeFilter.lazy",
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/ObjectTimelineProps": {
       "sites": [
         "",
         "filter.element",
+        "filter.element.options[0]",
         "timeline.groupByField"
       ]
     },
     "ui/ObjectTreeProps": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/Page": {
@@ -1766,23 +1794,27 @@
         "",
         "interfaceConfig.emptyState.link.url",
         "record.filter.element",
+        "record.filter.element.options[0]",
         "slots.header.options[0].type"
       ]
     },
     "ui/PageComponent": {
       "sites": [
         "dataSource.options[0].filter.element",
+        "dataSource.options[0].filter.element.options[0]",
         "type"
       ]
     },
     "ui/PageRecordBinding": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/PageRegion": {
       "sites": [
         "components.element.lazy.dataSource.options[0].filter.element",
+        "components.element.lazy.dataSource.options[0].filter.element.options[0]",
         "components.element.lazy.type"
       ]
     },
@@ -1800,7 +1832,8 @@
     "ui/RecordLineItemsProps": {
       "sites": [
         "columns.element",
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/RecordQuickActionsProps": {
@@ -1810,7 +1843,8 @@
     },
     "ui/RecordRelatedListProps": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     },
     "ui/Report": {
@@ -1829,7 +1863,8 @@
     },
     "ui/UserFilters": {
       "sites": [
-        "tabs.element.filter.element"
+        "tabs.element.filter.element",
+        "tabs.element.filter.element.options[0]"
       ]
     },
     "ui/View": {
@@ -1842,10 +1877,22 @@
         "list.bulkActionDefs.element",
         "list.emptyState.link.url",
         "list.filter.element",
+        "list.filter.element.options[0]",
         "list.gantt.groupByField",
         "list.grouping.fields.element.field",
         "list.kanban.groupByField",
         "list.timeline.groupByField"
+      ]
+    },
+    "ui/ViewFilterOrGroup": {
+      "sites": [
+        "or.element"
+      ]
+    },
+    "ui/ViewFilterElement": {
+      "sites": [
+        "",
+        "options[0]"
       ]
     },
     "ui/ViewFilterRule": {
@@ -1859,6 +1906,7 @@
         "options[0].config.bulkActionDefs.element",
         "options[0].config.emptyState.link.url",
         "options[0].config.filter.element",
+        "options[0].config.filter.element.options[0]",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",
         "options[0].config.kanban.groupByField",
@@ -1875,6 +1923,7 @@
         "options[0].config.bulkActionDefs.element",
         "options[0].config.emptyState.link.url",
         "options[0].config.filter.element",
+        "options[0].config.filter.element.options[0]",
         "options[0].config.gantt.groupByField",
         "options[0].config.grouping.fields.element.field",
         "options[0].config.kanban.groupByField",
@@ -1887,7 +1936,8 @@
     },
     "ui/ViewTab": {
       "sites": [
-        "filter.element"
+        "filter.element",
+        "filter.element.options[0]"
       ]
     }
   }

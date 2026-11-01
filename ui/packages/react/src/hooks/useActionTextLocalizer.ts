@@ -83,9 +83,10 @@
  *   the token in after the action succeeds, through the same `${result.*}`
  *   scope `onSuccess.navigate` reads — one interpolation, in one place.
  * - **The `template` envelope keeps its shape** (objectui#13367, the renderer
- *   half of objectstack#24814). `confirmText`, `successMessage` and
- *   `errorMessage` may arrive as `{ dialect: 'template', source }` instead of
- *   a string. The envelope is not an `I18nLabel` map — read as one it would
+ *   half of objectstack#24814). `confirmText`, `successMessage`,
+ *   `errorMessage` and each `outcomeMessages` entry (objectstack#27948) may
+ *   arrive as `{ dialect: 'template', source }` instead of a string. The
+ *   envelope is not an `I18nLabel` map — read as one it would
  *   collapse to its first string value, the word `template` — so its `source`
  *   is what the bundle's fallback and answer replace, and the runner receives
  *   the envelope and fills its `{{ }}` holes (`ActionRunner`'s copy reads).
@@ -218,9 +219,15 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
       // real bag?" predicate in this package answers whether to read it.
       const authoredOutcomes: unknown = action.outcomeMessages;
       if (isConfigBag(authoredOutcomes)) {
-        const outcomeMessages: Record<string, string> = {};
+        // Each entry is a `template` slot like `successMessage`
+        // (objectstack#27948, ruling A): an envelope keeps its shape and has
+        // its `source` offered to the bundle, never collapsed as a locale map.
+        const outcomeMessages: Record<string, unknown> = {};
         for (const [outcome, copy] of Object.entries(authoredOutcomes)) {
-          const text = actionOutcome(keyObject, name, outcome, pickLocalized(copy, language));
+          const text = resolveCopy(
+            collapseCopy(copy, language),
+            (fallback) => actionOutcome(keyObject, name, outcome, fallback),
+          );
           if (text !== undefined) outcomeMessages[outcome] = text;
         }
         out.outcomeMessages = outcomeMessages;

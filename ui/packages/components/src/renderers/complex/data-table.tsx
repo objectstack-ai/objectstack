@@ -18,7 +18,7 @@ import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagno
 import { ComponentRegistry, compareSortValues, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
-import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope } from '@object-ui/react';
+import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation, useDisplayLocale } from '@object-ui/i18n';
 import { 
   Table, 
@@ -375,6 +375,39 @@ function extractSaveErrorMessage(error: unknown): string {
 }
 
 /**
+ * The lines a refused save shows in the save bar: one per reason the refusals
+ * list (a `VALIDATION_FAILED` answer keeps one `fields[]` entry per failed
+ * rule), else each refusal's one message — distinct, in the order the rows
+ * were sent. Said whole, never cut to one line (objectstack-ai/objectstack#27520).
+ */
+function saveRefusalLines(errors: readonly unknown[]): string[] {
+  const lines: string[] = [];
+  for (const error of errors) {
+    const listed = unmarkedRefusalLines(error, () => false);
+    for (const line of listed && listed.length > 0 ? listed : [extractSaveErrorMessage(error)]) {
+      if (!lines.includes(line)) lines.push(line);
+    }
+  }
+  return lines;
+}
+
+/**
+ * The cells a refused row save names, field → reason, read from the refusal's
+ * own field entries (`extractFieldErrors`); `null` when it names none. A field
+ * the table draws no column for simply marks nothing: its reason is still in
+ * the save bar.
+ */
+function refusedCellsOf(error: unknown): Record<string, string> | null {
+  const entries = extractFieldErrors(error);
+  if (!entries) return null;
+  const cells: Record<string, string> = {};
+  for (const { field, message } of entries) {
+    if (!(field in cells)) cells[field] = message || extractSaveErrorMessage(error);
+  }
+  return cells;
+}
+
+/**
  * The element type of `DataTableSchema.rowActionDefs`. Derived via indexed
  * access rather than imported by name: `@object-ui/types` defines
  * `DataTableRowAction` but doesn't re-export it from its public entry, so it's
@@ -702,29 +735,26 @@ export const DataTableBuiltinRowActionItem: React.FC<{
 };
 
 /**
- * The row overflow ("⋮") menu for ONE row — trigger included, or nothing at all.
- *
- * A component per row rather than inline JSX in the row loop, because deciding
- * whether the trigger exists means evaluating THIS row's predicates, and that
- * needs a hook scope of its own (the row loop's arity is the page's row count).
- *
- * objectui#3562: the old guard asked whether HANDLERS were supplied
- * (`onRowEdit` / `onRowDelete` / `rowActionDefs`) while the items were filtered
- * a second time by their per-record predicates. Handlers present + every item
- * suppressed = a trigger that opens an empty box (measured at 128×10 with zero
- * `[role=menu]` children). The guard now counts the items that will actually
- * render, so the two can't disagree.
- *
- * The actions `<TableCell>` around this is NOT conditional: a row with no
- * surviving actions renders an empty cell, keeping every row aligned with the
- * `Actions` header — the same shape a table with no handlers at all has always
- * produced.
+ * The row "⋮" menu's custom actions: `rowActionDefs`, capability-gated and
+ * switch-off-filtered, and only when there is a handler to dispatch them to.
+ * One definition, read by the menu's hook below and by the row context menu's
+ * open decision (objectstack#28434), so the two cannot disagree on a row.
  */
-const DataTableRowActionsMenu: React.FC<{
-  schema: DataTableSchema;
-  row: any;
-  t: (key: string) => string;
-}> = ({ schema, row, t }) => {
+function gatedDataTableRowActions(
+  schema: Pick<DataTableSchema, 'rowActionDefs' | 'onRowActionDef'>,
+  mayInvoke: ReturnType<typeof useCapabilityGate>,
+): RowActionDef[] {
+  return Array.isArray(schema.rowActionDefs) && schema.onRowActionDef
+    ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d))
+    : [];
+}
+
+/**
+ * THE resolver of ONE row's "⋮" menu, read by {@link DataTableRowActionsMenu}
+ * and by the row context menu this table opens when no host draws its own
+ * (objectstack#28434): same gate, same predicates, same order.
+ */
+function useDataTableRowMenuPlan(schema: DataTableSchema, row: any): DataTableRowMenuPlan {
   const scope = usePredicateScope();
   /**
    * [ADR-0066 D4 / objectui#9623] The capability gate, applied ONCE to the
@@ -752,13 +782,10 @@ const DataTableRowActionsMenu: React.FC<{
    */
   const mayInvoke = useCapabilityGate();
   const customActions = useMemo(
-    () =>
-      Array.isArray(schema.rowActionDefs) && schema.onRowActionDef
-        ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d))
-        : [],
+    () => gatedDataTableRowActions(schema, mayInvoke),
     [schema.rowActionDefs, schema.onRowActionDef, mayInvoke],
   );
-  const plan = useMemo(
+  return useMemo(
     () =>
       planDataTableRowMenu({
         onRowEdit: schema.onRowEdit,
@@ -779,6 +806,33 @@ const DataTableRowActionsMenu: React.FC<{
       scope,
     ],
   );
+}
+
+/**
+ * The row overflow ("⋮") menu for ONE row — trigger included, or nothing at all.
+ *
+ * A component per row rather than inline JSX in the row loop, because deciding
+ * whether the trigger exists means evaluating THIS row's predicates, and that
+ * needs a hook scope of its own (the row loop's arity is the page's row count).
+ *
+ * objectui#3562: the old guard asked whether HANDLERS were supplied
+ * (`onRowEdit` / `onRowDelete` / `rowActionDefs`) while the items were filtered
+ * a second time by their per-record predicates. Handlers present + every item
+ * suppressed = a trigger that opens an empty box (measured at 128×10 with zero
+ * `[role=menu]` children). The guard now counts the items that will actually
+ * render, so the two can't disagree.
+ *
+ * The actions `<TableCell>` around this is NOT conditional: a row with no
+ * surviving actions renders an empty cell, keeping every row aligned with the
+ * `Actions` header — the same shape a table with no handlers at all has always
+ * produced.
+ */
+const DataTableRowActionsMenu: React.FC<{
+  schema: DataTableSchema;
+  row: any;
+  t: (key: string) => string;
+}> = ({ schema, row, t }) => {
+  const plan = useDataTableRowMenuPlan(schema, row);
   // Nothing to show → no trigger. An affordance that opens empty reads as a
   // broken page, which is the whole of #3562.
   if (plan.count === 0) return null;
@@ -801,43 +855,85 @@ const DataTableRowActionsMenu: React.FC<{
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-        {plan.edit && (
-          <DataTableBuiltinRowActionItem
-            name="edit"
-            predicates={schema.rowEditPredicates}
-            row={row}
-            icon={<Edit className="mr-2 h-4 w-4" />}
-            label={t('table.edit')}
-            onSelect={(r) => schema.onRowEdit?.(r)}
-          />
-        )}
-        {/* Child-object custom actions (e.g. a related list surfacing the
-            child's `list_item` actions). Dispatched with the clicked row.
-            Separators are placed off the SURVIVING groups, so a suppressed
-            group can no longer leave a stray rule behind. */}
-        {plan.custom.length > 0 && plan.edit && <DropdownMenuSeparator />}
-        {plan.custom.map((action) => (
-          <DataTableRowActionItem
-            key={action.name}
-            action={action}
-            row={row}
-            onActionDef={schema.onRowActionDef}
-          />
-        ))}
-        {plan.remove && (plan.edit || plan.custom.length > 0) && <DropdownMenuSeparator />}
-        {plan.remove && (
-          <DataTableBuiltinRowActionItem
-            name="delete"
-            predicates={schema.rowDeletePredicates}
-            row={row}
-            icon={<Trash2 className="mr-2 h-4 w-4" />}
-            label={t('table.delete')}
-            className="text-destructive focus:text-destructive"
-            onSelect={(r) => schema.onRowDelete?.(r)}
-          />
-        )}
+        <DataTableRowMenuItems schema={schema} row={row} t={t} plan={plan} />
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+};
+
+/**
+ * The items of ONE row's "⋮" plan — Edit, the surviving custom actions,
+ * Delete — for whichever menu content hosts them: {@link DataTableRowActionsMenu}
+ * and the row context menu (objectstack#28434) render this one list.
+ */
+const DataTableRowMenuItems: React.FC<{
+  schema: DataTableSchema;
+  row: any;
+  t: (key: string) => string;
+  plan: DataTableRowMenuPlan;
+}> = ({ schema, row, t, plan }) => (
+  <>
+    {plan.edit && (
+      <DataTableBuiltinRowActionItem
+        name="edit"
+        predicates={schema.rowEditPredicates}
+        row={row}
+        icon={<Edit className="mr-2 h-4 w-4" />}
+        label={t('table.edit')}
+        onSelect={(r) => schema.onRowEdit?.(r)}
+      />
+    )}
+    {/* Child-object custom actions (e.g. a related list surfacing the
+        child's `list_item` actions). Dispatched with the clicked row.
+        Separators are placed off the SURVIVING groups, so a suppressed
+        group can no longer leave a stray rule behind. */}
+    {plan.custom.length > 0 && plan.edit && <DropdownMenuSeparator />}
+    {plan.custom.map((action) => (
+      <DataTableRowActionItem
+        key={action.name}
+        action={action}
+        row={row}
+        onActionDef={schema.onRowActionDef}
+      />
+    ))}
+    {plan.remove && (plan.edit || plan.custom.length > 0) && <DropdownMenuSeparator />}
+    {plan.remove && (
+      <DataTableBuiltinRowActionItem
+        name="delete"
+        predicates={schema.rowDeletePredicates}
+        row={row}
+        icon={<Trash2 className="mr-2 h-4 w-4" />}
+        label={t('table.delete')}
+        className="text-destructive focus:text-destructive"
+        onSelect={(r) => schema.onRowDelete?.(r)}
+      />
+    )}
+  </>
+);
+
+/**
+ * The row context menu this table draws for ITSELF, when no host draws one
+ * through `renderRowContextMenu` (objectstack#28434) — the related-list
+ * tables, whose rows have this table's own "⋮" menu: Open (what a click on the
+ * row does), then exactly that row's "⋮" items, from the same resolver.
+ */
+const DataTableRowContextMenuItems: React.FC<{
+  schema: DataTableSchema;
+  row: any;
+  t: (key: string) => string;
+}> = ({ schema, row, t }) => {
+  const plan = useDataTableRowMenuPlan(schema, row);
+  return (
+    <>
+      {schema.onRowClick && (
+        <DropdownMenuItem onClick={() => schema.onRowClick?.(row)} data-testid="row-context-open">
+          <ChevronRight className="mr-2 h-4 w-4" />
+          {t('table.open')}
+        </DropdownMenuItem>
+      )}
+      {schema.onRowClick && plan.count > 0 && <DropdownMenuSeparator />}
+      <DataTableRowMenuItems schema={schema} row={row} t={t} plan={plan} />
+    </>
   );
 };
 
@@ -978,6 +1074,26 @@ function hasTextSelectionIn(el: Element): boolean {
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
   if (selection.toString().trim() === '') return false;
   return selection.getRangeAt(0).intersectsNode(el);
+}
+
+/**
+ * objectstack#28434 — where a right-click on a row keeps the BROWSER's menu
+ * rather than the row's: on a link (open in new tab, copy link address), on an
+ * input, a picker or a cell in edit mode (paste, spell check), and whenever the
+ * viewer has selected text in the row (copy), so copying from a list keeps
+ * working. Also on an overlay a row hosts, portalled above it (its "⋮" menu, a
+ * dialog it opened), whose events still bubble to the row through React.
+ */
+function keepsBrowserContextMenu(target: HTMLElement, row: HTMLElement): boolean {
+  return Boolean(
+    target.closest('a[href]')
+    || target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+    || target.closest('[data-editing-cell]')
+    || hasTextSelectionIn(row)
+    || target.closest('[role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]')
+    || portalledFrom(target, row, '[role="dialog"]')
+    || portalledFrom(target, row, '[role="alertdialog"]'),
+  );
 }
 
 /**
@@ -1670,15 +1786,59 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     };
   }, [pendingChanges]);
   const [isSaving, setIsSaving] = useState(false);
-  // Last save failure message (server validation text, etc.) shown in the
-  // toolbar; null when the last save attempt succeeded or nothing's been saved.
-  const [saveError, setSaveError] = useState<string | null>(null);
+  // Last save failure, one line per reason (server validation text, etc.),
+  // shown in the toolbar; null when the last save attempt succeeded or
+  // nothing's been saved.
+  const [saveError, setSaveError] = useState<string[] | null>(null);
+  // The cells the last refusal named, per record key, field → reason
+  // (objectstack-ai/objectstack#27520): each is marked where it is drawn, and
+  // its mark goes the moment the cell is edited again or its row saves.
+  const [cellErrors, setCellErrors] = useState<Map<PendingRowKey, Record<string, string>>>(new Map());
+  const clearCellError = (rowKey: PendingRowKey, columnKey: string) => {
+    setCellErrors((prev) => {
+      const cells = prev.get(rowKey);
+      if (!cells || !(columnKey in cells)) return prev;
+      const next = new Map(prev);
+      const rest = { ...cells };
+      delete rest[columnKey];
+      if (Object.keys(rest).length > 0) next.set(rowKey, rest);
+      else next.delete(rowKey);
+      return next;
+    });
+  };
+  const setRowCellErrors = (rowKey: PendingRowKey, cells: Record<string, string> | null) => {
+    setCellErrors((prev) => {
+      if (!cells && !prev.has(rowKey)) return prev;
+      const next = new Map(prev);
+      if (cells) next.set(rowKey, cells);
+      else next.delete(rowKey);
+      return next;
+    });
+  };
   // Records whose last save attempt failed, by the key their pending edit is
   // kept under (objectui#12310) — tinted destructive so the author sees exactly
   // which rows didn't persist (no silent "phantom save").
   const [erroredRows, setErroredRows] = useState<Set<PendingRowKey>>(new Set());
   // Column header context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; columnKey: string } | null>(null);
+  // objectstack#28434 — the row context menu: which row it is open on, where,
+  // and the element focus goes back to when it closes (the focused cell for
+  // the keyboard, the cell under the pointer for a right-click).
+  const [rowContextMenu, setRowContextMenu] = useState<{ row: any; selected: boolean; x: number; y: number } | null>(null);
+  const rowContextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
+  // The last pointer that pressed a row: a touch long-press raises
+  // `contextmenu` too, and touch keeps the row's "⋮" instead.
+  const rowPointerTypeRef = useRef<string>('');
+  // When the keyboard last opened the menu: the browser may raise its own
+  // `contextmenu` for the same key press right after.
+  const rowContextMenuKeyboardAtRef = useRef(Number.NEGATIVE_INFINITY);
+  // Set when the menu closes because the pointer went elsewhere: focus then
+  // stays where that press put it instead of jumping back to the row.
+  const rowContextMenuClosedOutsideRef = useRef(false);
+  // The built-in row menu's verdicts are asked at open time, so the open
+  // decision and the items it opens read one answer (see `rowContextMenuItems`).
+  const rowMenuScope = usePredicateScope();
+  const rowMenuMayInvoke = useCapabilityGate();
   
   // Refs for column resizing
   const resizingColumn = useRef<string | null>(null);
@@ -2335,6 +2495,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // save that settled since this render is not undone (objectui#12322).
     const inFlight = inFlightRef.current.get(rowKey);
     setPendingChanges((prev) => stageCellChange(prev, rowKey, row, columnKey, valueToStage, inFlight));
+    clearCellError(rowKey, columnKey);
 
     // Call the legacy onCellChange callback if provided
     if (schema.onCellChange) {
@@ -2428,6 +2589,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const inFlight = inFlightRef.current.get(rowKey);
     setEditValue(value);
     setPendingChanges((prev) => stageCellChange(prev, rowKey, row, columnKey, value, inFlight));
+    clearCellError(rowKey, columnKey);
   };
 
   // Commit the in-flight edit when the input loses focus (e.g. the user clicks
@@ -2502,12 +2664,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         if (next.size === 0) setSaveError(null);
         return next;
       });
+      setRowCellErrors(rowKey, null);
     } catch (error) {
       // Keep the pending change so the author can fix and retry; surface the
-      // reason instead of failing silently, and flag the row.
+      // reason instead of failing silently, flag the row, and mark the cells
+      // the refusal names.
       console.error('Failed to save row:', error);
-      setSaveError(extractSaveErrorMessage(error));
+      setSaveError(saveRefusalLines([error]));
       setErroredRows((prev) => new Set(prev).add(rowKey));
+      setRowCellErrors(rowKey, refusedCellsOf(error));
     } finally {
       setIsSaving(false);
     }
@@ -2524,6 +2689,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       if (next.size === 0) setSaveError(null);
       return next;
     });
+    setRowCellErrors(rowKey, null);
   };
 
   // Save All. Like `saveRow`, it settles against the pending edits as they
@@ -2589,13 +2755,23 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         const landed = new Map(Array.from(sent).filter(([key]) => !failedKeys.has(key)));
         setPendingChanges((prev) => removeSentEdits(prev, landed));
         setErroredRows(failedKeys);
-        setSaveError(extractSaveErrorMessage(failed[0].error));
+        // Every refused row's reasons, and the cells each refusal names
+        // (objectstack-ai/objectstack#27520).
+        setSaveError(saveRefusalLines(failed.map((entry) => entry.error)));
+        const refusedCells = new Map<PendingRowKey, Record<string, string>>();
+        for (const entry of failed) {
+          const cells = refusedCellsOf(entry.error);
+          const key = keyOfRowIndex.get(entry.rowIndex);
+          if (cells && key !== undefined) refusedCells.set(key, cells);
+        }
+        setCellErrors(refusedCells);
         return;
       }
       // Clear every edit the batch saved, and only those.
       setPendingChanges((prev) => removeSentEdits(prev, sent));
       // Saved — clear any prior errors.
       setErroredRows(new Set());
+      setCellErrors(new Map());
       setSaveError(null);
     } catch (error) {
       // A rejection says nothing about which rows landed, so it is read as
@@ -2603,8 +2779,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // one staged during the save), and surface the reason instead of
       // failing silently.
       console.error('Failed to save batch:', error);
-      setSaveError(extractSaveErrorMessage(error));
+      setSaveError(saveRefusalLines([error]));
       setErroredRows(new Set(sent.keys()));
+      // Which row a whole-batch refusal's fields belong to is unknown, so no
+      // cell is marked; the save bar says every reason.
+      setCellErrors(new Map());
     } finally {
       setIsSaving(false);
     }
@@ -2613,6 +2792,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const cancelAllChanges = () => {
     setPendingChanges(new Map());
     setErroredRows(new Set());
+    setCellErrors(new Map());
     setSaveError(null);
   };
 
@@ -2996,6 +3176,88 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     (Array.isArray(schema.rowActionDefs) && schema.rowActionDefs.length > 0 && schema.onRowActionDef)
   );
   const rowActionsColumnIsEditOnly = editable && !!(schema.onRowSave || schema.onBatchSave) && !rowMenuDeclared;
+
+  /**
+   * objectstack#28434 — the items ONE row's context menu opens with, or `null`
+   * for the browser's own menu.
+   *
+   * A host that draws its own (`renderRowContextMenu` — `ObjectGrid`) decides
+   * alone. Otherwise the table draws its own only where it draws its own row
+   * "⋮" column: Open, then that row's "⋮" items. Never for a row inside a
+   * selection of two or more — a selection is a bulk act, and this table holds
+   * no bulk actions to offer it — and never on a row with nothing to offer.
+   */
+  const rowContextMenuItems = (row: any, selected: boolean): React.ReactNode => {
+    if (schema.renderRowContextMenu) {
+      const items = schema.renderRowContextMenu(row, { selected });
+      return items === false || items === undefined ? null : items;
+    }
+    if (!rowActions || rowActionsColumnIsEditOnly) return null;
+    if (selected && selectedRowIds.size >= 2) return null;
+    const plan = planDataTableRowMenu({
+      onRowEdit: schema.onRowEdit,
+      onRowDelete: schema.onRowDelete,
+      editPredicates: schema.rowEditPredicates,
+      deletePredicates: schema.rowDeletePredicates,
+      customActions: gatedDataTableRowActions(schema, rowMenuMayInvoke),
+      row,
+      scope: rowMenuScope,
+    });
+    if (plan.count === 0 && !schema.onRowClick) return null;
+    return <DataTableRowContextMenuItems schema={schema} row={row} t={t} />;
+  };
+
+  /**
+   * Open the row context menu from a right-click (`contextmenu`) or from the
+   * keyboard (the context-menu key, Shift+F10) on a row — or leave the event to
+   * the browser: a touch long-press, the targets `keepsBrowserContextMenu`
+   * names, and a row with nothing to offer all keep the browser's menu.
+   */
+  const openRowContextMenu = (
+    e: React.MouseEvent<HTMLTableRowElement> | React.KeyboardEvent<HTMLTableRowElement>,
+    row: any,
+    selected: boolean,
+  ) => {
+    const target = e.target as HTMLElement;
+    const rowEl = e.currentTarget;
+    const fromKeyboard = e.type === 'keydown';
+    if (!fromKeyboard) {
+      // Event time, not the clock: both events carry it from the same origin,
+      // and the handler stays free of a render-time impure call.
+      if (e.timeStamp - rowContextMenuKeyboardAtRef.current < 500) {
+        // The browser's own echo of the key press that just opened the menu.
+        e.preventDefault();
+        return;
+      }
+      const pointerType = (e.nativeEvent as PointerEvent).pointerType || rowPointerTypeRef.current;
+      if (pointerType === 'touch') return;
+    }
+    if (keepsBrowserContextMenu(target, rowEl)) return;
+    const items = rowContextMenuItems(row, selected);
+    if (items == null) return;
+    e.preventDefault();
+    const pointer = fromKeyboard ? null : (e as React.MouseEvent);
+    let x: number;
+    let y: number;
+    if (pointer && (pointer.clientX !== 0 || pointer.clientY !== 0)) {
+      x = pointer.clientX;
+      y = pointer.clientY;
+    } else {
+      // The keyboard has no pointer: open below the focused element.
+      const rect = target.getBoundingClientRect();
+      x = rect.left;
+      y = rect.bottom;
+    }
+    if (fromKeyboard) rowContextMenuKeyboardAtRef.current = e.timeStamp;
+    const focusable = fromKeyboard ? target : target.closest<HTMLElement>('[tabindex]');
+    rowContextMenuReturnFocusRef.current = focusable && rowEl.contains(focusable) ? focusable : null;
+    rowContextMenuClosedOutsideRef.current = false;
+    setRowContextMenu({ row, selected, x, y });
+  };
+  // The open menu's items, re-asked each render so they follow the row.
+  const openRowContextMenuItems = rowContextMenu
+    ? rowContextMenuItems(rowContextMenu.row, rowContextMenu.selected)
+    : null;
   const showToolbar = searchEnabled || exportable || (showSelectionCount && selectable && selectedRowIds.size > 0) || hasPendingChanges;
 
   // The span of a row drawn as one cell across the table: the leading utility
@@ -3022,7 +3284,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     <div className={`flex flex-col h-full gap-2 sm:gap-4 ${className || ''}`}>
       {/* Toolbar */}
       {showToolbar && (
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-4 flex-none">
+        <div data-slot="table-toolbar" className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2 sm:gap-4 flex-none">
           <div className="flex items-center gap-2 flex-1">
             {searchEnabled && (
               <div className="relative w-full sm:max-w-sm flex-1">
@@ -3040,17 +3302,6 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           <div className="flex flex-wrap items-center gap-2">
             {hasPendingChanges && (
               <>
-                {saveError && (
-                  <div
-                    role="alert"
-                    className="flex items-center gap-1.5 text-sm text-destructive max-w-[16rem] sm:max-w-sm"
-                  >
-                    <AlertCircle className="h-4 w-4 flex-none" />
-                    <span className="truncate" title={`${t('table.saveFailed')}: ${saveError}`}>
-                      {t('table.saveFailed')}: {saveError}
-                    </span>
-                  </div>
-                )}
                 <div className="text-sm text-muted-foreground">
                   {t('table.modified', { count: pendingChanges.size })}
                 </div>
@@ -3093,6 +3344,31 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               </div>
             )}
           </div>
+
+          {/* The last save's refusal, on a line of its own and said whole —
+              one line per reason (objectstack-ai/objectstack#27520). The
+              cells it names are marked in the table below. */}
+          {hasPendingChanges && saveError && (
+            <div
+              role="alert"
+              data-testid="table-save-refusal"
+              className="flex items-start gap-1.5 text-sm text-destructive sm:basis-full"
+            >
+              <AlertCircle className="h-4 w-4 flex-none mt-0.5" />
+              {saveError.length === 1 ? (
+                <span className="min-w-0 break-words">
+                  {t('table.saveFailed')}: {saveError[0]}
+                </span>
+              ) : (
+                <div className="min-w-0 break-words">
+                  <span>{t('table.saveFailed')}:</span>
+                  <ul className="list-disc pl-5">
+                    {saveError.map((line) => <li key={line}>{line}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -3453,6 +3729,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                   const rowHasChanges = rowPending !== undefined;
                   const rowChanges = rowPending?.changes || {};
                   const rowErrored = erroredRows.has(rowKey);
+                  const rowCellErrors = cellErrors.get(rowKey);
                   
                   return (
                     // objectstack#27545 — the row of the record a pane beside
@@ -3488,6 +3765,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         rowClassName && rowClassName(row, rowIndex)
                       )}
                       style={rowStyle ? rowStyle(row, rowIndex) : undefined}
+                      // objectstack#28434 — the row context menu: a
+                      // right-click, the context-menu key or Shift+F10 on a
+                      // focused row (see `openRowContextMenu`).
+                      onPointerDown={(e) => { rowPointerTypeRef.current = e.pointerType; }}
+                      onContextMenu={(e) => openRowContextMenu(e, row, isSelected)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) openRowContextMenu(e, row, isSelected);
+                      }}
                       onClick={(e) => {
                         // objectui#13188 — a drag that selected text in the
                         // row is a copy gesture, not an open.
@@ -3669,6 +3954,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         const hasPendingChange = rowChanges[col.accessorKey] !== undefined;
                         const cellValue = hasPendingChange ? rowChanges[col.accessorKey] : originalValue;
                         const isEditing = editingCell !== null && editingCell.rowKey === rowKey && editingCell.columnKey === col.accessorKey;
+                        // The reason the last refusal gave for THIS cell, if it
+                        // named it (objectstack-ai/objectstack#27520).
+                        const cellError = rowCellErrors?.[col.accessorKey];
                         // A masked column reads as NOT editable here too
                         // (objectui#10583), so its cell neither shows the
                         // edit cursor nor swallows the row's click —
@@ -3700,6 +3988,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               isFit ? 'whitespace-nowrap' : 'overflow-hidden',
                               isEditable && !isEditing && "cursor-text hover:bg-muted/50",
                               hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
+                              cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
                               isFrozen && colIndex === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
                             )}
@@ -3742,6 +4031,12 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex ? 0 : -1) : 0}
                             data-grid-cell={keyboardNavigation ? `${rowIndex}:${colIndex}` : undefined}
                             onFocus={keyboardNavigation ? () => rove(rowIndex, colIndex) : undefined}
+                            aria-invalid={cellError !== undefined || undefined}
+                            // objectstack#28434 — a cell in edit mode keeps the
+                            // browser's context menu (`keepsBrowserContextMenu`).
+                            data-editing-cell={isEditing ? '' : undefined}
+                            data-cell-error={cellError}
+                            title={cellError}
                           >
                             {isEditing ? (
                               (() => {
@@ -4116,6 +4411,45 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* objectstack#28434 — the row context menu, opened at the pointer (or
+          below the focused cell) by `openRowContextMenu`. Non-modal, so a
+          right-click on another row reaches that row and reopens it there.
+          Mounted only while open: a closed menu draws nothing, so a table
+          nobody right-clicks renders exactly the markup it did before. */}
+      {rowContextMenu && openRowContextMenuItems != null && (
+        <DropdownMenu
+          open
+          onOpenChange={(open) => { if (!open) setRowContextMenu(null); }}
+          modal={false}
+        >
+          <DropdownMenuTrigger asChild>
+            <span
+              aria-hidden
+              tabIndex={-1}
+              data-testid="row-context-menu-anchor"
+              className="pointer-events-none fixed h-px w-px"
+              style={{ left: rowContextMenu.x, top: rowContextMenu.y }}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="min-w-[180px]"
+            data-testid="row-context-menu"
+            onClick={(e) => e.stopPropagation()}
+            onInteractOutside={() => { rowContextMenuClosedOutsideRef.current = true; }}
+            onCloseAutoFocus={(e) => {
+              // Esc or a chosen item: focus goes back to the row it opened on,
+              // never to the invisible anchor.
+              e.preventDefault();
+              if (!rowContextMenuClosedOutsideRef.current) rowContextMenuReturnFocusRef.current?.focus();
+              rowContextMenuClosedOutsideRef.current = false;
+            }}
+          >
+            {openRowContextMenuItems}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       {/* Column header context menu */}

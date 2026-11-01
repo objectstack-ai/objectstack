@@ -56,7 +56,10 @@ import {
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
-import { isWritablePackage } from '@objectstack/metadata-protocol';
+import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+// [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
+// shared with the registry's co-owner gate.
+import { declaredDependencyIds } from '@objectstack/core';
 // [#9960] The uninstall seam's DECLARED shapes, from the same producer and for
 // the same reason as the predicate above: this door reached `deletePackage`
 // through `protocol` and routinely sent two keys — `organizationId`
@@ -341,6 +344,25 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
 }
 
 /**
+ * The actor a package write door records (ADR-0146 D1): the user id of the
+ * execution context this request was authorized as — the same context
+ * {@link requireManageMetadata} judged a few lines earlier — or `undefined`
+ * when the caller carries none, so the protocol's no-actor default (a `NULL`
+ * `recorded_by`) applies and a machine write is never stamped with a person.
+ *
+ * Never the request body: a body `actor` let any caller holding
+ * `manage_metadata` record any name as the one who changed a package. This is
+ * the rule `RestServer.resolveMetaWriteActor` holds for the `/meta` write
+ * doors, so attribution cannot drift from authorization. Only
+ * `publish-drafts` reads it today; the sibling package doors that still read
+ * `body.actor` are carried by their own card.
+ */
+function resolvePackageWriteActor(context: HttpProtocolContext | undefined): string | undefined {
+    const userId: unknown = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
+    return typeof userId === 'string' && userId ? userId : undefined;
+}
+
+/**
  * ADR-0106 D4 READ gate for the `/packages` domain (#7033 / #7023).
  *
  * Package reads disclose authored metadata — the `GET /packages` id
@@ -592,6 +614,80 @@ function requireWritablePackage(
 }
 
 /**
+ * [#28117] Whether `id` is a **module of an installed app** — the one kind of
+ * read-only package an admin may DISABLE (and only disable) on this server.
+ *
+ * ## The ruling
+ *
+ * A suite ships one artifact: its `type: 'app'` package and several
+ * `type: 'module'` packages (ADR-0019 D3, ADR-0130 D2/D6). The maintainer
+ * ruled plan A for "enable modules in settings": the customer's own admin
+ * switches a module off, per environment, and "disabled" has exactly ONE
+ * meaning — hidden, refused on the data plane, data kept. Every package of a
+ * booted or installed artifact is read-only to {@link isWritablePackage}, so
+ * without this reading the disable door refused every suite module.
+ *
+ * ## The tie
+ *
+ * Read off the registry ROW, because the row is what both install paths leave
+ * behind: a code boot (`AppPlugin` → `manifest.register`) and a marketplace
+ * install (`manifest.register(…, { source: 'marketplace' })`) both record the
+ * module's `manifest.type` and `manifest.dependencies`, and neither keeps the
+ * artifact's own package list past the registration call. So a package is a
+ * module of an installed app when:
+ *
+ *   • its `manifest.type` is `'module'`;
+ *   • it DIRECTLY declares (`manifest.dependencies`, ADR-0141 D1) a package
+ *     that is installed here and whose `manifest.type` is `'app'`;
+ *   • its own `manifest.scope` is not a platform scope
+ *     ({@link READ_ONLY_PACKAGE_SCOPES}): a module the platform delivers stays
+ *     the platform's, as every platform package does.
+ *
+ * Everything else answers as before: the app itself, a plugin, a driver, a
+ * module that declares no app, or one whose app is not installed.
+ *
+ * ⛔ A reading at the disable door, never a change to {@link isWritablePackage}:
+ * `writable` keeps meaning "may author into", and stays `false` for a module,
+ * so edit, publish, revert, delete and overwrite still refuse it
+ * (`WRITABLE_PACKAGE_REQUIRED`, ADR-0070 D2). The door asks it through
+ * {@link isDisableablePackage}, which the read doors serve as `disableable`.
+ */
+function isDisableableAppModule(engine: unknown, id: string): boolean {
+    const registry = (engine as PackageRowRegistryHost | null | undefined)?.registry;
+    if (typeof registry?.getPackage !== 'function') return false;
+    const manifest = registry.getPackage(id)?.manifest;
+    if (manifest?.type !== 'module') return false;
+    if (typeof manifest.scope === 'string' && READ_ONLY_PACKAGE_SCOPES.includes(manifest.scope)) return false;
+    return declaredDependencyIds(manifest).some(
+        (dependency) => dependency !== id && registry.getPackage!(dependency)?.manifest?.type === 'app',
+    );
+}
+
+/** The registry slice {@link isDisableableAppModule} reads: one row, by id. */
+interface PackageRowRegistryHost {
+    registry?: {
+        getPackage?(id: string): { manifest?: { type?: unknown; scope?: unknown; dependencies?: unknown } } | undefined;
+    };
+}
+
+/**
+ * [#28318] The disable door's verdict on `id`: `PATCH /packages/:id/disable`
+ * accepts the package (as far as the PACKAGE goes) exactly when this answers
+ * `true` — a writable base ({@link isWritablePackage}) or a module of an
+ * installed app ({@link isDisableableAppModule}).
+ *
+ * ONE predicate, asked by both readers: the door, before it switches the
+ * package off, and {@link withDisableableVerdict}, which serves the same answer
+ * as the row's `disableable` so a client offers Disable only where the door
+ * will accept it (#8146: one answer, served by the server). ⛔ Never re-spell
+ * the rule at either site. The caller's own permission and a catalog wall are
+ * not package facts: the door still asks them, and the verdict does not.
+ */
+function isDisableablePackage(engine: unknown, id: string | undefined): boolean {
+    return (id !== undefined && isDisableableAppModule(engine, id)) || isWritablePackage(engine, id);
+}
+
+/**
  * [#14451] `POST /packages/:id/duplicate` — the SOURCE must be a BASE.
  *
  * ## The measurement
@@ -769,6 +865,24 @@ function withWritableVerdict<T extends { manifest?: { id?: unknown }; id?: unkno
     const manifestId = row?.manifest?.id;
     const id = typeof manifestId === 'string' ? manifestId : (typeof row?.id === 'string' ? row.id : undefined);
     return { ...row, writable: isWritablePackage(engine, id) };
+}
+
+/**
+ * [#28318] Decorate one registry row with the disable door's verdict,
+ * `disableable` ({@link isDisableablePackage}). A separate key, never folded
+ * into `writable`: a module of an installed app is `disableable` and not
+ * `writable` — it may be switched off, never authored into — and the Console
+ * offers Disable / Enable from this key alone. Same shape as
+ * {@link withWritableVerdict}: a spread copy, keyed the way the registry keys
+ * the row, recomputed per read and never stored.
+ */
+function withDisableableVerdict<T extends { manifest?: { id?: unknown }; id?: unknown }>(
+    engine: unknown,
+    row: T,
+): T & { disableable: boolean } {
+    const manifestId = row?.manifest?.id;
+    const id = typeof manifestId === 'string' ? manifestId : (typeof row?.id === 'string' ? row.id : undefined);
+    return { ...row, disableable: isDisableablePackage(engine, id) };
 }
 
 /**
@@ -1254,8 +1368,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // `manifest.id`, which the projection keeps, so it is indifferent to
             // running second. Pinned in `packages-serializable-response.test.ts`
             // so a future reorder is a red test rather than a missing field.
+            // [#28318] `disableable` (see `withDisableableVerdict`) is stamped
+            // the same way, after the projection, for the same reason.
             const rows = packages.map(
-                (p: any) => withWritableVerdict(qlService, toPackageResponse(p) as any),
+                (p: any) => withDisableableVerdict(qlService, withWritableVerdict(qlService, toPackageResponse(p) as any)),
             );
             // [#16781] `hasMore` is REQUIRED by
             // `ListInstalledPackagesResponseSchema` and this door did not send
@@ -1720,7 +1836,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // switch off. BEFORE `disablePackage`, and before
             // `setPackageDisabled` writes the choice to disk — a disable that
             // lands is not undone by a restart, it is REPLAYED by one.
-            const readOnly = requireWritablePackage(deps, qlService, id, 'disable'); if (readOnly) return readOnly;
+            // [#28117] One exemption, for THIS verb only: a module of an
+            // installed app is the customer admin's to switch off
+            // ({@link isDisableableAppModule}). Every other door below still
+            // asks `requireWritablePackage` alone, so the module stays
+            // read-only for authoring. [#28318] Asked through
+            // `isDisableablePackage`, the predicate the read doors serve as
+            // `disableable`, so the row's verdict and this door cannot differ.
+            const readOnly = isDisableablePackage(qlService, id)
+                ? null
+                : requireWritablePackage(deps, qlService, id, 'disable');
+            if (readOnly) return readOnly;
             const pkg = registry.disablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             try {
@@ -1779,9 +1905,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
                 }
                 try {
+                    // [ADR-0146 D1] Who published: the identity this request
+                    // was authorized as, never a name the body supplies — see
+                    // `resolvePackageWriteActor`. A body `actor` is ignored.
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.publishPackageDrafts({
                         packageId: id,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...(actor !== undefined ? { actor } : {}),
+                        // [ADR-0146 D1] The author's change note: the package
+                        // commit and every item history row this publish writes
+                        // carry it. A string, as the single-item publish door
+                        // reads `message`; anything else sends no note.
+                        ...(typeof body?.message === 'string' ? { message: body.message } : {}),
                         // [#24253] Passed through as sent: the protocol judges
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.
@@ -2403,9 +2538,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             // [#14375] Same verdict, same predicate as the list door — and
             // [#14309] the same project-then-stamp order, for the same reason.
+            // [#28318] `disableable` likewise, beside `writable`.
             return {
                 handled: true,
-                response: deps.success(withWritableVerdict(qlService, toPackageResponse(pkg) as any)),
+                response: deps.success(withDisableableVerdict(qlService, withWritableVerdict(qlService, toPackageResponse(pkg) as any))),
             };
         }
 

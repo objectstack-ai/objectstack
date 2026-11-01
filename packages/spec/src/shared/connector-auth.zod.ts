@@ -388,8 +388,12 @@ export type ConnectorInstanceAppCredentialAuth = z.input<typeof ConnectorInstanc
  * canonical-request algorithm, implemented in the automation service's signer
  * registry, so nothing about the canonicalisation is authored.
  */
-export const ConnectorSigningSchemeSchema = z.enum(['aliyun-acs3-hmac-sha256'])
-  .describe('Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature).');
+export const ConnectorSigningSchemeSchema = z.enum(['aliyun-acs3-hmac-sha256', 'tencentcloud-tc3-hmac-sha256', 'alipay-v3'])
+  .describe(
+    'Request-signing scheme: `aliyun-acs3-hmac-sha256` (Alibaba Cloud OpenAPI V3 signature), '
+      + '`tencentcloud-tc3-hmac-sha256` (Tencent Cloud API 3.0 signature v3) or `alipay-v3` (Alipay '
+      + 'OpenAPI v3, ALIPAY-SHA256withRSA, responses verified).',
+  );
 export type ConnectorSigningScheme = z.input<typeof ConnectorSigningSchemeSchema>;
 
 /**
@@ -432,6 +436,68 @@ export const ConnectorInstanceSignedAliyunAcs3AuthSchema = lazySchema(() => stri
 export type ConnectorInstanceSignedAliyunAcs3Auth = z.input<typeof ConnectorInstanceSignedAliyunAcs3AuthSchema>;
 
 /**
+ * `signed` with `scheme: 'tencentcloud-tc3-hmac-sha256'` — Tencent Cloud's API
+ * 3.0 signature v3 (ADR-0143 Q4). Every request carries an `Authorization:
+ * TC3-HMAC-SHA256 Credential=<SecretId>/<date>/<service>/tc3_request,
+ * SignedHeaders=content-type;host, Signature=…` header, an HMAC-SHA256 over the
+ * canonical request with a key derived from the SecretKey, the date and the
+ * service; the signer also sets the `X-TC-Timestamp` it signs with. The service
+ * is the first label of the endpoint host (`cvm.tencentcloudapi.com` → `cvm`),
+ * as the vendor names it, so nothing about it is authored. The request names
+ * its API with the `X-TC-Action`, `X-TC-Version` and `X-TC-Region` headers.
+ */
+export const ConnectorInstanceSignedTencentCloudTc3AuthSchema = lazySchema(() => strictObject({
+  surface: "this `signed` connector auth (`scheme: 'tencentcloud-tc3-hmac-sha256'`)",
+  history: 'This shape is strict from birth — the `signed` instance kind had no earlier spelling, so an unknown key here was never accepted.',
+  guidance: SIGNED_GUIDANCE,
+  // Tencent Cloud's own word for the key id.
+  aliases: { secretId: 'keyId' },
+}, {
+  type: z.literal('signed'),
+  scheme: z.literal('tencentcloud-tc3-hmac-sha256').describe('Tencent Cloud API 3.0 signature v3 (TC3-HMAC-SHA256).'),
+  keyId: z.string().min(1).describe('The SecretId (not a secret); sent in the `Credential` of every signature.'),
+  credentialRef: z.string().min(1).describe(
+    'Secrets-layer reference resolved to the SecretKey every request\'s signing key is derived from. Never an inline secret.',
+  ),
+}));
+export type ConnectorInstanceSignedTencentCloudTc3Auth = z.input<typeof ConnectorInstanceSignedTencentCloudTc3AuthSchema>;
+
+/**
+ * `signed` with `scheme: 'alipay-v3'` — Alipay's OpenAPI v3 signature (ADR-0143
+ * Q4). Every request carries an `Authorization: ALIPAY-SHA256withRSA
+ * app_id=…,nonce=…,timestamp=…,sign=…` header, an RSA SHA-256 signature with
+ * the application private key over the auth string, the method, the path and
+ * query, and the body. The vendor signs its responses too, and this scheme
+ * verifies them (Q4 condition 2): every response is checked against the
+ * Alipay public key `vendorPublicKeyRef` names before its body is read.
+ * Public-key mode only; Alipay's certificate mode is not this shape.
+ */
+export const ConnectorInstanceSignedAlipayV3AuthSchema = lazySchema(() => strictObject({
+  surface: "this `signed` connector auth (`scheme: 'alipay-v3'`)",
+  history: 'This shape is strict from birth — the `signed` instance kind had no earlier spelling, so an unknown key here was never accepted.',
+  guidance: {
+    ...SIGNED_GUIDANCE,
+    appPrivateKey: inlineSecretGuidance('signed', 'application private key'),
+    alipayPublicKey: 'Not authorable on `auth: { type: \'signed\', scheme: \'alipay-v3\' }`. The Alipay public key is '
+      + 'replaced when the app\'s keys are, so it lives in the secrets layer beside the private key: put it there and '
+      + 'name it with `vendorPublicKeyRef`.',
+  },
+  // Alipay's own word for the key id.
+  aliases: { appId: 'keyId' },
+}, {
+  type: z.literal('signed'),
+  scheme: z.literal('alipay-v3').describe('Alipay OpenAPI v3 signature (ALIPAY-SHA256withRSA); responses are verified.'),
+  keyId: z.string().min(1).describe('The Alipay app id (not a secret); sent as `app_id` in every signature.'),
+  credentialRef: z.string().min(1).describe(
+    'Secrets-layer reference resolved to the application private key (RSA) every request is signed with. Never an inline key.',
+  ),
+  vendorPublicKeyRef: z.string().min(1).describe(
+    'Secrets-layer reference resolved to the Alipay public key every response\'s signature is verified against.',
+  ),
+}));
+export type ConnectorInstanceSignedAlipayV3Auth = z.input<typeof ConnectorInstanceSignedAlipayV3AuthSchema>;
+
+/**
  * Per-request signing auth for a provider-bound instance (ADR-0143 D2.3): no
  * token exists — the platform signs every outgoing request with the key
  * `credentialRef` names, by the vendor's canonical-request algorithm. One
@@ -444,6 +510,8 @@ export type ConnectorInstanceSignedAliyunAcs3Auth = z.input<typeof ConnectorInst
  */
 export const ConnectorInstanceSignedAuthSchema = lazySchema(() => z.discriminatedUnion('scheme', [
   ConnectorInstanceSignedAliyunAcs3AuthSchema,
+  ConnectorInstanceSignedTencentCloudTc3AuthSchema,
+  ConnectorInstanceSignedAlipayV3AuthSchema,
 ], {
   // The refusal names the scheme it got and the ones that ship, rather than
   // zod's bare "invalid discriminator": a scheme is a vendor algorithm, and

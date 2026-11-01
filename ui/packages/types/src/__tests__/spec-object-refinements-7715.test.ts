@@ -315,7 +315,15 @@ describe('objectui#12971 — the Page `record` binding placement refusal reaches
  */
 const SITES = [
   { site: 'NavigationAreaSchema (app.zod.ts)', spec: SpecNavigationAreaSchema, attached: [], notAttachable: [] },
-  { site: 'SpecAppFields → AppComponentSchema (app.zod.ts)', spec: SpecAppSchema, attached: [], notAttachable: [] },
+  {
+    site: 'SpecAppFields → AppComponentSchema (app.zod.ts)',
+    spec: SpecAppSchema,
+    attached: [],
+    // `checkAppLandingItems` joined the spec object with `landing` (objectstack#28022, spec half):
+    // a landing `item` must name an openable entry of the app's own navigation. OWED TO the
+    // follow-up domain:ui landing card, which attaches it here together with the console redirect.
+    notAttachable: ['checkAppLandingItems'],
+  },
   {
     site: 'DashboardWidgetSchema (complex.zod.ts)',
     spec: SpecDashboardWidgetSchema,

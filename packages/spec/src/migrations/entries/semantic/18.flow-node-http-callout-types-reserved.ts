@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // `relevantWhen` either, so it is always listed (the F5-jsx shape).
 export const entry: SemanticMigration = {
   id: 'flow-node-http-callout-types-reserved',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span AND a table cell.
   surface: "flow node type authored as 'http_request', 'http_call' or 'webhook' (FlowNodeSchema.type, automation/flow.zod.ts)",
   replacement:
     "`type: 'http'` — the one outbound callout node since ADR-0018 unified the three; the node's `id`, `label` "

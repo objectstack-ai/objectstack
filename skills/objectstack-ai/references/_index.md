@@ -19,10 +19,12 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Transitive dependencies
 
 - `node_modules/@objectstack/spec/src/ai/embedding.zod.ts` — Embedding & Vector Store Primitives
+- `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, UniqueScopeSchema
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
+- `node_modules/@objectstack/spec/src/kernel/override-declaration.zod.ts` — The override declaration (ADR-0146 D2)
 - `node_modules/@objectstack/spec/src/shared/conditional-formatting.zod.ts` — The **single declaration** of a conditional formatting rule —
 - `node_modules/@objectstack/spec/src/shared/enums.zod.ts` — Exports: SortDirectionEnum, SortItemSchema, MutationEventEnum, IsolationLevelEnum
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol

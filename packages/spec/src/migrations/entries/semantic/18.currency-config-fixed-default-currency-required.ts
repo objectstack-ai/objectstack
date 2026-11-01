@@ -12,8 +12,6 @@ import type { SemanticMigration } from '../../types.js';
 // with diagnostics, and is refused at its next save.
 export const entry: SemanticMigration = {
   id: 'currency-config-fixed-default-currency-required',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     "field.currencyConfig (a currency field, or a formula field with returnType: 'currency') with "
     + "currencyMode: 'fixed' and no defaultCurrency, which parsed to defaultCurrency: 'CNY'",

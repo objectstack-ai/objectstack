@@ -84,11 +84,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import type {
   MetadataLayered,
   MetadataLockState,
-  MetadataReference,
 } from '@object-ui/data-objectstack';
 // The ONE draft-envelope reader (objectui#8181). Its docblock carries the
 // read-decoration contract objectui#7603 established here; it was hoisted so
@@ -96,7 +94,7 @@ import type {
 import { extractDraftBody } from '@object-ui/data-objectstack';
 import { PageShell } from './PageShell.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
-import { LayeredDiff, countOverlaidFields } from './LayeredDiff.js';
+import { LayeredDiff, countOverlaidFields } from '../item-tools/LayeredDiff.js';
 import { DraftReviewPanel, computeDraftChangeCount } from './DraftReviewPanel.js';
 import {
   SchemaForm,
@@ -133,8 +131,9 @@ import {
 import { useCreateDerive, deriveDefaultCreateFields } from './createDerive.js';
 import { RelatedPanel, type RelatedTarget } from './RelatedPanel.js';
 import { MetadataDetailDrawer } from './MetadataDetailDrawer.js';
-import { HistoryPanel } from './ResourceHistoryPage.js';
-import { AuditPanel } from './AuditPanel.js';
+import { HistoryPanel } from '../item-tools/ResourceHistoryPage.js';
+import { AuditPanel } from '../item-tools/AuditPanel.js';
+import { ReferencesPanel, useReferencesScan } from '../item-tools/ReferencesPanel.js';
 import {
   getMetadataPreview,
   useRegisteredMetadataPreview,
@@ -144,8 +143,8 @@ import { readFields } from './previews/object-fields-io.js';
 import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../assistant/assistantBus.js';
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
-import { useMetadataLocale, t, tFormat, translateMetadataType, translateValidationMessage } from './i18n.js';
-import { JsonSourceEditor } from './JsonSourceEditor.js';
+import { useMetadataLocale, t, tFormat, translateMetadataType, translateSchemaIssue, translateValidationMessage } from './i18n.js';
+import { JsonSourceEditor } from '../item-tools/JsonSourceEditor.js';
 import { validateMetadataDraft, hasClientValidator, type DraftMode } from './clientValidation.js';
 import {
   DraftVerdictContext,
@@ -417,40 +416,6 @@ export function MetadataResourceEditPage({
   );
 }
 
-/**
- * References panel data — one discriminated union, not a `refs` / `refsLoading`
- * pair (objectui#5110).
- *
- * The pair could only spell two of the three facts this panel has to tell
- * apart. `refs == null` was already overloaded as "still loading", so a failed
- * `client.references()` call had nowhere to go: the catch wrote `setRefs([])`,
- * which is byte-identical to a *successful* scan that found nothing — and the
- * panel renders that state as "Nothing in the metadata graph points at this
- * item. Safe to delete." A refused request, a dropped connection, an expired
- * session and a `501 NOT_IMPLEMENTED` were therefore all shown to the operator
- * as an affirmative, measured all-clear, with a `console.error` nobody reads as
- * the only trace. The operator is on this panel precisely because they are
- * about to delete something.
- *
- * `status` makes the third fact representable, and makes the wrong combination
- * unrepresentable: no value of this type is both `error` and `loaded`, so no
- * render path can read a failure as a measurement. The `error` arm carries the
- * cause and asserts NOTHING about deletion safety — the honest answer when the
- * question was never answered — and the panel offers a retry so the operator
- * can ask it again.
- *
- * `idle` is deliberately distinct from `loading`: the sheet is lazy, and
- * "never asked" is what re-enables a retry after a failure (see
- * `loadReferences`'s re-entry guard).
- *
- * ADR-0110 D3 — a miss and a fault are different facts.
- */
-type ReferencesState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; items: MetadataReference[] }
-  | { status: 'error'; message: string };
-
 /** The two catalogs the single `client.get('object', …)` call yields. */
 type ObjectCatalog = {
   fields: ObjectFieldOption[];
@@ -612,7 +577,7 @@ function MetadataResourceEditPageImpl({
   const [draft, setDraft] = React.useState<Record<string, unknown>>(() =>
     createMode ? { ...(config.createDefaults ?? {}), [identityField]: '' } : {},
   );
-  const [refsState, setRefsState] = React.useState<ReferencesState>({ status: 'idle' });
+  const { state: refsState, load: loadReferences } = useReferencesScan(client, type, name);
   const [loading, setLoading] = React.useState(!createMode);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -639,6 +604,11 @@ function MetadataResourceEditPageImpl({
   React.useEffect(() => {
     inlineIssueFieldsRef.current = inlineIssueFields;
   });
+  // objectstack#28179 — the rows the form on screen offers whose served layout
+  // says `required: true` (`onRequiredRowFieldsChange`). The flag is a layout
+  // override the Zod need not share, so neither the live pass nor the server
+  // judges it: this page does, below (`requiredRowIssues`).
+  const [requiredRowFields, setRequiredRowFields] = React.useState<ReadonlySet<string>>(() => new Set());
 
   // Wrap setDraft so that editing a field clears any *server-side*
   // diagnostic issues whose path begins with that field. The user
@@ -711,12 +681,18 @@ function MetadataResourceEditPageImpl({
     },
     [handleDraftChange],
   );
-  const { markTouched: markCreateFieldTouched } = useCreateDerive({
+  const { markTouched: markCreateFieldTouched, underivable } = useCreateDerive({
     rules: config.createDerive,
     draft,
     onPatch: onCreatePatch,
     enabled: !!createMode,
   });
+  // objectstack#28232 — a label the slug rule cannot turn into a name leaves
+  // Name empty; the form says so under it until the author types one.
+  const createFieldNotes =
+    underivable.length > 0
+      ? Object.fromEntries(underivable.map((f) => [f, t('engine.create.nameNotDerived', locale)]))
+      : undefined;
 
   // Effective hidden-fields for create mode: collapse the form to just
   // the identity inputs declared by the type (or required-fields ∪
@@ -838,11 +814,32 @@ function MetadataResourceEditPageImpl({
       window.clearTimeout(handle);
     };
   }, [type, draft, entry?.schema, draftMode, createMode]);
+  // objectstack#28179 — an offered row whose served layout says `required:
+  // true`, left unset, is a located "required" issue on that field, for every
+  // type. Only where the override is STRICTER than the schema: a field the
+  // schema requires already has its own verdict (the live pass's message, the
+  // server's refusal) and keeps it, and a value the schema defaults is never
+  // unset. Computed from the draft, never from the debounced live pass, so it
+  // holds the same Save it is shown beside (`doSave`).
+  const requiredRowIssues = React.useMemo<SchemaFormIssue[]>(() => {
+    const props = (schema?.properties ?? {}) as Record<string, { default?: unknown } | undefined>;
+    const schemaRequired = Array.isArray(schema?.required) ? (schema.required as unknown[]).map(String) : [];
+    const unset = (v: unknown) =>
+      v === undefined || v === null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0);
+    const out: SchemaFormIssue[] = [];
+    for (const field of requiredRowFields) {
+      if (schemaRequired.includes(field) || props[field]?.default !== undefined) continue;
+      if (unset((draft as Record<string, unknown>)[field])) {
+        out.push({ path: field, message: t('engine.validation.fieldRequired', locale) });
+      }
+    }
+    return out;
+  }, [requiredRowFields, draft, schema, locale]);
   // Issues to DISPLAY (banner + inline). Suppressed on a pristine create form
   // so a blank new item doesn't open covered in required-field errors.
   const displayIssues = React.useMemo(
-    () => (createMode && !createDirty ? [] : issues),
-    [createMode, createDirty, issues],
+    () => (createMode && !createDirty ? [] : requiredRowIssues.length > 0 ? [...issues, ...requiredRowIssues] : issues),
+    [createMode, createDirty, issues, requiredRowIssues],
   );
   // Per-item draft pending publish (mode=draft saves land here).
   // When non-null, the editor is "viewing the draft" and we surface
@@ -870,7 +867,7 @@ function MetadataResourceEditPageImpl({
     const errs = (hasClientValidator(type, draftMode)
       ? withServerOnlyErrors(displayIssues, diag?.errors)
       : (diag?.errors ?? [])
-    ).map((i) => ({ path: i.path, message: translateValidationMessage(i.message, locale) }));
+    ).map((i) => ({ path: i.path, message: translateSchemaIssue(i, locale) }));
     const warns = (diag?.warnings ?? []).map((i) => ({
       path: i.path,
       message: translateValidationMessage(i.message, locale),
@@ -1384,26 +1381,6 @@ function MetadataResourceEditPageImpl({
     };
   }, [client, type, name, ownerPackageId, bundleMember, createMode, reloadKey, locale, recordDraftRead]);
 
-  // Lazy-load references the first time the References sheet opens.
-  //
-  // Re-entry guard: a request already in flight is not duplicated, and a
-  // completed scan is not re-run when the sheet is reopened. `idle` and
-  // `error` both fall through — which is what makes the panel's Retry work
-  // without a second code path: it calls this same loader (objectui#5110).
-  async function loadReferences() {
-    if (refsState.status === 'loading' || refsState.status === 'loaded') return;
-    setRefsState({ status: 'loading' });
-    try {
-      const r = await client.references(type, name);
-      setRefsState({ status: 'loaded', items: r });
-    } catch (err: any) {
-      // NOT `{ status: 'loaded', items: [] }`: an unanswered question is not
-      // an answer of "nothing". The panel renders this arm as a failed check
-      // with a retry and says nothing about whether deleting is safe.
-      setRefsState({ status: 'error', message: String(err?.message ?? err) });
-    }
-  }
-
   // Related drawer state. `null` = closed. We avoid querystring round-
   // trips on every keystroke; URL state is best-effort sync via effect
   // below.
@@ -1893,6 +1870,17 @@ function MetadataResourceEditPageImpl({
           setSaving(false);
           return;
         }
+      }
+      // objectstack#28179 — an unset row the served form marks `required:
+      // true` holds the save, create or edit: no request, and the refusal is
+      // the inline error `displayIssues` already draws on that field. The
+      // server accepts the body (the override is stricter than its Zod), so
+      // nothing else would refuse it. Bounded like the Name hold above: only
+      // rows the form on screen offers and the author can edit report, so the
+      // author can always fill what holds the save.
+      if (requiredRowIssues.length > 0) {
+        setSaving(false);
+        return;
       }
       // objectui#12810 — a create never saves the seed's placeholder identity
       // (`buildCreateModeBody` leaves it out). One the author left unset that
@@ -3056,7 +3044,7 @@ function MetadataResourceEditPageImpl({
                 : (diag?.errors ?? [])
               ).map((i) => ({
                 path: i.path,
-                message: translateValidationMessage(i.message, locale),
+                message: translateSchemaIssue(i, locale),
               }));
               const liveValid = hasClientValidator(type, draftMode)
                 ? liveErrors.length === 0
@@ -3114,7 +3102,9 @@ function MetadataResourceEditPageImpl({
                       </div>
                       <ul className="mt-1 space-y-0.5 font-mono text-[11px]">
                         {head.map((e, i) => (
-                          <li key={i} className="truncate">
+                          // Wraps: a message is the fix the author needs, so
+                          // it is never cut to the banner's width.
+                          <li key={i} data-testid="metadata-diagnostics-item" className="whitespace-normal break-words">
                             <span className="opacity-70">{e.path ? labelForIssuePath(e.path) : '(root)'}</span>: {e.message}
                           </li>
                         ))}
@@ -3460,6 +3450,8 @@ function MetadataResourceEditPageImpl({
                             widgetContext={widgetContext}
                             revealIssues={revealIssues}
                             onInlineIssueFieldsChange={setInlineIssueFields}
+                            onRequiredRowFieldsChange={setRequiredRowFields}
+                            fieldNotes={createFieldNotes}
                           />
                         )}
                       </div>
@@ -3486,6 +3478,8 @@ function MetadataResourceEditPageImpl({
                 widgetContext={widgetContext}
                 revealIssues={revealIssues}
                 onInlineIssueFieldsChange={setInlineIssueFields}
+                onRequiredRowFieldsChange={setRequiredRowFields}
+                fieldNotes={createFieldNotes}
               />
             )}
             {/* objectui#7611 — under the designer, too: `position` renders
@@ -3759,101 +3753,6 @@ function MetadataResourceEditPageImpl({
   // objectstack#26858 — the verdict on the body on screen, for an expression
   // field to read at its own path (`useServerErrorsAt`).
   return <DraftVerdictContext.Provider value={serverDiagnostics}>{page}</DraftVerdictContext.Provider>;
-}
-
-/**
- * Renders exactly one arm of `ReferencesState` — the union is the whole point
- * (objectui#5110), so the error arm is checked FIRST and there is no path from
- * a failure to the empty state's "Safe to delete."
- */
-function ReferencesPanel({
-  state,
-  locale,
-  onRetry,
-}: {
-  state: ReferencesState;
-  locale?: string;
-  onRetry: () => void;
-}) {
-  if (state.status === 'error') {
-    return (
-      <Empty data-testid="refs-error">
-        <EmptyTitle className="flex items-center justify-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-600" />
-          {t('engine.edit.refsErrorTitle', locale)}
-        </EmptyTitle>
-        <EmptyDescription>
-          {t('engine.edit.refsErrorDesc', locale)}
-        </EmptyDescription>
-        {state.message ? (
-          <p
-            data-testid="refs-error-cause"
-            className="mt-2 max-w-full break-words font-mono text-xs text-muted-foreground"
-          >
-            {state.message}
-          </p>
-        ) : null}
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-3"
-          data-testid="refs-retry"
-          onClick={onRetry}
-        >
-          {t('engine.edit.refsRetry', locale)}
-        </Button>
-      </Empty>
-    );
-  }
-  if (state.status !== 'loaded') {
-    return (
-      <div
-        data-testid="refs-scanning"
-        className="text-sm text-muted-foreground flex items-center gap-2"
-      >
-        <Loader2 className="h-4 w-4 animate-spin" /> {t('engine.edit.refsScanning', locale)}
-      </div>
-    );
-  }
-  const refs = state.items;
-  if (refs.length === 0) {
-    return (
-      <Empty data-testid="refs-empty">
-        <EmptyTitle>{t('engine.edit.refsEmptyTitle', locale)}</EmptyTitle>
-        <EmptyDescription>
-          {t('engine.edit.refsEmptyDesc', locale)}
-        </EmptyDescription>
-      </Empty>
-    );
-  }
-  return (
-    <div className="border rounded-lg overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
-          <tr>
-            <th className="px-3 py-2 text-left">{t('engine.edit.refsColFromType', locale)}</th>
-            <th className="px-3 py-2 text-left">{t('engine.edit.refsColFromName', locale)}</th>
-            <th className="px-3 py-2 text-left">{t('engine.edit.refsColPath', locale)}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {refs.map((r, i) => (
-            <tr key={i} className="hover:bg-accent/50">
-              <td className="px-3 py-2">
-                <Badge variant="outline" className="text-[10px] font-mono">
-                  {r.fromType}
-                </Badge>
-              </td>
-              <td className="px-3 py-2 font-mono text-xs">{r.fromName}</td>
-              <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
-                {r.path}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
 }
 
 /**

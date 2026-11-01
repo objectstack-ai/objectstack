@@ -103,10 +103,10 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.new': 'New',
   'detail.noValue': 'No value',
   'detail.activity': 'Activity',
-  // objectstack#27052 — the record page's timeline switch, and the card the
-  // timeline's blocks fold into when the reader switches the column off.
-  'detail.timeline': 'Timeline',
-  'detail.timelineFolded': 'Activity',
+  // objectstack#27524 — 动态 (Activity), the record page's stream, and the
+  // 动态 panel's one-line composer.
+  'detail.timeline': 'Activity',
+  'detail.timelineComposer': 'Write a note… @ to mention',
   'detail.copyRecordId': 'Copy record ID',
   'detail.showEmptyFields': 'Show {{count}} empty fields',
   'detail.showEmptyFields_one': 'Show {{count}} empty field',
@@ -120,6 +120,14 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.previousPage': 'Previous',
   'detail.nextPage': 'Next',
   'detail.pageOf': 'Page {{current}} of {{total}}',
+  // objectstack#27524 — the enlarged related list's toolbar.
+  'detail.relatedFilter': 'Filter {{title}}…',
+  'detail.relatedChips': 'Show',
+  'detail.relatedChipAll': 'All',
+  'detail.relatedChipMine': 'Mine',
+  'detail.relatedChipOverdue': 'Overdue',
+  'detail.relatedExport': 'Export',
+  'detail.relatedRows': '{{count}} rows',
   'detail.sortBy': 'Sort by',
   'detail.filterPlaceholder': 'Filter…',
   'detail.highlightFields': 'Key Fields',
@@ -295,6 +303,16 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // any other current/completed stage, so naming it apart would hand a screen
   // reader a distinction the screen does not make.
   'detail.pathStageWonUpcoming': '{{stage}}, goal stage, not reached',
+  // `record:path` with `allowStageChange` (objectstack#28061): the stage
+  // button's accessible name, the confirmation, and the refusals the path
+  // shows in place when the server's answer carries no sentence of its own.
+  'detail.pathStageChangeAction': 'Move to {{stage}}',
+  'detail.pathStageChangeTitle': 'Change stage?',
+  'detail.pathStageChangeDescription': 'Move this record to {{stage}}?',
+  'detail.pathStageChangeConfirm': 'Move',
+  'detail.pathStageChangeConflict': 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
+  'detail.pathStageChangeDenied': "You don't have permission to change this record's stage.",
+  'detail.pathStageChangeFailed': 'The stage could not be changed.',
   // objectui#9050 — RelatedList's malformed-filter state. Byte-identical to
   // the `en` pack (`defaults-maps-mirror-en-pack`), and present HERE as well
   // because a provider-less host mounting `RelatedList` directly is exactly

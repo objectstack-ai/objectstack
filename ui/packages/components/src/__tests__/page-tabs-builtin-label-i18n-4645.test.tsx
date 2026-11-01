@@ -47,12 +47,13 @@ import '../renderers';
 
 /**
  * The tokens `buildDefaultPageSchema` writes onto its tab nodes (Details,
- * Timeline, Related, Approvals since objectstack#27055), plus the ones it wrote
- * before, which the strip still localizes.
+ * the stream's `Activity stream` — 「动态」, objectstack#27524 — Related,
+ * Approvals since objectstack#27055), plus the ones it wrote before, which the
+ * strip still localizes.
  */
 const SYNTHESIZED_TABS: Array<{ token: string; packKey: keyof typeof builtInLocales.en.detail }> = [
   { token: 'Details', packKey: 'details' },
-  { token: 'Timeline', packKey: 'timeline' },
+  { token: 'Activity stream', packKey: 'timeline' },
   { token: 'Related', packKey: 'related' },
   { token: 'Attachments', packKey: 'attachments' },
   { token: 'Activity', packKey: 'activity' },
@@ -143,11 +144,11 @@ describe('page:tabs — built-in record-detail labels speak the session locale (
 
     expect(texts).toContain('詳情');
     expect(texts).toContain('相關');
-    expect(texts).toContain('時間線');
+    expect(texts).toContain('動態');
     // The Simplified pack values, which a pack-first order would have produced.
     expect(texts).not.toContain('详情');
     expect(texts).not.toContain('相关');
-    expect(texts).not.toContain('时间线');
+    expect(texts).not.toContain('动态');
   });
 
   /**
@@ -174,5 +175,42 @@ describe('page:tabs — built-in record-detail labels speak the session locale (
     );
 
     expect(tabTexts(container)).toEqual(['Invoices', '詳細']);
+  });
+
+  /**
+   * objectstack#27524 — the record page's stream is 「动态」 (Activity) now, and
+   * `Timeline` is an author's word for something else: the served approval
+   * page's history tab is labelled `Timeline`. The strip keeps it a timeline
+   * in every pack (the pack's own word for one) — never the stream's 动态.
+   */
+  it('leaves an authored Timeline tab a timeline, not the record stream\'s 动态', () => {
+    const strip = (language: string) =>
+      render(
+        <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
+          <SchemaRenderer
+            schema={{
+              type: 'page:tabs',
+              id: 'tabs',
+              properties: {
+                items: [
+                  { label: 'Details', value: 'details', children: textChild('D') },
+                  { label: 'Timeline', value: 'timeline', children: textChild('T') },
+                ],
+              },
+            }}
+          />
+        </I18nProvider>,
+      );
+    const en = strip('en');
+    expect(tabTexts(en.container)).toEqual(['Details', 'Timeline']);
+    en.unmount();
+    const zhTW = strip('zh-TW');
+    expect(tabTexts(zhTW.container)).toEqual(['詳情', '時間線']);
+    zhTW.unmount();
+    const zh = strip('zh');
+    expect(tabTexts(zh.container)).toEqual(['详情', '时间线']);
+    zh.unmount();
+    const ja = strip('ja');
+    expect(tabTexts(ja.container)).toEqual(['詳細', 'タイムライン']);
   });
 });

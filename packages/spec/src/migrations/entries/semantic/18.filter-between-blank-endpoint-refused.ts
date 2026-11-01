@@ -7,8 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // the SCHEMA does with one.
 export const entry: SemanticMigration = {
   id: 'filter-between-blank-endpoint-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'either endpoint of a $between range, authored BLANK — the empty string, or an absent '
     + '(undefined) bound — in any filter this platform stores or executes. The carriers split '

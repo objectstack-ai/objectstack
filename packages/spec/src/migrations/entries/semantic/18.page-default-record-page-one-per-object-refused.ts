@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // stack's own keys, to pages a plugin registers in code and to stored rows.
 export const entry: SemanticMigration = {
   id: 'page-default-record-page-one-per-object-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'pages[] — two or more record pages (type record, the default) bound to one object and both declared '
     + 'isDefault: true, within one stack, across the stacks composeStacks composes, across the packages one '

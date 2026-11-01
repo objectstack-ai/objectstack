@@ -80,6 +80,7 @@
     "kernel/OpsDomainModule",
     "kernel/OpsFilePath",
     "kernel/OpsPluginStructure",
+    "kernel/OverrideDeclaration",
     "kernel/PackageArtifact",
     "kernel/PackageDependencyConflict",
     "kernel/PackageDependencyResolutionResult",
