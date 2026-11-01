@@ -125,6 +125,9 @@ import { recordNotFoundError } from '@objectstack/core';
 // asks beside its exposure gate (`RestServer.enforceApiAccess`, the runtime
 // dispatcher's `refuseUnexposedDataAction`), asked here by the write arms.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+// [#28715] The engine's own reading of "this field declares options" (its
+// `label()` map is built from it), never a second spelling here.
+import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
@@ -940,6 +943,17 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         })),
         enableFeatures: def.enable ?? {},
       };
+    },
+
+    // [#28715] From the object `describeObject` reads: the protocol's served
+    // object, where a picklist-bound field carries its list's resolved
+    // `options`, so the served-form predicate is the one that matches.
+    async optionFieldsOf(name: string): Promise<readonly string[] | null> {
+      const def = (await objectView.getObject(name)) as ObjectDef | undefined;
+      if (!def) return null;
+      return Object.entries(def.fields ?? {})
+        .filter(([, f]) => declaresOptions(f))
+        .map(([key]) => key);
     },
 
     async query(object, opts) {
