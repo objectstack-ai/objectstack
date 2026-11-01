@@ -10,8 +10,9 @@
  * `manage_metadata` who sent `{ actor: 'u_someone_else' }` had the protocol
  * stamp `u_someone_else` into `sys_metadata_history.recorded_by` and the
  * package commit. The single-item door already took the session identity
- * (`RestServer.resolveMetaWriteActor`); these doors now share one helper,
- * `packageWriteActor`, that reads the same identity.
+ * (`RestServer.resolveMetaWriteActor`); these doors now read the same
+ * identity through the one helper the publish-drafts door already used,
+ * `resolvePackageWriteActor`.
  *
  * Both halves per door: the session user is what the protocol receives when
  * the body names another user, and a caller with no user id (a system
@@ -19,8 +20,8 @@
  * records `null` (#4556) — whether or not its body names one.
  *
  * The publish-drafts door's own `publishPackageDrafts` call is not pinned
- * here (#28406 carries it); its ADR-0045 visibility flip, which re-saves each
- * `_unpublished` app through `saveMetaItem`, is.
+ * here (#28406 pinned it beside the door); its ADR-0045 visibility flip,
+ * which re-saves each `_unpublished` app through `saveMetaItem`, is.
  */
 
 import { describe, it, expect, vi } from 'vitest';
