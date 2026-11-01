@@ -11518,12 +11518,7 @@ export class ObjectStackProtocolImplementation implements
             // added member is the address's, served from the pair's row under
             // the pair's binding (a dependent's member never is).
             if (!record && readState === 'active' && wantedMember !== undefined && typeof contentPackageId === 'string') {
-                const pairOfAddition = this.pairOfAddedMember(request.type, request.name, contentPackageId, wantedMember);
-                if (pairOfAddition !== undefined) {
-                    record = (await this.findServedOverlayRow({
-                        type: request.type, name: request.name, state: readState, packageId: pairOfAddition, ...memberOption(member),
-                    }, activeRows))?.row;
-                }
+                record = await this.findPairAddedMemberRow(request.type, request.name, contentPackageId, member, wantedMember, activeRows);
             }
             // [#23715] Two or more packages and no package-unbound draft: the
             // best-effort first match ADR-0048 §3.3 states, as before, served
@@ -12223,7 +12218,7 @@ export class ObjectStackProtocolImplementation implements
             // then the `.custom` item, `code` the base's document and
             // `effective` the override (the base's document stays reachable
             // here, ADR-0146 "Decided here" item 5).
-            const served = await this.findServedOverlayRow({
+            let served: { row: any; overrideOf?: string } | undefined = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: 'active',
@@ -12231,6 +12226,13 @@ export class ObjectStackProtocolImplementation implements
                 ...memberOption(member),
                 servedOverride: true,
             });
+            // [#28830, #28390 ruling A] The pair's own added member is the
+            // overlay on the base's address, as the by-name read serves it
+            // ({@link findPairAddedMemberRow}); another package's never is.
+            if (!served && wantedMember !== undefined && typeof contentPackageId === 'string') {
+                const row = await this.findPairAddedMemberRow(request.type, request.name, contentPackageId, member, wantedMember);
+                if (row) served = { row };
+            }
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
                 name: request.name,
@@ -17404,6 +17406,24 @@ export class ObjectStackProtocolImplementation implements
         if (shippingPackageIds(this.shippedArtifactsOf(type, name, shipping, member)).has(base)) return undefined;
         const pair = customizationPackageId(base);
         return pair.ok ? pair.value : undefined;
+    }
+
+    /**
+     * [#28802, #28830] The pair's own stored row at the bundle member `member`
+     * (`wantedMember` its discriminator value) of the name `name`, when only
+     * the pair can add that member on `base`'s address
+     * ({@link pairOfAddedMember}); else `undefined`. The one read of it the
+     * by-name read and the layered read share.
+     */
+    private async findPairAddedMemberRow(
+        type: string, name: string, base: string, member: string | undefined, wantedMember: string,
+        activeRows?: readonly StoredOverlayRow[],
+    ): Promise<any> {
+        const pairOfAddition = this.pairOfAddedMember(type, name, base, wantedMember);
+        if (pairOfAddition === undefined) return undefined;
+        return (await this.findServedOverlayRow({
+            type, name, state: 'active', packageId: pairOfAddition, ...memberOption(member),
+        }, activeRows))?.row;
     }
 
     /**
