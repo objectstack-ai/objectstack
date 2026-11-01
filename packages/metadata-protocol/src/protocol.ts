@@ -184,6 +184,7 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 // base's name.
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf } from './served-override.js';
+import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
@@ -9736,6 +9737,31 @@ export class ObjectStackProtocolImplementation implements
     async getMetaItemsPerPackage(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
         // The same #4432 fold {@link getMetaItems} applies, for the same reason.
         return this.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
+    }
+
+    /**
+     * [#28411, ADR-0146 D8 item 4] The served overrides of a base package's
+     * items: each ACTIVE row of its paired `<base>.custom` package that
+     * {@link isServedOverrideRowOf} admits and no read declines, as
+     * `{ type, name, member?, basedOn?, version? }`, ordered by type, name and
+     * member. The overrides half of `GET /packages/:id/customizations`; the
+     * body and its narrowings are `protocol-served-overrides.ts`'s.
+     *
+     * A base with no pair, or an id with no pair, answers `[]`, and the read
+     * never creates the pair. No diff and no `basedOn` verdict: `basedOn` is
+     * copied as recorded (ADR-0146 D2, D6).
+     *
+     * @throws the `sys_metadata` read failure, classified by
+     *         {@link rethrowUnlessMetadataStoreUnprovisioned}; an unprovisioned
+     *         table answers `[]`.
+     */
+    async listServedOverrides(request: { packageId: string }): Promise<ServedOverrideEntry[]> {
+        const host: ThisParameterType<typeof listServedOverrides> = {
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return listServedOverrides.call(host, request);
     }
 
     /**

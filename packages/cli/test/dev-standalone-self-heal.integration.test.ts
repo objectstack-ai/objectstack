@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: three sequential boots of the built CLI on one database file (a fresh `os dev`, an `os dev` restart over the staged legacy index, a production `os serve` over the restaged index), each a leg the file pins, stopped by SIGTERM; slowest CI reading 22.9 s of the five scheduled runs 41199450735…41271604267, x 1.25, rounded up
 
 /**
  * #21733 — the card's acceptance, run against the BUILT CLI: a plain `os dev`
