@@ -41,16 +41,13 @@ const PAIR = `${BASE}.custom`;
 const doc = (content: string) => ({ name: NAME, label: NAME, content, group: 'reference' });
 
 /** The server's sentences, worded as the framework words them; read back verbatim below. */
+const CLOSED =
+  'A write naming no package onto a packaged item is closed (ADR-0146 D11); a package-less customization stored ' +
+  `before it is still served until \`os migrate packageless-overlays\` moves it into '${PAIR}'.`;
 const SAVE_CLOSED =
-  `'doc/${NAME}' ships in '${BASE}', and a write naming no package onto a packaged item is closed: a customization ` +
-  `of an installed package lives in its paired .custom package (ADR-0146 D11). Save it into '${PAIR}' ` +
-  `(?package=${PAIR}), declaring overrides: { package: '${BASE}', basedOn }. A package-less customization stored ` +
-  `before this release is still served; run \`os migrate packageless-overlays\` first to move it into '${PAIR}'.`;
-const RESET_CLOSED =
-  `'doc/${NAME}' ships in '${BASE}', and a write naming no package onto a packaged item is closed: a customization ` +
-  `of an installed package lives in its paired .custom package (ADR-0146 D11). Remove it from '${PAIR}' ` +
-  `(?package=${PAIR}). A package-less customization stored before this release is still served; run ` +
-  `\`os migrate packageless-overlays\` first to move it into '${PAIR}'.`;
+  `'doc/${NAME}' ships in '${BASE}': save it into '${PAIR}' (?package=${PAIR}), declaring ` +
+  `overrides: { package: '${BASE}', basedOn }. ${CLOSED}`;
+const RESET_CLOSED = `'doc/${NAME}' ships in '${BASE}': remove its customization from '${PAIR}' (?package=${PAIR}). ${CLOSED}`;
 
 const server = {
   /** The packaged item's stored package-less row, as an unmigrated deployment holds it. */

@@ -259,25 +259,23 @@ export function packagelessOverlayWriteRefusal(
     const sole = pairs.length === 1 ? pairs[0]! : undefined;
     // One base: its pair, by name. Several: the pair of the base the writer
     // customizes, each named — never guessed (the ceremony lists such a row).
-    const into = sole
-        ? `'${sole.pair}' (?package=${sole.pair})`
-        : `the pair of the package it customizes (${pairs.map((p) => `'${p.pair}'`).join(' or ')}, as ?package=<that pair>)`;
+    const pair = sole ? `'${sole.pair}' (?package=${sole.pair})` : `the pair of the package it customizes (${pairs.map((p) => `'${p.pair}'`).join(' or ')})`;
     const declared = sole ? `overrides: { package: '${sole.base}', basedOn }` : 'overrides: { package: <that base>, basedOn }';
+    // The fix first, then the rule and the ceremony: the REST door bounds a
+    // refusal's text (`CLIENT_MESSAGE_MAX`, 500 characters, `@objectstack/types`),
+    // and Setup shows that text as sent.
     const ceremony = sole
-        ? 'A package-less customization stored before this release is still served; run '
-            + `\`os migrate packageless-overlays\` first to move it into '${sole.pair}'.`
-        : 'A package-less customization stored before this release is still served; run '
-            + '`os migrate packageless-overlays` first: it lists a name several packages ship for you to place.';
-    const fix = operation === 'delete'
-        ? `Remove it from ${into}. ${ceremony}`
-        : operation === 'rollback'
-            ? `Its customization belongs in ${into}: run \`os migrate packageless-overlays\` to move the row there, then roll it back.`
-            : `${operation === 'publish' ? 'Publish' : 'Save'} it into ${into}, declaring ${declared}. ${ceremony}`;
-    const what = operation === 'rollback' ? 'a rollback of its package-less row' : 'a write naming no package';
-    const err = new Error(
-        `${item} ${shipped}, and ${what} onto a packaged item is closed: a customization of an installed package `
-        + `lives in its paired .custom package (ADR-0146 D11). ${fix}`,
-    );
+        ? `\`os migrate packageless-overlays\` moves it into '${sole.pair}'`
+        : '`os migrate packageless-overlays` lists it for you to place';
+    const closed = 'A write naming no package onto a packaged item is closed (ADR-0146 D11); '
+        + `a package-less customization stored before it is still served until ${ceremony}.`;
+    const message = operation === 'rollback'
+        ? `${item} ${shipped}, and a rollback of its package-less row is closed (ADR-0146 D11): run `
+            + `\`os migrate packageless-overlays\` to move the row into ${pair}, then roll it back there.`
+        : operation === 'delete'
+            ? `${item} ${shipped}: remove its customization from ${pair}. ${closed}`
+            : `${item} ${shipped}: ${operation === 'publish' ? 'publish' : 'save'} it into ${pair}, declaring ${declared}. ${closed}`;
+    const err = new Error(message);
     (err as any).code = 'NOT_OVERRIDABLE';
     (err as any).status = 403;
     return err;

@@ -426,6 +426,10 @@ describe('an item a CODE package ships: the package-less write is closed (ADR-01
         expect(resolveThrownHttpError(e)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
         expect(String((e as Error).message)).toContain(`'${PAIR}'`);
         expect(String((e as Error).message)).toContain('os migrate packageless-overlays');
+        // The REST door cuts a refusal's text at 500 characters
+        // (`CLIENT_MESSAGE_MAX`, `@objectstack/types`), and Setup shows it as
+        // sent: the whole sentence fits, the ceremony included.
+        expect(String((e as Error).message).length).toBeLessThan(500);
     };
 
     it('with no stored row: the package-less save is refused naming the pair, and nothing is written', async () => {
