@@ -109,6 +109,7 @@ export const esES: TranslationData = {
         nav_http_deliveries: { label: 'Entregas HTTP' },
         nav_datasources: { label: 'Fuentes de datos' },
         nav_connector_credentials: { label: 'Credenciales de conectores' },
+        nav_connector_connections: { label: 'Conexiones de conectores' },
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
       },

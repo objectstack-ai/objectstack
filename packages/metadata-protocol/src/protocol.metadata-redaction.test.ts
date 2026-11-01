@@ -1370,3 +1370,60 @@ describe('#20611 — the runtime authoring gate reads a withheld-and-stored secr
         expect(redactedPathsCarriedForward('view', { name: 'v' }, { name: 'v', secret: 'x' })).toEqual([]);
     });
 });
+
+describe('the read exits withhold the declared ssl secret member of a datasource', () => {
+    /** The stored client key, which no read exit may serve; the public members it sits beside. */
+    const SSL_KEY = 'TEST_PLACEHOLDER_SSL_KEY';
+    const SSL_PUBLIC = { enabled: true, rejectUnauthorized: true, ca: 'TEST_CA_PEM', cert: 'TEST_CERT_PEM' };
+
+    function seedTlsRow(rows: Map<string, Row>, ssl: Record<string, unknown>) {
+        const where = { type: 'datasource', name: 'tls_pg', organization_id: null, package_id: null, state: 'active' };
+        const body = { name: 'tls_pg', label: 'TLS PG', driver: 'postgres', config: { host: 'db.internal', database: 'app' }, ssl };
+        rows.set(keyOf(where), { id: 'r_tls', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1 } as Row);
+    }
+    const tlsBody = (rows: Map<string, Row>) =>
+        JSON.parse(Array.from(rows.values()).find((r) => r.name === 'tls_pg')!.metadata);
+
+    it('getMetaItems, getMetaItem and getMetaItemLayered serve ssl without its key', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedTlsRow(rows, { ...SSL_PUBLIC, key: SSL_KEY });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const list: any = await protocol.getMetaItems({ type: 'datasource' });
+        const listed = list.items.find((i: any) => i.name === 'tls_pg');
+        expect(listed.ssl).toEqual(SSL_PUBLIC);
+
+        const one: any = await protocol.getMetaItem({ type: 'datasource', name: 'tls_pg' });
+        expect(one.item.ssl).toEqual(SSL_PUBLIC);
+
+        const layered: any = await protocol.getMetaItemLayered({ type: 'datasource', name: 'tls_pg' });
+        expect(layered.overlay.ssl).toEqual(SSL_PUBLIC);
+        expect(layered.effective.ssl).toEqual(SSL_PUBLIC);
+
+        for (const served of [list, one, layered]) expect(allStrings(served)).not.toContain(SSL_KEY);
+        // A serving act only: the stored row keeps its key for the connect path.
+        expect(tlsBody(rows).ssl.key).toBe(SSL_KEY);
+    });
+
+    it('control: an ssl block with no key is served as stored', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedTlsRow(rows, SSL_PUBLIC);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const one: any = await protocol.getMetaItem({ type: 'datasource', name: 'tls_pg' });
+        expect(one.item.ssl).toEqual(SSL_PUBLIC);
+    });
+
+    it('the GET → edit → PUT round trip keeps the stored key', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedTlsRow(rows, { ...SSL_PUBLIC, key: SSL_KEY });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'datasource', name: 'tls_pg' })).item;
+        expect(served.ssl.key).toBeUndefined();
+        await protocol.saveMetaItem({ type: 'datasource', name: 'tls_pg', item: { ...served, label: 'TLS PG (edited)' } });
+
+        const stored = tlsBody(rows);
+        expect(stored.label).toBe('TLS PG (edited)');
+        expect(stored.ssl).toEqual({ ...SSL_PUBLIC, key: SSL_KEY });
+    });
+});
