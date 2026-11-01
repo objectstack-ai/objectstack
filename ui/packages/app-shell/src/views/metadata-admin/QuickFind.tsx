@@ -38,6 +38,7 @@ import {
   type RichMetadataTypeEntry,
 } from './useMetadata.js';
 import { useMetadataLocale, t as tr, translateMetadataType } from './i18n.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
 
 type ItemResult = {
   kind: 'item';
@@ -49,6 +50,8 @@ type ItemResult = {
   lock?: string;
   /** Reason shown in the lock icon tooltip. */
   lockReason?: string;
+  /** The served owning package (`_packageId`), when the item names one. */
+  packageId?: string;
 };
 
 type TypeResult = {
@@ -67,6 +70,10 @@ export function MetadataQuickFind({ appSlug }: MetadataQuickFindProps = {}) {
   const navigate = useNavigate();
   const client = useMetadataClient();
   const { entries: typeEntries } = useMetadataTypes(client);
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area the
+  // palette opens the area's pages, and a package's area finds that package's
+  // items only.
+  const host = useMetadataAreaHost();
 
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -115,6 +122,7 @@ export function MetadataQuickFind({ appSlug }: MetadataQuickFindProps = {}) {
                   description: item?.description,
                   lock: typeof item?._lock === 'string' ? item._lock : undefined,
                   lockReason: typeof item?._lockReason === 'string' ? item._lockReason : undefined,
+                  packageId: typeof item?._packageId === 'string' ? item._packageId : undefined,
                 });
               }
             } catch {
@@ -150,6 +158,7 @@ export function MetadataQuickFind({ appSlug }: MetadataQuickFindProps = {}) {
       .slice(0, 8)
       .map((entry) => ({ kind: 'type', entry }));
     const itemHits: ItemResult[] = (items ?? [])
+      .filter((i) => !host?.packageId || i.packageId === host.packageId)
       .filter(
         (i) =>
           i.name.toLowerCase().includes(q) ||
@@ -159,7 +168,7 @@ export function MetadataQuickFind({ appSlug }: MetadataQuickFindProps = {}) {
       )
       .slice(0, 40);
     return [...typeHits, ...itemHits];
-  }, [query, typeEntries, items]);
+  }, [query, typeEntries, items, host?.packageId]);
 
   React.useEffect(() => {
     setActiveIdx(0);
@@ -167,12 +176,12 @@ export function MetadataQuickFind({ appSlug }: MetadataQuickFindProps = {}) {
 
   function navigateTo(r: Result) {
     setOpen(false);
-    const base = appSlug ? `/apps/${appSlug}` : '..';
+    const base = host ? host.basePath : `${appSlug ? `/apps/${appSlug}` : '..'}/metadata`;
     if (r.kind === 'type') {
-      navigate(`${base}/metadata/${encodeURIComponent(r.entry.type)}`);
+      navigate(`${base}/${encodeURIComponent(r.entry.type)}`);
     } else {
       navigate(
-        `${base}/metadata/${encodeURIComponent(r.type)}/${encodeURIComponent(r.name)}`,
+        `${base}/${encodeURIComponent(r.type)}/${encodeURIComponent(r.name)}`,
       );
     }
   }

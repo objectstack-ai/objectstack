@@ -20,7 +20,7 @@
 
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowUpRight, Boxes, Building2, Clock, Hammer, Lock, Plus, Loader2, Copy, Store } from 'lucide-react';
+import { ArrowUpRight, Boxes, Building2, Clock, Hammer, Library, Lock, Plus, Loader2, Copy, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRecentItems, type RecentNamedItem } from '../../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
@@ -30,6 +30,7 @@ import { isMarketplaceEnabled } from '../../runtime-config.js';
 import { fetchPackages, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
 import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
+import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
 import { componentRefToUrlSegments } from '../../services/componentRegistry.js';
 
@@ -331,6 +332,25 @@ export function BuilderLanding(): React.ReactElement {
             <span className="block truncate text-[13px] font-medium">{t('engine.studio.org.name', locale)}</span>
             <span className="block text-[10px] leading-4 text-muted-foreground">
               {t('engine.studio.org.description', locale)}
+            </span>
+          </span>
+        </button>
+        {/* objectstack#28561 — the "All metadata" area's cross-package leg
+          * (ADR-0146 D1): the environment catalog, whose items have one name
+          * per deployment and may belong to no package (ADR-0131 D3). */}
+        <button
+          type="button"
+          data-testid="studio-landing-env-catalog"
+          onClick={() => navigate(studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT))}
+          className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2.5 text-left hover:bg-muted/40"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Library className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium">{t('engine.studio.landing.envCatalog.name', locale)}</span>
+            <span className="block text-[10px] leading-4 text-muted-foreground">
+              {t('engine.studio.landing.envCatalog.description', locale)}
             </span>
           </span>
         </button>
