@@ -259,8 +259,8 @@ Two properties of this table are the ADR's acceptance criteria:
 > row the caller can read is matched and takes the update arm, where the engine still judges
 > the write. A row the caller cannot read is, on the write doors, a row that does not exist
 > (ruling record `5985885287`), so it takes the create arm: the same insert and the same row
-> answer as `operation: 'create'` naming that `id`. Every fact above holds for that arm, and two
-> are particular to it:
+> answer as `operation: 'create'` naming that `id`. Every fact above holds for that arm, which no
+> readable row enters, and two are particular to it:
 >
 > - **A held `id` the caller cannot read meets the collision, never a match.** Import `upsert`
 >   matches on the mapping's declared key fields; this door's match key is the `id` itself, so
@@ -270,8 +270,8 @@ Two properties of this table are the ADR's acceptance criteria:
 >   organization or held by another one. A caller without the create grant gets the create's
 >   refusal instead, the same for a held `id` and for one that names no row.
 > - **On `driver-memory` the create arm lands a second row with that `id`**, as every create
->   door does there; when that driver runs with persistence (its opt-in `persistence` option
->   or a custom `persistenceAdapter`), the duplicate is also written to that development store.
+>   door does there; when that driver runs with persistence (its opt-in `persistence` option,
+>   a custom adapter included), the duplicate is also written to that development store.
 >   Accepted as the same residual: the development and test driver declares no primary key.
 >
 > Pinned at the HTTP door, atomic and not, by
