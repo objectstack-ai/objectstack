@@ -50,7 +50,11 @@ const V1 = () => ({
     name: PKG,
     namespace: NS,
     version: '1.0.0',
-    objects: [object('probeup_a'), object('probeup_shared', { label: 'v1 shared' }), object('probeup_old')],
+    objects: [
+        object('probeup_a'),
+        object('probeup_shared', { label: 'v1 shared' }),
+        object('probeup_old', { fields: { title: field('Title'), tier: { type: 'select', label: 'Tier', picklist: 'probeup_tier' } } }),
+    ],
     apps: [app('probeup_app', 'probeup_a')],
     pages: [{ name: 'probeup_v1_page', type: 'app' }, { name: 'probeup_v1_record', type: 'record', object: 'probeup_a', isDefault: true }],
     permissions: [{ name: 'probeup_v1_ps', objects: {} }],
@@ -75,6 +79,8 @@ const V2 = (fault: Record<string, unknown> = {}) => {
         apps: [app('probeup_app_v2', 'probeup_new')],
         pages: [{ name: 'probeup_v2_page', type: 'app' }, { name: 'probeup_v2_record', type: 'record', object: 'probeup_new', isDefault: true }],
         permissions: [{ name: 'probeup_v2_ps', objects: {} }],
+        picklists: [{ name: 'probeup_tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }, { label: 'Platinum', value: 'platinum' }] }],
+        picklistExtensions: [{ extend: 'probeup_industry', options: [{ label: 'Retail', value: 'retail' }] }],
         datasources: [{ name: 'probeup_ds_v2', driver: 'memory' }],
         ...rest,
     };
@@ -184,8 +190,8 @@ const PART_WAY: Array<{ label: string; fault: Record<string, unknown>; code: str
         code: 'INVALID_METADATA', status: 422,
     },
     {
-        label: 'a picklist repeating a value an extension already adds to it',
-        fault: { picklistExtensions: [{ extend: 'probeup_list', options: [{ label: 'X', value: 'x' }] }], picklists: [{ name: 'probeup_list', label: 'L', options: [{ label: 'X again', value: 'x' }] }] },
+        label: 'a picklist repeating a value another package\'s extension already adds to it',
+        fault: { picklists: [{ name: 'probeup_tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }, { label: 'Silver', value: 'silver' }] }] },
         code: 'INVALID_METADATA', status: 422,
     },
     {
@@ -194,8 +200,18 @@ const PART_WAY: Array<{ label: string; fault: Record<string, unknown>; code: str
         code: 'INVALID_METADATA', status: 422,
     },
     {
+        // After the body registered whole (its picklist and its extension of
+        // the host's list included), and after a nested object whose
+        // record-currency amount makes the registry resolve every object.
         label: 'the same from a nested plugin, after the body registered',
-        fault: { plugins: [{ name: 'probeup_inner', namespace: 'probeupinner', objects: [object('probeup_inner_thing')], picklistExtensions: [{ extend: 'probeup_industry', options: [{ label: 'Fintech', value: 'finance' }] }] }] },
+        fault: {
+            plugins: [{
+                name: 'probeup_inner',
+                namespace: 'probeupinner',
+                objects: [object('probeup_inner_line', { fields: RECORD_AMOUNT })],
+                picklistExtensions: [{ extend: 'probeup_industry', options: [{ label: 'Fintech', value: 'finance' }] }],
+            }],
+        },
         code: 'INVALID_METADATA', status: 422,
     },
 ];
@@ -213,6 +229,8 @@ describe('[#28697] an upgrade the registry refuses part-way leaves the installed
             expect((engine.registry.getObject('probeup_a') as any)?.label).toBe('Tenant label');
             expect(Object.keys((engine.registry.getObject('probeup_old') as any)?.fields ?? {})).toContain('ext_note');
             expect(engine.registry.getObject('probeup_new')).toBeUndefined();
+            expect(engine.registry.resolvePicklistOptions('probeup_industry')?.map((o) => o.value)).toEqual(['finance']);
+            expect(((engine.registry.getObject('probeup_old') as any)?.fields?.tier?.options ?? []).map((o: any) => o.value)).toEqual(['gold', 'silver']);
         });
     }
 });
@@ -231,6 +249,8 @@ describe('[#28697] refused-upgrade controls', () => {
         expect(Object.keys((registry.getObject('probeup_old') as any)?.fields ?? {})).toContain('ext_note');
         expect(registry.listItems('app').map((a: any) => a.name)).toContain('probeup_app_v2');
         expect(engine.listDatasourceDefs().map((d) => d.name)).toContain('probeup_ds_v2');
+        expect(registry.resolvePicklistOptions('probeup_industry')?.map((o) => o.value)).toEqual(['finance', 'retail']);
+        expect(((registry.getObject('probeup_old') as any)?.fields?.tier?.options ?? []).map((o: any) => o.value)).toEqual(['gold', 'platinum', 'silver']);
         expect(registry.securityCatalogNamesHeldBy(PKG, 'permission' as any)).toEqual(['probeup_v1_ps', 'probeup_v2_ps']);
         expect(registry.defaultRecordPageHoldersOf('probeup_new').map((h: any) => h.page)).toEqual(['probeup_v2_record']);
     });
