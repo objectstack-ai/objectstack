@@ -82,6 +82,7 @@ import type {
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import {
   attachObjectSortability,
+  attachCascadeDeleteObjects,
   markSwitchedOffActions,
   convertFiltersToAST,
   emulateBatchTransaction,
@@ -5745,6 +5746,11 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // entries under a symbol (`markSwitchedOffActions`), so every action gate
     // reads it and no metadata write ever carries it.
     markSwitchedOffActions(item, data && typeof data === 'object' ? (data as any).disabledActions : undefined);
+    // [objectstack#28472] …and the envelope's `cascadeDeleteObjects`, the
+    // objects a delete of this one also deletes: carried under a symbol
+    // (`attachCascadeDeleteObjects`) for the delete confirmation. Absent stays
+    // absent, which the confirmation reads as "no answer", never as "none".
+    attachCascadeDeleteObjects(item, data && typeof data === 'object' ? (data as any).cascadeDeleteObjects : undefined);
     return attachObjectSortability(item, data && typeof data === 'object' ? (data as any).sortability : undefined);
   }
 

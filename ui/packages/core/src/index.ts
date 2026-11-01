@@ -60,6 +60,9 @@ export * from './utils/column-sortability.js';
 // actions the installation switched off, stamped by the data layer and asked
 // by every action gate beside the capability check.
 export * from './utils/action-activation.js';
+// [objectstack#28472] The served delete cascade: the objects a delete of this
+// object also deletes, carried by the data layer to the delete confirmation.
+export * from './utils/cascade-delete-objects.js';
 // [objectstack#28211] A list view's `kanban.lanes` as the `object-kanban`
 // node's `columns`: the one mapping both producers of that node share.
 export * from './utils/kanban-declared-lanes.js';

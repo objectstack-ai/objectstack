@@ -3302,6 +3302,7 @@ const ko = {
     bulkDeleteConfirmTitle_one: "{{count}}개의 {{label}} 레코드를 삭제하시겠습니까?",
     bulkDeleteConfirmTitle_other: "{{count}}개의 {{label}} 레코드를 삭제하시겠습니까?",
     deleteConfirmButton: "삭제",
+    deleteCascade: "다음의 관련 레코드도 함께 삭제됩니다: {{objects}}.",
     bulkDeleteSuccess: "{{count}}개의 {{label}} 레코드 삭제됨",
     bulkDeleteSuccess_one: "{{count}}개의 {{label}} 레코드 삭제됨",
     bulkDeleteSuccess_other: "{{count}}개의 {{label}} 레코드 삭제됨",

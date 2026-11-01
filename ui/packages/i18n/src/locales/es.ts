@@ -3371,6 +3371,7 @@ const es = {
     bulkDeleteConfirmTitle_many: "¿Eliminar {{count}} de registros de {{label}}?",
     bulkDeleteConfirmTitle_other: "¿Eliminar {{count}} registros de {{label}}?",
     deleteConfirmButton: "Eliminar",
+    deleteCascade: "Esto también elimina los registros relacionados en: {{objects}}.",
     bulkDeleteSuccess: "{{count}} registros de {{label}} eliminados",
     bulkDeleteSuccess_one: "{{count}} registro de {{label}} eliminado",
     bulkDeleteSuccess_many: "{{count}} de registros de {{label}} eliminados",
