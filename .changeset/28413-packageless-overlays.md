@@ -7,6 +7,7 @@ feat(cli,metadata-protocol): `os migrate packageless-overlays` moves package-les
 
 Clause-②: yes (widening)
 Metadata-protocol: added
+Skills-docs: none — the one taught line this touches, `skills/objectstack-platform/SKILL.md`'s "a package-unbound Setup row still wins over the base's until D11", stays true: the ceremony moves such rows when an operator runs it, and the package-less write that makes new ones stays open until #28576, which is the change that retires that line. No file under `skills/**` teaches the `os migrate` operator ceremonies (a `git grep` of `skills/` for `packageless` and `security-catalog-overlays` names nothing).
 
 **The one operator step of this release.** After upgrading, run `os migrate packageless-overlays` once (preview), then `os migrate packageless-overlays --apply`, on each deployment that has Setup customizations. Until it runs, those customizations are still served, but they stay rows of no package: they are not exported and do not reach another environment.
 
