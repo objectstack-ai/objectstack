@@ -183,7 +183,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 export type MetaDomainProtocol =
     Partial<Pick<MetadataProtocol,
         'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'getMetaItemLayered'>>
-    & Partial<Pick<ObjectStackProtocolImplementation, 'declinesStoredRow' | 'getMetaItemsForExecution'>>
+    & Partial<Pick<ObjectStackProtocolImplementation, 'declinesStoredRow' | 'getMetaItemsForExecution' | 'packagelessLayeredReadRefusal'>>
     & {
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         listDrafts?(request: any): Promise<any>;
@@ -508,6 +508,10 @@ const NAV_PRUNE_LOGGED = new Set<string>();
  * `/published` asks about. A host
  * with no registry that can answer withholds nothing, as before; a read that
  * rejects is that fault, never "not withheld".
+ *
+ * [#28337] `packagelessLayeredReadRefusal`, the layered chain's step 1c: the
+ * protocol's own judge, handed through when it has one, as `RestServer` hands
+ * it.
  */
 function metaItemReadGateSources(
     deps: DomainHandlerDeps,
@@ -546,6 +550,9 @@ function metaItemReadGateSources(
             const envelope = await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) });
             return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
         },
+        ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
+            ? { packagelessLayeredReadRefusal: (item: { type: string; name: string; member?: string }) => protocol.packagelessLayeredReadRefusal!(item) }
+            : {}),
     };
 }
 
@@ -900,7 +907,8 @@ async function answerMetaLayered(
         });
         answer = await createMetaLayeredAnswer(
             metaItemReadGateSources(deps, context, protocol, mayWriteItem),
-            { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), maskPosture },
+            // [#28337] The member the layers were read at, for step 1c.
+            { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), ...memberSelector, maskPosture },
         )(layered);
     } catch (e: any) {
         return withHeaders(deps.errorFromThrown(e, 500), headers);

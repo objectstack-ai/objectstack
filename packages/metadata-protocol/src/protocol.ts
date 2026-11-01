@@ -11704,6 +11704,45 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#28337, ADR-0048] The layered view's door refusal: what
+     * `GET /meta/:type/:name/layers` (and the deprecated `?layers=true`)
+     * answers when it names no package and the item's ACTIVE rows are bound
+     * to two or more packages. The refusal the package-less save and delete
+     * answer for the same rows ({@link packagelessAddressAmbiguityRefusal},
+     * `409 RESOURCE_CONFLICT`, the holders sorted and the `?package=`
+     * prescription), asked of the same resolution
+     * ({@link packagelessAddress} at `active`, at the addressed bundle member,
+     * read in full): one answer to one ambiguity. `undefined` for a name one
+     * package holds, none does, or only the package-unbound row does, and for
+     * every request that names a package (the caller asks only without one).
+     *
+     * Before, {@link getMetaItemLayered} naming no package took its overlay
+     * from {@link packagelessReadAddress}, which answers no package for such
+     * a name, so the layer was the first row a package-agnostic lookup met:
+     * one holder's stack, picked silently, while the Studio editor that loads
+     * this view and the save it then sends were refused for the same name.
+     *
+     * Asked by the DOOR (the shared layered chain in `@objectstack/rest`,
+     * `createMetaLayeredAnswer`), ⛔ never inside {@link getMetaItemLayered}:
+     * its in-process resolution readers (the security catalog echo, the
+     * packaged-permission-set lock gate, `/published`) read the layers of a
+     * name with no package and keep the answer they had.
+     */
+    async packagelessLayeredReadRefusal(request: {
+        type: string;
+        name: string;
+        /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
+        member?: string;
+    }): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
+        const { type, name } = canonicalizeMetaRequestType(request);
+        const member = resolveBundleMemberSelector(type, request.member);
+        const address = await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
+        return address.candidates.length > 1
+            ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
+            : undefined;
+    }
+
+    /**
      * Phase 3a-layered-get: return the 3 layers of a metadata item
      * separately — `code` (artifact-loaded baseline), `overlay` (per-org
      * customisation row, if any), and `effective` (what `getMetaItem`
