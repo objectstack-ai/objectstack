@@ -39,6 +39,7 @@ import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import {
     InMemoryMetadataActivationStore,
+    listPackageMetadataActivations,
     METADATA_ACTIVATION_TABLE,
     ObjectStoreMetadataActivationStore,
 } from './metadata-activation-store.js';
@@ -427,5 +428,45 @@ describe('InMemoryMetadataActivationStore', () => {
         const rows = await store.list();
         expect(rows).toEqual([{ name: 'env_action', active: false }]);
         expect('packageId' in rows[0]).toBe(false);
+    });
+});
+
+describe('listPackageMetadataActivations — one package\'s rows across types (#28411, ADR-0146 D8 item 4)', () => {
+    const rows = [
+        { id: 'r1', metadata_type: 'flow', name: 'nightly_sync', package_id: 'crm', active: false },
+        { id: 'r2', metadata_type: 'action', name: 'mark_done', package_id: 'crm', active: 0 },
+        { id: 'r3', metadata_type: 'position', name: 'crm_manager', package_id: 'crm', active: true },
+        { id: 'r4', metadata_type: 'flow', name: 'other_sync', package_id: 'other', active: false },
+        { id: 'r5', metadata_type: 'permission', name: 'env_set', active: false },
+    ];
+
+    it('reads every type\'s rows of the package, under the system context, each with its metadata_type', async () => {
+        const { engine, calls } = makeStoreEngine(rows);
+        const out = await listPackageMetadataActivations(engine, 'crm');
+        expect(out).toEqual([
+            { metadataType: 'flow', name: 'nightly_sync', packageId: 'crm', active: false },
+            { metadataType: 'action', name: 'mark_done', packageId: 'crm', active: false },
+            { metadataType: 'position', name: 'crm_manager', packageId: 'crm', active: true },
+        ]);
+        const find = calls.find((c) => c.op === 'find');
+        expect(find?.object).toBe(METADATA_ACTIVATION_TABLE);
+        expect(find?.options?.where).toEqual({ package_id: 'crm' });
+        expect(find?.options?.context?.isSystem).toBe(true);
+    });
+
+    it('parses a row exactly as its own type\'s store does', async () => {
+        const viaPackage = (await listPackageMetadataActivations(makeStoreEngine(rows).engine, 'crm'))
+            .filter((r) => r.metadataType === 'action')
+            .map(({ metadataType: _type, ...row }) => row);
+        const viaStore = (await new ObjectStoreMetadataActivationStore(makeStoreEngine(rows).engine, 'action').list())
+            .filter((r) => r.packageId === 'crm');
+        expect(viaPackage).toEqual(viaStore);
+    });
+
+    it('an empty or non-string package reads nothing, never the package-less rows', async () => {
+        const { engine } = makeStoreEngine(rows);
+        expect(await listPackageMetadataActivations(engine, '')).toEqual([]);
+        expect(await listPackageMetadataActivations(engine, undefined as unknown as string)).toEqual([]);
+        expect(engine.find).not.toHaveBeenCalled();
     });
 });

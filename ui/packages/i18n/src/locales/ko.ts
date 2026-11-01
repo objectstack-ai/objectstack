@@ -468,6 +468,9 @@ const ko = {
     bulkAllOnPage_other: "이 페이지의 {{count}}건이 모두 선택되었습니다.",
     bulkSelectAllMatching: "일치하는 {{count}}건 모두 선택",
     bulkAllMatchingSelected: "일치하는 레코드 {{count}}건이 모두 선택되었습니다.",
+    bulkSelectAllMatchingCapped: "일치하는 {{total}}건 중 처음 {{cap}}건 선택",
+    bulkAllMatchingSelectedCapped: "일치하는 레코드 {{total}}건 중 처음 {{cap}}건만 처리됩니다.",
+    bulkSelectedAllMatchesCapped: "{{cap}}건 선택됨(일치 항목 {{total}}건 중)",
     bulkActions: "일괄 작업",
     bulk: {
       confirmDefault: "레코드 {{count}}건에 적용됩니다.",

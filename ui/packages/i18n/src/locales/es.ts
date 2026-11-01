@@ -481,6 +481,9 @@ const es = {
     bulkAllOnPage_other: "Están seleccionados los {{count}} de esta página.",
     bulkSelectAllMatching: "Seleccionar las {{count}} coincidencias",
     bulkAllMatchingSelected: "Están seleccionados los {{count}} registros coincidentes.",
+    bulkSelectAllMatchingCapped: "Seleccionar las primeras {{cap}} de {{total}} coincidencias",
+    bulkAllMatchingSelectedCapped: "Solo se procesarán los primeros {{cap}} de {{total}} registros coincidentes.",
+    bulkSelectedAllMatchesCapped: "{{cap}} seleccionados (de {{total}} coincidencias)",
     bulkActions: "Acciones masivas",
     bulk: {
       confirmDefault: "Esto se aplicará a {{count}} registro(s).",

@@ -24,6 +24,10 @@
  *   - the two doors give the SAME answer for the same manifest: status, code,
  *     message and `details`, byte-compared. Both answer through one helper,
  *     `protocolIncompatibleAnswer` in `@objectstack/metadata-core`;
+ *   - [#28535] the same refusal for a compiled artifact in the body
+ *     `os package install <file>` sends (manifest nested, `id` and `version`
+ *     lifted beside it), where the range used to stay one level down and the
+ *     package installed with a "declares no engines.protocol range" warning;
  *   - the `kernel:ready` rehydrate of an incompatible ledger entry, as
  *     measured: on `origin/main` before this change it registered the package,
  *     ran `syncSchemas` and logged only `info` "rehydrated". Now it is NOT
@@ -263,6 +267,78 @@ describe('POST install-local: an incompatible protocol range is refused, and not
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(h.installRegistrations().map((m) => m.id)).toEqual([COMPATIBLE.id]);
         const warned = h.logger.warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes('[protocol]'));
+        expect(warned).toHaveLength(1);
+        expect(warned[0]).toContain(COMPATIBLE.id);
+    });
+});
+
+/**
+ * [#28535] The body `os package install ./dist/objectstack.json` sends, built
+ * the way `packages/cli/src/commands/package/install.ts` builds it: the whole
+ * compiled artifact (manifest nested under `manifest:` beside its collections,
+ * ADR-0130 D4) with `id` and `version` lifted to the top. Every published CLI
+ * sends this shape, so the door is judged on it, not on a body only a test
+ * would build.
+ */
+function cliInstallBody(artifact: { manifest: Record<string, any>; [k: string]: any }) {
+    return { manifest: { ...artifact, id: artifact.manifest.id ?? artifact.id, version: artifact.manifest.version ?? artifact.version } };
+}
+
+/** A compiled artifact: the manifest nested under `manifest:`, one object beside it. */
+function compiledArtifact(manifest: Record<string, any>) {
+    return {
+        manifest,
+        objects: [{ name: 'qa_task', label: 'Task', fields: { name: { type: 'text', label: 'Name' } } }],
+    };
+}
+
+describe('[#28535] a compiled artifact as `os package install <file>` sends it: the handshake reads its nested manifest', () => {
+    const protocolWarnings = (h: { logger: { warn: { mock: { calls: unknown[][] } } } }) =>
+        h.logger.warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes('[protocol]'));
+
+    it(`refuses ${OLD_RANGE} on protocol ${PROTOCOL_MAJOR}: 422 with the five diagnostic fields, and nothing is installed`, async () => {
+        const h = await mount(dir);
+        const res = await h.install(cliInstallBody(compiledArtifact(INCOMPATIBLE)));
+        expectProtocolRefusal(res);
+        expectNothingWritten(h);
+        expect(protocolWarnings(h)).toEqual([]);
+    });
+
+    it('answers exactly what the flat manifest answers, byte for byte', async () => {
+        const h = await mount(dir);
+        const viaCli = await h.install(cliInstallBody(compiledArtifact(INCOMPATIBLE)));
+        const viaFlat = await h.install({ manifest: INCOMPATIBLE });
+        expect(JSON.stringify(viaCli)).toBe(JSON.stringify(viaFlat));
+    });
+
+    it('refuses the bare compiled artifact (no lifted id) the same way', async () => {
+        const h = await mount(dir);
+        expectProtocolRefusal(await h.install({ manifest: compiledArtifact(INCOMPATIBLE) }));
+        expectNothingWritten(h);
+    });
+
+    it(`lit control: ${CURRENT_RANGE} installs with no protocol warning, registered and ledgered flat`, async () => {
+        const h = await mount(dir);
+        const res = await h.install(cliInstallBody(compiledArtifact(COMPATIBLE)));
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.manifestId).toBe(COMPATIBLE.id);
+        expect(protocolWarnings(h)).toEqual([]);
+        const [registered] = h.installRegistrations() as any[];
+        expect(h.installRegistrations()).toHaveLength(1);
+        expect(registered.id).toBe(COMPATIBLE.id);
+        expect(registered.engines).toEqual({ protocol: CURRENT_RANGE });
+        expect(registered.objects.map((o: any) => o.name)).toEqual(['qa_task']);
+        expect(registered.manifest).toBeUndefined();
+        expect(readdirSync(dir)).toEqual([`${COMPATIBLE.id}.json`]);
+        expect(new LocalManifestSource(dir).read(COMPATIBLE.id).entry?.manifest.engines).toEqual({ protocol: CURRENT_RANGE });
+    });
+
+    it('lit control: an artifact with no range is admitted with the one warning, as before', async () => {
+        const { engines: _omitted, ...noRange } = COMPATIBLE;
+        const h = await mount(dir);
+        const res = await h.install(cliInstallBody(compiledArtifact(noRange)));
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        const warned = protocolWarnings(h);
         expect(warned).toHaveLength(1);
         expect(warned[0]).toContain(COMPATIBLE.id);
     });

@@ -507,13 +507,17 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     // the server's answer was given to that credential.
     //
     // A grant-bearing instance's borrowed token (`ctx.credentialHandle`)
-    // reaches the server too, and is deliberately not counted here: the
-    // credential path a refusal below takes holds and marks the instance's
-    // `credentialRef` row, which for such an instance is its client secret —
-    // a value the listing never depended on — while the token that was sent
-    // belongs to an organization's connection, which that path neither marks
-    // nor re-attempts on a reconnect. Until the materializer has a route for
-    // it, such an instance keeps the plain fault.
+    // reaches the server too, and is deliberately not counted here. A 403 the
+    // server answers that token with at discovery (thrown above as
+    // `ConnectorCredentialRejectedError`; a 401 is refreshed once, then a 503)
+    // is routed by the materializer to the
+    // connection the token was borrowed from: for an `authorization_code`
+    // instance, the discovery organization's connection is marked
+    // `reconnect_required` and a reconnect there lists again, while the
+    // instance's `credentialRef` (its client secret) is left alone (#26702).
+    // The `include` / `toolsSnapshot` refusals below are not routed that way:
+    // with the borrowed token not counted here, such an instance keeps the
+    // plain fault for them (the accepted deviation of #28357).
     const credentialSent = transport.kind === 'http' && sendsInstanceAuth(ctx.auth);
     if (includeList) {
       // An entry naming a tool the server does not list is refused after the
