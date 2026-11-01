@@ -309,7 +309,8 @@ export function StudioRestoreOriginalItem({
 /**
  * The confirmation of "Restore package original": it says what goes, the
  * customization, and its unpublished draft when one is pending. `onConfirm`
- * sends both deletes; nothing is sent on Cancel.
+ * sends both deletes; nothing is sent on Cancel. objectstack#28570 — a flow's
+ * (`kind: 'flow'`) says the base's flow runs again, under the same switch.
  */
 export function StudioRestoreOriginalDialog({
   open,
@@ -319,6 +320,7 @@ export function StudioRestoreOriginalDialog({
   hasDraft,
   locale,
   onConfirm,
+  kind = 'item',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -328,9 +330,15 @@ export function StudioRestoreOriginalDialog({
   hasDraft: boolean;
   locale: string;
   onConfirm: () => void;
+  /** What is restored: an item served in the base's place, or a flow that runs in its place. */
+  kind?: 'item' | 'flow';
 }): React.ReactElement {
   const vars = { item: label, package: baseLabel };
-  const body = tFormat('engine.studio.customize.restoreBody', locale, vars);
+  const body = tFormat(
+    kind === 'flow' ? 'engine.studio.customize.restoreFlowBody' : 'engine.studio.customize.restoreBody',
+    locale,
+    vars,
+  );
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent data-testid="studio-restore-original-dialog">

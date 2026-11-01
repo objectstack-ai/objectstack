@@ -2841,6 +2841,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.customize.restore': '恢复软件包原版',
   'engine.studio.customize.restoreConfirm': '恢复 {package} 的「{item}」？',
   'engine.studio.customize.restoreBody': '本部署对「{item}」的自定义会被删除，重新使用 {package} 的版本。',
+  'engine.studio.customize.restoreFlowBody': '本部署对「{item}」的自定义会被删除，{package} 的流程重新替它运行，启用开关保持不变。',
   'engine.studio.customize.restoreDraft': '会先丢弃它未发布的草稿。',
   'engine.studio.customize.restoreDone': '「{item}」已恢复为 {package} 的版本',
   // objectstack#28572 — 只读基础包与其定制包合为一个界面。

@@ -15,7 +15,12 @@
 //      still reads;
 //   3. a refused upgrade of an installed package (v2's connector wears the
 //      showcase's id) leaves v1 serving: its object, its app and the package at
-//      version 1.0.0 read, and v2's new object does not.
+//      version 1.0.0 read, and v2's new object does not;
+//   4. an upgrade the registry refuses part-way (v2's third object is one the
+//      showcase owns) is refused 422 `PLUGIN_REGISTER_FAILED`, and v1 keeps
+//      serving whole: the package at 1.0.0, its object with v1's label and the
+//      field another installed package extends it with, its app; v2's new
+//      object does not read.
 //
 // Boots a fixture stack of its own (the install-local plugin mounted), so it
 // stays out of `SHARED_SHOWCASE`.
@@ -37,6 +42,8 @@ const HOST_OBJECT = 'showcase_product';
 const FRESH_ID = 'com.dogfood.refusedfresh';
 const MIDWAY_ID = 'com.dogfood.refusedmidway';
 const UPGRADE_ID = 'com.dogfood.refusedupgrade';
+const MIDUP_ID = 'com.dogfood.refusedmidup';
+const MIDUP_EXTENDER_ID = 'com.dogfood.refusedmidupext';
 
 const object = (name: string) => ({ name, label: name, fields: { title: { type: 'text', label: 'Title' } } });
 const app = (name: string, objectName: string) => ({
@@ -77,6 +84,18 @@ const UPGRADE_V2 = install(UPGRADE_ID, 'refusedupgrade', '2.0.0', {
   objects: [object('refusedupgrade_thing'), object('refusedupgrade_new')],
   apps: [app('refusedupgrade_app', 'refusedupgrade_thing')],
   connectors: [stampedConnector('refusedupgrade_conn')],
+});
+
+const MIDUP_V1 = install(MIDUP_ID, 'refusedmidup', '1.0.0', {
+  objects: [{ ...object('refusedmidup_thing'), label: 'Midup v1' }],
+  apps: [app('refusedmidup_app', 'refusedmidup_thing')],
+});
+const MIDUP_EXTENDER = install(MIDUP_EXTENDER_ID, 'refusedmidupext', '1.0.0', {
+  objectExtensions: [{ extend: 'refusedmidup_thing', fields: { ext_note: { type: 'text', label: 'Extender note' } } }],
+});
+const MIDUP_V2 = install(MIDUP_ID, 'refusedmidup', '2.0.0', {
+  objects: [{ ...object('refusedmidup_thing'), label: 'Midup v2' }, object('refusedmidup_new'), object(HOST_OBJECT)],
+  apps: [app('refusedmidup_app', 'refusedmidup_thing')],
 });
 
 type Answer = { status: number; body: any };
@@ -120,6 +139,16 @@ describe('dogfood: a package the install refuses part-way leaves nothing of itse
     answers.upgradeObject = await get('/meta/object/refusedupgrade_thing');
     answers.upgradeApp = await get('/meta/app/refusedupgrade_app');
     answers.upgradeNew = await get('/meta/object/refusedupgrade_new');
+
+    // 4
+    answers.midupV1 = await post(MIDUP_V1);
+    answers.midupExtender = await post(MIDUP_EXTENDER);
+    answers.midupV2 = await post(MIDUP_V2);
+    answers.midupPackage = await get(`/packages/${MIDUP_ID}`);
+    answers.midupObject = await get('/meta/object/refusedmidup_thing');
+    answers.midupApp = await get('/meta/app/refusedmidup_app');
+    answers.midupNew = await get('/meta/object/refusedmidup_new');
+    answers.midupHostObject = await get(`/meta/object/${HOST_OBJECT}`);
   }, 300_000);
 
   afterAll(async () => {
@@ -160,5 +189,22 @@ describe('dogfood: a package the install refuses part-way leaves nothing of itse
     expect(answers.upgradeObject.status).toBe(200);
     expect(answers.upgradeApp.status).toBe(200);
     expect(answers.upgradeNew.status, shown(answers.upgradeNew)).toBe(404);
+  });
+
+  it('4: an upgrade the registry refuses part-way leaves the installed version serving whole', () => {
+    expect(answers.midupV1.status, shown(answers.midupV1)).toBe(200);
+    expect(answers.midupExtender.status, shown(answers.midupExtender)).toBe(200);
+    expect(answers.midupV2.status, shown(answers.midupV2)).toBe(422);
+    expect(answers.midupV2.body?.error?.code).toBe('PLUGIN_REGISTER_FAILED');
+    expect(answers.midupV2.body?.error?.message).toContain(`already owned by package "${HOST_PACKAGE_ID}"`);
+    expect(answers.midupPackage.status, shown(answers.midupPackage)).toBe(200);
+    expect(JSON.stringify(answers.midupPackage.body)).toContain('"version":"1.0.0"');
+    expect(JSON.stringify(answers.midupPackage.body)).not.toContain('"version":"2.0.0"');
+    expect(answers.midupObject.status, shown(answers.midupObject)).toBe(200);
+    expect(answers.midupObject.body?.item?.label).toBe('Midup v1');
+    expect(Object.keys(answers.midupObject.body?.item?.fields ?? {})).toContain('ext_note');
+    expect(answers.midupApp.status).toBe(200);
+    expect(answers.midupNew.status, shown(answers.midupNew)).toBe(404);
+    expect(answers.midupHostObject.status).toBe(200);
   });
 });

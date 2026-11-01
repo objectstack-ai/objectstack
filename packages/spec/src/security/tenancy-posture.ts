@@ -58,13 +58,22 @@ export function postureEnforcesWall(posture: TenancyPosture): boolean {
  * Does this posture require `organization_id` to be stamped on write?
  *
  * True exactly when a wall is enforced: an absent value would land a row behind
- * a wall that then hides it. The STAMPER, however, is the enterprise
- * `@objectstack/organizations` runtime, not the open engine — the same runtime
- * whose presence activates these postures in the first place, so the two can
- * never be out of step. This predicate is the shared vocabulary that runtime
- * compiles against; the open engine only VALIDATES supplied values (the write
- * side of the Layer 0 wall), which is a security property rather than a
- * packaging one.
+ * a wall that then hides it.
+ *
+ * The stamping is open code (ADR-0105 D5, the write half of the wall): the
+ * engine lands an insert in the caller's active organization in every posture
+ * (`ObjectQL#driverWriteTarget`, `packages/objectql`), and the SQL driver
+ * fills an absent `organization_id` from it (`SqlDriver#injectTenantOnInsert`,
+ * `packages/drivers/driver-sql`). An explicit value is never overwritten; where
+ * `@objectstack/plugin-security` installs the wall on the write, it holds that
+ * value to the Layer 0 verdict, storing it where the wall admits it and
+ * refusing the write where it does not. The enterprise
+ * `@objectstack/organizations` runtime fills an absent value too, in its write
+ * middleware, but it is not the only stamper.
+ *
+ * What does need that runtime is ACTIVATING a walled posture (ADR-0105 D12):
+ * open code does not mean free activation. This predicate is the shared
+ * vocabulary for the stamping rule, whichever package does the stamping.
  */
 export function postureStampsOrganization(posture: TenancyPosture): boolean {
   return postureEnforcesWall(posture);

@@ -2024,6 +2024,30 @@ class ExtensionMembershipKeysRefusedError extends Error {
 }
 
 /**
+ * [#28574] The refusals an `extend` contribution meets at registration, before
+ * anything is materialized: `defaultRowScope`
+ * ({@link ExtensionDefaultRowScopeRefusedError}) and `membershipKeys`
+ * ({@link ExtensionMembershipKeysRefusedError}), in that order. `undefined`
+ * when the contribution carries neither.
+ *
+ * The ONE copy of both: {@link SchemaRegistry.registerObject} throws what this
+ * answers, and the metadata save and publish doors ask it of an
+ * `object_extension` item (through
+ * {@link SchemaRegistry.extendContributionRefusal}) so the item is refused at
+ * the door with the same sentence, instead of being stored and then failing
+ * every sync that registers it.
+ */
+export function extendContributionRefusal(
+  schema: { name?: unknown; defaultRowScope?: unknown; membershipKeys?: unknown },
+  packageId: string | undefined,
+): Error | undefined {
+  const name = String(schema.name ?? '');
+  if (schema.defaultRowScope !== undefined) return new ExtensionDefaultRowScopeRefusedError(name, packageId);
+  if (schema.membershipKeys !== undefined) return new ExtensionMembershipKeysRefusedError(name, packageId);
+  return undefined;
+}
+
+/**
  * {@link ValidationRuleCopyRefusedError}'s code — `INVALID_METADATA`, for the
  * reason {@link EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE} gives: a body this
  * registry will not take as written. ⛔ Not a new code. The condition is named
@@ -3184,6 +3208,34 @@ function withoutField(schema: ServiceObject, name: string): ServiceObject {
   return { ...schema, fields: rest } as ServiceObject;
 }
 
+/**
+ * [#28697] The undo record of one registration run under
+ * {@link SchemaRegistry.restoringOnRefusal}: for each registry entry the run
+ * writes, the way to put back what the entry held just before the run's FIRST
+ * write to it. An entry the run never writes is never recorded, so a restore
+ * puts back exactly the entries the run touched and nothing else — another
+ * package's entries and a tenant's layers are left as they are.
+ */
+class RegistrationRestorePoint {
+  private readonly touched = new Set<string>();
+  private readonly undo: Array<() => void> = [];
+
+  /**
+   * Record `key` before its first write in this run. `capture` reads the
+   * entry as it is now and returns how to put it back.
+   */
+  note(key: string, capture: () => () => void): void {
+    if (this.touched.has(key)) return;
+    this.touched.add(key);
+    this.undo.push(capture());
+  }
+
+  /** Put every recorded entry back, the last one written first. */
+  restore(): void {
+    for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i]();
+  }
+}
+
 export class SchemaRegistry {
   // ==========================================
   // Logging control
@@ -3467,6 +3519,170 @@ export class SchemaRegistry {
   }
 
   // ==========================================
+  // Restore on refusal
+  // ==========================================
+
+  /** The open {@link RegistrationRestorePoint}, while {@link restoringOnRefusal} runs. */
+  private restorePoint: RegistrationRestorePoint | undefined;
+
+  /**
+   * [#28697] Run `register` — one registration made of several registry
+   * writes, such as an upgrade of an installed package — and, when it throws,
+   * put back exactly the entries it wrote, then throw the same error.
+   *
+   * Every refusal a verb below raises keeps its code and words; this decides
+   * only what is left afterwards, wherever in the run the refusal came from:
+   * the entries as they were before the run.
+   *
+   * What is recorded, each entry before the run's first write to it: an
+   * object's contributor list (an `extend` or overlay layer of another package
+   * or a tenant sits in it and is put back unchanged), a namespace's owners,
+   * an item slot (the package record included), this package's picklist
+   * extension of one list, and the security catalog and default record page
+   * claims the package door records. Nothing the run does not write is
+   * recorded or put back. After a restore every merged object is
+   * re-resolved, since a fold computed during the run may have read an entry
+   * the restore put back.
+   *
+   * ⛔ Not a way back from an operator's verb: {@link uninstallPackage},
+   * {@link unregisterObject} and the overlay removals are never journaled.
+   * Synchronous by contract: `register` must not return a promise, so no
+   * other caller's write can land between the run's writes and its restore.
+   * A nested call joins the run that is already open.
+   */
+  restoringOnRefusal<T>(register: () => T): T {
+    if (this.restorePoint) return register();
+    const point = new RegistrationRestorePoint();
+    this.restorePoint = point;
+    try {
+      const result = register();
+      if (result instanceof Promise) {
+        throw new TypeError('[Registry] restoringOnRefusal takes a synchronous registration; it was handed one that returned a promise.');
+      }
+      return result;
+    } catch (err) {
+      point.restore();
+      this.invalidateAll();
+      throw err;
+    } finally {
+      this.restorePoint = undefined;
+    }
+  }
+
+  /** Record an object's contributor list (and each contributor's mutable slots) before its first write. */
+  private noteObjectEntry(fqn: string): void {
+    this.restorePoint?.note(`object\u0000${fqn}`, () => {
+      const list = this.objectContributors.get(fqn);
+      if (!list) return () => this.closeObjectEntry(fqn);
+      // The late-install branch re-classifies a sitting contributor in place,
+      // so its ownership and priority are kept beside the reference.
+      const saved = list.map((c) => ({ c, ownership: c.ownership, priority: c.priority }));
+      return () => {
+        for (const s of saved) {
+          s.c.ownership = s.ownership;
+          s.c.priority = s.priority;
+        }
+        list.splice(0, list.length, ...saved.map((s) => s.c));
+        this.mergedObjectCache.delete(fqn);
+      };
+    });
+  }
+
+  /** Record a namespace's owner set before its first write. */
+  private noteNamespace(namespace: string): void {
+    this.restorePoint?.note(`namespace\u0000${namespace}`, () => {
+      const owners = this.namespaceRegistry.get(namespace);
+      const saved = owners ? new Set(owners) : undefined;
+      return () => {
+        if (saved) this.namespaceRegistry.set(namespace, saved);
+        else this.namespaceRegistry.delete(namespace);
+      };
+    });
+  }
+
+  /** Record whether an item type had a store at all, before the run can create one. */
+  private noteItemType(type: string): void {
+    this.restorePoint?.note(`type\u0000${type}`, () => {
+      const hadType = this.metadata.has(type);
+      return () => {
+        if (!hadType && this.metadata.get(type)?.size === 0) this.metadata.delete(type);
+      };
+    });
+  }
+
+  /** Record one item slot before its first write. */
+  private noteItem(type: string, key: string): void {
+    this.restorePoint?.note(`item\u0000${type}\u0000${key}`, () => {
+      const collection = this.metadata.get(type);
+      const had = collection?.has(key) ?? false;
+      const value = collection?.get(key);
+      return () => {
+        const now = this.metadata.get(type);
+        if (had) now?.set(key, value);
+        else now?.delete(key);
+      };
+    });
+  }
+
+  /** Record this package's extension of one picklist before its first write. */
+  private notePicklistExtension(target: string, packageKey: string): void {
+    this.restorePoint?.note(`picklistExtension\u0000${target}\u0000${packageKey}`, () => {
+      const byPackage = this.picklistExtensionContributions.get(target);
+      const saved = byPackage?.get(packageKey);
+      return () => {
+        let now = this.picklistExtensionContributions.get(target);
+        if (saved) {
+          if (!now) this.picklistExtensionContributions.set(target, now = new Map());
+          now.set(packageKey, saved);
+        } else if (now) {
+          now.delete(packageKey);
+          if (now.size === 0) this.picklistExtensionContributions.delete(target);
+        }
+      };
+    });
+  }
+
+  /** Record who holds one security catalog name before its first write. */
+  private noteSecurityCatalogClaim(type: SecurityCatalogType, name: string): void {
+    this.restorePoint?.note(`catalogClaim\u0000${type}\u0000${name}`, () => {
+      const saved = this.securityCatalogClaims.get(type)?.get(name);
+      return () => {
+        let byName = this.securityCatalogClaims.get(type);
+        if (saved !== undefined) {
+          if (!byName) this.securityCatalogClaims.set(type, byName = new Map());
+          byName.set(name, saved);
+        } else {
+          byName?.delete(name);
+        }
+      };
+    });
+  }
+
+  /**
+   * Record the default record page claims before `packageId`'s first rewrite
+   * of them ({@link recordDefaultRecordPageClaims} drops all of the package's
+   * claims, then adds what the manifest declares). Put back per object, and
+   * only for the objects `packageId` held a claim on before or after, each in
+   * its holders' original order.
+   */
+  private noteDefaultRecordPageClaims(packageId: string): void {
+    this.restorePoint?.note(`defaultPageClaims\u0000${packageId}`, () => {
+      const saved = new Map<string, Map<string, string>>();
+      for (const [object, byPackage] of this.defaultRecordPageClaims) saved.set(object, new Map(byPackage));
+      return () => {
+        const objects = new Set<string>();
+        for (const [object, byPackage] of saved) if (byPackage.has(packageId)) objects.add(object);
+        for (const [object, byPackage] of this.defaultRecordPageClaims) if (byPackage.has(packageId)) objects.add(object);
+        for (const object of objects) {
+          const before = saved.get(object);
+          if (before) this.defaultRecordPageClaims.set(object, new Map(before));
+          else this.defaultRecordPageClaims.delete(object);
+        }
+      };
+    });
+  }
+
+  // ==========================================
   // Namespace Management
   // ==========================================
 
@@ -3476,6 +3692,7 @@ export class SchemaRegistry {
    */
   registerNamespace(namespace: string, packageId: string): void {
     if (!namespace) return;
+    this.noteNamespace(namespace);
 
     let owners = this.namespaceRegistry.get(namespace);
     if (!owners) {
@@ -3492,6 +3709,7 @@ export class SchemaRegistry {
   unregisterNamespace(namespace: string, packageId: string): void {
     const owners = this.namespaceRegistry.get(namespace);
     if (owners) {
+      this.noteNamespace(namespace);
       owners.delete(packageId);
       if (owners.size === 0) {
         this.namespaceRegistry.delete(namespace);
@@ -3666,6 +3884,7 @@ export class SchemaRegistry {
    * {@link defaultRecordPageClaims} for why a re-install replaces).
    */
   private recordDefaultRecordPageClaims(packageId: string, manifest: ObjectStackManifest): void {
+    this.noteDefaultRecordPageClaims(packageId);
     this.forgetDefaultRecordPageClaims(packageId);
     for (const { object, page } of declaredDefaultRecordPages(manifest)) {
       let byPackage = this.defaultRecordPageClaims.get(object);
@@ -3795,6 +4014,7 @@ export class SchemaRegistry {
         byName = new Map();
         this.securityCatalogClaims.set(type, byName);
       }
+      this.noteSecurityCatalogClaim(type, name);
       byName.set(name, packageId);
     }
   }
@@ -4012,14 +4232,14 @@ export class SchemaRegistry {
     // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
     // door and for the same reason: before any materialization and before the
     // contributor list is opened, so a refused contribution leaves nothing behind.
-    if (ownership === 'extend' && (schema as { defaultRowScope?: unknown }).defaultRowScope !== undefined) {
-      throw new ExtensionDefaultRowScopeRefusedError(schema.name, packageId);
-    }
     // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
     // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
-    // reason, so a refused contribution leaves nothing behind.
-    if (ownership === 'extend' && (schema as { membershipKeys?: unknown }).membershipKeys !== undefined) {
-      throw new ExtensionMembershipKeysRefusedError(schema.name, packageId);
+    // reason, so a refused contribution leaves nothing behind. [#28574] Both
+    // are asked through {@link extendContributionRefusal}, the one copy the
+    // metadata save and publish doors also ask of an `object_extension` item.
+    if (ownership === 'extend') {
+      const extendRefusal = extendContributionRefusal(schema, packageId);
+      if (extendRefusal) throw extendRefusal;
     }
     // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
     // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
@@ -4144,6 +4364,11 @@ export class SchemaRegistry {
     // record — skip rather than registering `undefined` as an owner (which
     // would also mean widening `registerNamespace`'s own required-string
     // contract, out of scope here).
+    // [#28697] Recorded before the first write below (the namespace claim),
+    // so a refusal raised after it — the ownership conflict — puts this
+    // object's layers back exactly ({@link restoringOnRefusal}).
+    this.noteObjectEntry(fqn);
+
     if (namespace && packageId) {
       this.registerNamespace(namespace, packageId);
     }
@@ -5837,6 +6062,75 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#28574] {@link extendContributionRefusal}, asked of the registry by the
+   * metadata doors (which reach this registry through the engine and do not
+   * import this package).
+   */
+  extendContributionRefusal(
+    schema: { name?: unknown; defaultRowScope?: unknown; membershipKeys?: unknown },
+    packageId: string | undefined,
+  ): Error | undefined {
+    return extendContributionRefusal(schema, packageId);
+  }
+
+  /**
+   * [#28574, ADR-0146 D10] Register an `object_extension` item — a stored row
+   * of a writable package — as that package's `'extend'` contributor of the
+   * object it names.
+   *
+   * The WHOLE body is the contribution: every key the extension's schema
+   * declares reaches {@link mergeObjectDefinitions}, never a hand-copied key
+   * list. Only the two addressing keys are taken off it: `extend` becomes the
+   * contribution's `name` (the object it registers under) and `priority` its
+   * merge priority ({@link DEFAULT_EXTENDER_PRIORITY} when absent). The body
+   * is the caller's PARSED body (`ObjectExtensionSchema`), so schema defaults
+   * and the parse's own rewrites are already applied.
+   *
+   * Re-registering replaces the package's previous contribution to the object
+   * (the `extend` arm of {@link registerObject}), so every sync that re-reads
+   * the stored row can call this again. Refusals are {@link registerObject}'s.
+   *
+   * @returns the FQN registered under.
+   */
+  registerObjectExtension(
+    extension: { extend: string; priority?: number } & Record<string, unknown>,
+    packageId: string,
+  ): string {
+    const { extend, priority, ...contribution } = extension;
+    return this.registerObject(
+      { ...contribution, name: extend } as unknown as ServiceObject,
+      packageId,
+      undefined,
+      'extend',
+      typeof priority === 'number' ? priority : DEFAULT_EXTENDER_PRIORITY,
+    );
+  }
+
+  /**
+   * [#28574] Withdraw ONE package's `'extend'` contribution to an object — the
+   * delete of that package's `object_extension` item. The owner, the overlay
+   * layer and every other package's extension stay exactly where they are; a
+   * package's whole set leaves with {@link unregisterObjectsByPackage}.
+   *
+   * @returns whether a contribution was removed (idempotent: `false` when the
+   *   package contributes no extension to the object).
+   */
+  withdrawObjectExtension(name: string, packageId: string): boolean {
+    const fqn = this.resolveObjectKey(name) ?? name;
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors) return false;
+    const idx = contributors.findIndex(c => c.ownership === 'extend' && c.packageId === packageId);
+    if (idx === -1) return false;
+    contributors.splice(idx, 1);
+    if (contributors.length === 0) this.closeObjectEntry(fqn);
+    // The same two invalidations every other contributor mutation performs.
+    this.mergedObjectCache.delete(fqn);
+    this._objectRevision += 1;
+    this.log(`[Registry] Withdrew extend contribution to ${fqn} from ${packageId}`);
+    return true;
+  }
+
+  /**
    * [ADR-0029 D9.7] Remove the tenant OVERLAY layer of an object, leaving the
    * packaged owner exactly where it is — the layer-addressed sibling of
    * #6818's name-addressed {@link unregisterObject}.
@@ -6172,6 +6466,7 @@ export class SchemaRegistry {
    * Universal Register Method for non-object metadata.
    */
   registerItem<T>(type: string, item: T, keyField: keyof T = 'name' as keyof T, packageId?: string) {
+    this.noteItemType(type);
     if (!this.metadata.has(type)) {
       this.metadata.set(type, new Map());
     }
@@ -6450,6 +6745,7 @@ export class SchemaRegistry {
       }
     }
 
+    this.noteItem(type, storageKey);
     collection.set(storageKey, item);
     if (type === 'picklist') this.invalidateAll();
     // [#24400] A bound action is attached to its target on read
@@ -7215,6 +7511,7 @@ export class SchemaRegistry {
       this.registerNamespace(manifest.namespace, manifest.id);
     }
     
+    this.noteItemType('package');
     if (!this.metadata.has('package')) {
       this.metadata.set('package', new Map());
     }
@@ -7224,6 +7521,7 @@ export class SchemaRegistry {
       // a normal path, not an error — keep it at debug (#3420).
       this.debug(`[Registry] Overwriting package: ${manifest.id}`);
     }
+    this.noteItem('package', manifest.id);
     collection.set(manifest.id, pkg);
     // The names this package now holds, recorded whether or not an item store
     // entry will carry them (see `securityCatalogClaims`).
@@ -7749,6 +8047,7 @@ export class SchemaRegistry {
 
     let byPackage = this.picklistExtensionContributions.get(target);
     if (!byPackage) this.picklistExtensionContributions.set(target, byPackage = new Map());
+    this.notePicklistExtension(target, packageKey);
     byPackage.set(packageKey, { packageId, options: merged });
     this.invalidateAll();
     this.log(`[Registry] Registered picklist extension: ${target} (+${extension.options?.length ?? 0}) from ${packageId}`);
