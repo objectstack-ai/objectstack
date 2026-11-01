@@ -35,6 +35,19 @@
 // here, not authored: they judge what the author wrote, and the field schema
 // refuses `picklist` and `options` together.
 import { isResolvedPicklistOptions, markResolvedPicklistOptions } from '@objectstack/metadata-core';
+// The walk — which picklists a manifest's fields name, which lists it declares
+// and extends — is `@objectstack/metadata`'s, the one spelling the
+// residual-picklist refusal (`unreferencedResidualPicklists`) and the
+// author-time doors read too. Re-exported so the registry, the boot audit and
+// the install door keep importing it from here. ⛔ Never a second walk here.
+import type { OrphanPicklistExtension, PicklistReference } from '@objectstack/metadata/picklist-references';
+export {
+  collectManifestPicklistExtensions,
+  collectManifestPicklistNames,
+  collectManifestPicklistReferences,
+  collectPicklistReferences,
+} from '@objectstack/metadata/picklist-references';
+export type { OrphanPicklistExtension, PicklistReference } from '@objectstack/metadata/picklist-references';
 
 /** One option, as `SelectOptionSchema` declares it (only `value` is read here). */
 export interface PicklistOptionLike {
@@ -50,14 +63,6 @@ export interface PicklistContribution {
   /** `'picklist'` for the owning list, `'extension'` for a `picklistExtensions` entry. */
   kind: 'picklist' | 'extension';
   options: readonly PicklistOptionLike[];
-}
-
-/** One field that names a picklist, with the package that declared the field. */
-export interface PicklistReference {
-  object: string;
-  field: string;
-  picklist: string;
-  packageId: string | undefined;
 }
 
 /** The ADR-0112 envelope every refusal here is thrown in — the code the registration seams already use. */
@@ -182,31 +187,6 @@ export function resolvePicklistFieldsOnto<T>(
   return { ...(body as object), fields: next } as T;
 }
 
-/** Every field of an object body that names a picklist. */
-export function collectPicklistReferences(
-  object: string,
-  body: unknown,
-  packageId: string | undefined,
-): PicklistReference[] {
-  const refs: PicklistReference[] = [];
-  const fields = (body as { fields?: unknown } | undefined)?.fields;
-  if (!fields || typeof fields !== 'object') return refs;
-  const entries: Array<[string, unknown]> = Array.isArray(fields)
-    ? fields.map((f) => [String((f as { name?: unknown })?.name ?? ''), f])
-    : Object.entries(fields as Record<string, unknown>);
-  for (const [field, def] of entries) {
-    const picklist = (def as { picklist?: unknown } | undefined)?.picklist;
-    if (typeof picklist === 'string' && picklist.length > 0) refs.push({ object, field, picklist, packageId });
-  }
-  return refs;
-}
-
-/** A `picklistExtensions` entry whose `extend` names a list no loaded package declares. */
-export interface OrphanPicklistExtension {
-  picklist: string;
-  packageId: string | undefined;
-}
-
 /**
  * The load-time refusal for picklist names nothing declares — every field
  * that references one, and every `picklistExtensions` entry that extends one,
@@ -237,57 +217,4 @@ export function describeUnresolvedPicklistReferences(
     + 'neither can take effect until the list does. Declare the picklist (a `*.picklist.ts` file, or '
     + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name.',
   );
-}
-
-/** A manifest's `objects` in either authored spelling, as `[name, body]` pairs. */
-function manifestObjects(source: any): Array<[string, unknown]> {
-  const objects = source?.objects;
-  if (Array.isArray(objects)) return objects.map((o: any) => [String(o?.name ?? ''), o]);
-  if (objects && typeof objects === 'object') return Object.entries(objects);
-  return [];
-}
-
-/** The manifest itself and its nested `plugins[]`, which register under its package (`registerPlugin`). */
-function manifestSources(manifest: any): any[] {
-  const plugins = Array.isArray(manifest?.plugins) ? manifest.plugins.filter((p: unknown) => p && typeof p === 'object') : [];
-  return [manifest, ...plugins];
-}
-
-/**
- * The picklist references one manifest brings — its objects', its
- * `objectExtensions`' and its nested plugins' fields — attributed to the
- * package that registers them. Read before the manifest is registered, by the
- * post-boot install door.
- */
-export function collectManifestPicklistReferences(manifest: any, packageId: string | undefined): PicklistReference[] {
-  const refs: PicklistReference[] = [];
-  for (const source of manifestSources(manifest)) {
-    for (const [name, body] of manifestObjects(source)) refs.push(...collectPicklistReferences(name, body, packageId));
-    for (const ext of Array.isArray(source?.objectExtensions) ? source.objectExtensions : []) {
-      refs.push(...collectPicklistReferences(String(ext?.extend ?? ''), ext, packageId));
-    }
-  }
-  return refs;
-}
-
-/** The picklist names one manifest declares, nested plugins included. */
-export function collectManifestPicklistNames(manifest: any): Set<string> {
-  const names = new Set<string>();
-  for (const source of manifestSources(manifest)) {
-    for (const p of Array.isArray(source?.picklists) ? source.picklists : []) {
-      if (typeof p?.name === 'string') names.add(p.name);
-    }
-  }
-  return names;
-}
-
-/** The `picklistExtensions` targets one manifest brings, nested plugins included. */
-export function collectManifestPicklistExtensions(manifest: any, packageId: string | undefined): OrphanPicklistExtension[] {
-  const out: OrphanPicklistExtension[] = [];
-  for (const source of manifestSources(manifest)) {
-    for (const ext of Array.isArray(source?.picklistExtensions) ? source.picklistExtensions : []) {
-      if (typeof ext?.extend === 'string') out.push({ picklist: ext.extend, packageId });
-    }
-  }
-  return out;
 }
