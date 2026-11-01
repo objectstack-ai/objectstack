@@ -89,6 +89,8 @@ const srv = vi.hoisted(() => ({
   saves: [] as Array<{ name: string; body: Record<string, unknown>; opts: Record<string, unknown> }>,
   resets: [] as Array<{ name: string; opts: Record<string, unknown> }>,
   version: 0,
+  /** Whether the engine's `_status` answer holds a row for the flow. */
+  statusRow: true,
 }));
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -181,7 +183,7 @@ const json = (body: unknown, status = 200) =>
 const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = new URL(String(input), 'http://localhost').pathname;
   if (path.endsWith('/automation/_status')) {
-    return json({ success: true, data: { flows: [{ name: FLOW_NAME, enabled: true, bound: true }] } });
+    return json({ success: true, data: { flows: srv.statusRow ? [{ name: FLOW_NAME, enabled: true, bound: true }] : [] } });
   }
   if (path.endsWith('/toggle')) return json({ success: true, data: { name: FLOW_NAME, enabled: false } });
   if (path === `/api/v1/packages/${BASE}/ensure-customization` && init?.method === 'POST') {
@@ -216,6 +218,7 @@ beforeEach(() => {
   srv.saves.length = 0;
   srv.resets.length = 0;
   srv.version = 0;
+  srv.statusRow = true;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   fetchMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
@@ -386,6 +389,25 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await waitFor(() => expect(within(header()).queryByTestId('studio-override-chip')).toBeNull(), { timeout: 8000 });
     expect(await within(header()).findByTestId('studio-customize')).toBeEnabled();
     expect(srv.saves).toEqual([]);
+    expect(calls('/toggle')).toHaveLength(0);
+  });
+
+  it('with no ledger row served, a customized flow draws no switch at all, where the base’s own flow keeps its locked one', async () => {
+    srv.statusRow = false;
+    mount();
+    await openFlow();
+    // CONTROL: the base's flow, not customized, keeps the read-only definition switch.
+    expect(within(header()).getByRole('switch')).toBeDisabled();
+    expect(within(header()).queryByTestId('auto-ledger-switch')).toBeNull();
+
+    await customize();
+    expect(within(header()).queryByRole('switch')).toBeNull();
+    patchFlow();
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
+    expect(within(header()).queryByRole('switch')).toBeNull();
+    // Studio never writes the override's status to mean on or off.
+    expect(srv.saves[0]!.body.status).toBe(BASE_FLOW.status);
     expect(calls('/toggle')).toHaveLength(0);
   });
 
