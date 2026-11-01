@@ -130,6 +130,10 @@ reason.
   your own extension adds in `fields` — is not a patch target, whatever the
   priorities: set that field's text where it is declared. The install door and
   `os validate` refuse such a patch, and at boot it is not applied and is named once.
+  The platform columns the runtime adds to every object (`created_at` and the rest)
+  sit in the owner's stored declaration, so the install door admits a patch of one and
+  every read applies it, while `os validate`, which reads the declaration you wrote,
+  refuses it.
 - **Conflicts resolve like `label`.** Two extensions patching the same key: the higher
   `priority` wins. A tenant who has edited that text keeps their own, [below](#extensions-and-tenant-customization).
 - **A patch must name something real.** A field the target does not declare, or an option

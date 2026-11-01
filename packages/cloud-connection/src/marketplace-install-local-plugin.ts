@@ -3302,9 +3302,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * each `packages[]` entry's, or the body's own — judged against its target
      * by `@objectstack/metadata-core`'s `fieldPatchTargetRefusals`. A target
      * this artifact delivers is read off its body; any other is the owner's
-     * declaration the registry holds (`getFieldPatchTarget`), never the
-     * resolved object: that one carries every installed extension's fields,
-     * and a patch reaches the owner's own fields only (ADR-0146 D10). A target
+     * declaration the registry holds (`getObjectOwner`, keyed by the object
+     * name, which is the registry key), never the resolved object: that one
+     * carries every installed extension's fields, and a patch reaches the
+     * owner's own fields only (ADR-0146 D10). The stored declaration carries
+     * the platform columns the registry injects at registration (`created_at`
+     * and the rest), so a patch of one is admitted here, as the fold applies
+     * it, while `os validate` (the authored declaration) refuses it. A target
      * neither knows is not judged here: the extension then registers against
      * an owner that is not loaded, which the registry already reports.
      */
@@ -3323,9 +3327,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
             for (const object of list) if (isPlainObject(object) && typeof object.name === 'string') delivered.set(object.name, object);
         }
-        let registry: { getFieldPatchTarget?(name: string): unknown } | undefined;
+        let registry: { getObjectOwner?(fqn: string): { definition?: unknown } | undefined } | undefined;
         try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered targets are known */ }
-        const getTarget = (name: string): unknown => delivered.get(name) ?? registry?.getFieldPatchTarget?.(name);
+        const getTarget = (name: string): unknown => delivered.get(name) ?? registry?.getObjectOwner?.(name)?.definition;
         return bodies.flatMap(({ body, prefix }) => fieldPatchTargetRefusals(body.objectExtensions, getTarget, prefix));
     };
 

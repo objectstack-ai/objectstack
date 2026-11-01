@@ -539,6 +539,11 @@ function recordFieldOf(body: unknown, name: string): Record<string, unknown> | u
  * publishes it. A field an extension adds is never one of them, whatever the
  * priorities, and neither is an array-spelled entry: the merge, the patch and
  * the miss report all read the record spelling, so they cannot disagree.
+ * The declaration is the one the registry stores, so the platform columns
+ * {@link applySystemFields} injects at registration (`created_at` and the
+ * rest) are among these names: the fold and the install door
+ * (`getObjectOwner`) admit a patch of one, while `os validate`, which judges
+ * the authored declaration, refuses it.
  * `undefined` when no owner is registered — no opinion, as
  * {@link SchemaRegistry.tenantPatchedDisplayKeys} has none there either.
  */
@@ -5767,22 +5772,6 @@ export class SchemaRegistry {
   getObjectOwner(fqn: string): ObjectContributor | undefined {
     const contributors = this.objectContributors.get(fqn);
     return contributors?.find(c => c.ownership === 'own');
-  }
-
-  /**
-   * [ADR-0146 D10, second rule] The body an extension's `fieldPatches` of
-   * object `name` is judged against: the `own` contributor's declaration. A
-   * patch reaches the owner's own fields only — never a field an extension
-   * adds — so the resolved object ({@link getObject}), which carries every
-   * extender's fields, is the wrong target. The marketplace install door asks
-   * this; the fold reads the same contributor ({@link ownFieldNamesOf}).
-   * Name-addressed as `getObject` is. `undefined` when no owner is registered
-   * under the name.
-   */
-  getFieldPatchTarget(name: string): ServiceObject | undefined {
-    const fqn = this.resolveObjectKey(name);
-    if (fqn === undefined) return undefined;
-    return this.objectContributors.get(fqn)?.find((c) => c.ownership === 'own')?.definition;
   }
 
   /**

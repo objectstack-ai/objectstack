@@ -97,7 +97,7 @@ async function mount(dir: string, objects: SchemaRegistry = installedObjects()) 
         getAllPackages: () => [],
         getPackage: (id: string) => (id === BASE ? { manifest: { id, version: '1.2.0' } } : undefined),
         getObject: (name: string) => objects.getObject(name),
-        getFieldPatchTarget: (name: string) => (objects as any).getFieldPatchTarget?.(name),
+        getObjectOwner: (name: string) => objects.getObjectOwner(name),
     };
     const services: Record<string, any> = {
         manifest: { register },
