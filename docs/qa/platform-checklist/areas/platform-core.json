@@ -1023,7 +1023,7 @@
       "title": "Notification center (bell / InboxPopover): badge counts distinct unread topics + pending approvals, repeats coalesce, per-group and global mark-read drop the badge",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1095,8 +1095,7 @@
       "negative": [
         "a badge showing raw unread ROW count (inflating to 9+ off one recurring topic) is the #2765 regression — FAIL",
         "mark-read firing one POST per row for a coalesced group (instead of one {ids} request) is a FAIL of the coalescing contract",
-        "read-state reverting to unread on the next poll for a keyed row (writing sys_notification_receipt through the generic data API, which rejects it — ADR-0103) is a FAIL",
-        "cross-ref: this is distinct from i18n.notification-localized-and-clears (single-entry localization + clear) and approvals.notification-deep-link (deep-link) — do not double-count their coverage here"
+        "read-state reverting to unread on the next poll for a keyed row (writing sys_notification_receipt through the generic data API, which rejects it — ADR-0103) is a FAIL"
       ],
       "traps": ["hydration-race", "single-datapoint"],
       "source": [
@@ -1105,7 +1104,8 @@
         "objectui packages/app-shell/src/layout/AppHeader.tsx (postMarkRead → POST /api/v1/notifications/read[/all]; poll GET /notifications?view=mine)",
         "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
         "packages/runtime/src/domains/notifications.ts#handleNotificationRequest (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400 — re-pointed #18104: markRead is a PROVIDER METHOD this file only calls off the inbox capability, a member access; the POST /notifications/read branch that validates the body and issues it is in handleNotificationRequest)",
-        "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)"
+        "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)",
+        "cross-ref: this is distinct from i18n.notification-localized-and-clears (single-entry localization + clear) and approvals.notification-deep-link (deep-link) — do not double-count their coverage here"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — bell/InboxPopover: topic-based badge (#2765), (topic,title) coalescing, per-group + global mark-read on the wire, approvals tab, receipt persistence; cross-referenced with i18n + approvals notification items", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -1121,6 +1121,12 @@
           "date": "2026-10-31",
           "change": "steps[5] and acceptance[3].verify name a group the scheduled digest cannot race. Checklist-accuracy finding of QA run #27441 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): the per-minute showcase_scheduled_digest (examples/app-showcase/src/automation/flows/index.ts, a 60-second interval) can land a new row in the group between the per-group mark-read and the badge read, so the badge does not drop. The clause is unchanged: it is still one POST for the group and a one-topic drop. Re-read at 3fd80337",
           "ref": "#27441"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-01",
+          "change": "negative[3] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },

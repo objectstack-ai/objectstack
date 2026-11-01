@@ -5401,7 +5401,7 @@
       "title": "Import mapping TransformType matrix: each of the 7 declared transforms does exactly its documented conversion, javascript is refused loudly at the door (no sandbox), format mismatch is a named 400",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -5462,8 +5462,7 @@
       "negative": [
         "a javascript-transform import that silently SKIPS the column (or worse, executes anything) is a FAIL — the refusal must be loud, total and row-free",
         "a map transform DROPPING an unmapped value (instead of passing it through unchanged) is a FAIL — the passthrough is the documented arm",
-        "an unknown transform string reaching applyMappingToRows answers 400 UNSUPPORTED_TRANSFORM 'unknown transform' (import-mapping.ts) — around-the-parse-seam guard, not HTTP-drivable end-to-end (spec parse rejects it at authoring); if ever observed answering 200, that is a FAIL",
-        "cross-ref guard: header mapping, idempotent re-import and the unknown-mappingName refusal are named-import-mapping's clauses — do not re-score them here"
+        "an unknown transform string reaching applyMappingToRows answers 400 UNSUPPORTED_TRANSFORM 'unknown transform' (import-mapping.ts) — around-the-parse-seam guard, not HTTP-drivable end-to-end (spec parse rejects it at authoring); if ever observed answering 200, that is a FAIL"
       ],
       "traps": [
         "seed-data-thin",
@@ -5478,7 +5477,8 @@
         "packages/spec/src/data/mapping.zod.ts#TransformType (TransformType — none/constant/lookup/split/join/javascript/map, 7 members, named export pinned above)",
         "packages/rest/src/import-mapping.ts#resolveNamedMapping (format guard + the javascript refusal naming #2611), packages/core/src/utils/import-mapping.ts#transform (the per-transform switch + around-the-seam unknown-transform refusal)",
         "examples/app-showcase/src/data/mappings/index.ts#showcase_inquiry_feed (showcase_inquiry_feed — the stock none+map carrier)",
-        "cross-ref: records-forms.named-import-mapping (header mapping, idempotence, unknown-name refusal — kept there; this item is the transform axis)"
+        "cross-ref: records-forms.named-import-mapping (header mapping, idempotence, unknown-name refusal — kept there; this item is the transform axis)",
+        "cross-ref guard: header mapping, idempotent re-import and the unknown-mappingName refusal are named-import-mapping's clauses — do not re-score them here"
       ],
       "history": [
         {
@@ -5487,7 +5487,8 @@
           "change": "initial — sweep gap (spec-enums angle): TransformType's 7 members had no per-variant coverage; named-import-mapping drives only the default copy + upsert path. Authored as a sibling item rather than widening that one (different axis, different fixtures), with the enumSource pin so an 8th transform trips VARIANTS STALE",
           "ref": "#sweep-2026-08-30"
         },
-        { "revision": 2, "date": "2026-10-02", "change": "clause 2 no longer requires the refusal to name framework#2611: f115b1f (#21188) made REST refusals state each decision in words instead of a tracker number, and on 17.6.0 the UNSUPPORTED_TRANSFORM message names the missing sandbox without it (measured by the release-verification run, 0 rows landed). Step 3 notes the javascript transform is authored bare", "ref": "#21330" }
+        { "revision": 2, "date": "2026-10-02", "change": "clause 2 no longer requires the refusal to name framework#2611: f115b1f (#21188) made REST refusals state each decision in words instead of a tracker number, and on 17.6.0 the UNSUPPORTED_TRANSFORM message names the missing sandbox without it (measured by the release-verification run, 0 rows landed). Step 3 notes the javascript transform is authored bare", "ref": "#21330" },
+        { "revision": 3, "date": "2026-11-01", "change": "negative[3] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" }
       ]
     },
     {
