@@ -4813,6 +4813,63 @@ export function permissionSetOwnerRegistrationRefusal(
 }
 
 /**
+ * [#28534] The registration door's refusal of a collection item whose body
+ * already carries a `_packageId` other than the package it is registered under
+ * (`ownerId`; none for a manifest that carries no id).
+ *
+ * `_packageId` is the ADR-0010 envelope stamp: the package that registered the
+ * item, written by the door (`stampPackage` here, `registerItem` behind it,
+ * both through `applyProtection`). `applyProtection` writes it only while it is
+ * `undefined`, and every item schema that spreads `MetadataProtectionFields`
+ * (a connector entry among them) declares the key, so a body could arrive
+ * wearing ANOTHER package's id and keep it: an installed package naming the
+ * host's own id, or an id no package holds, and every reader that asks an
+ * item's owner (the connector materializer judging whose root a file ref
+ * resolves against, the disabled-package filter, the ADR-0130 artifact gates)
+ * then reads a stamp the body wrote about itself.
+ *
+ * Refused rather than overwritten, beside the two other body-against-key
+ * refusals of the same loop (the divergent view-container `name`, the
+ * permission set's `packageId`): resolving a disagreement between the body and
+ * the key it is filed under silently, in either direction, files the item
+ * under something nobody wrote (commit d0ee598e6). A stamp EQUAL to the owner
+ * is accepted — it is what an item re-registered under its own package (a
+ * ledger rehydrate, an artifact the metadata door already stamped in place
+ * with the same body id) carries. `null` and the empty string are stamps too:
+ * neither is overwritten by `applyProtection`, so either would survive as an
+ * owner no row answers.
+ *
+ * `VALIDATION_ERROR` / 400, `issues[]` at `_packageId`: the envelope of
+ * {@link permissionSetOwnerRegistrationRefusal}. Exported for the stack's
+ * RESIDUAL registration (`registerUnclaimedTopLevelItems` in `plugin.ts`),
+ * which files top-level items under the residual owner and refuses the same
+ * stamp in this same envelope. ⛔ Never rebuild the envelope at a second door.
+ */
+export function collectionItemOwnerStampRefusal(
+  item: unknown,
+  type: string,
+  name: string,
+  ownerId: string | undefined,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
+  if (!item || typeof item !== 'object') return undefined;
+  const stamped = (item as { _packageId?: unknown })._packageId;
+  if (stamped === undefined || stamped === ownerId) return undefined;
+  const owner = ownerId === undefined ? 'no package' : `package '${ownerId}'`;
+  const issueMessage = `carries _packageId ${JSON.stringify(stamped)}, but it is registered under ${owner}`;
+  const err = new Error(
+    `Drop \`_packageId\` from ${type} '${name}': it ${issueMessage}. The package an item belongs to is the one `
+    + 'that registers it, stamped by the registration; a body never names its own owner.',
+  ) as Error & {
+    code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }>;
+  };
+  err.code = 'VALIDATION_ERROR';
+  err.status = 400;
+  err.httpStatus = 400;
+  err.issues = [{ path: '_packageId', message: issueMessage, code: 'custom' }];
+  return err;
+}
+
+/**
  * [#5320] The registration door's refusal of a `views:` entry that is not a
  * view CONTAINER (`isViewContainerShaped` is false: a ViewItem's
  * `viewKind`/`config`, a flattened overlay's inline view config): the stack
@@ -5048,6 +5105,40 @@ export class ObjectQL implements IObjectQLEngine {
 
   // Package manifests registry (for defaultDatasource lookup)
   private manifests = new Map<string, any>();
+
+  // [#28534] Where each ADR-0130 residual owner came from — see
+  // {@link recordResidualOwner}.
+  private readonly residualOwnerSources = new Map<string, 'code' | 'marketplace'>();
+
+  /**
+   * [#28534] Record the origin of an artifact's RESIDUAL owner: the id the
+   * residual rule files a multi-package stack's unclaimed top-level items
+   * under (`unclaimedTopLevel`, `@objectstack/metadata`), as the door that
+   * registered the artifact states it — `'code'` for the deployment's own
+   * boot, `'marketplace'` for an install.
+   *
+   * The residual is not a package, so no package row records that id (unless
+   * a body carries it, and then the body's row answers), yet its items wear it
+   * as their `_packageId`. Without this record a reader asking an item's
+   * origin could not tell the host's own residual from an installed bundle's.
+   * Called by the `manifest` service, the one place that knows both the
+   * residual's id and the door's statement. Once an id is recorded as
+   * `'marketplace'` it stays so for this engine: an install can never turn
+   * into the host's own by re-registering under the same id.
+   */
+  recordResidualOwner(ownerId: string, source: 'code' | 'marketplace'): void {
+    if (this.residualOwnerSources.get(ownerId) === 'marketplace') return;
+    this.residualOwnerSources.set(ownerId, source);
+  }
+
+  /**
+   * [#28534] The origin {@link recordResidualOwner} recorded for a residual
+   * owner id, or `undefined` when no artifact this engine registered named it
+   * as its residual's owner.
+   */
+  residualOwnerSource(ownerId: string): 'code' | 'marketplace' | undefined {
+    return this.residualOwnerSources.get(ownerId);
+  }
 
   // Datasource definitions by name (ADR-0015): carries schemaMode +
   // external.allowWrites so the write gate (Gate 3) can enforce federation
@@ -8921,6 +9012,10 @@ export class ObjectQL implements IObjectQLEngine {
           this.logger.debug('Registering seed data datasets', { id, count: seedData.length });
           for (const dataset of seedData) {
               if (dataset.object) {
+                  // [#28534] The collection loop's owner-stamp refusal, for the
+                  // one collection filed outside it.
+                  const ownerStamp = collectionItemOwnerStampRefusal(dataset, 'data', String(dataset.object), id);
+                  if (ownerStamp) throw ownerStamp;
                   this._registry.registerItem('data', stampPackage(dataset, id, version), 'object' as any, id);
               }
           }
@@ -9113,6 +9208,15 @@ export class ObjectQL implements IObjectQLEngine {
                   const refusal = permissionSetOwnerRegistrationRefusal(item, itemName, ownerId);
                   if (refusal) throw refusal;
               }
+              // [#28534] …and an item of ANY collection whose body already wears
+              // a `_packageId` other than `ownerId`: `stampPackage` and
+              // `registerItem` stamp the owner only while the key is unset, so
+              // the body's own stamp used to win. See
+              // {@link collectionItemOwnerStampRefusal}.
+              {
+                  const refusal = collectionItemOwnerStampRefusal(item, pluralToSingular(key), itemName, ownerId);
+                  if (refusal) throw refusal;
+              }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
               // [#5320] The `views:` tighten — containers ONLY, the contract the
               // stack schema has always declared (`stack.zod.ts`,
@@ -9186,6 +9290,8 @@ export class ObjectQL implements IObjectQLEngine {
                   this.logger.warn('Skipping viewItems entry without a derivable name', { id: ownerId });
                   continue;
               }
+              const ownerStamp = collectionItemOwnerStampRefusal(body, 'view', itemName, ownerId);
+              if (ownerStamp) throw ownerStamp;
               const toRegister = body.name === itemName ? body : { ...body, name: itemName };
               this._registry.registerItem('view', stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
           }

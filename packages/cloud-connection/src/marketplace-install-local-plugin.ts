@@ -651,6 +651,37 @@ function declaredDatasources(body: unknown): any[] {
 }
 
 /**
+ * [#28534] The artifact as this door hands it to the `manifest` service: every
+ * `packages[]` entry that states a `source` other than `'marketplace'` states
+ * `'marketplace'` instead; every other key, and every entry stating none or
+ * `'marketplace'`, is handed through as received (by reference when nothing
+ * changes).
+ *
+ * The `manifest` service stamps an entry's own `source` over the door's
+ * (`ArtifactPackageSchema.source`: the producer that MERGED an artifact knows
+ * each member's origin — a control plane folding installs into a boot
+ * artifact), so a bundle installed here whose member said `'code'` registered
+ * that member as the host's own code. Every package this door registers
+ * reached the runtime through it, whatever its entry says about how it reached
+ * the artifact, so the door's word is the origin; overridden rather than
+ * refused because the entry's statement is about the artifact's assembly, not
+ * wrong in itself, and because the rehydrate must register a ledger entry
+ * written before this rule without refusing it. The rule lives at this door,
+ * not in the `manifest` service, so a boot that registers a merged artifact
+ * stating no source keeps every member's own statement.
+ */
+export function asMarketplaceRegistration<T>(artifact: T): T {
+    if (!isPlainObject(artifact) || !Array.isArray(artifact.packages)) return artifact;
+    const restated = (entry: unknown): boolean =>
+        isPlainObject(entry) && entry.source !== undefined && entry.source !== 'marketplace';
+    if (!artifact.packages.some(restated)) return artifact;
+    return {
+        ...artifact,
+        packages: artifact.packages.map((entry: unknown) => (restated(entry) ? { ...(entry as object), source: 'marketplace' } : entry)),
+    } as T;
+}
+
+/**
  * The seed datasets a cached manifest bundles: its `data[]` entries that name
  * an object and carry records. One reading for the two doors that match seed
  * rows — the purge, and the listing's `withSampleData` (#21775).
@@ -1018,8 +1049,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // the package as soon as rehydrate reports success.
                 // [#23972] Every ledger entry is a marketplace install, so its
                 // registry row says so (`source: 'marketplace'`) after a restart
-                // exactly as it did when it was installed.
-                await manifestService!.register(converted, { source: 'marketplace' });
+                // exactly as it did when it was installed — every member of a
+                // `packages[]` bundle included, whatever its entry states
+                // ([#28534], {@link asMarketplaceRegistration}), a ledger entry
+                // written before that rule included.
+                await manifestService!.register(asMarketplaceRegistration(converted), { source: 'marketplace' });
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -1947,8 +1981,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // metadata service — a caller that reads metadata right after a
             // 200 (AI describe_object, Studio object list) must see them.
             // [#23972] The registry row records where this package came
-            // from: the marketplace (`source: 'marketplace'`).
-            await manifestService.register(converted, { source: 'marketplace' });
+            // from: the marketplace (`source: 'marketplace'`) — for every
+            // member of a `packages[]` bundle too, whatever its entry states
+            // ([#28534], {@link asMarketplaceRegistration}).
+            await manifestService.register(asMarketplaceRegistration(converted), { source: 'marketplace' });
         } catch (err: any) {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard

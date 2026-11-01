@@ -365,10 +365,12 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
 }
 
 /**
- * [#28534] The package-anchored members a connector entry is handed when the
- * package that declared it was INSTALLED into this runtime rather than shipped
- * in the host's own stack: both {@link ConnectorProviderContext.loadPackageFile}
- * and {@link ConnectorProviderContext.resolvePackagePath} refuse every ref.
+ * [#28534] The package-anchored members a connector entry is handed when it is
+ * not the host's own ({@link nonHostDeclaringPackageOf}) — the package that
+ * declared it was INSTALLED into this runtime, or its stamp names a package no
+ * registration records as the host's: both
+ * {@link ConnectorProviderContext.loadPackageFile} and
+ * {@link ConnectorProviderContext.resolvePackagePath} refuse every ref.
  *
  * The contract resolves a relative ref against the root of the package that
  * declared the entry. An installed package has no root on this runtime's disk
@@ -390,13 +392,17 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
  */
 export function createInstalledPackageRefRefusal(
     connectorName: string,
-    packageId: string,
+    declaring: NonHostDeclaringPackage,
     member: 'reads' | 'paths',
 ): (relativePath: string) => Promise<never> {
     return async (relativePath: string) => {
+        const whose = declaring.why === 'installed'
+            ? `is declared by package '${declaring.packageId}', which was installed into this runtime and has no ` +
+                'package root on its disk'
+            : `names package '${declaring.packageId}' as its owner, which no package registration in this runtime ` +
+                'records as the host\'s';
         const head =
-            `connector instance '${connectorName}' is declared by package '${packageId}', which was installed into this ` +
-            `runtime and has no package root on its disk, so its package ${member === 'reads' ? 'file' : 'path'} ref ` +
+            `connector instance '${connectorName}' ${whose}, so its package ${member === 'reads' ? 'file' : 'path'} ref ` +
             `'${String(relativePath)}' is refused: a relative ref resolves only against the root of the package that ` +
             `declared it, never against the host's.`;
         const remedy = member === 'reads'
@@ -409,27 +415,78 @@ export function createInstalledPackageRefRefusal(
 }
 
 /**
- * [#28534] The id of the INSTALLED package that declared a connector entry,
- * or `undefined` when the entry is the host's own.
- *
- * The answer is the package registry's row for the entry's `_packageId`
- * stamp — its `source`, which the door that registered the package states and
- * the registry records without inferring it (`InstalledPackageSchema.source`,
- * #23972): the install-local door registers with `'marketplace'`, at install
- * and at every restart's rehydrate, while the host's own stack, each member of
- * a multi-package artifact that states no other origin, and every plugin
- * package register as `'code'`. Only `'marketplace'` is read as installed. An
- * entry with no stamp, a stamp no row answers (a composed stack's residual
- * owner), or no registry at all is the host's: a package reaches this runtime
- * as installed only through a door that writes that row.
+ * [#28534] What {@link nonHostDeclaringPackageOf} reads: the objectql engine's
+ * package registry rows, and its record of each artifact residual's origin.
  */
-export function installedDeclaringPackageOf(
+export interface DeclaringPackageReaders {
+    /** `SchemaRegistry.getPackage` — the row the registering door wrote, with its `source`. */
+    getPackage?: (id: string) => { source?: unknown } | undefined;
+    /** `ObjectQL.residualOwnerSource` — the registering door's statement for a residual owner id, which has no row. */
+    residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
+}
+
+/**
+ * [#28534] A declaring package whose entries are NOT the host's own: one the
+ * runtime installed (`installed`), or a stamp no registration records as the
+ * host's (`unrecorded`).
+ */
+export interface NonHostDeclaringPackage {
+    packageId: string;
+    why: 'installed' | 'unrecorded';
+}
+
+/**
+ * [#28534] Whether a connector entry is the host's own, whose package-relative
+ * refs resolve against the host's root, or not — then the answer names the
+ * package and why, and its refs are refused
+ * ({@link createInstalledPackageRefRefusal}).
+ *
+ * ## What it trusts
+ *
+ * Only what a REGISTERING DOOR wrote: the package registry's row for the
+ * entry's `_packageId` and that row's `source` (`InstalledPackageSchema.source`,
+ * #23972), and, for an artifact residual's owner, which has no row, the
+ * door's statement the `manifest` service recorded (`ObjectQL.residualOwnerSource`).
+ * The install-local door registers `'marketplace'` at install and at every
+ * restart's rehydrate, for every member of a `packages[]` bundle whatever its
+ * entry states (`asMarketplaceRegistration`, `@objectstack/cloud-connection`);
+ * the host's boot, its multi-package artifact's members and every plugin
+ * package register `'code'`.
+ *
+ * ## What it does not trust
+ *
+ * The item's own stamp, as a statement of ownership: it is used only as the
+ * key the door's record is looked up under, and the registration refuses a
+ * body whose `_packageId` differs from the package registering it
+ * (`collectionItemOwnerStampRefusal`, `@objectstack/objectql`), so a stamp on
+ * a registered item is the registering door's. Nor an artifact entry's stated
+ * `source` — it reaches here only as the row the door wrote.
+ *
+ * ## The answers
+ *
+ *  - no registry at all: the host's (no door could have registered a package);
+ *  - no stamp: the host's (an item registered into no package);
+ *  - a row: `'marketplace'` is `installed`; any other source is the host's
+ *    (`'authored'` packages keep today's reading, a separate question);
+ *  - no row, but the stamp is a residual owner a `'code'` door recorded: the
+ *    host's; one an install recorded: `installed`;
+ *  - any other stamp — no row and no residual record, or not a non-empty
+ *    string: `unrecorded`, refused. Fail closed: a stamp nobody's registration
+ *    answers for is never read as the host's.
+ */
+export function nonHostDeclaringPackageOf(
     entry: unknown,
-    registry: { getPackage?: (id: string) => { source?: unknown } | undefined } | undefined,
-): string | undefined {
-    const packageId = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
-    if (typeof packageId !== 'string' || packageId.length === 0) return undefined;
-    return registry?.getPackage?.(packageId)?.source === 'marketplace' ? packageId : undefined;
+    readers: DeclaringPackageReaders | undefined,
+): NonHostDeclaringPackage | undefined {
+    if (readers === undefined) return undefined;
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (stamp === undefined) return undefined;
+    if (typeof stamp !== 'string' || stamp.length === 0) return { packageId: String(stamp), why: 'unrecorded' };
+    const row = readers.getPackage?.(stamp);
+    if (row !== undefined) return row.source === 'marketplace' ? { packageId: stamp, why: 'installed' } : undefined;
+    const residual = readers.residualOwnerSource?.(stamp);
+    if (residual === 'code') return undefined;
+    return { packageId: stamp, why: residual === 'marketplace' ? 'installed' : 'unrecorded' };
 }
 
 // The credential resolver lives in ./credential-resolver.ts so the engine reads
@@ -2303,6 +2360,32 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
+     * connector entry's origin with, off the `objectql` engine the declared
+     * items are listed out of ({@link readDeclaredConnectorItems}): its package
+     * registry's rows and its residual-owner record. `undefined` when no
+     * `objectql` service is registered: then no door has registered a package
+     * in this kernel either.
+     */
+    private declaringPackageReadersOrNone(ctx: PluginContext): DeclaringPackageReaders | undefined {
+        let ql: {
+            registry?: { getPackage?: (id: string) => { source?: unknown } | undefined };
+            residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
+        } | undefined;
+        try {
+            ql = ctx.getService('objectql');
+        } catch {
+            return undefined; // no registry service
+        }
+        if (!ql) return undefined;
+        const registry = ql.registry;
+        return {
+            getPackage: registry && typeof registry.getPackage === 'function' ? (id) => registry.getPackage!(id) : undefined,
+            residualOwnerSource: typeof ql.residualOwnerSource === 'function' ? (id) => ql!.residualOwnerSource!(id) : undefined,
+        };
+    }
+
+    /**
      * The declarative `connectors:` entries this plugin should treat as the
      * current declaration — the input to both the descriptor audit and the
      * ADR-0097 reconcile.
@@ -2334,24 +2417,6 @@ export class AutomationServicePlugin implements Plugin {
      * down every live connector on a reload. Same rule as the flow re-sync's
      * `null` read: never tear down on an absent answer.
      */
-    /**
-     * [#28534] The package registry the declared connector items are read
-     * from — the ObjectQL registry {@link readDeclaredConnectorItems} lists
-     * them out of — for {@link installedDeclaringPackageOf}. `undefined` when
-     * no `objectql` service is registered: then no door has registered an
-     * installed package in this kernel either.
-     */
-    private packageRegistryOrNone(
-        ctx: PluginContext,
-    ): { getPackage?: (id: string) => { source?: unknown } | undefined } | undefined {
-        try {
-            return ctx.getService<{
-                registry?: { getPackage?: (id: string) => { source?: unknown } | undefined };
-            }>('objectql')?.registry;
-        } catch {
-            return undefined; // no registry service
-        }
-    }
 
     private async readDeclaredConnectorItems(
         ctx: PluginContext,
@@ -2645,10 +2710,10 @@ export class AutomationServicePlugin implements Plugin {
             if (!desired.has(name)) this.credentialRefusalAttempts.delete(name);
         }
 
-        // [#28534] The package registry, read once per run, answers which
-        // declaring packages were installed rather than shipped in the host's
-        // stack ({@link installedDeclaringPackageOf}).
-        const packageRegistry = this.packageRegistryOrNone(ctx);
+        // [#28534] The engine's package rows and residual-owner record, read
+        // once per run (each lookup is live), answer which declaring packages
+        // are not the host's own ({@link nonHostDeclaringPackageOf}).
+        const declaringReaders = this.declaringPackageReadersOrNone(ctx);
 
         // 2. Add new instances and re-materialize changed ones (signature diff).
         let changed = 0;
@@ -2880,7 +2945,7 @@ export class AutomationServicePlugin implements Plugin {
                 retryConfig = parsed.data;
             }
 
-            const installedBy = installedDeclaringPackageOf(entry, packageRegistry);
+            const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
             const providerCtx: ConnectorProviderContext = {
                 name,
                 label: entry.label ?? name,
@@ -2901,17 +2966,18 @@ export class AutomationServicePlugin implements Plugin {
                 requestTimeoutMs: entry.requestTimeoutMs,
                 // #3016 — lets a factory dereference relative file refs (e.g.
                 // openapi's `providerConfig.spec: './billing-openapi.json'`),
-                // confined to the stack/package root. [#28534] An entry an
-                // INSTALLED package declared is handed refusals instead: that
-                // package has no root here, and the host's is not its own.
-                loadPackageFile: installedBy === undefined
+                // confined to the stack/package root. [#28534] An entry that is
+                // not the host's own (an INSTALLED package's, or one whose stamp
+                // no registration answers for) is handed refusals instead: such
+                // a package has no root here, and the host's is not its own.
+                loadPackageFile: notHost === undefined
                     ? createPackageFileLoader(this.options.packageRoot)
-                    : createInstalledPackageRefRefusal(name, installedBy, 'reads'),
+                    : createInstalledPackageRefRefusal(name, notHost, 'reads'),
                 // #22434 — the same root as a location (e.g. a launched
                 // process's working directory), under the same confinement.
-                resolvePackagePath: installedBy === undefined
+                resolvePackagePath: notHost === undefined
                     ? createPackagePathResolver(this.options.packageRoot)
-                    : createInstalledPackageRefRefusal(name, installedBy, 'paths'),
+                    : createInstalledPackageRefRefusal(name, notHost, 'paths'),
             };
 
             let materialization;

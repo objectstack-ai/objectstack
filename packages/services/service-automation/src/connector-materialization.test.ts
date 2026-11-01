@@ -100,6 +100,8 @@ interface BootOptions {
     packageRoot?: string;
     /** The package registry's rows by id, as `getPackage` answers them (#28534). */
     packages?: Record<string, { source: string }>;
+    /** The engine's residual-owner record by id, as `residualOwnerSource` answers it (#28534). */
+    residualOwners?: Record<string, 'code' | 'marketplace'>;
 }
 
 /**
@@ -123,6 +125,7 @@ async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKe
                     listItems: (type: string) => (type === 'connector' ? declared : []),
                     getPackage: (id: string) => opts.packages?.[id],
                 },
+                residualOwnerSource: (id: string) => opts.residualOwners?.[id],
             });
             const automation = ctx.getService('automation');
             if (opts.providerFactory) {
@@ -186,6 +189,8 @@ async function bootReloadable(
         packageRoot?: string;
         /** The package registry's rows by id, as `getPackage` answers them (#28534). */
         packages?: Record<string, { source: string }>;
+        /** The engine's residual-owner record by id, as `residualOwnerSource` answers it (#28534). */
+        residualOwners?: Record<string, 'code' | 'marketplace'>;
     },
 ) {
     const state = { declared: initial };
@@ -204,6 +209,7 @@ async function bootReloadable(
                     listItems: (type: string) => (type === 'connector' ? state.declared : []),
                     getPackage: (id: string) => opts.packages?.[id],
                 },
+                residualOwnerSource: (id: string) => opts.residualOwners?.[id],
             });
             ctx.getService('automation').registerConnectorProvider('fake', opts.providerFactory);
         },
@@ -697,6 +703,9 @@ describe('#28534 — an entry an installed package declares is refused its packa
     const INSTALLED = 'com.acme.installed';
     const HOST = 'com.acme.host';
     const packages = { [INSTALLED]: { source: 'marketplace' }, [HOST]: { source: 'code' } };
+    const HOST_RESIDUAL = 'com.acme.host.stack';
+    const INSTALLED_RESIDUAL = 'com.acme.installed.bundle';
+    const residualOwners = { [HOST_RESIDUAL]: 'code', [INSTALLED_RESIDUAL]: 'marketplace' } as const;
     const ownedBy = <T extends object>(item: T, packageId: string) => ({ ...item, _packageId: packageId });
 
     /**
@@ -778,23 +787,54 @@ describe('#28534 — an entry an installed package declares is refused its packa
         await kernel.shutdown();
     });
 
-    it('control: the host\'s own entries read and resolve under its root — a `code` row, a stamp no row answers, no stamp', async () => {
+    it('control: the host\'s own entries read and resolve under its root — a `code` row, the residual owner a `code` door recorded, no stamp', async () => {
         const { factory, reads, resolved } = makeRefProvider();
         const spec = './specs/billing.json';
         const kernel = await boot(
             [
                 ownedBy(providerConnector('host_pkg', { providerConfig: { spec, paths: ['.'] } }), HOST),
-                // A composed stack's residual owner: a stamp with no package row.
-                ownedBy(providerConnector('residual', { providerConfig: { spec } }), 'com.acme.residual'),
+                // The host artifact's residual owner: no package row, but the
+                // `manifest` service recorded the boot door's `code` for it.
+                ownedBy(providerConnector('residual', { providerConfig: { spec } }), HOST_RESIDUAL),
                 providerConnector('unstamped', { providerConfig: { spec } }),
             ],
-            { providerFactory: factory, packageRoot: fixtureRoot, packages },
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, residualOwners },
         );
         const registered = automationOf(kernel).getRegisteredConnectors();
         expect(registered).toEqual(expect.arrayContaining(['host_pkg', 'residual', 'unstamped']));
         expect(reads).toEqual(Array(3).fill(JSON.stringify({ openapi: '3.0.0' })));
         expect(resolved).toEqual([path.resolve(fixtureRoot)]);
         await kernel.shutdown();
+    });
+
+    it('a stamp no registration answers for is refused, never read as the host\'s — no row and no residual record', async () => {
+        const { factory, reads } = makeRefProvider();
+        const err = await rejectionOf(
+            boot([ownedBy(providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } }), 'com.acme.nobody')], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+                packages,
+                residualOwners,
+            }),
+        );
+        expect(err.message).toContain(`connector instance 'billing' names package 'com.acme.nobody' as its owner`);
+        expect(err.message).toContain(`file ref './specs/billing.json' is refused`);
+        expect(err.message).not.toContain(path.resolve(fixtureRoot));
+        expect(reads).toEqual([]);
+    });
+
+    it('an installed bundle\'s residual owner (recorded by an install, no row) is installed: refused', async () => {
+        const { factory, reads } = makeRefProvider();
+        const err = await rejectionOf(
+            boot([ownedBy(providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } }), INSTALLED_RESIDUAL)], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+                packages,
+                residualOwners,
+            }),
+        );
+        expect(err.message).toContain(`connector instance 'billing' is declared by package '${INSTALLED_RESIDUAL}', which was installed`);
+        expect(reads).toEqual([]);
     });
 
     it('control: one installed entry refused on reload leaves the host\'s entry beside it serving', async () => {
