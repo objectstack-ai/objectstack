@@ -454,6 +454,7 @@ export function StudioBundleItemEditor({
           </div>
           {Preview && (
             <div className="min-w-0 border-t lg:overflow-auto lg:border-l lg:border-t-0" data-testid="studio-bundle-editor-preview">
+              {/* eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataPreview returns a registered component (stable), not one created during render */}
               <Preview type={type} name={name} draft={draft} locale={locale} editing={editable} />
             </div>
           )}
