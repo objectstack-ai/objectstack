@@ -109,7 +109,7 @@ filter: [
 Operators (no others): `equals`, `not_equals`, `contains`,
 `not_contains`, `icontains`, `starts_with`, `ends_with`, `greater_than`, `less_than`,
 `greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in` (list values),
-`is_empty`, `is_not_empty`, `is_null`, `is_not_null`, `before`, `after`, `between`.
+`is_empty`, `is_not_empty`, `is_null`, `is_not_null`, `before`, `after`, `between` (`[min, max]`).
 
 A group holds flat rules only (no group in a group) and never `or: []`; `$or`,
 `any` / `anyOf`, `logic` / `conditions` on a rule are refused naming this shape.

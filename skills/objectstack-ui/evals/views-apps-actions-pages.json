@@ -118,7 +118,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["listViews", "or: [", "{current_user_id}"],
-        "must_not_contain": ["$or", "logic:", "anyOf"]
+        "must_not_contain": ["$or", "logic:", "conditions:", "anyOf"]
       }
     }
   ]
