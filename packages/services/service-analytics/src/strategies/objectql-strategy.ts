@@ -220,6 +220,9 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
   return err;
 }
 
+/** One `engine.aggregate` group key: a column, or a column bucketed by a granularity. */
+export type AggregateGroupKey = string | { field: string; dateGranularity: string };
+
 /**
  * [#28692, #28744] Append `item` to an `engine.aggregate` `groupBy` unless an
  * identical key is already there: the same column, or the same column bucketed
@@ -231,10 +234,7 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
  * two values under one name: the column raw beside its bucket, or two buckets
  * of it, are different keys, so both are handed on and the engine refuses them.
  */
-function pushGroupKey(
-  groupBy: Array<string | { field: string; dateGranularity: string }>,
-  item: string | { field: string; dateGranularity: string },
-): void {
+function pushGroupKey(groupBy: AggregateGroupKey[], item: AggregateGroupKey): void {
   const same = (a: (typeof groupBy)[number]) =>
     typeof a === 'string' || typeof item === 'string'
       ? a === item
@@ -259,10 +259,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return caps.objectqlAggregate && typeof ctx.executeAggregate === 'function';
   }
 
-  async execute(query: AnalyticsQuery, ctx: StrategyContext): Promise<AnalyticsResult> {
-    const cube = ctx.getCube(query.cube!)!;
-    const objectName = this.extractObjectName(cube);
-
+  /**
+   * The `engine.aggregate` `groupBy` {@link execute} hands the engine for
+   * `query`, in order: one key per `dimensions` entry, then one per bucketed
+   * `timeDimensions` entry not also listed there, each named once
+   * ({@link pushGroupKey}).
+   *
+   * [#28765] Public so the draft preview, which hands no engine anything,
+   * judges the same keys at the same positions and refuses a selection the
+   * engine would refuse with the engine's own words
+   * ({@link assertPreviewGroupColumnsDistinct}).
+   */
+  groupByOf(query: AnalyticsQuery, cube: Cube): AggregateGroupKey[] {
     // Build groupBy from dimensions, honouring `timeDimensions` granularity.
     // A date dimension with a granularity becomes a STRUCTURED groupBy item
     // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (the
@@ -270,16 +278,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // path grouped raw timestamps (one bucket per row) and date-bucketed
     // dataset widgets never matched their legacy `categoryGranularity`
     // counterpart.
-    type GroupByItem = string | { field: string; dateGranularity: string };
     const granByDim = new Map<string, string>();
     for (const td of query.timeDimensions ?? []) {
       if (td.granularity) granByDim.set(td.dimension, td.granularity);
     }
     // [#28744] Each group key is named once (see {@link pushGroupKey}): two
     // dimensions over one column (`region`, and `zone` declared over
-    // `region`) share its group, and the row mapping below keys the answer by
-    // every dimension name over it.
-    const groupBy: GroupByItem[] = [];
+    // `region`) share its group, and the row mapping in {@link execute} keys
+    // the answer by every dimension name over it.
+    const groupBy: AggregateGroupKey[] = [];
     if (query.dimensions && query.dimensions.length > 0) {
       for (const dim of query.dimensions) {
         const field = this.resolveFieldName(cube, dim, 'dimension');
@@ -292,6 +299,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     for (const [dim, gran] of granByDim) {
       pushGroupKey(groupBy, { field: this.resolveFieldName(cube, dim, 'dimension'), dateGranularity: gran });
     }
+    return groupBy;
+  }
+
+  async execute(query: AnalyticsQuery, ctx: StrategyContext): Promise<AnalyticsResult> {
+    const cube = ctx.getCube(query.cube!)!;
+    const objectName = this.extractObjectName(cube);
+
+    const groupBy = this.groupByOf(query, cube);
 
     // The compiled dataset's own scope (#10298 / PR #10758), read ONCE and
     // reused below for both the per-measure aggregation filter (#10413 phase

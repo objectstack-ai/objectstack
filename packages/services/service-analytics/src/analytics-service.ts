@@ -116,6 +116,7 @@ import {
   type DimensionLabelDeps,
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
+import { assertPreviewGroupColumnsDistinct } from './preview-group-column-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter } from './scoped-measure-key.js';
@@ -1464,6 +1465,11 @@ interface CubeReads {
  */
 export class AnalyticsService implements IAnalyticsService {
   private readonly strategies: AnalyticsStrategy[];
+  /**
+   * The built-in ObjectQL strategy, held by name as well so the draft preview
+   * judges the `groupBy` it would hand the engine (#28765).
+   */
+  private readonly objectqlStrategy = new ObjectQLStrategy();
   /** Context-independent part of the StrategyContext (no per-request scope). */
   private readonly baseCtx: DatasetScopedStrategyContext;
   /** Context-aware read-scope provider (bound to the request's context per call). */
@@ -1708,7 +1714,7 @@ export class AnalyticsService implements IAnalyticsService {
     // When fallbackService is configured, an internal delegate is added at P3.
     const builtIn: AnalyticsStrategy[] = [
       new NativeSQLStrategy(),
-      new ObjectQLStrategy(),
+      this.objectqlStrategy,
     ];
 
     // Auto-add fallback delegate when fallbackService is provided
@@ -2890,6 +2896,11 @@ export class AnalyticsService implements IAnalyticsService {
             // under one `null` key (and a filter on one matched no row) where
             // the live strategies join it. See {@link assertPreviewJoinsNothing}.
             this.assertPreviewJoinsNothing(q, cube);
+            // [#28765] …and a selection asking one column for two values
+            // under one name (raw beside its own bucket, or two buckets of
+            // it), with the refusal the engine gives both live faces for the
+            // same keys, where the evaluator served both columns.
+            assertPreviewGroupColumnsDistinct(dataset.object, this.objectqlStrategy.groupByOf(q, cube));
             return evaluateAnalyticsQueryOverRows(
               q,
               previewEvaluationCube(q, cube),
