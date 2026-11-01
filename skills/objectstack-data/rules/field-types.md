@@ -51,7 +51,7 @@ fields: {
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
 | `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency, currencyField, homeAmount) |
-| `percent` | Percentage values (0-100) | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
+| `percent` | Percentage; stored as a fraction (0-1) unless the field declares `max` above 1 (`max: 100`), then whole points; seeds, defaults, API values use that scale | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
 
 ## Date & Time
 
@@ -242,15 +242,6 @@ The `format` is literal text interleaved with `{...}` tokens:
 2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique). The literal separator keeps distinct groups apart.
 3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps). Size it for readability, not as a ceiling.
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.
-
-### Vector (AI Embeddings)
-
-```typescript
-{
-  type: 'vector',
-  dimensions: 1536,  // flat sibling — OpenAI ada-002
-}
-```
 
 ## Incorrect vs Correct
 
