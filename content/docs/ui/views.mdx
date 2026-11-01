@@ -515,19 +515,31 @@ app page or action, where `features.*` stays bound and stays legal. A record *fi
 
 ## How a list opens a record
 
-Clicking a row, card, node, bar or event opens the record in an overlay whose mode is
-the view's `navigation.mode`: `drawer`, `modal`, `split` or `popover`. Every list-type
-view (grid, tree, kanban, calendar, gantt, list, gallery, map and timeline) opens the
-same record panel, so a record reads with its declared labels and typed values, without
-its `hidden` fields, whichever view it came from. In `split` the view moves into the
-left panel; in `popover` the panel is anchored to what was clicked.
+Clicking a row, card, node, bar or event opens the record the one way its object declares:
+in the **drawer**, which expands to the full page, unless the view's `navigation.mode` is
+`page`, declared only for an object whose record should open as a full page (`new_window`
+and `none` are the other two values). Every list-type view (grid, tree, kanban, calendar,
+gantt, list, gallery, map and timeline) opens the same record page, so a record reads with
+its declared labels and typed values, without its `hidden` fields, whichever view it came
+from. `modal`, `split` and `popover` were removed in @objectstack/spec 18.3.0 (ADR-0087 D2):
+a stored value is refused with its fix, and `os migrate meta --from 17` drops it. On a phone
+every record opens as a page, whatever the view declares.
+
+Whether the record opens beside the list is the reader's choice, not the view's. The list's
+**Display** menu offers **Open records**: **Split** (the default) draws the record page in a
+pane beside the list, **Drawer** draws it over the list, and **Full page** navigates. The
+choice is kept in the browser for every drawer-mode object, and is not offered for an object
+declared to open as a page; a record's **↗** always opens the full page. The reader also
+drags the pane's edge, and **⤢** or **Open as full page** leaves the pane, while **Collapse
+to drawer** returns to the stack it left. The `size` bucket on `navigation` sets only the
+drawer's starting width; `width` is deprecated.
 
 The record opened from a list is addressable: `?recordId=` on the list's URL, so a
 reload, a shared link or Back reopens it. A record opened inside the drawer (a related
 row, a lookup value) opens one level down in the same drawer; those levels are
-in-memory, so a reload shows the root record. `⤢` opens a level's full page, and
-**Collapse to drawer** returns to the stack it left. A record page's own layout is
-described in [Pages](/docs/ui/pages).
+in-memory, so a reload shows the root record. A record page's own layout, and the
+reader's right-column and panel choices on it, are described in
+[Pages](/docs/ui/pages#record-pages).
 
 ### A user's list state never writes the view
 
