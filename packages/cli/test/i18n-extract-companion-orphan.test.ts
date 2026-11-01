@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: four spawns of the source CLI (os i18n extract on the apps-only stack, its --check over a seeded legacy companion, and the full stack under --objects-only and --no-objects-only), every one a distinct triple; slowest CI reading 11.3 s (run 41271604267), taken through the tsx launcher this file no longer uses, of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * The provenance companion accompanies the bundle modules beside it, and its
@@ -80,8 +81,13 @@ import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const CLI_PACKAGE_ROOT = resolve(HERE, '..');
 
 /** One object (2 leaves) + one app (1 leaf); the registry baseline rides along. */
@@ -146,7 +152,7 @@ function runExtract(
 ): { stdout: string; dir: string; files: string[] } {
   const dir = join(outRoot, name);
   const stdout = execFileSync(
-    TSX,
+    process.execPath,
     [CLI, 'i18n', 'extract', config, '--locales=ja-JP', '--source-hashes', '--fill=default', ...flags, `--out=${dir}`],
     { encoding: 'utf8', env: childEnv(), timeout: 180_000 },
   );
@@ -210,7 +216,7 @@ describe('os i18n extract — the provenance companion accompanies a module (#16
 
     const stdout = plain(
       execFileSync(
-        TSX,
+        process.execPath,
         [
           CLI, 'i18n', 'extract', APPS_ONLY, '--locales=ja-JP', '--source-hashes',
           '--fill=default', '--no-metadata-forms', '--check', `--out=${dir}`,

@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine (better-sqlite3 :memory:) and AuthManager in each of the 13 real-engine cases, its sign-ups (a production scrypt hash per new password) and the stamp or probe they produce the case's subject, beside 15 pure-function cases; 3.3 s in a local run; slowest CI reading 11.9 s (scheduled full-battery run 41237094739, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#12751] The walled owner-verified stamp — maintainer ruling 2026-08-28
