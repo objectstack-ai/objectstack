@@ -24,6 +24,11 @@
  *   authenticated caller. That is why the schema strips unknown keys instead
  *   of refusing them: the SDK's deprecated `opts.actor` keeps working.
  *
+ * The body as a whole: one that is present and is not a JSON object (an
+ * array, a string, a number, a boolean) is refused `400 VALIDATION_ERROR` with
+ * the schema's own whole-body issue before anything is published; an absent
+ * body (`undefined`, `null`) is a publish with no note.
+ *
  * The protocol is a double for the forwarding cases (what it receives is the
  * assertion) and the real `ObjectStackProtocolImplementation` for the
  * refusal cases, whose shape judgement runs before any server state is read.
@@ -158,6 +163,25 @@ describe('publish-drafts request body conforms to PublishPackageDraftsRequestSch
             expect(response.status, JSON.stringify(body)).toBe(400);
             expect(response.body?.error?.code, JSON.stringify(body)).toBe('VALIDATION_ERROR');
             expect(response.body?.error?.message, JSON.stringify(body)).toMatch(/^Invalid publish-drafts body .*\bmessage: /);
+            expect(publishPackageDrafts, JSON.stringify(body)).not.toHaveBeenCalled();
+            expect(door.saveMetaItem, JSON.stringify(body)).not.toHaveBeenCalled();
+        }
+    });
+
+    it('a body that is not a JSON object is refused 400 VALIDATION_ERROR with the schema\'s own refusal, before anything is published', async () => {
+        // [#28541] An array, a string, a number or a boolean has no member to
+        // read, so it used to publish with the default note. The schema refuses
+        // it as a whole, and so does the door. An absent body is pinned above.
+        for (const body of [[], ['message'], 'x', '', 42, 0, true, false]) {
+            const schemaVerdict = PublishPackageDraftsRequestSchema.safeParse(body);
+            expect(schemaVerdict.success, JSON.stringify(body)).toBe(false);
+            const publishPackageDrafts = vi.fn();
+            const door = makeDoor({ publishPackageDrafts });
+            const result = await door.dispatcher.handlePackages(`/${PKG}/publish-drafts`, 'POST', body, {}, PKG_ADMIN());
+            const response = result.response as any;
+            expect(response.status, JSON.stringify(body)).toBe(400);
+            expect(response.body?.error?.code, JSON.stringify(body)).toBe('VALIDATION_ERROR');
+            expect(response.body?.error?.message, JSON.stringify(body)).toMatch(/^Invalid publish-drafts body — \(body\): /);
             expect(publishPackageDrafts, JSON.stringify(body)).not.toHaveBeenCalled();
             expect(door.saveMetaItem, JSON.stringify(body)).not.toHaveBeenCalled();
         }

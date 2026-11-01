@@ -1444,13 +1444,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // while ObjectQL's registerApp expects the FLAT app shape (top-level
         // id + sections). Flatten when detected — otherwise every install of
         // a published compiled bundle dies with "Invalid manifest payload".
-        const normalizeBundle = (m: any): any => {
-            if (m && !m.id && !m.name && m.manifest && typeof m.manifest === 'object' && (m.manifest.id || m.manifest.name)) {
-                const { manifest: meta, ...sections } = m;
-                return { ...meta, ...sections };
-            }
-            return m;
-        };
+        //
+        // [#28535] ⭐ Detected by the nested `manifest` object ALONE, through
+        // the one flatten this door already owns (`flattenPackageBody`). The
+        // detection used to also require NO top-level `id`/`name`, and
+        // `os package install <file>` (every published CLI) lifts `id` and
+        // `version` to the top beside the nested `manifest` — so that body
+        // was never flattened, and every key the checks below read at the
+        // manifest top level (`engines` for the ADR-0087 handshake,
+        // `dependencies` for the ADR-0141 check) stayed one level down: a
+        // package built for another protocol installed with a "declares no
+        // engines.protocol range" warning. The door reads the shape it
+        // receives; it does not depend on which sender built it.
+        const normalizeBundle = (m: unknown): any => (isPlainObject(m) ? flattenPackageBody(m) : m);
 
         let manifest: any;
         let resolvedVersionId: string;
