@@ -4,10 +4,13 @@
  * [ADR-0146 D10, second rule] `POST /api/v1/marketplace/install-local` step
  * 2e: a package whose `objectExtensions[].fieldPatches` names a field its
  * target does not have, or an option value the field does not have, is refused
- * `400 VALIDATION_ERROR` before anything is registered, written or synced.
+ * `422 VALIDATION_ERROR` — the status every other body refusal at this door
+ * answers — before anything is registered, written or synced.
  *
- * The target is the registry's resolved object (ADR-0141 D2 admitted the base
- * first), or one the same artifact delivers. A patch that matches installs.
+ * The target is the OWNER's declaration (ADR-0141 D2 admitted the base first),
+ * or one the same artifact delivers: a patch reaches the owner's own fields
+ * only, so a field another installed extension adds is not one it can name.
+ * A patch that matches installs.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -19,6 +22,7 @@ import { BaseResponseSchema, ApiErrorSchema, envelopeViolations } from '@objects
 // lazy `import()` inside the plugin); its first load is paid here, at module
 // top, never inside a clocked `it`.
 import '@objectstack/runtime';
+import { SchemaRegistry } from '@objectstack/objectql';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 
@@ -67,7 +71,24 @@ function makeC(body: any) {
     };
 }
 
-async function mount(dir: string) {
+/**
+ * A real registry holding the installed vendor object, and — when `region` is
+ * set — an installed extension that adds `crm_account.region`.
+ */
+function installedObjects({ region = false } = {}): SchemaRegistry {
+    const reg = new SchemaRegistry({ multiTenant: false, searchCompanion: false } as never);
+    reg.logLevel = 'silent';
+    reg.registerObject(structuredClone(ACCOUNT) as any, BASE, undefined, 'own');
+    if (region) {
+        reg.registerObject(
+            { name: ACCOUNT.name, fields: { region: { type: 'text', label: 'Region' } } } as any,
+            'com.example.crm-region', undefined, 'extend', 100,
+        );
+    }
+    return reg;
+}
+
+async function mount(dir: string, objects: SchemaRegistry = installedObjects()) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const register = vi.fn();
@@ -75,7 +96,8 @@ async function mount(dir: string) {
     const registry = {
         getAllPackages: () => [],
         getPackage: (id: string) => (id === BASE ? { manifest: { id, version: '1.2.0' } } : undefined),
-        getObject: (name: string) => (name === ACCOUNT.name ? structuredClone(ACCOUNT) : undefined),
+        getObject: (name: string) => objects.getObject(name),
+        getFieldPatchTarget: (name: string) => (objects as any).getFieldPatchTarget?.(name),
     };
     const services: Record<string, any> = {
         manifest: { register },
@@ -108,7 +130,7 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'mil-field-patch-')); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
 
 function expectRefusal(res: { payload: any; status: number }, paths: string[]) {
-    expect(res.status, JSON.stringify(res.payload)).toBe(400);
+    expect(res.status, JSON.stringify(res.payload)).toBe(422);
     expect(BaseResponseSchema.safeParse(res.payload).success).toBe(true);
     expect(envelopeViolations(res.payload)).toEqual([]);
     expect(ApiErrorSchema.safeParse(res.payload.error).success).toBe(true);
@@ -156,6 +178,25 @@ describe('install-local 2e — the field-patch target check (ADR-0146 D10)', () 
             },
         });
         expectRefusal(res, ['packages[1].manifest.objectExtensions[0].fieldPatches.state']);
+    });
+
+    it('refuses a patch naming a field only another installed extension adds: a patch reaches the owner\'s own fields', async () => {
+        const objects = installedObjects({ region: true });
+        // The resolved object does carry the field; the owner does not declare it.
+        expect((objects.getObject(ACCOUNT.name) as any).fields.region).toBeDefined();
+        const h = await mount(dir, objects);
+        const res = await h.install({ manifest: extensionPackage({ region: { label: 'Territory' } }) });
+        expectRefusal(res, ['objectExtensions[0].fieldPatches.region']);
+        expect(res.payload.error.details.refusals[0]).toMatchObject({ object: 'crm_account', field: 'region', reason: 'field' });
+        expect(h.installRegistrations()).toEqual([]);
+        expect(h.syncs()).toBe(0);
+    });
+
+    it('…while a patch of the owner\'s own field installs beside that extension', async () => {
+        const h = await mount(dir, installedObjects({ region: true }));
+        const res = await h.install({ manifest: extensionPackage({ industry: { label: 'Sector' } }) });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(h.installRegistrations()).toHaveLength(1);
     });
 
     it('lit control: a patch whose field and option the target has installs', async () => {
