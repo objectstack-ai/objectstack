@@ -879,7 +879,13 @@ async function dispatchAdmittedRestAction(
         // audit line and the RLS/FLS-bypassing `ctx.engine` / `ctx.api` are
         // built below, and none of them may exist for a caller who has not
         // demonstrated read access to the subject row.
-        actionExec.refuseDeniedSubjectLoad(objectName, recordId, subject);
+        //
+        // [#28657] Except ahead of an api forward that needs nothing from the
+        // row: it builds none of that, and its target authorizes the caller
+        // itself (ADR-0066 D4), so a denied load forwards and the target's
+        // answer is this door's — see `refuseDeniedSubjectLoadBeforeDispatch`.
+        // The MCP `run_action` bridge calls the same function at the same point.
+        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject);
 
         // ── api forward (#27506, ruling 6499781492) ── a same-origin
         // `type: 'api'` action is forwarded IN-PROCESS to its declared
@@ -903,7 +909,11 @@ async function dispatchAdmittedRestAction(
             if (!inject) {
                 return { handled: true, response: deps.error(actionExec.apiActionForwardUnavailableError(actionDef), 503) };
             }
-            const built = actionExec.buildApiActionRequest(actionDef, { recordId, record, params: reqParams, ec });
+            // [#28657] On a denied load the request is built from the
+            // `recordId` alone — ⛔ never from a row the caller could not read.
+            const built = actionExec.buildApiActionRequest(actionDef, {
+                recordId, record: actionExec.apiForwardSubjectRecord(recordId, subject), params: reqParams, ec,
+            });
             if ('message' in built) {
                 return { handled: true, response: deps.error(built.message, built.status) };
             }
