@@ -2076,7 +2076,7 @@ const nextDirectiveOnLine = (key) =>
  * every FURTHER key after a separator run; ⛔ a key after a WORD is prose.
  *
  * @param {string} text
- * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'} key
+ * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'|'Seam'|'Patrol'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
@@ -15440,6 +15440,122 @@ export function h68ClassBWithoutSeamLine(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H70 + H71 (#28642) — a project seat's hourly patrol, and the card its absence
+// leaves waiting.
+//
+// The seating rule (seat-lifecycle.md 〈座位贴协议〉) makes taking a project
+// seat create ONE self-bound patrol routine in the same act and record it on
+// the stub as `Patrol: TRIGGER_ID · CRON` (seat-post-protocol.md 〈座位 Routine
+// 创建〉); an empty queue is standby, so the patrol runs until `seat-offline`.
+// The measured incident: a HELD seat with nothing in hand never created its
+// routine, woke only on PR subscriptions and one-shot reminders, and a p1
+// `pm:queue` card on its lane sat unclaimed 4.5 h. Nothing on the board could
+// show either half — the post had no patrol line to be missing, and a queued
+// card looks like a queued card. Two readings, both FREE (the seat posts and
+// the `pm:queue` page are listings this sweep already holds):
+//
+//   H70  a HELD seat post (🟢 a login — not `🟢 Routine`, whose scheduler IS
+//        its patrol, and not the director seat, which has none) whose body
+//        carries no `Patrol:` line. The reader is the one `Blocked-by:`
+//        shares, so `- **Patrol:** …` is a line; the VALUE is not judged.
+//   H71  an open, UNASSIGNED `pm:queue` card on a lane where some seat post
+//        reads 🟢 (any holder, `Routine` included — someone is on the clock),
+//        quiet for more than QUEUE_ON_DUTY_UNCLAIMED_HOURS. Quiet is read off
+//        `updated_at`, the H10/H30 clock: adding the label bumps it, so the
+//        age is a LOWER BOUND on time-in-queue — it never fires early, and a
+//        comment inside the window hides a card until the next sweep.
+//
+// ⚠️ The filing card asked H71 to require the seat to have SPARE CONCURRENCY.
+// That is not machine-readable today — a seat post states its cap in prose, and
+// the cap can span several lane seats of one account — so the condition is
+// DROPPED rather than guessed, and the row says so. ⛔ Report-only, both rows:
+// readings the patrols act on, never a merge gate (the card's triage ruling).
+// ---------------------------------------------------------------------------
+
+/** H71's clock — the card's own figure: an on-duty lane should claim within the hour its patrol fires, so two hours is one missed fire plus slack. */
+export const QUEUE_ON_DUTY_UNCLAIMED_HOURS = 2;
+
+/**
+ * The director seat's post — no patrol by rule (项目席唤醒 … 总监席除外). Matched
+ * anywhere in the SEAT-NAME half (before the ` — ` status separator), never at
+ * its first character only: the live `director(项目总监)` and a retitled
+ * `项目总监` must both be excluded, and a status word cannot name the seat.
+ */
+const DIRECTOR_SEAT_TITLE = /^\[PM seat\][^—]*?(?:\bdirector\b|总监)[^—]*—/iu;
+
+/** Labels that make a queued card no candidate for H71 — a pending decision or a re-triage. */
+export const H71_NOT_CANDIDATE_LABELS = Object.freeze(['needs-user-decision', 'pm:retriage']);
+
+/** Is this seat post's status 🟢 — any holder, a `Routine` included? */
+export function seatOnDuty(issue) {
+  const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(issue?.title ?? '');
+  return Boolean(m) && m[2].trim().startsWith('🟢');
+}
+
+/** Has this text a `Patrol:` line at line start with a value — decoration tolerated, the value unjudged? */
+export function hasPatrolLine(text) {
+  return directiveValues(text, 'Patrol').length > 0;
+}
+
+/** H70 — null when out of scope or carrying the line, else the finding sentence. */
+export function h70HeldSeatWithoutPatrol(issue) {
+  if (!issue || issue.pull_request || issue.state === 'closed') return null;
+  if (!labelNames(issue).includes('pm:seat')) return null;
+  if (!seatIsHeld(issue) || DIRECTOR_SEAT_TITLE.test(String(issue.title ?? ''))) return null;
+  if (hasPatrolLine(issue.body)) return null;
+  return (
+    '`pm:seat` HELD by a login with no `Patrol:` line in its body — taking a project seat creates ONE ' +
+    'self-bound hourly patrol routine in the same act and records it on the stub as `Patrol: TRIGGER_ID · ' +
+    'CRON` (seat-lifecycle.md 〈座位贴协议〉, seat-post-protocol.md 〈座位 Routine 创建〉). Without the line ' +
+    'nobody can see whether this seat has a patrol at all: a seat with none wakes only on PR subscriptions and ' +
+    'relays, and stops looking once its queue empties — the measured shape a p1 card waited 4.5 h behind. ' +
+    'Remedy — WHO and HOW: the holder creates the routine if it is missing and writes the line (bare or ' +
+    'decorated) into the stub. ⛔ Report-only: no label, title or body is written from this script. Out of ' +
+    'scope by rule: a `🟢 Routine` seat (its scheduler is the patrol), the director seat (no patrol), a vacant ' +
+    'or paused seat; the line\'s VALUE is not judged here.'
+  );
+}
+
+/**
+ * H71 — null when clean, else the finding sentence.
+ *
+ * @param {object} issue — the card.
+ * @param {Map<string, number[]>} onDutyLanes — canonical lane → issue numbers of
+ *   its 🟢 seat posts, read off the `pm:seat` listing this sweep holds.
+ */
+export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
+  if (!issue || issue.pull_request || issue.state === 'closed') return null;
+  const labels = labelNames(issue);
+  if (!labels.includes('pm:queue') || labels.includes('pm:epic')) return null;
+  // Not candidates though they may legally pair with `pm:queue` (H29's vocabulary):
+  // a card awaiting the maintainer's decision or a re-triage is never dispatched,
+  // so "that seat claims it" would be the wrong remedy.
+  if (H71_NOT_CANDIDATE_LABELS.some((l) => labels.includes(l))) return null;
+  if ((issue.assignees ?? []).length > 0) return null;
+  const lanes = [...new Set(labels.filter((l) => /^domain:/u.test(l)).map(canonicalLane))];
+  const held = lanes.filter((lane) => (onDutyLanes?.get(lane) ?? []).length > 0);
+  if (held.length === 0) return null;
+  const updated = Date.parse(issue.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= QUEUE_ON_DUTY_UNCLAIMED_HOURS) return null;
+  const seats = held.map((lane) => `\`${lane}\` (${onDutyLanes.get(lane).map((n) => `#${n}`).join(', ')})`).join(', ');
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `no activity for ~${Math.round(ageHours)}h (threshold ${QUEUE_ON_DUTY_UNCLAIMED_HOURS}h; a lower bound on its time in the queue)`;
+  return (
+    `\`pm:queue\`, open and unassigned, with ${reading}, on a lane a 🟢 seat holds: ${seats}. A seat on duty ` +
+    'runs an hourly patrol whose first act is to claim up to its `batch` limit, so a card this old on its lane ' +
+    'usually means the patrol is not running (H70 names a held post with no `Patrol:` line) or the seat is full. ' +
+    'Remedy — WHO and HOW: that seat claims it, or says on its post why not (in hand at its limit, or the card ' +
+    'is not ready). ⚠️ Spare concurrency is NOT judged: no seat post states it machine-readably, so a full seat ' +
+    'reads the same as an idle one here. ⛔ Report-only: no label or assignee is written from this script. Out ' +
+    'of scope: an assigned queue card (H24), a `pm:epic` subtree card, a card awaiting a decision or a ' +
+    're-triage (`needs-user-decision`, `pm:retriage`: not candidates), a lane with no 🟢 seat post.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H64 (#18069, re-keyed by #18237) — a seat- or dev-signed artefact that names
 // no session.
 //
@@ -19237,6 +19353,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H27: 'stall',
   H28: 'stall',
   H32: 'stall',
+  // H71 is a `stall` for H32's reason, card-side: a dispatchable card not moving
+  // on a lane someone is on the clock for.
+  H71: 'stall',
   H33: 'stall',
   H36: 'stall',
   H38: 'stall',
@@ -19269,6 +19388,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // a half-written handoff, readable and repairable from the board by one
   // comment. ⛔ Not `stall`: the PR may be moving perfectly well.
   H69: 'state',
+  // H70 is a `state`: the seat post contradicts the seating rule it was written
+  // under, and the repair is on the board — a routine and one stub line.
+  H70: 'state',
   H49: 'state',
   H50: 'state',
 
@@ -23030,6 +23152,9 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (labels.includes('pm:seat')) {
       const desync = h5SeatStickerDesync(issue);
       if (desync) findings.push([issue, 'H5', desync]);
+      // H70 (#28642) — the post's own body, free: a held seat with no `Patrol:` line.
+      const patrolless = h70HeldSeatWithoutPatrol(issue);
+      if (patrolless) findings.push([issue, 'H70', patrolless]);
       if (h6SeatBodyOversized(issue)) {
         const kb = (Buffer.byteLength(issue.body ?? '', 'utf8') / 1024).toFixed(1);
         findings.push([issue, 'H6', `seat body is ${kb} KB (soft bound ~10 KB) — compact to the six-section current-state template (#7583; edit history is the archive)`]);
@@ -23326,6 +23451,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     const { lane } = seatLane(issue);
     const idle = h32SeatIdleOverQueue(issue, marker, laneInventory.get(lane) ?? { unclaimed: 0, inFlight: 0 });
     if (idle) findings.push([issue, 'H32', idle]);
+  }
+  // H71 (#28642) — the card-side complement of H32, off the same listings: an
+  // unclaimed queue card gone quiet on a lane some 🟢 seat post holds. Free.
+  const onDutyLanes = new Map();
+  for (const issue of seen.values()) {
+    if (!labelNames(issue).includes('pm:seat') || !seatOnDuty(issue)) continue;
+    const { lane, foreign } = seatLane(issue);
+    if (!lane || foreign) continue;
+    onDutyLanes.set(lane, [...(onDutyLanes.get(lane) ?? []), issue.number]);
+  }
+  for (const issue of seen.values()) {
+    const waiting = h71UnclaimedOnDutyLane(issue, onDutyLanes);
+    if (waiting) findings.push([issue, 'H71', waiting]);
   }
 
   // H7 + H12 + H21 — the PR side. Listed straight from `/pulls` rather than
@@ -24831,6 +24969,9 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // cases that must stay quiet, the unread thread that must stay UNJUDGED, and
   // the three verdict-word dialects.
   'H43 hand-off timing': 80,
+  // Registered with the seat-patrol rows (#28642), pin just under the count: two
+  // free readings, each with its firing controls and its out-of-scope arms inside.
+  'H70/H71 seat patrol': 30,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28098,6 +28239,53 @@ async function selfTest() {
   b(BATTERY18901, 'H68 band: no code is left unregistered and none registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
   b(BATTERY18901, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18901) && SELF_TEST_BATTERIES[BATTERY18901] > 0, true);
   b(BATTERY18901, 'floor: the roster now declares TEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR === 10 && Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
+
+  // -- H70 + H71 (#28642): a project seat's patrol line, and the queue card a
+  //    missing patrol leaves waiting. Both free; fixtures are offline rows. ---
+  const BATTERY28642 = 'H70/H71 seat patrol';
+  const seat70 = (title, body, extra = {}) => ({ ...issue(['pm:seat'], [], body, title), state: 'open', ...extra });
+  const HELD70 = '[PM seat] domain:spec · seat 4 — 🟢 marchtian';
+  // The measured spelling on a live stub (the skills seat 2 post): bulleted, bold key.
+  const LIVE_PATROL70 = '- **Patrol:** hourly at :33 past the hour, a scheduled task bound to the seated session.';
+  const STUB70 = '## Current PM — 🟢 marchtian\n\n- **Holder:** `marchtian`\n- **Mailbox:** PR #28676';
+  const row70 = (...args) => String(h70HeldSeatWithoutPatrol(...args) ?? '');
+  b(BATTERY28642, 'H70: a held project seat whose stub has no `Patrol:` line -> finding', typeof h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70)), 'string');
+  b(BATTERY28642, '⭐ H70: the bare protocol spelling `Patrol: TRIGGER_ID · CRON` clears it', h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\nPatrol: trig_01PjbHZiLyrERj8ppEGppxjS · 33 * * * *`)), null);
+  b(BATTERY28642, 'H70: the measured live spelling — bulleted, bold key — is the same line (shared directive reader)', h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\n${LIVE_PATROL70}`)), null);
+  b(BATTERY28642, 'H70: …and a backticked line reads too', h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\n\`Patrol: trig_x · 48 * * * *\``)), null);
+  b(BATTERY28642, '⛔ H70: a `Patrol:` with nothing after it is no line, and a mid-sentence mention is prose — still fires', [typeof h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\nPatrol:`)), typeof h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\nthe seat should write a Patrol: line here`))].join(), 'string,string');
+  b(BATTERY28642, '⛔ H70: a lowercase key is not the line — the spelling stays byte-stable', typeof h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\npatrol: trig_x · 0 * * * *`)), 'string');
+  b(BATTERY28642, '⛔ H70: a `🟢 Routine` seat is out of scope — its scheduler is its patrol', h70HeldSeatWithoutPatrol(seat70('[PM seat] triage (objectstack-wide) — 🟢 Routine · trig_01 (hourly)', STUB70)), null);
+  b(BATTERY28642, '⛔ H70: the director seat has no patrol by rule — never fires, held or not', h70HeldSeatWithoutPatrol(seat70('[PM seat] director(项目总监) — 🟢 os-zhuang', STUB70)), null);
+  b(BATTERY28642, '⛔ H70: a retitled director post — 总监 inside the seat name, not at its start — is still excluded', h70HeldSeatWithoutPatrol(seat70('[PM seat] 项目总监 — 🟢 os-zhuang', STUB70)), null);
+  b(BATTERY28642, 'H70 control: …and 总监 in the STATUS half does not exclude a lane seat', typeof h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:server — 🟢 os-zhuang · 总监 relay', STUB70)), 'string');
+  b(BATTERY28642, 'H70 control: …and the same holder on a LANE seat fires', typeof h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:server — 🟢 os-zhuang', STUB70)), 'string');
+  b(BATTERY28642, '⛔ H70: a vacant or paused seat is out of scope', [h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:ui · seat 3 — ⏳ vacant', STUB70)), h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:ui · seat 3 — ⏸️ paused', STUB70))].every((v) => v === null), true);
+  b(BATTERY28642, '⛔ H70: a card without `pm:seat`, a closed post, a PR row and a missing row are never judged', [h70HeldSeatWithoutPatrol({ ...seat70(HELD70, STUB70), labels: [{ name: 'domain:spec' }] }), h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70, { state: 'closed' })), h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70, { pull_request: {} })), h70HeldSeatWithoutPatrol(undefined)].every((v) => v === null), true);
+  b(BATTERY28642, 'H70 text: names the line\'s shape WITHOUT angle brackets, both rule homes and the report-only boundary', [row70(seat70(HELD70, STUB70)).includes('`Patrol: TRIGGER_ID · CRON`'), row70(seat70(HELD70, STUB70)).includes('〈座位贴协议〉'), row70(seat70(HELD70, STUB70)).includes('〈座位 Routine 创建〉'), row70(seat70(HELD70, STUB70)).includes('Report-only'), /<[a-z ]+>/.test(row70(seat70(HELD70, STUB70)))].join(), 'true,true,true,true,false');
+  b(BATTERY28642, 'H70 band: registered as `state`, and the sweep really pushes it', `${familyBand('H70')}/${familyRegistryCoverage().emitted.includes('H70')}`, 'state/true');
+
+  const NOW71 = Date.parse('2026-11-01T10:29:00Z');
+  const ON_DUTY71 = new Map([['domain:spec', [18917]]]);
+  // The measured incident: a p1 card entered the queue at 05:56Z on a lane whose seat was held, unclaimed till 10:29Z.
+  const card71 = (labels, extra = {}) => ({ ...issue(labels), number: 28560, state: 'open', updated_at: '2026-11-01T05:56:00Z', ...extra });
+  const row71 = (...args) => String(h71UnclaimedOnDutyLane(...args) ?? '');
+  b(BATTERY28642, 'H71: the incident — unassigned `pm:queue` card on a 🟢 lane, quiet ~4.5h -> finding', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec', 'priority:p1']), ON_DUTY71, NOW71), 'string');
+  b(BATTERY28642, 'H71: …and the row names the lane, its seat post and the age', [row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes('`domain:spec` (#18917)'), row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes('~5h')].join(), 'true,true');
+  b(BATTERY28642, '⭐ H71: inside the window is clean — 1h59m quiet does not fire, 2h01m does', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: '2026-11-01T08:30:00Z' }), ON_DUTY71, NOW71), typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: '2026-11-01T08:28:00Z' }), ON_DUTY71, NOW71)].join(), ',string');
+  b(BATTERY28642, '⛔ H71: a lane with NO 🟢 seat post is out of scope however old the card', h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:ui']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: an ASSIGNED queue card is H24\'s, not this row\'s', h71UnclaimedOnDutyLane({ ...card71(['pm:queue', 'domain:spec']), assignees: [{ login: 'marchtian' }] }, ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a `pm:epic` subtree card and a card not in `pm:queue` are out of scope', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:epic', 'domain:spec']), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:blocked', 'domain:spec']), ON_DUTY71, NOW71)].every((v) => v === null), true);
+  b(BATTERY28642, '⛔ H71: a queued card awaiting a decision (`needs-user-decision`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'needs-user-decision', 'domain:spec']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a queued card in re-triage (`pm:retriage`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:retriage', 'domain:spec']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a closed card, a PR row and a missing row are never judged', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { state: 'closed' }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { pull_request: {} }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(undefined, ON_DUTY71, NOW71)].every((v) => v === null), true);
+  b(BATTERY28642, 'H71: an unreadable `updated_at` must not read as fresh', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: 'not a date' }), ON_DUTY71, NOW71), 'string');
+  b(BATTERY28642, 'H71: a retired lane spelling reads through the alias map to the lane that absorbed it', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:engine']), new Map([['domain:server', [6367]]]), NOW71), 'string');
+  b(BATTERY28642, 'H71 text: the dropped spare-concurrency condition is SAID, and the row stays report-only', ['Spare concurrency is NOT judged', 'Report-only', 'lower bound'].every((s) => row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes(s)), true);
+  b(BATTERY28642, 'seatOnDuty: 🟢 login and 🟢 Routine are on duty; vacant, paused and an unparseable title are not', [seatOnDuty(seat70(HELD70, '')), seatOnDuty(seat70('[PM seat] triage (objectstack-wide) — 🟢 Routine', '')), seatOnDuty(seat70('[PM seat] domain:ui — ⏳ vacant', '')), seatOnDuty(seat70('[PM seat] domain:ui — ⏸️ paused', '')), seatOnDuty(seat70('devx seat registry', ''))].join(), 'true,true,false,false,false');
+  b(BATTERY28642, 'H71 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H71')}/${familyRegistryCoverage().emitted.includes('H71')}`, 'stall/true');
+  b(BATTERY28642, 'H70/H71: neither is a loud finding — they never escalate a sweep', [isLoudFinding(row70(seat70(HELD70, STUB70))), isLoudFinding(row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71))].join(), 'false,false');
+  b(BATTERY28642, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28642) && SELF_TEST_BATTERIES[BATTERY28642] > 0, true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
