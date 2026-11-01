@@ -1,0 +1,34 @@
+{
+  "number": 28561,
+  "kind": "issue",
+  "title": "Studio: an All metadata area in the builder — directory, lists, generic item page, history and diagnostics, per package and across packages; pillar types open their pillar",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T05:57:26Z",
+  "updated_at": "2026-11-01T06:52:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28561",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P3, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P3 \"N-26 the metadata directory into Studio (D1)\"; schedule review correction 7: the browse half can start now. ⛔ Not a claim.\n\nPart of #28236 (P3, child **N-26a**) · governs: ADR-0146 D1 (\"an 'All metadata' area joins [the pillars], per package and across packages, holding … the type directory, lists, the generic item page. A pillar type opened from the directory opens its pillar\"; read-only tools on a read-only package) · lane: `domain:ui` · size: L.\n\n**Business reason.** A developer in Studio on HotCRM sometimes needs a type the four pillars do not cover, such as a translation, a job or an agent. Today they leave Studio for Setup's metadata pages to browse it. Studio should hold the whole catalog, per package and across packages, so Setup can stop being a second metadata home.\n\n**Measured (`35b178bd0a`).**\n- The catalog is `ui/packages/app-shell/src/views/metadata-admin/`: `DirectoryPage.tsx` (type tiles, domain chips, \"Writable only\", scope by `?package=` limited to project packages, `HIDDEN_TYPES` field and package), `ResourceListPage`, `ResourceEditPage`, `MetadataResourceHistoryPage`, `DiagnosticsPage`. It is served under any app segment at `/apps/:app/metadata[/_diagnostics|/:type[/new|/:name[/history]]]` (`console/AppContent.tsx:1499–1506`; no-app branch :1385–1390).\n- The Studio builder is `/studio/:packageId/:tab` (`ui/apps/console/src/components/StudioRoute.tsx:290`). Its tabs are the four `PILLARS` (`studio-design/StudioDesignSurface.tsx:436`), and any other tab is a not-found state (:1529). Pillars open one item from `?surface=TYPE:NAME` (`useSurfaceDeepLink.ts`).\n- Studio *app* navigation already has \"All Metadata Types\" (`packages/platform-objects/src/apps/studio.app.ts:119–125`). It renders the same page in app chrome at `/apps/studio/metadata`, outside the builder.\n- Setup's Access Control entries open environment-scope lists: position, capability, permission and sharing_rule with `?scope=environment` (`packages/plugins/plugin-security/src/security-plugin.ts:1643–1645`, `packages/plugins/plugin-sharing/src/sharing-plugin.ts:672`; `catalog-scope.ts:39–86`).\n- The AI review deep link opens `/apps/:app/metadata/:type/:name?review=1` (`console/AppContent.tsx:241`).\n- PR #28076 (D5) landed the app → Studio browse entry into the pillars only. No directory is in the builder.\n\n**Wanted.**\n1. An **All metadata** area in the builder for the open package: directory, type list, generic item page, history and diagnostics. These are the existing metadata-admin components mounted, not copied. The dev settles the route (e.g. `/studio/:packageId/metadata/...`) and registers it, so it is not a not-found tab.\n2. A cross-package leg of the same area with no package scope, which serves the environment-scope lists and items above with `?scope=environment`.\n3. A pillar type opened from the area opens its pillar with `?surface=`: object → Data; flow → Automations; page, dashboard, report and view → Interfaces; permission → Access. Every other type opens the generic item page in the area.\n4. The area keeps the query parameters `?package=`, `?scope=environment` and `?review=1` with today's meaning, so a later redirect (N-28) loses no deep link.\n5. On a read-only package the item page is read-only. Layers, references, history, audit and source are shown. No rollback, source save, reset, delete or \"Customize with an overlay\" save is offered in Studio (D1). On a writable package it saves exactly as the Setup page does with `?package=` (same component, same doors). No new write path.\n6. Assignment sections (permission-set holders, position holders) are not drawn here. A link opens their Setup page (N-27, #28241). The datasource tile links out to Setup, which keeps datasources (D1).\n7. Setup's pages are not changed.\n\n**Tests.**\n- The area mounts at its route for a writable and a read-only package, and in the cross-package leg.\n- Opening object, flow, view and permission lands in the right pillar with `?surface=`.\n- A translation opens the generic page, read-only on a read-only package, with no overlay save.\n- A `?scope=environment` permission list renders, and `?review=1` opens the review.\n- The existing metadata-admin tests stay green.\n\n**Release safety.** Additive: a new area in Studio, nothing removed or redirected, server untouched. Safe with no `Blocked-by:`.\n\n**Not here.** \"Customized / added\" marks (N-26b). The simplified translation and email-template editors (N-25). Setup redirects, Packaged automation retirement and re-pointing Studio app's `nav_metadata_directory` (N-28). Customization writes (N-17).\n\n**Dedupe.** Searched `metadata directory studio \"all metadata\"`, `setup metadata redirect studio`: only #28236, #28130 (closed) and QA runs.\n\nLinks back: #28236, #28076, #28241, ADR-0146 D1, D5, D7.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

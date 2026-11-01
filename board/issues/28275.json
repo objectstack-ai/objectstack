@@ -2,8 +2,8 @@
   "number": 28275,
   "kind": "issue",
   "title": "metadata/objectql/cli: the residual-picklist judgement is spelled twice (engine and `os validate` / `os build`), held equal only by a boot-parity test",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,17 +14,24 @@
     "area:data",
     "domain:server",
     "finding",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T01:20:54Z",
-  "updated_at": "2026-10-31T01:53:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T06:00:40Z",
+  "closed_at": "2026-11-01T05:55:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28275",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFollow-up from PR #28274 (card #28248), should-fix #2 of contract review record 6536889061.\n\n## What is there now\n\nA composed stack's top-level picklist that no package body declares and no object field the engine registers names is refused twice, by two copies of one judgement:\n\n- **The engine.** `unreferencedResidualPicklistRefusal` in `packages/objectql/src/plugin.ts`, module-private. It walks the bodies' fields with `collectManifestPicklistReferences` (`packages/objectql/src/picklist-resolution.ts`) and composes the `INVALID_METADATA` message.\n- **The doors.** `findUnreferencedResidualPicklists` in `packages/cli/src/utils/picklist-references.ts`. It has its own named-walk (`fieldPicklistNamesOf`) and its own wording (`residualPicklistWording`), and `os validate` (step 2d) and `os build` (step 3a-bis) run it as `picklist-residual-unreferenced`.\n\nBoth copies read the same residual rule (`unclaimedTopLevel` from `@objectstack/metadata`). Only two things are restated: which fields count as naming a list, and the words. `packages/cli/src/utils/picklist-references.boot-parity.test.ts` boots a real `ObjectKernel` + `ObjectQLPlugin` on nine stacks and checks, byte for byte, that the boot's message equals the door's `message + ' ' + hint`.\n\nPR #28274 restated rather than exported because its claim excluded `packages/objectql`. The review accepted that as the smaller evil, carried on a card. The costs:\n\n- the repo's standing rule is one spelling per judgement (the residual-rule header's \"never a second copy at a door\"; #28160 is the same pattern for the permission-set owner envelope);\n- a wording change in `packages/objectql` turns `packages/cli`'s suite red;\n- the engine's docblock does not point at the parity file.\n\n## Wanted\n\n- **One exported judgement.** Define the named-walk plus the wording once, in `@objectstack/metadata` beside `unclaimedTopLevel`, the way `viewContainerNameRefusal` is defined (`packages/metadata/src/view-container-name.ts`).\n  - Input: the stack, or the residual answer plus the ordered bodies.\n  - Output: the unreferenced residual picklists and the refusal text, in a form that serves both the engine's one plural sentence and the door's one finding per list.\n- **The engine uses it.** `@objectstack/objectql` re-exports it, as `view-container-name-refusal.ts` does for the container judgement, and `unreferencedResidualPicklistRefusal` calls it instead of composing its own text.\n- **The doors use it.** `packages/cli/src/utils/picklist-references.ts` imports it. `fieldPicklistNamesOf` and `residualPicklistWording` go away, and the `picklist-residual-unreferenced` finding keeps its shape (`severity`, `rule`, `where`, `path: picklists[i]`, `message`, `hint`).\n- **The parity pin shrinks.** The boot-parity file becomes a smoke check (one refused stack, one control) or is deleted. The unit pins in `picklist-references.test.ts` stay.\n\n## Must not change\n\n- What the boot refuses and what it serves: the residual object's field, the body field (`picklist-reference-unknown` at the doors), body-declared lists and stacks without `packages[]` keep their current outcomes.\n- The boot's `INVALID_METADATA` text, and the `--json` shape of the door's finding.\n- The judgement must stay importable by the CLI without booting a kernel.\n\n## Refs\n\n- PR #28274; contract review record 6536889061 (should-fix #2).\n- Precedent: `viewContainerNameRefusal` (`@objectstack/metadata`, re-exported by `@objectstack/objectql`, imported by the CLI).\n- Same pattern on another envelope: #28160."

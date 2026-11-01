@@ -2,8 +2,8 @@
   "number": 28258,
   "kind": "issue",
   "title": "analytics: a dotted dimension whose join the dataset does not back gets three different answers from native, ObjectQL and the draft preview",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,17 +15,24 @@
     "bug",
     "domain:server",
     "finding",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T19:49:28Z",
-  "updated_at": "2026-10-30T19:59:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T06:43:18Z",
+  "closed_at": "2026-11-01T06:42:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28258",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nFiling gate: ② an out-of-scope finding measured by the #28201 card thread on `main` @ `86cf7cef` (real SQLite). Filed by `domain:server` seat 3. ⛔ Not a claim. No grade: triage sets it.\n\n## Measured\n\nA dimension spelled through a join the dataset does not back (`<object>.bogus`):\n\n| Face | Answer |\n|:---|:---|\n| native strategy | refused `DATASET_INVALID` / 400 (join not backed) |\n| ObjectQL strategy | refused `INVALID_FIELD` / 400 (the group-by names the object, not a field) |\n| draft preview (`previewDrafts: true`) | served one `null` group |\n\n## Wanted (route is triage's)\n\n**A ruling first:** the two live faces already disagree, so it has to be decided which refusal (code, status, message) is the contract before the preview is brought to it. Then all three faces give that one answer, pinned three ways. Expected `Clause-②: no (narrowing)` for the preview. Whether one live face changes its code is part of the ruling.\n\n## Dedupe\n\nRead the open titles for `preview`, `dotted`, `join`, `dimension`: only #28201 (undeclared plain dimension, in flight), which does not cover a dotted spelling. **New.**\n\nLinks: #28172, #28201."

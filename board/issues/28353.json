@@ -2,8 +2,8 @@
   "number": 28353,
   "kind": "issue",
   "title": "Record pointer columns headed \"Record ID\" show the record's name: sys_audit_log, sys_activity, sys_mail_association",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,17 +13,24 @@
   "labels": [
     "area:access",
     "domain:server",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T06:05:17Z",
-  "updated_at": "2026-10-31T06:56:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T05:36:54Z",
+  "closed_at": "2026-11-01T05:33:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28353",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ② an out-of-scope finding of the #28250 card thread (os-dev-report 6539729086 on #28250), same family as #28250 (PR #28347, `sys_approval_request`). ⛔ Not a claim. Triage sets the lane and grade.\nReach: an administrator reading the audit log or activities sees a field headed \"Record ID\" whose cell shows the record's name and icon (the console draws the pointer target), so the header and the cell disagree.\n\n## Observed (on `main`, measured by the #28250 card thread before it reverted its widening)\n\n- `sys_audit_log` (plugin-audit) declares `record_id` with `referenceVia` and lists it headed \"Record ID\" in four list views: `recent`, `writes_only`, `record_views`, `all_events`.\n- `sys_activity` (plugin-audit) declares `record_id` with `referenceVia` too; it shows only on the Details tab, also drawn as the record.\n- `sys_mail_association` (service-mailbox) is **not** the same defect: `record_id` shows only in its highlights strip, and `HeaderHighlight` has no pointer face, so the strip prints the raw id and \"Record ID\" is correct there. It changes only if the strip drops the field, as the other two objects' strips already do.\n\n## Wanted\n\n- `sys_audit_log.record_id` and `sys_activity.record_id` read \"Record\" (zh-CN 记录, ja-JP レコード, es-ES Registro, the words `sys_approval_action.record_id` and PR #28347 use).\n- `sys_mail_association.record_id` keeps \"Record ID\" unless its highlights strip stops showing the field.\n- Field names, queries, seeds and pointer pairs unchanged.\n\nDedupe words: Record ID label pointer column, record_id label Record, audit log Record ID header.\n\nLinks back: #28250, PR #28347."

@@ -1,0 +1,31 @@
+{
+  "number": 28522,
+  "kind": "issue",
+  "title": "spec(view): the any-of filter group still says [PLANNED] and \"no console applies it yet\" after #28370 landed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T04:39:50Z",
+  "updated_at": "2026-11-01T04:56:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28522",
+  "body": "domain:skills#1 · os-tesla · session_01L9qibzCtJt8Q2Z63fyRNix\n\nFiling gate: ① published author-facing text states a false status. Found by the contract review of PR #28517 (#28476, record 6553490758, ③.2), outside that PR's scope (spec package). ⛔ Not a claim. Triage sets the grade and lane.\n\nReach: every author (and AI author) who reads `/meta/types` for a view `filter`, or who writes a MongoDB-form `$or` and gets the parse refusal. Both tell them the any-of group `{ or: [rule, ...] }` is not applied by any console and that a view storing one is refused when it loads. That steers them away from the one shape that works, toward two views or a client-side workaround.\n\n## What `main` says (`efb1620c`)\n\n- `packages/spec/src/ui/view.zod.ts` L1165 docblock heading `## [PLANNED — not yet rendered]`, and the `ViewFilterOrGroupSchema` `.describe` text L1216–1223: \"[PLANNED — not yet rendered] … No console reads it yet: until the list query build reads the group, a view that stores one is refused when it loads\".\n- `packages/spec/src/ui/filter-rule-array.ts` L192–199: the `$or` refusal prose says the group is \"declared, but no console applies it yet, so it does not narrow the rows today\", and the code comment cites the PLANNED note.\n\n## What `main` does\n\n- #28370 closed with PR #28475 merged: `ui/packages/core/src/utils/filter-converter.ts` (≈L1389–1418) lowers the group to one `['or', ...]` node inside the list's AND; `ui/packages/plugin-view/src/ObjectView.tsx` and `ui/packages/plugin-grid/src/objectGridQuery.ts` send that query; the server filter AST accepts the logical node (`packages/spec/src/data/filter.zod.ts` ≈L2857–2860). The builder saves its OR toggle as one group (`ui/packages/app-shell/src/views/viewFilterFold.ts`), round-trip test `viewFilterOrGroup.roundTrip-28370.test.tsx`.\n- `content/docs/ui/views.mdx` § Base filter (PR #28475) and, after PR #28517, the `objectstack-ui` skill already teach the group as live.\n\n## Wanted\n\n- Drop the `[PLANNED — not yet rendered]` marker and the \"no console reads it yet / refused when it loads\" sentences from the `ViewFilterOrGroupSchema` docblock and `.describe`; state the live behavior in one sentence (a group is ANDed with its sibling elements; the Console builder edits a filter that is exactly one group).\n- Drop \"(declared, but no console applies it yet, so it does not narrow the rows today)\" from the `$or` refusal prose in `filter-rule-array.ts`, and the code comment's PLANNED citation. Update any test that pins the old prose.\n- Prose only: `Metadata-protocol: none`, `Clause-②: no`, a patch changeset for `@objectstack/spec`. Any liveness / marker register row that lists this key as planned moves with it.\n\nReader who acts: the spec lane.\n\nDedupe (open AND closed): \"ViewFilterOrGroupSchema PLANNED\" → #28476, #28370 (the renderer card, closed), #26945 (seat post) — none corrects the spec prose; \"no console applies it yet\" → 1 hit, this text's source. **New.**"
+}

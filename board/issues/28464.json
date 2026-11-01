@@ -2,8 +2,8 @@
   "number": 28464,
   "kind": "issue",
   "title": "Skills: action copy hole list names the three new template slots (description, param helpText, outcomeMessages)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T18:58:05Z",
-  "updated_at": "2026-10-31T23:02:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T04:00:02Z",
+  "closed_at": "2026-11-01T03:54:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28464",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ② a `Skills-docs: follow-up owed` line of PR #28463 (#27948 step 2, maintainer ruling 6545229148 letter A). `skills/**` is a governed path the card thread may not edit. ⛔ Not a claim. Triage sets the grade.\nReach: an author (or an AI) writing action copy reads `skills/objectstack-ui/rules/actions.md`. After PR #28463 its \"Copy holes are `{{ }}`\" line names `confirmText`, `successMessage` and `errorMessage` only, so `description`, param `helpText` and `outcomeMessages` look like they take some other spelling; `${…}` there is refused by `os validate` and the publish gate.\nReader who acts: the owner of `skills/objectstack-ui` (Tier H by the governed-surface register).\n\n## Wanted\n\n- `skills/objectstack-ui/rules/actions.md` (the \"Copy holes are `{{ }}`\" bullet, ≈L23 on `main`): add `description` (reads `record`), param `helpText` (reads `record`) and `outcomeMessages` (reads `result`, the handler's answer), with one example each, and say `${…}` fails `os validate` on all five.\n- Lands after PR #28463 is on `main`.\n\nDedupe words: action copy holes skills, outcomeMessages template slot docs, helpText double brace.\n\nLinks back: #27948, PR #28463.\n\nBlocked-by: #28463\n"

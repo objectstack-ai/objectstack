@@ -2,8 +2,8 @@
   "number": 28243,
   "kind": "issue",
   "title": "skills: teach action.pressed in the objectstack-ui actions rule",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T18:34:36Z",
-  "updated_at": "2026-10-31T23:42:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T03:59:04Z",
+  "closed_at": "2026-11-01T03:54:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28243",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #28235 (#27946), filed by the seat before ACCEPT as the claim template requires. ⛔ Not a claim. Triage sets the lane and grade.\nReach: an AI author writing a toggle-style header action from the `objectstack-ui` skill does not learn `pressed`.\n\n## Wanted\n\n- `skills/objectstack-ui/rules/actions.md` teaches `pressed`: an expression over `record` and `user` that marks the action as already done by this reader; a per-reader fact on a child record reaches it through `attachedOnRead` plus an `afterFind` hook that attaches it to the served row.\n- Lands with or after the console card for #27946, so the skill never teaches a key that draws nothing. Governed path (`skills/**`): Tier H.\n\nLinks back: #27946, PR #28235.\n\nBlocked-by: #28242\n"

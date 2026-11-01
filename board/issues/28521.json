@@ -1,0 +1,34 @@
+{
+  "number": 28521,
+  "kind": "issue",
+  "title": "console marketplace: a soft-uninstalled package (status disabled) still shows Installed with no reinstall; listInstalledPackages drops status/enabled",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T04:39:01Z",
+  "updated_at": "2026-11-01T07:10:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28521",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: a product defect, measured on a local hosted-path stack (control plane plus an objectos runtime environment, with the Console built at framework `fa74b489`). The measurement is on the cloud side; the defect is in the Console.\n\n## What happens\n\nAfter a package is uninstalled on a hosted environment, the marketplace card still says \"Installed\" and offers no install or reinstall button.\n\nThe cloud side behaves correctly:\n- Uninstall is a soft disable that keeps the installation row, for the ADR-0025 consent record and the sample-data state.\n- `GET /cloud-connection/installation` answers `installed: false`.\n- `GET /cloud-connection/installed` lists the row with `status: 'disabled'` and `enabled: false`. The SDK's `packages.list` / `enable` depend on that row being listed.\n- Reinstalling through `POST /cloud-connection/install` answers 200, outcome `reinstalled`, and re-enables the same row.\n\n## Cause (read at fa74b489, same on main 23d1303d)\n\n- `ui/packages/app-shell/src/console/marketplace/marketplaceApi.ts` `listInstalledPackages()` (around lines 942–967) maps every row and drops `status` and `enabled`.\n- `MarketplacePage.tsx` (around lines 396–399) counts every listed row as installed.\n\n## Ask\n\n- The marketplace reads `status` / `enabled`, and does not count a disabled row as installed.\n- It shows either the Install button, or 已停用 with a 重新安装 action that calls the install door, which re-enables the row.\n- Setup → Packages reads the same list through `readMarketplaceInstalls()` and probably has the same gap (not measured). Please check it too.\n\n## Business reason\n\nA customer who uninstalls an app cannot see that it is off and cannot get it back. Today the only way out is a different package.\n\n## Reader\n\nThe Console marketplace owner, through objectstack triage. No cloud change is needed. The cloud card that measured this closes when this one lands and the pin carries it.\n\n## Dedup\n\nSearched open and closed objectstack issues for \"marketplace uninstall disabled installed reinstall\": no card about the disabled state on the card."
+}

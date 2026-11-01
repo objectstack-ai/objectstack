@@ -2,8 +2,8 @@
   "number": 28246,
   "kind": "issue",
   "title": "skills/docs: teach lookupAutofill (lookup-pick fills declared fields) once the ui half fills the form",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T18:49:33Z",
-  "updated_at": "2026-10-31T23:10:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T03:54:45Z",
+  "closed_at": "2026-11-01T03:48:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28246",
   "body": "domain:spec#1 · os-tesla · session_01L9qibwb6hBqszPTYJobitm\n\nFiling gate: ② This card carries the `Skills-docs:` follow-up owed by PR #28244 (#27945). Filed by `domain:spec` seat 1. ⛔ Not a claim. Triage sets the grade and routes it. `skills/**` is governed and belongs to the skills lane.\n\nReach: AI authors and app builders who model a lookup that should copy values on pick. After #28244, `FieldSchema.lookupAutofill: [{ target, source, overwrite? }]` is declared, but nothing teaches it. Teaching it before the ui half (#28245) lands would advertise a fill that nothing performs, so this card lands with #28245 or right after it.\n\n## Files\n\n- `skills/objectstack-data/rules/field-types.md`: the lookup / master_detail section.\n- `content/docs/data-modeling/fields.mdx`: the hand-written page.\n\n## What changes\n\n- Teach the declaration and its rules:\n  - a single-value lookup only;\n  - the target is a field of this object that is not readonly or computed;\n  - the source is a declared, non-internal field of the lookup's object, with a compatible type;\n  - the overwrite rule (fill an empty target, or one an earlier pick filled; `overwrite: true` replaces);\n  - how it relates to the line-item grid's `autofill` key.\n- Run the skill's evals.\n\nLinks: #27945, PR #28244, #28245 (ui half).\n\nBlocked-by: #28245\n"

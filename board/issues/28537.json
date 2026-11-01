@@ -1,0 +1,35 @@
+{
+  "number": 28537,
+  "kind": "pull_request",
+  "title": "fix(connector-openapi): send each parameter by its declared style and explode",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T05:19:49Z",
+  "updated_at": "2026-11-01T05:59:48Z",
+  "closed_at": "2026-11-01T05:59:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T05:59:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28537",
+  "body": "Fixes #28504\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:OpenAPI 连接器发请求时,query / path / header 参数按文档声明的 `style` / `explode`(或 OpenAPI 3.x 默认值)编码,对象和数组不再经 `String()` 变成 `[object Object]` 或逗号串。\n- 为什么改:Stripe 等厂商的列表接口用 `deepObject` 传日期区间和 `expand`,此前请求被静默发错、运行却答 200;作者和 AI 按 schema 填参也照样发错。\n- 风险与回滚:标量参数逐字节不变(对照用例在旧代码上同样通过);新增两处拒绝——文档给某位置声明了未定义的 style 时启动失败(仓内 2 份文档 42 个参数实测 0 命中),值的形状无编码时该步失败且不发请求。回滚即还原本 PR。\n- 先看:`packages/connectors/connector-openapi/src/parameter-serialization.ts`(`serializeQueryParameter` 与 `deepPairs`,deepObject 数组取下标括号);`openapi-connector.ts` 的 `parameterEncodings` / `withAuthQuery`(启动期拒绝与 api-key 合并);`parameter-style.test.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/connector-openapi exec vitest run --maxWorkers=2 src/parameter-style.test.ts`,预期 17 passed,其中 Stripe 的 `created` 发成 `created%5Bgte%5D=1700000000`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- New `src/parameter-serialization.ts`: each sent parameter is encoded by its Parameter Object's `style` / `explode`, or by its location's OpenAPI 3.x default when it declares none (query `form`, exploded; path and header `simple`). Implemented: query `form`, `spaceDelimited`, `pipeDelimited`, `deepObject`; path `simple`, `label`, `matrix`; header `simple`. Scalars are the only values that become text.\n- `deepObject` on an array (Stripe's `expand`) brackets each index, `expand[0]=a&expand[1]=b`: the style's own rule (each property in brackets) applied to the array's keys, rather than a guessed `expand[]` convention. Nested values recurse the same way.\n- Materialization refusal: a parameter whose `style` OpenAPI 3.x does not define for its location, or a non-boolean `explode`, throws from `createOpenApiConnector` naming the operation, the parameter and the style (fatal at boot for a declarative instance; `include` that leaves the operation out clears it).\n- Dispatch refusal (`ParameterValueError`): a value the declared style has no encoding for (an array of objects for `form`, an object for exploded `spaceDelimited`, any non-scalar for a `content`-typed parameter) fails the step before `fetch` is called.\n- Query pairs travel as an ordered list; the static api-key query credential still replaces a same-named input pair in place, as before.\n- `OpenApiParameter` gains optional `style`, `explode`, `content`.\n- Docs: `content/docs/automation/connectors.mdx` states how parameters are sent and adds the two refusals to the failure table; `packages/apps/connector-stripe/README.md` Limits bullet, which told authors to leave `expand` / `created[gte]` out, now says how they are sent (this change made it false).\n- Changeset: `@objectstack/connector-openapi` patch.\n\n## Tests\n\n- `src/parameter-style.test.ts` (17): the three Stripe shapes with `GetInvoices`' five parameter objects copied verbatim from Stripe's document (MIT), equal to the packaged `connector-stripe` document's objects (one-off canonical-JSON compare: `equal true`); two scalar controls (query and path); the style table; the auth-merge case; both refusals, the dispatch refusal asserting the error class and zero `fetch` calls.\n- Ablation (one-off, base `openapi-connector.ts` swapped in, restored with `git checkout HEAD --`, hash re-matched): 15 failed / 2 passed of 17. The 2 that stay green are the scalar controls, so scalar output is byte-identical to the old code. Old outputs read off the failures: `created=%5Bobject+Object%5D`, `expand=data.customer%2Cdata.subscription`, `due_date=%5Bobject+Object%5D`.\n- Public door, one-off probe (not committed): the packaged Stripe app booted with `bootStack`, a flow calling `GetInvoices` via `POST /api/v1/automation/:flow/trigger` answered 200 and the fake Stripe received `https://api.stripe.com/v1/invoices?created%5Bgte%5D=1700000000&due_date%5Bgte%5D=1700000000&due_date%5Blt%5D=1702592000&expand%5B0%5D=data.customer&expand%5B1%5D=data.subscription&limit=3`.\n\n## Acceptance notes\n\n- Stripe's own answer to `expand[0]=…` and `created[gte]=…` is NOT MEASURED (no key); the tests run against a fake Stripe.\n- `allowReserved` is not read: reserved characters stay percent-encoded, as before.\n- Cookie parameters are still left out of the action's input schema and never sent (unchanged).\n- Query delimiters are form-urlencoded with the values (`,` as `%2C`, a space as `+`, `|` as `%7C`), which is how a scalar was always encoded; path delimiters stay literal.\n- An empty array or object sends nothing (RFC 6570 treats it as undefined).\n\n## Verification\n\nAll readings at head `73e2a2ec` (after merging `origin/main` at `eeec88d1`), repository `objectstack-ai/objectstack`.\n\n<details><summary>Package tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/connector-openapi test`: Test Files 9 passed (9), Tests 109 passed (109).\n- `pnpm --filter @objectstack/connector-openapi typecheck`: exit 0; `check:test-typecheck: OK`, 1 file / 5 errors / 1 pinned signature held (pre-existing ledger, unchanged).\n- `pnpm --filter @objectstack/connector-app-stripe test` (the consumer that boots the packaged Stripe document): `objectstack validate` passed, Test Files 2 passed (2), Tests 16 passed (16).\n- Lock verdict: `os-verify-lock: VERDICT command-exit 0`.\n</details>\n\n<details><summary>Derived gate families</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 88 commands for the 6 changed paths; every one run on `73e2a2ec`, each exit code captured before any pipe: 88 exit 0.\n- `--ran` reconciliation: `88 derived, 88 run, 0 NOT-MEASURED, 0 UNRUN`.\n- `node scripts/check-nul-bytes.mjs`: exit 0.\n- Not run locally, owned by CI: the type-check lanes, Build Core, Build Docs and the families the derivation prints as outside its list; the full `pnpm lint` sweep.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcVBKAFk1ntXSjvPt7U)_\n"
+}

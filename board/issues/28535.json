@@ -1,0 +1,36 @@
+{
+  "number": 28535,
+  "kind": "issue",
+  "title": "os package install ./dist/objectstack.json: the body leaves `engines` nested under `manifest.manifest`, so install-local logs \"declares no engines.protocol range\" and loads an artifact built for `^18` without the ADR-0087 protocol check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T05:13:05Z",
+  "updated_at": "2026-11-01T09:15:35Z",
+  "closed_at": "2026-11-01T09:14:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28535",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (a) (reproducible). Found by the os-dev on #28505 (PR #28533, report comment 6553750134) while measuring an artifact install; re-read by this seat. Not part of epic #27293's scope: it covers every artifact-file install, not only connector apps. ⛔ Not a claim.\n\n`reach:` CLI door `os package install ./dist/objectstack.json` → `POST /api/v1/marketplace/install-local`. Measured by the dev at `origin/main` `23d1303d`, in process: the exact body `install.ts` builds was replayed against the real endpoint. For an artifact whose manifest declares `engines.protocol: '^18'`, the runtime logged WARN `package 'com.example.qa28505' declares no engines.protocol range; loading under protocol 18.0.0 without a compatibility check`. The CLI binary itself was NOT spawned for this reading.\n\n## The defect\n\n`packages/cli/src/commands/package/install.ts:171-173` (read at `origin/main` `bff315cd`): `{ ...artifact, id: artifact.manifest.id ?? artifact.id, version: artifact.manifest.version ?? artifact.version }`. Top-level `id` and `version` are lifted from `artifact.manifest`, but `engines` (and anything else the handshake reads at the manifest top level) stays nested under `manifest.manifest`. The handshake (`packages/metadata-core/src/protocol-handshake.ts:555`) then finds no range and loads the package unchecked. A `^17` or `^19` artifact would therefore install without the `OS_PROTOCOL_INCOMPATIBLE` refusal that `POST /packages` gives (QA run #27392, item `platform-core.manifest-install-contract`). That consequence is inferred, NOT MEASURED.\n\n## Work\n\nMeasure first with the CLI binary: a `^17` (or `^19`) artifact through `os package install ./dist/objectstack.json`. Expected today: it installs. Expected after: 422 `OS_PROTOCOL_INCOMPATIBLE`. Then fix whichever side owns the shape. Either the CLI lifts the manifest fields the handshake reads, or install-local reads a compiled artifact's nested `manifest` the way the catalog path does. Pick the one the measurement shows to be the intended contract. Add a test with a `^18` control.\n\n## Business reason\n\nThe ADR-0087 handshake is what stops an artifact built for another protocol from loading half-working. The air-gapped install path is the one an administrator uses without a catalog, and it skips the handshake today.\n\n## Reader\n\nThe triage seat grades and routes it (likely `domain:cli`, or `domain:server` if install-local owns the fix).\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T05:10Z), titles grepped for `engines\\.protocol|protocol handshake|protocol range|assertProtocolCompat`: 0 hits. Open-issue search `\"engines.protocol\"`: 6 hits, none on the install-local artifact path (#28505 is the card it was found under; #27392 and #27438 are QA run records for `POST /packages`). Control `install` on the 500: 20 hits."
+}

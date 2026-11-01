@@ -1,0 +1,32 @@
+{
+  "number": 28575,
+  "kind": "issue",
+  "title": "Studio: add a field to a read-only base object — written as an extension in <base>.custom named xxx__c, base fields editable only within the display-property whitelist",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T06:03:56Z",
+  "updated_at": "2026-11-01T06:03:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28575",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P2, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P2 \"N-23a/b/c object extension … Studio add-field (D10)\". ⛔ Not a claim.\n\nBlocked-by: #28560, #28564, #28565, #28574, #28407\n\nPart of #28236 (P2, child **N-23c**) · governs: ADR-0146 D10 (last paragraph: Studio's add field writes an extension in `.custom`, suffixed, the base untouched; the display-property patch), D3 (auto-create, no prompt) · lane: `domain:ui` · size: L.\n\n**Why it waits.** This card writes the extension body N-23a declares, including its per-field patch slot. Four other cards come first:\n- N-23e, the runtime write door for an extension into a writable package. No such door exists today.\n- N-23b, the `__c` gates.\n- N-23d, which applies the patch and checks its target.\n- The ensure door (#28407, PR #28512: `POST /api/v1/packages/:id/ensure-customization`), which creates the pair.\n\n**Business reason.** An administrator wants a \"Region\" field on HotCRM's Account. Today Studio refuses because HotCRM is read-only. They should add it in Studio and get `region__c` in `hotcrm.custom`. HotCRM stays as shipped and the next HotCRM upgrade cannot collide with the field. Renaming a HotCRM field's label works the same way, within the whitelist.\n\n**Measured (`35b178bd0a`).**\n- Data pillar: `canAddFields = !readOnly && !objIsExternal` (`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx:7485`). `addField` pushes the field into the open object's own buffer (`objDraft`), and autosave writes that object whole (:7473–7484). On a read-only base, nothing is offered.\n- `AddFieldPopover.tsx` derives the api name from the label (`toFieldNameLoose`) and refuses a taken name (`fieldNameTakenRefusal`).\n- Spec: `EXTENSION_FIELD_SUFFIX = '__c'` and `isExtensionFieldName` (`packages/spec/src/data/field-customization.ts:31`, :40). `BASE_FIELD_DISPLAY_WHITELIST` is `label`, `description`, `inlineHelpText`, `placeholder` and option `label` (:74). The patch slot is not declared yet (:21–23, N-23a).\n- `ObjectExtensionSchema` (`packages/spec/src/data/object.zod.ts:4709`) carries `extend`, `fields`, `label`, `pluralLabel`, `description`, `validations`, `indexes` and `priority`.\n- No runtime write path for an extension exists. `object_extension` has no slot of its own (`packages/objectql/src/plugin.ts:178–182`), and only the manifest load registers one (`objectql/src/engine.ts`, the `'extend'` registration). N-23e builds the door.\n\n**Wanted.**\n1. On a base object of a read-only base, Studio offers **Add field** (grid \"+\" and Form toolbar). Create ensures `<base>.custom` without a prompt and writes an extension of that object into the pair, not into the base object's buffer.\n2. The popover shows the api name with `__c` before Create (`region` → `region__c`). A typed name is suffixed the same way. The taken-name refusal covers the folded object's fields.\n3. The new field appears in the grid and form at once, and its inspector edits the extension. The base object's other fields stay read-only.\n4. On a base field, the inspector edits only the whitelisted properties, read from the spec constant (no client copy). Edits are written as the per-field patch in the pair's extension. Every other property is shown read-only, with one sentence naming the whitelist.\n5. Server refusals are shown verbatim: suffix, structural key, walled `403` from the ensure door. Under a walled posture, for a principal the served facts refuse, the actions draw disabled in the console's own words.\n6. Unchanged: add-field on a writable package's own object (plain names), and the field inspector there.\n\n**Tests.** Fixture read-only base + object:\n- Add field \"Region\" ensures the pair once, writes an extension with `region__c` into it, and leaves the base object's body unsent;\n- a second add does not ensure again;\n- a label patch on a base field writes only `label` into the patch;\n- `required` on a base field is not editable;\n- a refusal is shown verbatim;\n- the walled tenant case is disabled;\n- a writable package's add-field is unchanged.\n\n**Release safety.** Safe on its own: the write door (N-23e), its gates (N-23b, N-23d) and the ensure door (#28407) are all in `Blocked-by:`. Without this card, base objects stay read-only in Studio, as today.\n\n**Not here.** The patch slot (N-23a). `__c` at every door (N-23b). Patch merge and target check (N-23d). The extension write door (N-23e). The customized/added marks on rails (N-19). Directory marks (N-26b). No fields table (D6).\n\n**Dedupe.** Searched `add field __c` and `extension field studio base object`: only #28236, #28411 (the read) and closed N-08 history (#28404, #28467).\n\nLinks back: #28236, #28407, #28404, ADR-0146 D10, D3, D6, ADR-0029 D9.2.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

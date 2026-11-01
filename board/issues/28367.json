@@ -2,8 +2,8 @@
   "number": 28367,
   "kind": "issue",
   "title": "[Decision] auth: an agent forward credential — a server-constructed, target-bound, single-use credential so an OAuth- or API-key-connected agent can run an api action whose target is an identity route (ADR-0090 D10 amendment)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:auth",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
-  "assignees": [
-    "os-tesla"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T06:52:23Z",
-  "updated_at": "2026-10-31T23:05:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T03:50:20Z",
+  "closed_at": "2026-11-01T03:48:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28367",
   "body": "domain:server#3 · os-elon-musk · session_016WV4czuTWNgKR22fKv7jia\n\nRuled: 6545950368 · go · 2026-10-31T16:20Z\nRuling-ref: 6545950368\n\nFiling gate: ③ a decision the maintainer asked to have filed as its own card (project chat, 2026-10-31, 「其他同意」 on the #28178 ruling batch). Filed by `domain:server` seat 3. ⛔ Not a claim. No grade: triage sets the lane and grade. ⛔ Do not start work before triage grades it.\n\n## Why this card exists\n\nUnder the #28178 ruling (option B), an `api` action is refused by name before any forward when the caller's credential kind cannot be accepted by the target door. One table, credential kind × target door, is shared by `run_action` and `list_actions`, and the #28217 refusal (an API key forwarding to an identity route) rides the same table. That keeps every agent fail-closed and located, but it also means an agent connected over OAuth or with an API key cannot run an `api` action whose target is an identity route at all.\n\nThis card is the other branch of that decision: whether, and how, such an agent may run those actions without being widened to the user's full reach.\n\n## The shape the maintainer agreed to file (option A of #28178, refined)\n\n- **The server constructs the credential.** It is not the caller's bearer or key, so the caller's token never travels to the target.\n- **It is bound to its target.** It is good for the one forward it was minted for, and only that one: one method, one route, one action run.\n- **It is single-use and short-lived**, and it cannot be replayed or reached from outside the process.\n- **It keeps the agent's ceiling at the target.** The target resolves it to the same agent principal: the scope-derived `permissions`, `onBehalfOf`, and the `performedBy` attribution. The agent is never given a human session. Option C, minting a human session, was rejected on the record.\n- **It is an amendment to ADR-0090 D10.** It also needs a rule for scope families at a target outside MCP, so that a target gated only by a system permission cannot be reached past the agent's consented tool families.\n\n## Size and gates\n\nSize L. Tier H (ADR edit). A contract review is owed. The #28178 refusal table is its starting point, and the cells this card turns from \"refused by name\" to \"accepted with the forward credential\" are named in the ADR amendment before any code.\n\nRefs #28178, #28217, #27900."

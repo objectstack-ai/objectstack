@@ -1,0 +1,38 @@
+{
+  "number": 28505,
+  "kind": "issue",
+  "title": "connector apps: an installed app's package-relative `providerConfig.spec` file is not in its built artifact, and the loader resolves it against the host's own package root, so an OpenAPI connector app installed from the marketplace cannot read its spec",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "finding",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T03:43:06Z",
+  "updated_at": "2026-11-01T06:33:03Z",
+  "closed_at": "2026-11-01T06:32:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28505",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (a). Found by the os-dev on #28276 (the Stripe app, PR #28503) and re-read by this seat. Child of #27293 (E4 — it decides whether an OpenAPI app on the shelf works once installed). ⛔ Not a claim.\n\n`reach:` named real producer — the Stripe connector app (PR #28503) declares `providerConfig.spec: './openapi/stripe.openapi.json'`, the package-relative form the published recipe teaches (`skills/objectstack-automation/references/integration-recipes.md`, recipe 1: \"A spec is not a secret and ships in the package\").\n\n## What is measured and what is not\n\n- Measured by the dev: `objectstack build` in that package writes `dist/objectstack.json` (4.7 KB) with `providerConfig.spec` still the file reference; the 47 KB document is not in the compiled artifact.\n- Read by this seat at `origin/main` (2026-11-01T03:40Z): `packages/services/service-automation/src/plugin.ts:2765` hands provider factories `loadPackageFile: createPackageFileLoader(this.options.packageRoot)` — the host runtime's package root (CLI default: the directory of its own `objectstack.config.ts`), and ADR-0097 confines reads to that root.\n- NOT MEASURED: an end-to-end install of the built artifact into another runtime (`install-local`) followed by materialization. The expected result from the two readings above is a materialization fault reading a file that is not there; the dev who takes this card measures it first.\n\n## Work (direction for the dev to measure, then pick)\n\nEither the build carries a package-relative `providerConfig.spec` into the artifact (inlined, or as an artifact file the install writes and the loader can reach), or the install's loader resolves package-relative files against the installed package rather than the host — whichever the measurement shows is the platform's intended path; or, if neither is in reach, the recipe and the handbook stop teaching the file form for apps that are installed, and the shelf apps inline the document. The choice touches the artifact contract, so a change to `os build` output or the install flow may need the spec lane.\n\n## Business reason\n\n#27293's Done-when is an administrator installing a connector app from the marketplace and dispatching it. For every OpenAPI app on the shelf (Stripe now, DocuSign next) that fails at the first step after install if this holds. MCP apps (GitHub) are unaffected: their config carries no file.\n\n## Reader\n\nThe triage seat grades and routes it; the epic PM of #27293 dispatches. Cross-repo note: the cloud pipeline (#28278) ingests these artifacts.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T03:42Z), titles grepped for `package-relative|loadPackageFile|artifact.*spec`: 0 hits; control `openapi` on the same set: 7 hits."
+}

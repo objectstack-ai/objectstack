@@ -1,0 +1,32 @@
+{
+  "number": 28573,
+  "kind": "issue",
+  "title": "Studio: \"New similar\" on a base permission set — the copy lands where the clone door puts it (<base>.custom) and opens in Studio; Setup's clone button reads the same",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T06:02:57Z",
+  "updated_at": "2026-11-01T06:02:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28573",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P2, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P2 \"N-20 permission set 'new similar' (D6)\"; schedule review correction 6 splits it into N-20a (server) and this ui half. ⛔ Not a claim.\n\nBlocked-by: #28563\n\nPart of #28236 (P2, child **N-20b**) · governs: ADR-0146 D6 (permission sets not overridable; a customer's own set is a **new** set in `.custom`), D3 (\"It receives … permission sets for the base\"), D1 (Studio holds the editor) · lane: `domain:ui` · size: M.\n\n**Why it waits.** The copy's destination is the server's: N-20a moves the permission-set clone door's target into `<base>.custom`. This card only offers the gesture in Studio and opens the copy where the server put it.\n\n**Business reason.** A HotCRM permission set is close to what a customer needs but not quite. The customer should press \"New similar\" on it in Studio and get their own set inside `hotcrm.custom`, which exports and deploys with their other changes. Today the only clone is on Setup's catalog page, and the copy lands outside every package.\n\n**Measured (`35b178bd0a`).**\n- The UI calls `POST /security/permission-sets/:name/clone` with `{ name, label }` (`ui/packages/app-shell/src/views/metadata-admin/permission-set-clone.ts:56#clonePermissionSet`). The server writes the copy as \"an ordinary environment-authored set: no package\" (`packages/runtime/src/domains/permission-set-clone.ts`, rule 2 of the header).\n- The button is drawn only when `artifactTierApplies = !packageId && codeIsArtifact` (`PermissionMatrixEditor.tsx:703`), on its locked strip and refused-save strip (:1698, :1833, :2157, :2341). Studio's Access pillar always passes a `packageId`, so Studio never offers it. It is reached only from Setup → Permission Sets (`/apps/setup/metadata/permission?scope=environment`, `packages/plugins/plugin-security/src/security-plugin.ts:1645`).\n- After a clone, `onCloned` navigates to `../COPY` under Setup's catalog route (`PermissionMatrixEditor.tsx:1618–1635`).\n- Studio's Access pillar lists only the sets the open package owns (`StudioDesignSurface.tsx:10073` doc, `AccessPillar`). The walled-posture read is `useWalledCatalogReadOnly` (`catalog-scope.ts:142`).\n- N-20a's response shape: not filed yet, not verified.\n\n**Wanted.**\n1. In Studio's Access pillar on a read-only base, each base permission set offers **New similar**. It asks for a machine name and a label (the existing `PermissionSetCloneDialog`) and calls the clone door. The client sends no package and no facet.\n2. The copy opens where the server says it landed: the package the response names, in Studio's Access pillar for that package with the copy selected (`?surface=permission:NAME`). An answer that names no package or no copy says so and opens nothing. Nothing is guessed.\n3. The label is \"New similar\" on both surfaces (en and zh, all locale packs). Setup's catalog button only changes its label: its `../COPY` hop still resolves the copy by bare name (the catalog has one holder per name, ADR-0131 D3), and the page itself retires in N-28.\n4. The server's notice and every refusal (400, 403, 404, 409, walled 403) are shown verbatim. Under a walled posture, for a principal the served facts refuse, the action draws disabled in the console's own words. It is never a live button that always answers 403.\n5. The base's sets stay read-only. No \"Customize\" or override gesture is drawn on a permission set (D6).\n\n**Tests.** A fixture base set with a stubbed door answer naming `<base>.custom`: New similar posts exactly `{ name, label }` and opens the pair's Access pillar with the copy selected (for HotCRM: `/studio/hotcrm.custom/access?surface=permission:COPY`). An answer with no package opens nothing and says so. A 409 shows the server's sentence. The walled tenant case is disabled. No override control draws on a base set. Setup's button reads \"New similar\".\n\n**Release safety.** Safe on its own: the gesture calls the door N-20a has already moved into `.custom` (`Blocked-by`). A release without this card keeps Setup's clone working.\n\n**Not here.** The door's target, the ensure call and the key-drop list (N-20a). Folding `.custom` under its base (N-19). Retiring Setup's catalog route (N-28). Overriding a set (D6, never).\n\n**Dedupe.** Searched `permission set clone custom`, `permission set new similar`: only #28236 and closed history (#21857, #22391).\n\nLinks back: #28236, ADR-0146 D6, D3, D1, ADR-0126 §7.1, ADR-0131 D3.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

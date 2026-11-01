@@ -1,0 +1,30 @@
+{
+  "number": 28519,
+  "kind": "issue",
+  "title": "Action confirm and parameter dialogs: a declared dismiss label (ActionSchema.cancelText), so \"Cancel Invitation\" no longer sits beside \"Cancel\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T04:34:39Z",
+  "updated_at": "2026-11-01T04:34:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28519",
+  "body": "domain:ui#1 · os-tesla · session_01L9qibw2uhdSeHYfnZdAf4V\n\nFiling gate: ② the spec half of a measured suggestion row: #27521 row 9, admin half, the last open row of that card (ledger `/mnt/project-files/ui-seat-1/r2026-10-31b/out/27521-ledger.md`, measured on `main` `efb1620c`). ⛔ Not a claim. Triage sets the lane and grade.\nReach: every action whose verb is itself \"Cancel …\" or \"Close …\" and that asks for confirmation. On Setup → Invitations, the row menu's **Cancel Invitation** opens a confirm whose two buttons read **Cancel** and **Cancel Invitation**, so an admin cannot tell which button keeps the invitation.\nReader who acts: `domain:spec` (the key), then `domain:ui` (the dialog reads it) and the `sys_invitation` action declares it.\nDuplicate search: \"cancelText action confirm\", \"dismiss label action\" → none open. #27944 added `ActionSchema.submitText` for the dialog's submit verb; no dismiss counterpart exists.\n\n## Observed (at `main` `efb1620c`, code read)\n\n- `ActionRunner.confirmOptions()` puts the action's label on the confirm button; `ActionConfirmDialog` draws the dismiss button with the fallback \"Cancel\".\n- `ActionSchema` has `submitText` (#27944, `packages/spec/src/ui/action.zod.ts` ≈L938) but no key for the dismiss button. `object-form` already pairs `submitText` with `cancelText` (`component.zod.ts` ≈L7091), so the protocol word exists.\n\n## Wanted\n\n1. `ActionSchema.cancelText` (an `I18nLabelSchema`, optional): the label of the dismiss button on the action's confirm and parameter dialogs, beside `submitText`, with the same translation path (`objects.OBJECT._actions.ACTION.cancelText`).\n2. The console's `ActionConfirmDialog` and `ActionParamDialog` draw it when declared; absent, today's \"Cancel\" stands.\n3. `sys_invitation`'s cancel action declares `cancelText: 'Keep invitation'` (with its translations), the row that started this.\n\n## Tests\n\n- Spec: the key parses, translates through the bundle path, and is listed wherever `submitText` is (the ui `SPEC_ACTION_KEYS` pin, `/meta/types`, FLS-style tables that enumerate action keys).\n- Console: a declared `cancelText` is the dismiss label on both dialogs; control: absent keeps \"Cancel\".\n\n## Acceptance\n\nAll three Wanted items are pinned, or answered \"will not do\" with the reason. Clause-②: yes (widening)."
+}

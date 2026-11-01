@@ -1,0 +1,35 @@
+{
+  "number": 28511,
+  "kind": "issue",
+  "title": "install-local: `DELETE /api/v1/marketplace/install-local/:manifestId` removes the ledger entry before asking the uninstall refusal, so a refused base (its `<base>.custom` installed, or an ADR-0029 extender) answers 200 and is left half-removed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T04:04:34Z",
+  "updated_at": "2026-11-01T06:40:02Z",
+  "closed_at": "2026-11-01T06:38:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28511",
+  "body": "domain:server#4 · os-zhuang · session_01QUs3BtyH9zgxKzYrJiH18J\n\nFiling gate: ① product defect with a named location and reach · child of epic #28236 (ADR-0146 D3) · found while measuring #28408's Wanted 3 (os-dev-report 6553094234) and judged a separate card by the contract review on PR #28506 (CONTRACT_REVIEW_TIER, PASS). ⛔ Not a claim.\n\nPart of #28236 · lane: `packages/cloud-connection` (the marketplace install-local plugin) · size: S.\n\n**Business reason.** An administrator uninstalls a marketplace-installed HotCRM while `hotcrm.custom` holds their customizations. The platform must refuse and name the pair (ADR-0146 D3: a refused uninstall leaves no half-removed base). On this door, today, the platform says 200. The base stays registered until restart, and after the restart the base is gone and the pair is stranded. The customer loses the base under their customizations, with no refusal sentence telling them why.\n\n**Reach (measured).** `DELETE /api/v1/marketplace/install-local/:manifestId` on a marketplace-installed base whose `BASE.custom` is installed returned 200 success. The test was a scratch test over the real `MarketplaceInstallLocalPlugin` and `SchemaRegistry` at `d79d71aa7`, recorded under PR #28506 Verification and Wanted 3. The response:\n- removes the ledger entry;\n- reports a failed `registry.uninstallPackage` cleanup inside the 200, without naming the pair;\n- leaves the base registered until restart.\n\n**Location.** `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, `handleUninstall` (about :2358–2470):\n- It calls `this.ledger.remove` first (about :2376).\n- It only then withdraws through `registry.uninstallPackage` inside `withdrawFromRunningKernel` (about :2578–2598), which catches the refusal.\n- The ADR-0029 extender refusal has the same gap, pinned as declared behaviour in `marketplace-install-local-uninstall-withdrawal.test.ts` (about :248). That ordering is #21576's recorded decision (\"Never before: an uninstall whose ledger write failed above leaves the package installed\"). This card asks for a refusal check before the ledger write, not a reversal of the ledger-then-withdraw order.\n\n**Wanted.**\n1. `handleUninstall` asks `registry.assertPackageUninstallable(id)` (the one predicate, which after #28506 carries both causes) before `ledger.remove`. On refusal it answers that refusal's 409 `RESOURCE_CONFLICT` with its sentence, and nothing moves: the ledger entry, registration and pair stay as they were.\n2. Re-pin `marketplace-install-local-uninstall-withdrawal.test.ts`: the extender case and a new pair case both answer 409 with the ledger untouched. A non-refused uninstall keeps #21576's ledger-first order.\n3. The epic's two-minute check 「卸载 HotCRM 被拒并点名 `hotcrm.custom`」 is recorded as met on a marketplace-installed HotCRM only after this lands.\n\n**Readers who act.** A `domain:server` lane dev, after #28506 merges (the predicate's pair cause lives there).\n\n**Dedupe.** Searched issues: `install-local uninstall ledger` (66 hits; #21490 and #27395 closed, about leftovers after a successful uninstall, not this ordering), `handleUninstall assertPackageUninstallable` (1 hit, #28408), `marketplace uninstall half-removed` (6 hits, none on this). No existing card covers it.\n\nBlocked-by: #28408"
+}

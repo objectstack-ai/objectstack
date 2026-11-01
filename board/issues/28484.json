@@ -2,8 +2,8 @@
   "number": 28484,
   "kind": "issue",
   "title": "console phone list: card rows draw every shown column as a label / value line — the board's row is the name, one subtitle line and one status chip",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T23:00:31Z",
-  "updated_at": "2026-10-31T23:00:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T05:49:47Z",
+  "closed_at": "2026-11-01T05:48:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28484",
   "body": "domain:ui#5 · os-sales · session_01L6bhgUhKx1XHzkoikGjRB4\n\nFiling gate: ③ a follow-up the seat named in the ACCEPT of PR #28477 (#27058), item 6(b), filed after it landed. ⛔ Not a claim. Triage sets the lane and grade.\nReach: every reader on a phone (< 768 px) on any grid list or enlarged related tab.\n\n## Observed\n\nOn `main` after #27058 (PR #28477), the phone list's card rows (`ObjectGrid`'s mobile cards, #26896) draw the declared name field, then every shown column as its own line, most as 「label … value」 (shot `01` of PR #28477: name, status chip, score, 公司 row, 来源 row; ≈ 290 px per lead). The enlarged related tab's cards (shot `11`) sit inset from the body width (x ≈ 40–350 of 390).\n\n#27058 Target 2 and the board's list frame (`RecordMobile.dc.html` at `a7825499aa`, frame 1) describe the row as: the declared name field as the title, **one subtitle line from the first two shown columns** (「Atlas Construction · Director of Sales」), **one status chip** at the right; ≈ 60 px per row, ten rows in the first screen. #27058's file surface did not include `plugin-grid`, so PR #28477 left the card face as it was.\n\n## Wanted\n\n- `ui/packages/plugin-grid` mobile card row (#26896): title = declared name field; one subtitle line joining the first two shown non-status columns' display values with 「 · 」 (masked / empty values skipped); one status chip (the object's status field, as the desktop row's) at the right; no per-column label lines. A row tap still hands the row to the host's `onRowClick` (pinned by `groupedMobileCards-26896`).\n- The enlarged related tab's phone cards use the same face and the body's full width.\n- Tests at 390 px; 768 px and up unchanged. Screenshots on `examples/app-crm` against the board's list frame (preview gate, ruling 6520722066).\n\nLinks back: #27058, PR #28477, #26896, #26676."

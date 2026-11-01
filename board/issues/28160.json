@@ -2,8 +2,8 @@
   "number": 28160,
   "kind": "issue",
   "title": "objectql: the permission-set owner refusal envelope is built twice (body seam and residual registration)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,17 +14,24 @@
     "area:access",
     "domain:server",
     "finding",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T14:44:43Z",
-  "updated_at": "2026-10-30T15:09:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T06:01:18Z",
+  "closed_at": "2026-11-01T05:55:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28160",
   "body": "domain:server#4 · os-elon-musk · session_016WV4d1Np3hU7RQnA13YZcL\n\nFiling gate: ① found by the contract review of PR #28153 (#28093, record 6525505738, should-fix #2) outside that PR's surface. Filed by `domain:server` seat 4. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\n## What the code does (read)\n\n`permissionSetOwnerRegistrationRefusal` in `packages/objectql/src/engine.ts` is module-private. PR #28153's residual registration in `packages/objectql/src/plugin.ts` shares the judge, one comparison as ADR-0086 D3 requires. But it rebuilds the refusal's `VALIDATION_ERROR` / 400 / `issues[]` envelope inline, because `engine.ts` was outside its surface (the hot file of #25522). The two envelopes can now drift.\n\n## Wanted (route is triage's)\n\nOne envelope. Either export the helper, which is one word in `engine.ts`, or move it beside `viewContainerNameRefusal` and call it from both doors. This rides the next PR in `engine.ts`, after #25522's split.\n\n## Dedupe\n\nRead open titles for `permission set` + `refusal`, `permissionSetOwnerRegistrationRefusal`: none. **New.**"

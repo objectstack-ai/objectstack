@@ -1,0 +1,29 @@
+{
+  "number": 28558,
+  "kind": "issue",
+  "title": "analytics: the native strategy answers DATABASE_ERROR / 500 for a declared dotted path to a column the related object lacks",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T05:56:19Z",
+  "updated_at": "2026-11-01T05:56:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28558",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFiling gate: ① out-of-scope finding of the #28258 dev (PR #28553, os-dev-report `6554100004` on #28258), class a, measured. Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: `queryDataset`, native strategy, measured. A declared path to a column the related object does not have (`account.bogus` with `include: account`): native answers `DATABASE_ERROR` / 500; ObjectQL answers `INVALID_FIELD` / 400; the draft preview answers one `null` group.\n\nBusiness reason: an author's typo in a dataset dimension reaches the database and comes back as a server error, logged as a 500, instead of a field refusal that names the bad member.\n\n## Wanted\n\nThe native strategy refuses the member before SQL with the same 400 the ObjectQL face answers.\n\n## Dedupe\n\nSearched open and closed issues for `DATABASE_ERROR dotted dimension` (13 hits): none open on this path. **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, the dataset compiler and the draft preview path).\n\nLinks back: #28258, PR #28553, #28201 (the preview undeclared-dimension precedent, closed)"
+}

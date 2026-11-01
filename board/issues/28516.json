@@ -1,0 +1,35 @@
+{
+  "number": 28516,
+  "kind": "pull_request",
+  "title": "fix(service-automation): RESUME_CHILD_PENDING's remedy names every run of the suspension chain",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T04:24:44Z",
+  "updated_at": "2026-11-01T05:01:59Z",
+  "closed_at": "2026-11-01T05:01:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T05:01:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28516",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XD327LjMjJZx2oCbKfZMtNc)_\n\nFixes #28202\n\nClause-②: no (message wording only)\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：批处理（`map`）运行的子项运行已消失、又没有 `cancelled` 历史时，恢复会被 `RESUME_CHILD_PENDING`（409）拒绝；拒绝文字里「要结束这批，请取消哪些运行」现在列出整条挂起链上的每一个运行，从 map 自己的运行起，依次往上，直到被恢复的那个运行。\n- **为什么改**：卡 #28202（分诊 6528511645，来自 PR #28176 合同评审 S3/S4）：取消一个运行不会连带取消等它的运行。map 在被恢复运行之下隔了不止一层 `subflow:` 时，旧文字只点名两头，运维照做后中间那层仍然挂着。\n- **风险与回滚**：只改文字。错误码、状态码和合同文字都不变；两层链的文字与改前逐字相同。回滚即 revert。\n- **先看**：`packages/services/service-automation/src/run-resume.ts`（新函数 `waitingRunsClause` 和它在 `continuePastCancelledMapItem` 里的唯一调用处）；`packages/services/service-automation/src/map-cancelled-item-resume.test.ts`（新增两层、三层两条用例）。\n- **两分钟验证**：`pnpm --filter @objectstack/service-automation exec vitest run --maxWorkers=2 src/map-cancelled-item-resume.test.ts` → `Tests 9 passed (9)`。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n`continuePastCancelledMapItem` ended its remedy with \"To end the batch, cancel run 'MAP'\", plus \" and run 'RESUMED', which waits on it\" when nested. It named `link.runId` and the resumed `runId` only. The `chain` it already receives (from `resolveSuspensionChain`, bounded by `MAX_SUSPENSION_CHAIN_DEPTH` = 32) holds every link, so the new helper `waitingRunsClause(chain)` names every run above the map, nearest first:\n\n| Chain | Remedy tail |\n| :--- | :--- |\n| MAP resumed directly | `cancel run 'MAP'` (unchanged) |\n| OUTER → MAP | `cancel run 'MAP' and run 'OUTER', which waits on it` (unchanged, byte for byte) |\n| OUTER → MID → MAP | `cancel run 'MAP' and runs 'MID' and 'OUTER', which wait on it in turn` |\n| deeper | `cancel run 'MAP' and runs 'A', 'B' and 'OUTER', which wait on it in turn` |\n\nThe list needs no cap of its own: the chain walk's depth bound already bounds it. The code (`RESUME_CHILD_PENDING`), the 409 status, the log line and every other sentence of the message are unchanged. `refuseMapItemSkip` (the still-suspended item) names one run to resume, not runs to cancel, so it is untouched.\n\n## Tests\n\nTwo new cases in `map-cancelled-item-resume.test.ts`, inside the existing `#27971` describe and its fixtures:\n\n- **two-level** (OUTER → MAP, item row gone, history `paused`): pins the nested suffix `To end the batch, cancel run 'MAP' and run 'OUTER', which waits on it; `, plus code and nothing moved. Card S4 noted this suffix was not pinned before.\n- **three-level** (OUTER → MID → MAP): pins `... cancel run 'MAP' and runs 'MID' and 'OUTER', which wait on it in turn; `, code, and that the map state and all three suspensions are unchanged.\n\nThe two direct pins (`To end the batch, cancel run '${paused.runId}'`, ≈L183/L200) are untouched and green.\n\n<details><summary>Red first on origin/main 1f1a369b (test only, no fix)</summary>\n\n```\n× names every run of a three-level chain in the remedy, from the map up to the resumed run\nReceived: \"... Nothing was changed. To end the batch, cancel run 'run_6e14…' and run 'run_2655…', which waits on it; if the run history store was unreachable, retry once it is readable\"\nTests  1 failed | 8 passed (9)\n```\nThe base names MAP and OUTER only; MID is missing. The two-level case is green on the base (its text is unchanged).\n</details>\n\n<details><summary>Green and package suite</summary>\n\n- `vitest run src/map-cancelled-item-resume.test.ts` → `Tests 9 passed (9)`, exit 0.\n- Under the verify lock: `pnpm --filter @objectstack/service-automation build && … typecheck && … test` → `Test Files 249 passed (249)`, `Tests 3164 passed (3164)`, `VERDICT command-exit 0`.\n- `eslint packages/services/service-automation --no-inline-config` → exit 0.\n</details>\n\n<details><summary>Ablation (on the fix, committed before the mutation)</summary>\n\nRestored the two-name form through `node scripts/ablation-replace.mjs --hold` on `run-resume.ts` (injected-text count 1, removed-text count 0 on disk). The test imports `./run-resume.js` from `src/` relatively, so no `dist/` build sits on the path. Result: `× names every run of a three-level chain …`, `Tests 1 failed | 8 passed (9)`: the three-level case only. Restored with `--restore` + `git checkout HEAD -- PATH`; `git diff HEAD` empty and the file's hash equals the `HEAD` blob (`3db6ab0c`).\n</details>\n\n## Acceptance notes\n\n- The message's lead still says \"Run 'OUTER' is waiting on run 'MAP'\" in a three-level chain, which is true transitively. The card scoped the change to the remedy, so the lead is left as is.\n\n## Verification\n\nAll read on head `8bb5561b` (same tree `0b745620` as the commit the gate loop ran on before the trailer reword).\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 61 derived families. Each run with its exit code captured before any pipe; `--ran` reconciliation: `✓ 61 derived famil(ies) accounted for — 60 run, 1 NOT-MEASURED`.\n- 60 exit 0. `node scripts/check-plugin-teardown-shape.mjs --self-test` first exited 3 on the shallow clone (positive-control commit unreachable); after `git fetch --depth=1 origin 621a4876…` it exits 0 (`48 cases pass`).\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: PREREQUISITE NOT MET (39 packages outside this diff's build closure have no `dist/`); CI builds the workspace and runs it. The diff changes no export or entry.\n- `test:repo` not run locally (the diff touches no repo-project test); CI Test Core runs it.\n- Families CI runs beyond the derived list: read from this PR's check-runs.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5m4fAx5zTbY8tmNPQm)_\n"
+}

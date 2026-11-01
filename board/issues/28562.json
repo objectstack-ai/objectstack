@@ -1,0 +1,32 @@
+{
+  "number": 28562,
+  "kind": "issue",
+  "title": "Studio: customize a read-only package's view, dashboard or report into <base>.custom — a declared override, its badge, and \"Restore package original\" (replaces #28147)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T05:57:56Z",
+  "updated_at": "2026-11-01T05:57:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28562",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P2, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P2 \"N-17 customize view / dashboard / report (replaces #28147)\". ⛔ Not a claim.\n\nBlocked-by: #28410, #28407\n\nPart of #28236 (P2, child **N-17**) · governs: ADR-0146 D2 (the declaration, badge and revert), D3 (\"Customize\" lands in the pair without asking) · lane: `domain:ui` · size: M.\n\n**Business reason.** An admin wants one more column on HotCRM's Accounts list. Today Studio shows the view greyed and sends them to Setup, which writes a row that never exports. With this card they press Customize in Studio, and the change becomes an item of `hotcrm.custom` that exports with its declaration. \"Restore package original\" brings HotCRM's view back.\n\n**Measured (`35b178bd0a`).**\n- `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`:\n  - `:1598` `readOnly` locks every Interfaces editor on a read-only package;\n  - `StudioReadOnlyLink` (`:831`) sends an overlay-type item to Setup (#27927);\n  - Pending and Publish read the open package (`usePendingDrafts` `:1705`, `publishPackageDrafts` `:1832`).\n- N-13 (PR #28512, open) adds `POST /api/v1/packages/:id/ensure-customization`. `201` means created, `200` present, and a walled tenant admin gets `403`.\n- N-10 (#28507): a read of X serves the pair row that declares `overrides.package` = X first (`metadata-protocol/src/protocol.ts#servedOverlayRowCandidates`). The layered read reports that row in `overlay`.\n- `basedOn` comes from `studio-design/packages-io.ts:182#fetchListedPackageManifests`, whose rows carry `manifest: Record<string, unknown>` (:151–156). That the listed manifest carries `version`: not verified; if it does not, the dev reports the server gap, no client guess.\n\n**WIP `adb2b4c6e6` (#28147, branch `claude/project-thread-3c7skj`).** Reusable:\n- `StudioOverlayControls.tsx`: the chip, and a confirm dialog that says the draft is discarded;\n- the `leafReadOnly` / `listViewReadOnly` split, which unlocks one leaf instead of the whole package;\n- the rail-mark context and the per-item layered-read hook.\n\nNot reusable: its writes target the read-only package's own row, gated on `allowEnvironmentOverlay` (the overlay model D2 superseded).\n\n**Wanted.**\n1. **Customize.** On a read-only base, it appears in the header of a view, dashboard or report item, and of an `object` leaf's list view. For a principal the ensure door refuses, it is disabled in the console's words, from the facts `setup/packagedFlowLedger.ts#useFlowLedgerWalledReadOnly` reads. A server refusal is shown verbatim.\n2. **First saved edit.** It calls the ensure door, with no prompt, then writes a draft into the pair:\n   - the same type and name;\n   - the layered `effective` body, without `_` keys;\n   - `overrides: { package, basedOn }`, where `basedOn` is the base's `manifest.version`.\n   The pair id comes from the ensure response, ⛔ never a local `.custom` spelling. An unedited Customize leaves nothing behind.\n3. **Publish.** On a read-only base, the pending count, the changes panel and Publish act on the pair's drafts. N-09's refusal is shown verbatim.\n4. **Badge.** The header says the item overrides HotCRM. It reads the served declaration, never a computation.\n5. **Restore package original.** On the item menu: confirm, discard the draft, then delete the pair's item (`DELETE /meta/:type/:name` naming the pair). The base reads back. N-16b relies on this door.\n6. **Link.** For these three types, `StudioReadOnlyLink` stops linking to Setup.\n\n**Tests.** One ensure call per first edit. The pair draft carries the declaration and the base is untouched. A second item gets `200`. A walled admin sees Customize disabled. Publish targets the pair. Restore brings back the base's columns. A writable package is unchanged. Each item has an ablation.\n\n**Release safety.** Safe alone: N-09 judges the declaration (#28410), and only N-13 creates the pair (#28407). An unmigrated package-less row stays stored, shadowed by the override on X's reads; #28413's ceremony lists it as shadowed with both ways out.\n\n**Not here.** Rail marks, filter, switcher fold, New (N-19). Flows (N-18). Translations and email templates (N-25). The rest of the link and closing the package-less write (N-16b). Migration (N-16a).\n\n**Dedupe.** #28147 (closed, replaced). Searched `studio customize view custom package`, `restore package original`: only epic siblings.\n\nLinks back: #28236, #28147, #28407, #28410, #28507, ADR-0146 D2, D3.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

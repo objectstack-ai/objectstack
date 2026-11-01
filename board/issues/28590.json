@@ -1,0 +1,32 @@
+{
+  "number": 28590,
+  "kind": "issue",
+  "title": "[Decision] #27293 Done-when: what \"provenance (upstream, commit, sha256)\" means for an MCP connector app, which packages no vendor document",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "needs-user-decision",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T07:06:56Z",
+  "updated_at": "2026-11-01T07:54:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28590",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ② a maintainer decision. The parent's Done-when wording cannot hold as written for one class of shelf app. Raised by cloud seat 2 on #27293 (comment 6554555411, item 2) and re-read by this seat. Child of #27293 (E4). ⛔ Not a claim.\n\n## The question\n\n#27293's Done-when requires: \"each [connector app] with provenance (upstream, commit, sha256) on its listing\". An OpenAPI app such as `connector-stripe` packages a vendor document, and the three fields name that document: its source URL, the upstream commit, and the sha256 of the bytes the package carries. An MCP app such as `connector-github` packages no document. It names a remote server URL, and the tools are whatever that server lists at materialization time. #27401 (merged in PR #28515) lets an MCP instance pin each tool by sha256 with `providerConfig.toolsSnapshot`, but the batch-1 GitHub app does not pin. So what do the three fields mean for an MCP listing?\n\n## Options\n\n- **A. The cloud proposal.** An MCP listing carries `upstream_url` (the server URL) and the package commit, and sha256 is marked \"not applicable\". Done-when is amended to say this.\n- **B. Pin, then hash the pin.** An MCP app on the shelf must ship `providerConfig.toolsSnapshot` for every tool it includes. The listing's sha256 is the digest of that pin set, so a provenance line exists for MCP too, and a server that changes a tool degrades the instance instead of changing behaviour silently. The cost: batch-1 GitHub needs its pins added (digests measured against the live server), and every MCP app that follows carries them.\n- **C. Provenance only where a document is packaged.** Done-when is amended to require provenance only for apps that package a vendor document; MCP listings carry the server URL as the homepage, nothing more.\n\nos-decision-facets\n① 长远：B 让 MCP 与 OpenAPI 应用的来源一律可校验（同一 sha256 语义），A/C 给 MCP 开一个永久特例\n② 拉动：今天撞上的是 cloud 首次入库与 Done-when 验收；板上无客户点名要求 MCP 校验\n③ 防错：B 的工具漂移在服务端变更时响亮降级，A/C 下服务端悄悄改工具，AI 写的流照跑不报\n④ 不扩散：A 不增义务，B 给每个 MCP 应用加一份需维护的锁定，C 收窄验收面\nPrior rulings read: `provenance|sha256|Done-when` on #27293's thread and the 500 most recent issues → 5 hits (#28309, #28279, #28278, #28273, #28262), none ruling the MCP case; ADR none; thread: 6486157794 (E4 phased) does not address MCP provenance\n\n## Seat recommendation\n\n**B.** Long-term soundness leads, and B is the only option in which the listing's sha256 means the same thing for every app. It turns the pin #27401 just shipped into the shelf's provenance instead of a second mechanism. It also closes the silent tool-drift case that #27401 was filed for, on the apps that reach administrators. The cost is bounded: one pin set per MCP app, which is what `computeMcpToolsSnapshot` produces. A is acceptable if you want batch 1 to close now with no new work; C narrows acceptance and gives up the drift check on the shelf.\n\n## Reader\n\nThe maintainer rules. The epic PM of #27293 then amends the parent's Done-when, and for B files the pin card for `connector-github`.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T07:03Z), titles grepped for `provenance|sha256`: 5 hits, none about MCP listings (two signed-auth slices, the normalizer trim card, the cloud pipeline card, an ADR-0143 provenance note). Control `connector`: 53 hits."
+}

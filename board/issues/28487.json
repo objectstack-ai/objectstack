@@ -2,7 +2,7 @@
   "number": 28487,
   "kind": "pull_request",
   "title": "docs(skills): the objectstack-data field-types rule teaches percentDisplay and lookupAutofill, and the fields page teaches lookupAutofill",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T23:31:42Z",
-  "updated_at": "2026-11-01T00:06:46Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-01T03:48:39Z",
+  "closed_at": "2026-11-01T03:48:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-01T03:48:38Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28487",

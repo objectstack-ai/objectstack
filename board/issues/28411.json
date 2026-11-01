@@ -2,8 +2,8 @@
   "number": 28411,
   "kind": "issue",
   "title": "runtime: per-package customization read — for an installed base, its `.custom` overrides, its object extensions and its switched-off items, served rows only, with counts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:studio",
     "domain:server",
     "enhancement",
-    "pm:blocked",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T12:04:39Z",
-  "updated_at": "2026-10-31T14:39:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T09:11:53Z",
+  "closed_at": "2026-11-01T09:09:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28411",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P1, cut after ADR-0146's rewrite merged in #28295) · the read that the landing counts (N-24) and Studio's \"only customizations\" filter and badge (N-19) take their numbers from. ⛔ Not a claim.\n\nBlocked-by: #28409\n\nPart of #28236 (P1, child **N-15**) · governs: ADR-0146 D8 item 4; D2 (badge, customization list, revert, chartered on served facts); D3 (the landing's per-package line) · lane: `domain:server` (`packages/runtime` package domain; declared spec surface: the request and response schemas in `packages/spec`) · size: M.\n\n**Why it waits.** The overrides this read lists must be exactly the ones N-10 serves, so it reuses N-10's served-override predicate rather than adding a second one.\n\n**Business reason.** \"What did we change on HotCRM?\" should have one answer in one place: the items `hotcrm.custom` overrides, the fields it adds to HotCRM's objects, and the HotCRM flows and actions switched off for this deployment. Upgrade reviews, the Studio landing (\"n customized, m switched off\") and the \"only customizations\" filter all need that answer from the server, not pieced together in the browser.\n\n**Measured (`75ecaf4ad8`).**\n- No such read exists. The package routes in `packages/runtime/src/domains/packages.ts` (:1282–2619: list, detail, commits, export, publish, duplicate and others) list nothing per override.\n- Switched-off items: `packages/platform-objects/src/system/sys-metadata-activation.object.ts` stores `metadata_type`, `name`, `package_id` and `active`, unique on `(metadata_type, name)`. Flows report their ledger state through `GET /api/v1/automation/_status` (`packages/runtime/src/domains/automation.ts:3347`). Actions report theirs beside `GET /meta/object` (#27842).\n- Extensions: `packages/objectql/src/registry.ts:5097#getObjectContributors(fqn)` returns each contributor with its `packageId` and `ownership` (`'extend'` for an extension).\n- Overrides: the `.custom` item's `overrides` block (schema from N-08, served by N-10).\n\n**Wanted.**\n1. One read, e.g. `GET /packages/:id/customizations` (the dev settles the path against the route ledger), that answers for base X:\n   - overrides: every item of X's `.custom` that declares `overrides.package = X`, with its type, name, `basedOn` and version;\n   - extensions: every field, validation and index that X's `.custom` contributes to an object X owns;\n   - switched-off: every ledger row with `package_id = X` and `active = false`.\n   Only served rows and ledger rows. No diff and no `basedOn` verdict (D2, D6).\n2. Counts in the same response, derived from those lists.\n3. For an X with no `.custom`: empty lists and 200. The read never creates the pair. An unknown X answers 404. If X is itself a `.custom` package, the request is refused with a message naming its base.\n4. The same read authority as `GET /packages/:id`. Walled postures get no per-organization axis (ADR-0131 D6).\n5. Contract: Zod first in `packages/spec`, then the route ledger, SDK client and OpenAPI are regenerated. The PR fills its `Clause-②` and `Metadata-protocol` lines truthfully.\n\n**Tests.** A fixture base plus `.custom` holding one override, one extension field and one switched-off flow returns all three lists with correct counts. A declaration from a non-pair package is not listed. A base without a pair returns empty lists. A `.custom` id is refused. An agreement test: every listed override is the item N-10's layered read marks as `override`.\n\n**Not here.** The landing UI (N-24). Studio's badge and filter (N-19). \"Restore package original\" (N-17). The new items in `.custom`, which the ordinary list scoped to the pair already serves.\n\n**Dedupe.** #11665 (closed design; ADR-0126 §9 deferred the customization list, and ADR-0146 D2 charters it). Searched `customization list`, `per-package customization list overrides`: no open card.\n\nLinks back: #28236, ADR-0146 D8 item 4, D2, D3, ADR-0126 §9.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

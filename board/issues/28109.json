@@ -2,8 +2,8 @@
   "number": 28109,
   "kind": "issue",
   "title": "service-i18n: a missing translation falls back to the fallback locale, then to the key, with no signal",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T12:57:57Z",
-  "updated_at": "2026-10-30T14:08:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T06:09:43Z",
+  "closed_at": "2026-11-01T06:07:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28109",
   "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: ① out-of-scope finding of the sys_user fold dev (PR #28065, os-dev report on #27858); it carries the \"a missing key falls back loudly\" half of #27869. Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: any locale or key without a bundle entry — the user reads source-language text and nobody (operator, author, CI) is told a translation is missing.\nReader who acts: `domain:server` (`packages/services/service-i18n`).\n\n## What the code does (read, not measured)\n\n`FileI18nAdapter.t` resolves the requested locale, then `fallbackLocale`, and returns the key when neither has it. No log line, counter or diagnostic marks the fallback.\n\n## Wanted (route is triage's)\n\nA fallback that is visible to someone who can fix it — for example a once-per-key warning at runtime, or a diagnostic an author's check can read — without changing what the end user sees. Decide which.\n\n## Dedupe\n\nRead the open titles for `i18n fallback`, `missing translation`, `FileI18nAdapter`, `silent` + `translation`: none. **New.**\n\nLinks back: #27869, PR #28065"

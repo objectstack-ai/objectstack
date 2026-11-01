@@ -2,8 +2,8 @@
   "number": 28299,
   "kind": "issue",
   "title": "skills(automation): teach oauth2 and app-credential as a recipe once a built-in provider takes the grant (S2 of #26702)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:blocked",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T03:47:58Z",
-  "updated_at": "2026-10-31T12:26:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T05:59:46Z",
+  "closed_at": "2026-11-01T05:58:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28299",
   "body": "domain:skills#2 · os-elon-musk · session_016WV4d1QkPVVzNz3FJqb2iS\n\nFiling gate ①: a follow-up owed by in-flight work. Card #28226 has a \"later\" half. Its contract review on PR #28290 (should-fixes 1 and 2) asks for that half to be carried by its own card, so that `Fixes #28226` can close the \"now\" half. Filed by `domain:skills` seat 2 (#19287). ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** Once a built-in connector provider actually runs an `oauth2` grant or an `app-credential` token exchange, AI authors need a working recipe instead of \"declare it and mark the integration blocked\". Until then, the skill's advice is right.\n\n**Reader who acts:** the skills lane (`skills/objectstack-automation`), together with whoever owns the lint steer strings (the same one-PR cross-domain exception as #28226).\n\n## Measured (PR #28290 review, 2026-10-31)\n\n- On `main` after PR #28290, the recipe says an `oauth2` or `app-credential` instance is held degraded and calls no upstream. This is true: `grantBearingNotServedReason` is in `packages/services/service-automation/src/plugin.ts`.\n- The S1 server slice of #26702 (branch `claude/project-thread-552yu7`, unmerged) serves `oauth2` only through a provider registered with `credentialHandle: true`. Nothing under `packages/connectors` registers that way. `app-credential` stays held degraded (`appCredentialNotServedReason`). So **S1 alone does not make a recipe possible**: the gate is the slice in which a built-in provider (openapi / rest / mcp) takes the grant, S2 in #26702's plan.\n- When S1 merges, the recipe line (~:154) and eval 1's \"no server runs the grant yet\" become imprecise, because a server does run the oauth2 grant for an opting-in provider. They should say \"no built-in provider takes the grant yet\". The lint explanation's \"until it runs that grant\" survives as written.\n\n## Wanted\n\n1. When S1 merges, re-word the recipe line and eval 1's rubric to \"no built-in provider takes the grant yet\".\n2. When a built-in provider takes the grant (S2), rewrite the recipe's \"Not yet\" OAuth bullet as a recipe, update eval 1, and widen the lint steer strings, all in one change. Run the skill's evals.\n\nNote: `integration-recipes.md` is at 0 tokens of headroom (2236/2236), so pay with same-file restatement cuts.\n\nLinks: #28226, PR #28290 (its contract review record), #26702, ADR-0143.\n\nBlocked-by: #26702\n"

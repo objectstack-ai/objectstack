@@ -1,0 +1,34 @@
+{
+  "number": 28524,
+  "kind": "pull_request",
+  "title": "fix(console): the sidebar opens on the area that holds the current page",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T04:48:02Z",
+  "updated_at": "2026-11-01T05:40:21Z",
+  "closed_at": "2026-11-01T05:40:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T05:40:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28524",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoJLgrzV2K6nu7KDKZeHnYTf)_\n\nFixes #28497\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：多 area 的应用里，Console 侧栏首次渲染、以及路由跳到当前 area 没有入口指向的页面时，切到\"持有当前页面入口\"的那个 area，并高亮该入口；都没有时保持原规则（当前 area，否则第一个可见 area）。\n- 为什么改：深链、书签或按受众配置的 `landing` 指向第二个 area 的入口时，侧栏仍显示第一个 area 的菜单，读者看到的菜单里没有自己所在的页面。\n- 风险与回滚：只动侧栏选 area 的逻辑；用户自己点选的 area 在其入口仍指向当前页面时不会被覆盖。回滚即 revert 本 PR，侧栏回到总是打开第一个 area。\n- 先看：`ui/packages/app-shell/src/layout/sidebarAreaElection.ts`（选举规则）、`UnifiedSidebar.tsx` 中 `electSidebarArea` 的两处调用（初始状态与路由变化 effect）、新测试文件。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/layout/__tests__/UnifiedSidebar.areaFollowsRoute-28497.test.tsx`，预期 6 passed。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- New `ui/packages/app-shell/src/layout/sidebarAreaElection.ts`: `electSidebarArea(visibleAreas, currentId, route)`. The entry the route addresses is the one `resolveActiveNavItem` (from `@object-ui/layout`) elects, the same match `NavigationRenderer` uses for the row highlight, so no second route matcher exists and the elected area always agrees with the highlighted row.\n  - The current area stays while one of its entries addresses the route (card Wanted 2: a reader's own pick holds).\n  - Otherwise the match runs once over every visible area's entries together, so the most specific entry wins across areas; a tie goes to the earlier area, as it does to the earlier row within one menu.\n  - With no match, the current area stays, else the first visible one (today's rule).\n- `UnifiedSidebar.tsx`: the `useState` initializer and the re-election effect both call `electSidebarArea`; the effect now also runs on `location.pathname` / `location.search` / `context` changes. The route is read only in the `app` context. The navigation template context (`currentUserId`, `currentOrgId`, `contextValues`) is hoisted into one `navTemplateContext` value so the election and both `NavigationRenderer` calls resolve hrefs with the same context; for that the `useAppContextSelectors` call moved above the area block (same hook, same arguments).\n- Root changeset `.changeset/28497-sidebar-area-follows-route.md` (`@object-ui/app-shell` patch).\n\n## Tests\n\nNew `UnifiedSidebar.areaFollowsRoute-28497.test.tsx`, a real `UnifiedSidebar` with real `@object-ui/components` and `@object-ui/layout`, two areas (the second area's target sits inside a group):\n\n1. Route on a second-area entry: the second area is active and its entry highlighted (`data-active=\"true\"`), the first area's menu is not drawn.\n2. Control: route on a first-area entry keeps the first area.\n3. Control: no entry of any area addresses the route: the first area.\n4. Route change to a page only the second area addresses: the sidebar follows.\n5. Card Wanted 2: both areas hold an `account` entry; the reader picks the second area, then opens a record of that object: the pick holds.\n6. A pick of an area that does not address the page holds until the route moves, then the election runs.\n\nAblations (through `scripts/ablation-replace.mjs`, both restored to the HEAD blob, `git diff HEAD` empty):\n\n- Election back to \"keep current, else `visibleAreas[0]`\" (`if (route) {` replaced by `if (false && route) {`): tests 1, 4 and 6 red, 3 passed.\n- Pick-holding line deleted (`if (current && areaAddressesRoute(current, route)) return current.id;`): test 5 red, 5 passed.\n\n## Acceptance notes\n\n- The election reads the area's authored (readable-pruned) navigation, before the Studio-only rewrite that turns the package entry into a `url` row. Studio is one app with no `areas` today, so the difference has no reader; NOT MEASURED against a multi-area Studio, noted, not a finding.\n- Visibility of single entries is not part of the match, exactly as for the highlight, which is computed over the unfiltered item list; areas themselves are only elected among visible ones.\n- The `@objectstack/spec` `AppLandingEntrySchema` docblock sentence \"the sidebar highlights what the reader landed on\" now holds for a target in a later area; no spec edit.\n- Shared files with neighbour cards: only `UnifiedSidebar.tsx` (none of the files #28477 / #28466 / #28496 declare).\n\n## Verification\n\nHead `1038dac7`, worktree off `origin/main` `1f1a369b`.\n\n<details><summary>Local gates and tests</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/layout/__tests__/UnifiedSidebar.areaFollowsRoute-28497.test.tsx packages/app-shell/src/layout/__tests__/UnifiedSidebar.derivedAreaVisibility.test.tsx`: 2 files, 13 passed.\n- `pnpm --dir ui exec vitest run packages/app-shell/src/layout/`: 126 files, 812 passed.\n- `pnpm --filter @object-ui/app-shell run type-check` (after a dts build of `@object-ui/app-shell^...`): exit 0, both `tsc --noEmit` and `tsc -p tsconfig.test.json`.\n- `dispatch-gates --commands`: 34 derived families, all run, all exit 0; `--ran` reconciliation: 34 run, 0 NOT-MEASURED, 0 UNRUN. `check:query-options-erasure` first hit a 280 s wrapper timeout (exit 124) and was re-run without it: exit 0. `node scripts/check-sdui-manifest.mjs` exit 0. `pnpm --dir ui exec vitest run scripts/`: 4901 passed, 2 skipped. `pnpm check:type-check-debt`: exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibz6e1jru1WvD8e9e9E)_\n"
+}

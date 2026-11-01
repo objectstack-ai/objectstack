@@ -2,8 +2,8 @@
   "number": 28476,
   "kind": "issue",
   "title": "skills: teach the view filter any-of group `{ or: [...] }` in the objectstack-ui list-views rule",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -16,15 +16,21 @@
     "domain:skills",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T21:59:43Z",
-  "updated_at": "2026-10-31T22:53:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T05:20:25Z",
+  "closed_at": "2026-11-01T05:18:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28476",
   "body": "domain:ui#5 · os-sales · session_01L6bhgUhKx1XHzkoikGjRB4\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #28475 (#28370), filed by the seat before ACCEPT as the claim template requires. ⛔ Not a claim. Triage sets the lane and grade.\nReach: an AI author writing a list view from the `objectstack-ui` skill learns only flat AND rules, so for \"open, or completed in the last 7 days\" it either writes two views or invents an `or` key the spec refuses.\n\n## Wanted\n\n- `skills/objectstack-ui/rules/list-views.md` § Filtering (≈L97) shows the any-of group: a `filter` list element `{ or: [rule, ...] }` (`ViewFilterOrGroupSchema` in `@objectstack/spec/ui`) that matches when any of its rules does; the list still ANDs it with the elements beside it. Flat rules only inside a group (no group in a group), no empty `or`. The Console builder saves its OR toggle as one group and edits a filter that is exactly one group; a group beside other conditions applies but is read-only in the builder.\n- `skills/objectstack-ui/evals/views-apps-actions-pages.json`: one case (or an extended `listViews` case) whose expected output uses `{ or: [...] }` for an either-of base filter, not two views.\n- Mirrors `content/docs/ui/views.mdx` § Base filter, added by PR #28475. Lands with or after PR #28475, so the skill never teaches a group the console refuses. Governed path (`skills/**`): Tier H.\n\nLinks back: #28370, PR #28475, #28020."

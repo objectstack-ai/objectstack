@@ -1,0 +1,32 @@
+{
+  "number": 28577,
+  "kind": "issue",
+  "title": "skills/docs: the ADR-0126 §1.3 promise pages and the skills teach what ADR-0146 D2 delivers — customizations in <base>.custom, `__c` fields, flow override and \"new similar\", no package-less overlay",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:skills",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T06:04:56Z",
+  "updated_at": "2026-11-01T06:04:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28577",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P3, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P3 \"N-30 skills and docs — the §1.3 promise pages say what D2 delivers\"; ADR-0126 §8 item 5. #28509 is this row's first slice. ⛔ Not a claim.\n\nBlocked-by: #28576, #28509, #28412, #28149, #28563, #28564, #28565\n\nPart of #28236 (P3, child **N-30**) · governs: ADR-0146 D2 (what a customization is), D4, D10, D11; ADR-0126 §1.3 / §8 item 5 · lane: `domain:skills` (`skills/**`, Tier H; general content pages declared in item 1) · size: M.\n\n**Business reason.** The docs promise an installed app can be customized, and describe the pre-epic paths. AI agents read the skills and write the old shapes: a package-less overlay, a field without `__c`, a clone that double-runs.\n\n**Measured (`35b178bd0a`).**\n- §1.3 promise pages, both general content docs:\n  - `content/docs/capabilities/integrations.mdx:18` and `content/docs/build-without-code.mdx:38`: views and dashboards are \"yours to edit directly\"; a packaged flow is switched off and cloned on Setup's packaged automation page; an object grows \"via an extension package\".\n  - Under D2, D4, D9 and D10 all three are superseded: an override in `<base>.custom`, from Studio; the switch on the item; \"new similar\" or a declared flow override; `__c` extension fields in `.custom`.\n- Other pages:\n  - `deployment/install-modes.mdx:16` (\"you customise beside it\");\n  - `data-modeling/object-extensions.mdx:22, :65, :95-104` (tenant field \"not a package extension\"; `fields` replaces a same-named field; prefix advice instead of `__c`);\n  - `concepts/metadata-lifecycle.mdx:157` (the five-type overlay tier);\n  - `permissions/permission-sets.mdx:364, :396-399` (clone as \"your organization's own set\", package-less);\n  - `deployment/cli.mdx` (no `os migrate` row for the overlay ceremony);\n  - `api/metadata-api.mdx` (the package-less write).\n  Not read in detail: `automation/flows.mdx`, `plugins/packages.mdx`.\n- Skills:\n  - `skills/objectstack-data/SKILL.md:376-381` (`defineObjectExtension`: no `__c`, no `.custom`, no patch);\n  - `skills/objectstack-data/references/examples-objects.md:142-170` (\"Edit (overlay)\" lock table);\n  - `skills/objectstack-platform/SKILL.md:113` (\"overlays\").\n  Not measured: `objectstack-automation`, `objectstack-studio-admin` (Setup's metadata admin moves to Studio, D1), `objectstack-ui`.\n- #28509 covers the effective read on `objectstack-platform/SKILL.md`, `references/system/metadata-persistence.mdx`, `references/api/package-api.mdx` and `ui/forms.mdx`. This card adds to those pages; it does not rewrite #28509's teaching.\n\n**Wanted.**\n1. **The §1.3 pages** say what D2 delivers. Every change to an installed package is an item of its `<base>.custom`, exported and deployed like any package and made in Studio. An override is a declaration; an object gains `__c` fields; a flow is overridden or copied with \"new similar\"; the switch is on the item. These two pages are general docs (`domain:devx` by the lane table) and stay in this card because ADR-0126 §8 item 5 asks for one correction; the PM may split them out as their own card.\n2. **Skills teach the code path** for a `.custom` package:\n   - `overrides: { package, basedOn }` only in the pair, with `basedOn` = the base's `manifest.version`, recorded and never judged;\n   - a dependent renames;\n   - the excluded types (permission set, position, capability) use \"new similar\" (N-20a);\n   - `__c` extension fields and the display patch (N-23b, N-23d);\n   - the flow override and its pinning (N-11) and \"new similar\" (N-21);\n   - the `os migrate` ceremony for old package-less rows (#28413).\n3. **The pages in Measured** are corrected; the package-less overlay is no longer taught as a customization path (N-16b refuses it).\n4. Every taught rule cites the card or PR that landed it. ⛔ Nothing is taught before it lands (ADR-0126 §8 item 5: \"not before\").\n\n**Tests.** `pnpm check:skill-identifier-liveness`, `check:docs-spec-enumerations` and `check:docs-audit-scope` pass, and `pnpm docs:build` builds. A docs-accuracy pass (`scripts/docs-audit/affected-docs.mjs`) runs over the touched pages, and each taught sentence is checked against the landed code.\n\n**Release safety.** Docs and skills only, landed after the behaviour they describe (`Blocked-by:`). A release right after it teaches only what that release does.\n\n**Not here.** #28509 (the effective read). QA checklist and live e2e (N-29). ADR text (landed in #28295 / #28486).\n\n**Dedupe.** #28509 (first slice). #26184 (open: audit skills against the protocol since 18.0, general, not this epic). Searched `customize in Studio docs` (44 hits, ADR and epic cards only) and `skills overlay is:open` (22 hits: #28509 and seat cards).\n\nLinks back: #28236, #28509, ADR-0146 D2, D4, D10, D11, ADR-0126 §1.3, §8.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

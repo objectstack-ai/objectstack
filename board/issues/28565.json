@@ -1,0 +1,32 @@
+{
+  "number": 28565,
+  "kind": "issue",
+  "title": "objectql: an object extension's display patch is carried and applied by mergeObjectDefinitions; a patch naming a missing field or option is refused at install and validate",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:server",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T05:59:26Z",
+  "updated_at": "2026-11-01T06:07:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28565",
+  "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P2, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P2 \"N-23a/b/c object extension — the field-patch whitelist\". Split from the review's one-card N-23b: the `__c` doors stay #28564. ⛔ Not a claim.\n\nBlocked-by: #28560\n\nPart of #28236 (P2, child **N-23d**) · governs: ADR-0146 D10 second rule (\"`mergeObjectDefinitions` applies it after the additive merges, and the ADR-0029 D9.2a scalar yield applies to it\") · lane: `domain:server` (`packages/objectql`, `packages/metadata-protocol` read fold) · size: S–M.\n\n**Business reason.** The patch N-23a declares has to reach the screen. \"Industry\" reads \"Sector\" on every form, list and API read of HotCRM's account, and the vendor's field otherwise stays as shipped. A patch aimed at a field that does not exist must be named, never silently ignored.\n\n**Measured (`35b178bd0a`).**\n- `objectql/src/engine.ts:8815-8833`: the manifest loop builds `extDef` from exactly `fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, then calls `registerObject(…, 'extend', priority)`. It is the only `'extend'` registration in `objectql`, `metadata-protocol` and `runtime` (`git grep`).\n- `objectql/src/registry.ts:559-601#mergeObjectDefinitions`: fields are spread, validations merged by name, indexes concatenated. The three scalars yield when `tenantAuthored` holds them (ADR-0029 D9.2a). The fold calls it at about :4140-4170. Removing an extender recomputes through `subtractExtenderContributions` (:5332).\n- `metadata-protocol/src/protocol-object-extender-fold.ts`: the by-name read folds extenders onto a MetadataService body.\n- Registration refusals precedent: `ExtensionMembershipKeysRefusedError` / `ExtensionDefaultRowScopeRefusedError` in `registerObject` (about :3826-3836), before the contributor list opens.\n- `content/docs/data-modeling/object-extensions.mdx:65` documents `fields` replacing a same-named field.\n\n**Wanted.**\n1. **Carry.** `extDef` carries N-23a's slot. The registry fold and the by-name read fold serve it, so the list, the by-name read and the layered read agree.\n2. **Apply.** `mergeObjectDefinitions` applies each patch after the additive merges:\n   - whitelisted keys onto the base field;\n   - option labels onto the option whose stored `value` matches.\n   The patch yields where D9.2a makes the three scalars yield. Two extensions that patch one key: the higher `priority` wins, as for the scalars.\n3. **Target check.** A patch naming a field the target does not have, or an option value the field does not have, is refused:\n   - at both install doors (the installed base is in the registry: ADR-0141 D2 admitted the dependency first);\n   - at `os validate` when the target is in the composed stack.\n   At the boot fold the same patch is not applied and is named once in the log, ⛔ never a boot refusal (AGENTS.md *Startup registry reads*).\n4. Who may patch is not narrowed here: any extension may patch display properties. `.custom` extension fields without `__c` are #28564's refusal.\n5. The slot's `[EXPERIMENTAL — not enforced]` marker and any `planned` liveness row flip to live, citing `mergeObjectDefinitions`. `Metadata-protocol: semantic` (a declared key gains its effect), minor changeset. `object-extensions.mdx` gains the patch beside `fields`.\n\n**Tests.**\n- A patch changes the label, description, help text, placeholder and one option label on all object reads; type, `required` and the option values are unchanged.\n- Uninstalling the extender restores the vendor's text.\n- The D9.2a yield: a tenant-authored label is kept.\n- Priority order between two patching extensions.\n- An unknown field or option value is refused at install and validate, and named at boot without failing it.\n- The existing extension fold tests stay green.\n\n**Release safety.** Display-only and additive. Nothing stored changes, and an extension without a patch folds as before. N-23a in `Blocked-by:` supplies the shape.\n\n**Not here.** The slot (#28560); `__c` at every door (#28564); Studio add-field (#28575). The runtime write door for an `object_extension` item into a writable package (#28574): no such door exists today (`objectql/src/plugin.ts:178-182`, the manifest loop is the only `'extend'` registration). That door hands the registry the whole parsed body, so the carry of item 1 applies to it without a second list.\n\n**Dedupe.** Searched `mergeObjectDefinitions is:open` (2 hits, both seat cards) and `field patch whitelist extension` (on topic: #28236, #28467 only). No card applies the patch.\n\nLinks back: #28236, #28467, ADR-0146 D10, ADR-0029 D9.2a, ADR-0141 D2.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"
+}

@@ -2,8 +2,8 @@
   "number": 28202,
   "kind": "issue",
   "title": "service-automation: RESUME_CHILD_PENDING's no-record refusal names only two runs, so an intermediate subflow run stays parked after the operator follows the remedy",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T16:37:44Z",
-  "updated_at": "2026-10-30T17:00:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T05:10:44Z",
+  "closed_at": "2026-11-01T05:01:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28202",
   "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: ① delta contract review of PR #28176 (#27971, ruling A 6523833308), should-fix S3 + S4 (record 6527998437). Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: an operator resuming a batch (`map`) run whose item run is gone with no `cancelled` history, when the map sits more than one `subflow:` link below the run they resumed (OUTER → MID → MAP; `MAX_SUSPENSION_CHAIN_DEPTH` is 32).\nReader who acts: `domain:server` (`packages/services/service-automation/src/run-resume.ts`).\n\n## What the code does (read, not measured)\n\n`continuePastCancelledMapItem` refuses with 409 `RESUME_CHILD_PENDING` and ends the message with the remedy \"To end the batch, cancel run 'MAP_RUN'\", plus \"and run 'OUTER', which waits on it\" when nested. It names `link.runId` and the resumed `runId` only. Cancellation never cascades, so with an intermediate run between them that run stays parked after the operator cancels both named runs.\n\n## Wanted (route is triage's)\n\n- S3: name every run in the suspension chain in the remedy (or say \"and the runs waiting on it\"). Message text only; the code, status and contract text are unchanged.\n- S4: pin the nested remedy suffix (today only the two-level map-run name is pinned, `map-cancelled-item-resume.test.ts` L183/L200), including a three-level chain.\n\n## Dedupe\n\nRead the open titles for `RESUME_CHILD_PENDING`, `subflow` + cancel, map + chain: none. **New.**\n\nLinks back: #27971, PR #28176"

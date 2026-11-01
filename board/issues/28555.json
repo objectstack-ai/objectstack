@@ -1,0 +1,29 @@
+{
+  "number": 28555,
+  "kind": "issue",
+  "title": "analytics: the dataset draft preview joins nothing, so a backed dotted dimension serves one null group with the whole total",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T05:54:29Z",
+  "updated_at": "2026-11-01T05:54:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28555",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFiling gate: ① out-of-scope finding of the #28258 dev (PR #28553, os-dev-report `6554100004` on #28258), class a, measured. Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: `queryDataset` with `previewDrafts: true` on a pending seed draft, measured on real SQLite at `eeec88d14`. A **backed** dotted dimension (`account.name` with `include: account`), or a dotted spelling that resolves to a declared dimension (`OBJECT.region`, `CUBE.region`), answers one `null` group holding the whole total. Both live strategies (native and ObjectQL) answer the real groups for the same dataset.\n\nBusiness reason: an author previewing a draft dataset before publishing sees one empty group and a total, and cannot tell a correct join from a broken one; after publish the same dataset answers differently.\n\n## Wanted\n\nThe preview answers the same groups the live strategies answer for a backed dotted dimension, or refuses it with the live refusal; never a silent null group.\n\n## Dedupe\n\nSearched open and closed issues for `preview dotted dimension` (23 hits) and `previewDrafts dotted` (4 hits): only #28258 (this family, unbacked half) and #28201 (closed, undeclared dimension). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, the dataset compiler and the draft preview path).\n\nLinks back: #28258, PR #28553, #28201 (the preview undeclared-dimension precedent, closed)"
+}

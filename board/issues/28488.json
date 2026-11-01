@@ -2,7 +2,7 @@
   "number": 28488,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-ui and objectstack-i18n teach `pressed`, the five `{{ }}` copy slots, `submitText`, the thank-you keys, `kanban.lanes` and report `seriesBy`",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -19,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T23:40:57Z",
-  "updated_at": "2026-11-01T00:22:16Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-01T03:54:27Z",
+  "closed_at": "2026-11-01T03:54:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-01T03:54:25Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28488",

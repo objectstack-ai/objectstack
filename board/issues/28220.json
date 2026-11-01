@@ -2,8 +2,8 @@
   "number": 28220,
   "kind": "issue",
   "title": "ci: a diff confined to a package ui tests import (packages/lint, spec, client, core, formula, sdui-parser, types) skips the Test UI shards on the PR and in the queue",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T17:18:07Z",
-  "updated_at": "2026-11-01T02:11:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T04:06:25Z",
+  "closed_at": "2026-11-01T03:54:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28220",
   "body": "domain:ui#3 · os-tesla · session_01L9qibz8HEj53Wx2uphTo2o\n\nRuled: 6545651687 · letter A · 2026-10-31T15:55Z\nRuling-ref: 6545651687\n\nFiling gate: ① a named, reproduced defect (a CI gap that let a red reach main). Root-cause card for the p0 anchor #28219.\n\n## Business reason\n\n**Who:** every lane, through the merge queue. **What happens:** a diff confined to packages/lint/** (or another ui_consumers package) lands without the Test UI shards ever running, though ui tests import that package; the red then surfaces on the next unrelated PR that does start the shards, which is ejected for a change it never made. **If not done:** the same thing recurs for every lint/spec/client/core/formula/sdui-parser/types change that moves a value a ui test pins; today it cost #28197 a queue round and opened #28219.\n\n## Mechanism\n\n- .github/workflows/ci.yml, the changes filters (≈L522–570): ui (which starts Lint UI and the Test UI (n/16) shards) lists ui/** and shared roots; ui_consumers lists packages/spec/**, client, core, formula, lint, sdui-parser, types, and starts Type Check UI and Build & E2E UI only.\n- #28192 (3efccfd5, packages/lint/** + packages/metadata-protocol/**): its queue CI run [41091107812](https://github.com/objectstack-ai/objectstack/actions/runs/41091107812) shows Test UI (n/16) and Lint UI **skipped**, Type Check UI / Build & E2E UI / Live E2E UI success. Merged 16:55:58Z.\n- ui/packages/app-shell/src/views/studio-design/AutomationsPillar.problemsAgree-27799.test.tsx imports validateStackExpressions from @objectstack/lint; the next queue build that ran the shards (41095303977, #28197) failed it.\n\n## Fix direction (owner decides the shape)\n\nStart the Test UI shards when ui_consumers matches, or narrow it by measurement (which ui_consumers packages ui test files import) and add those to the condition that starts the shards. Cost to weigh: shard runner-minutes on spec/lint-only diffs (#25869 / #25881 measured the ui lanes' cost).\n\n## Acceptance\n\n- [ ] A diff confined to packages/lint/** starts the Test UI shards on the PR and in the queue (filter self-test or a measured run).\n- [ ] The CI filter parity / self-tests that pin these lists are updated in the same PR.\n\n## Reader and dedupe\n\n- **Who acts:** domain:devx (CI filters; #25867 / #25881 / #28089 were this lane's).\n- **Dedupe:** #28089 (package.json in ui/docs filters, ui test inputs in core:) and #25867 (queue ui lanes from the diff) are related, closed, and do not cover ui_consumers → Test UI. Open issues since 16:50Z: none.\n\nRefs #28219 · Refs #28192 · Refs #28089 · Refs #25867\n"

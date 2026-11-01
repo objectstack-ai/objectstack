@@ -2,8 +2,8 @@
   "number": 28234,
   "kind": "issue",
   "title": "Flow node palette help in business words: the HTTP and approval node descriptions",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,17 +14,24 @@
     "area:automation",
     "documentation",
     "domain:server",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T18:18:02Z",
-  "updated_at": "2026-10-30T19:07:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T05:36:51Z",
+  "closed_at": "2026-11-01T05:32:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28234",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ Part 2 of #27838 (the producer half of #27356 row 15 and #27521 row 39). The `domain:spec` half lands in PR #28233 (the `approval.zod.ts` describes); the node descriptors are outside `domain:spec`, so the #27838 card thread carried this to the seat in its os-dev-report 6530217232 (`out_of_scope_findings`). ⛔ Not a claim. Triage sets the lane and grade.\nReach: every admin building a flow in Studio reads these as the palette and node-card text (observed on the 18.3.0 RC walkthrough).\n\n## Observed (on `main`)\n\n- `packages/services/service-automation/src/builtin/http-nodes.ts`, the HTTP node descriptor: the description and its config help name the outbox, retry / dead-letter, \"HMAC-SHA256 secret → X-Objectstack-Signature\", \"a literal, read as written\", \"a CEL value envelope\".\n- `packages/plugins/plugin-approvals/src/approval-node.ts` ≈L138: \"Route a record for human approval; suspends the flow until a decision, then continues down the approve / reject branch.\"\n\n## Wanted (proposed wording from the card thread; the taker may improve it)\n\n- HTTP description → \"Send a request to an outside web service: wait for its answer, or hand it off to be delivered in the background with automatic retries.\"\n- `method` → \"The kind of request, such as GET or POST. GET by default; POST when the request is delivered in the background.\"\n- `durable` → \"Deliver the request in the background and keep retrying if it fails, instead of waiting for the answer; the flow does not see the response.\"\n- `timeoutMs` → \"How long to wait for an answer, in milliseconds.\"\n- `signingSecret` → \"A shared secret used to sign each request, so the receiving service can check it came from you (sent as the X-Objectstack-Signature header).\"\n- `body` → \"What to send: a fixed value, or an expression worked out on each run.\"\n- Approval node description → \"Ask people to approve or reject a record. The flow waits for their decision, then continues down the approve or reject path.\"\n- Same rule as PR #28233: business words in the first sentence, no ADR ids, internal field names or enum literals; engineer detail moves to code comments. Keep any hand translations in step.\n\nDedupe words: flow node palette description business words, http node descriptor help, approval node description.\n\nLinks back: #27838, PR #28233, #27356, #27521."

@@ -2,8 +2,8 @@
   "number": 28215,
   "kind": "issue",
   "title": "skills: list the form thank-you translation keys in the objectstack-i18n _views row",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:i18n",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T17:00:23Z",
-  "updated_at": "2026-10-31T23:04:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T04:02:26Z",
+  "closed_at": "2026-11-01T03:54:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28215",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #28195 (#28004), filed by the seat before ACCEPT as the claim template requires. ⛔ Not a claim. Triage sets the lane and grade.\nReach: an AI author translating a public form from the `objectstack-i18n` skill does not learn the thank-you keys, so the panel after submit stays untranslated.\n\n## Wanted\n\n- `skills/objectstack-i18n/SKILL.md` L163, the `_views.{view_name}` row, lists `submitBehavior.title` / `submitBehavior.message` beside the form `title` (a form whose `submitBehavior` is `thank-you`; only authored copy is translated).\n- Contract review 6528389425 S2: land it with, not after, the next edit to the i18n skill. Nothing else waits on it (the key is live in PR #28195; the console draws the served panel). Governed path (`skills/**`): Tier H.\n\nLinks back: #28004, PR #28195.\n\nBlocked-by: #28195\n"
