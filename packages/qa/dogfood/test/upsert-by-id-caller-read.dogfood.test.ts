@@ -265,7 +265,14 @@ describe('upsert by id: a row behind the organization wall answers as a create n
   const stored = async (id: string) => JSON.stringify(await ql.findOne(OBJECT, { where: { id }, context: SYS }));
   const userId = async (email: string) => String((await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id ?? '');
 
+  // A walled deployment must DECLARE its membership policy or it refuses to
+  // boot; invitation-only is the declaration a walled deployment makes, and
+  // every membership below comes from an explicit act (creating an
+  // organization, an admin-added member row).
+  const priorPolicy = process.env.OS_AUTH_MEMBERSHIP_POLICY;
+
   beforeAll(async () => {
+    process.env.OS_AUTH_MEMBERSHIP_POLICY = 'invite-only';
     stack = await bootShowcase({ multiTenant: true });
     adminTok = await stack.signIn();
     ql = await stack.kernel.getServiceAsync('objectql');
@@ -312,6 +319,8 @@ describe('upsert by id: a row behind the organization wall answers as a create n
 
   afterAll(async () => {
     await stack?.stop?.();
+    if (priorPolicy === undefined) delete process.env.OS_AUTH_MEMBERSHIP_POLICY;
+    else process.env.OS_AUTH_MEMBERSHIP_POLICY = priorPolicy;
   });
 
   it('guard the guard: a real walled posture, two organizations, and the wall hides A`s row from B', async () => {
