@@ -1248,7 +1248,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 697 since #28158: the action form's `submitText` row (the verb on the
       // param dialog's submit button) — one row label, authored in all three
       // locales.
-      expect(translated.length, `${locale} positive control`).toBe(697);
+      // 698 since #28574 (ADR-0146 D10): `object_extension` joined the registry
+      // with its type-level display pair, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(698);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
