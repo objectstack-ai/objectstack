@@ -237,9 +237,9 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * EMPTY is this ledger's steady state: every row is a gap the build carries.
  * Two rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
  * gained the call: `findViewContainerNameRefusals` (#20331 → #20393) and
- * `findOverrideDeclarationRefusals` (#28410 → #28643). It holds one today,
- * `findExtensionFieldSuffixRefusals` (#28564), whose card did not name the
- * build.
+ * `findOverrideDeclarationRefusals` (#28410 → #28643). It holds two today,
+ * `findExtensionFieldSuffixRefusals` (#28564) and `findFieldPatchTargetRefusals`
+ * (#28565), whose cards did not name the build.
  */
 const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
   // [#28564] A real gap in the build's direction, reported and not closed —
@@ -251,6 +251,11 @@ const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
   // the save and publish doors refuse the same fields with the same judge.
   findExtensionFieldSuffixRefusals:
     'card #28564 placed the __c reservation at the save/restore/publish doors, os validate, the install doors and duplicate; os build is a further point it did not name (as #28410 left the override gate until #28643). The install and publish doors refuse the same fields with the same judge.',
+  findFieldPatchTargetRefusals:
+    '[ADR-0146 D10, second rule] An object extension\'s `fieldPatches` naming a field or option value its ' +
+    'in-stack target lacks, judged by the marketplace install door\'s own `fieldPatchTargetRefusals`. Wired ' +
+    'where the rollout card asked for it (`os validate` and the install door); `os build` still emits such an ' +
+    'artifact, which the install door then refuses — the build-side gap, reported rather than closed here.',
 };
 
 /**
