@@ -32,7 +32,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decision, from
 // `@objectstack/metadata-core` and NOT `@objectstack/objectql` (objectql
 // depends on this package, so that import would close a cycle).
-import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const TARGET = 'app.probe-target';
@@ -62,7 +62,10 @@ function makeProtocol(rows: Array<Omit<Row, 'id' | 'package_id' | 'organization_
             }
             return [...store.values()].map((r) => ({ ...r }));
         },
-        async findOne() { return null; },
+        async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
+            return null;
+        },
         async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             assertEngineUpdateDispatch(data, opts);
             const row = store.get(String(opts.where.id));
