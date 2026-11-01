@@ -111,6 +111,7 @@
 import { z } from 'zod';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { SCHEMALESS_NODE_CONFIG_SCHEMAS } from '@objectstack/spec/automation';
+import { ObjectExtensionSchema } from '@objectstack/spec/data';
 
 /**
  * One derived fact: an item of `fromType` may name a `target` item through a
@@ -283,9 +284,21 @@ function nameVocabularyRejectsKey(type: DeclaredMetadataType, separator: string)
     return verdict === 'unreadable' || verdict === 'rejects';
 }
 
+/**
+ * A declared type's Zod schema: {@link getMetadataTypeSchema}'s, and for
+ * `object_extension` (#28574) `ObjectExtensionSchema`, the schema its doors
+ * judge it by. That type is deliberately not bound in
+ * `BUILTIN_METADATA_TYPE_SCHEMAS` (the map requires the ADR-0010 envelope,
+ * which would change the schema a manifest's `objectExtensions` parse with),
+ * yet what an extension references is readable off its own schema.
+ */
+function declaredTypeSchema(type: string): z.ZodType | undefined {
+    return getMetadataTypeSchema(type) ?? (type === 'object_extension' ? ObjectExtensionSchema : undefined);
+}
+
 /** A declared type's JSON Schema, or `undefined` when it resolves no schema or cannot be converted. */
 function metadataTypeJsonSchema(type: string): JsonSchemaNode | undefined {
-    const schema = getMetadataTypeSchema(type);
+    const schema = declaredTypeSchema(type);
     if (!schema) return undefined;
     try {
         return z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as JsonSchemaNode;
@@ -576,7 +589,7 @@ export function deriveReferenceSites(): ReferenceSiteIndex {
 
     // Limb 1 — every declared type's own schema.
     for (const type of declaredTypes) {
-        const schema = getMetadataTypeSchema(type);
+        const schema = declaredTypeSchema(type);
         if (!schema) {
             unwalkable.push(type);
             continue;

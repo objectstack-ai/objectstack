@@ -420,6 +420,15 @@ import { classifyObjectContribution, releaseAdoptedObjectOwner } from './protoco
 import { flowSaveReplaysRetired } from './protocol-flow-save-replay.js';
 // [#25467 cut 19] A package write's validation scope: the written package and its declared dependency closure, from the registry.
 import { resolveWritePackageScope } from './protocol-write-package-scope.js';
+// [#28574, ADR-0146 D10] An object extension as an authorable item: the doors' gate, its shape schema, and the body every sync registers.
+import {
+    OBJECT_EXTENSION_ITEM_SCHEMA,
+    OBJECT_EXTENSION_TYPE,
+    objectExtensionItemRefusal,
+    listSlotNameOf,
+    registrableObjectExtension,
+} from './protocol-object-extension-item.js';
+import type { ObjectExtensionRegistry } from './protocol-object-extension-item.js';
 // [#25467 cut 20] The code-layer read through the `metadata` service: package-scoped, singular/plural fallback, a stored object row's copy not counted as code.
 import { readItemFromMetadataService } from './protocol-metadata-service-read.js';
 // [#25467 cut 21] The boot report of the stored overlay rows no read serves because they overlay sealed managed content.
@@ -1061,6 +1070,10 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
  */
 function resolveOverlaySchema(type: string, _item: unknown): z.ZodTypeAny | null {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    // [#28574] `object_extension` has no `BUILTIN_METADATA_TYPE_SCHEMAS` entry
+    // (the spec ruling on the card), so its schema is bound here, the door's
+    // own resolver: `ObjectExtensionSchema` over the body without its envelope.
+    if (singular === OBJECT_EXTENSION_TYPE) return OBJECT_EXTENSION_ITEM_SCHEMA as unknown as z.ZodTypeAny;
     return getMetadataTypeSchema(singular) ?? null;
 }
 
@@ -3138,20 +3151,25 @@ export function mergePackageAwareOverlay(
         return undefined;
     };
 
+    // [#28574] The name an item is slotted under: its own `name`, or an
+    // `object_extension`'s target ({@link listSlotNameOf}).
+    const canonicalType = canonicalMetaUrlType(type);
     for (const raw of baseItems) {
         const item = raw as any;
-        if (item && typeof item === 'object' && 'name' in item) {
-            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item,
+        const itemName = listSlotNameOf(canonicalType, item);
+        if (itemName !== undefined) {
+            push(slotOf(item, itemName), (item._packageId ?? undefined) as string | undefined, item,
                 undefined, unseated?.has(item));
         }
     }
     for (const { data, packageId, stored, standIn } of records) {
         const body = data as any;
-        if (!(body && typeof body === 'object' && 'name' in body)) continue;
+        const bodyName = listSlotNameOf(canonicalType, body);
+        if (bodyName === undefined) continue;
         // The base row this record shadows at its own slot (for view-identity
         // healing): a same-package row, else a package-less one, else any
         // same-slot row it stands in for.
-        const slot = slotOf(body, body.name);
+        const slot = slotOf(body, bodyName);
         const list = buckets.get(slot);
         const prev = list
             ? (list.find((c) => c.pkg === packageId)?.item
@@ -7344,6 +7362,7 @@ export class ObjectStackProtocolImplementation implements
     private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const host: ThisParameterType<typeof restoredBodyWriter> = {
+            objectExtensionItemRefusal: (...a) => this.objectExtensionItemRefusal(...a),
             refuseRestoredBodyTheSaveDoorRefuses: (...a) => this.refuseRestoredBodyTheSaveDoorRefuses(...a),
             restoredBodyDerivation: (...a) => this.restoredBodyDerivation(...a),
         };
@@ -7789,6 +7808,99 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
         };
         return resolveWritePackageScope.call(host, packageId);
+    }
+
+    /**
+     * [#28574, ADR-0146 D10] The save, publish and restore doors' gate for an
+     * `object_extension` body written into `binding` (the RESOLVED package of
+     * the row): {@link objectExtensionItemRefusal}, asked with this engine's
+     * registry and the package's dependency closure
+     * ({@link resolveWritePackageScope}). Any other type answers `undefined`.
+     */
+    private objectExtensionItemRefusal(
+        type: string,
+        item: unknown,
+        name: string,
+        binding: string | null | undefined,
+    ): Error | undefined {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== OBJECT_EXTENSION_TYPE) return undefined;
+        return objectExtensionItemRefusal(OBJECT_EXTENSION_TYPE, {
+            item,
+            name,
+            binding,
+            registry: this.engine?.registry as ObjectExtensionRegistry | undefined,
+            scope: this.resolveWritePackageScope(binding),
+        });
+    }
+
+    /**
+     * [#28574, ADR-0146 D10] Register a stored `object_extension` row as its
+     * package's `'extend'` contributor of the object it names — the WHOLE
+     * parsed body ({@link registrableObjectExtension}), through the registry's
+     * own verb (`SchemaRegistry.registerObjectExtension`). The one call every
+     * sync makes: the write-through ({@link applyRegistryWriteThrough}), the
+     * boot hydration ({@link loadMetaFromDb}) and the read-side and heal
+     * hydrations ({@link hydrateOverlayIntoRegistry}). A row bound to no
+     * package is never registered: the doors refuse to write one, and an
+     * extension needs a contributor id.
+     *
+     * Throws what the parse or the registry refuses, so each caller's own
+     * per-row handling names the row.
+     *
+     * @returns whether the row was registered.
+     */
+    private registerStoredObjectExtension(body: unknown, packageId: string | null | undefined): boolean {
+        if (typeof packageId !== 'string' || packageId === '') return false;
+        const registry = this.engine?.registry as ObjectExtensionRegistry | undefined;
+        if (typeof registry?.registerObjectExtension !== 'function') return false;
+        registry.registerObjectExtension(registrableObjectExtension(body), packageId);
+        return true;
+    }
+
+    /**
+     * [#28574] After an `object_extension` row of `name` is deleted: withdraw
+     * every stored-row extension of the object whose row is no longer stored
+     * (`SchemaRegistry.withdrawObjectExtension`), and re-register the ones that
+     * are. A stored row's contribution is the tenant-authored one
+     * (`_provenance: 'org'`, {@link registrableObjectExtension}); a code
+     * package's manifest extension of the same object is never touched.
+     *
+     * An outage is not an absence: a failed read withdraws nothing.
+     */
+    private async resyncStoredObjectExtensions(name: string): Promise<void> {
+        const registry = this.engine?.registry as ObjectExtensionRegistry | undefined;
+        if (typeof registry?.getObjectContributors !== 'function' || typeof registry.withdrawObjectExtension !== 'function') return;
+        let rows: Array<Record<string, unknown>> | null | undefined;
+        try {
+            rows = await this.findEnvironmentRows('sys_metadata', {
+                where: { type: OBJECT_EXTENSION_TYPE, name, state: 'active' },
+                context: { isSystem: true },
+            });
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+        }
+        const stored = new Map<string, Record<string, unknown>>();
+        for (const row of rows ?? []) {
+            const pkg = boundPackageOf(row.package_id);
+            if (pkg) stored.set(pkg, row);
+        }
+        for (const contributor of registry.getObjectContributors(name)) {
+            if (contributor.ownership !== 'extend') continue;
+            if ((contributor.definition as { _provenance?: unknown } | undefined)?._provenance !== 'org') continue;
+            if (!stored.has(contributor.packageId)) registry.withdrawObjectExtension(name, contributor.packageId);
+        }
+        for (const [pkg, row] of stored) {
+            try {
+                this.registerStoredObjectExtension(
+                    this.convertStoredItem(String(row.type ?? OBJECT_EXTENSION_TYPE), storedRowDocument(row)),
+                    pkg,
+                );
+            } catch (err: any) {
+                console.warn(
+                    `[Protocol] object extension '${name}' of package '${pkg}' could not be re-registered: ${err?.message ?? err}`,
+                );
+            }
+        }
     }
 
     /**
@@ -18703,6 +18815,14 @@ export class ObjectStackProtocolImplementation implements
         // [#6602] ADR-0005 — a per-org overlay is served on demand, never
         // grafted into the registry every org in this process shares.
         if (options.organizationId !== null && options.organizationId !== undefined) return false;
+        // [#28574] An `object_extension` row registers as its package's
+        // `'extend'` contributor of the object it names, never as an item:
+        // the body carries `extend`, not `name`. The boot hydration
+        // ({@link loadMetaFromDb}) and the read-side hydration reach it here.
+        // See {@link registerStoredObjectExtension}.
+        if (canonicalType === OBJECT_EXTENSION_TYPE) {
+            return this.registerStoredObjectExtension(data, options.packageId);
+        }
         if (!data || typeof data !== 'object' || !('name' in data)) return false;
         const registry: any = (this.engine as any)?.registry;
         if (!registry || typeof registry.registerItem !== 'function') return false;
@@ -19481,6 +19601,21 @@ export class ObjectStackProtocolImplementation implements
             await this.applyObjectRegistryMutation(request);
             return;
         }
+        // [#28574] An `object_extension` row is its package's `'extend'`
+        // contributor of the object it names: not org-gated and not
+        // kernel-scope-gated, for the `object` branch's own reason — it adds
+        // columns to an env-wide table and fields to every read of it. Best-effort
+        // like every branch here: the row is already persisted.
+        if (request.type === OBJECT_EXTENSION_TYPE) {
+            try {
+                this.registerStoredObjectExtension(request.item, request.packageId);
+            } catch (err: any) {
+                console.warn(
+                    `[Protocol] registry write-through failed for ${request.type}/${request.name}: ${err?.message ?? err}`,
+                );
+            }
+            return;
+        }
         // [#23298] Whose registry this is — never `environmentId` alone.
         if (!this.registryTakesStoredRows()) return;
         try {
@@ -19668,6 +19803,13 @@ export class ObjectStackProtocolImplementation implements
         // by this same walk. See the header. Ahead of the container's own
         // walk, which returns early from three of its tiers.
         await this.reconcileViewExpansions(type, { container: name, removed: 'every-row' }, organizationId);
+        // [#28574] An `object_extension` has no shadow, baseline or overlay
+        // entry to heal: its rows are `'extend'` contributors. The stored rows
+        // that remain say which stay. See {@link resyncStoredObjectExtensions}.
+        if ((PLURAL_TO_SINGULAR[type] ?? type) === OBJECT_EXTENSION_TYPE) {
+            await this.resyncStoredObjectExtensions(name);
+            return;
+        }
         try {
             const registry: any = this.engine.registry;
             const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -19942,6 +20084,11 @@ export class ObjectStackProtocolImplementation implements
         // hazard because `listDrafts` returns the draft row's stored type
         // verbatim). Guard-only either way: `type` never reaches
         // `syncObjectSchema`, which takes `name` alone.
+        //
+        // [#28574] An `object_extension` row is named by its target, so the
+        // same sync gives the target's table the columns the extension adds —
+        // the DDL path a manifest extension takes at boot, unchanged.
+        if (type === OBJECT_EXTENSION_TYPE) return this.ensureObjectStorage('object', name);
         if (type !== 'object') return;
         try {
             await this.engine.syncObjectSchema(name);
@@ -21783,6 +21930,19 @@ export class ObjectStackProtocolImplementation implements
                     await this.saveWriteBinding(singularType, request, mode),
                 );
                 if (suffixRefusal) throw suffixRefusal;
+            }
+            // [#28574, ADR-0146 D10] …and an `object_extension` body against
+            // its address, on the same binding and with the same envelope: a
+            // package's item, its row name its target, the target registered
+            // and inside the package's closure, the registry's own `extend`
+            // refusals and the `__c` reservation. Draft and publish alike. See
+            // {@link objectExtensionItemRefusal}.
+            {
+                const extensionRefusal = this.objectExtensionItemRefusal(
+                    singularType, request.item, request.name,
+                    await this.saveWriteBinding(singularType, request, mode),
+                );
+                if (extensionRefusal) throw extensionRefusal;
             }
             // [harden] …and a permission set whose NAME another owner already
             // holds, with `NAMESPACE_CONFLICT` / 422: a set's name is its
@@ -23910,6 +24070,16 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, promoteInto,
             );
             if (suffixRefusal) throw suffixRefusal;
+        }
+        // [#28574] …and an `object_extension` draft against its address, judged
+        // against the package promoted into: the target may have left the
+        // registry or the closure since the draft was saved. See
+        // {@link objectExtensionItemRefusal}.
+        if (draftForGate) {
+            const extensionRefusal = this.objectExtensionItemRefusal(
+                singularType, draftForGate.body, request.name, promoteInto,
+            );
+            if (extensionRefusal) throw extensionRefusal;
         }
         // [harden] …and a permission-set draft whose name a DIFFERENT owner
         // already holds by the time it is published: a draft save judged the

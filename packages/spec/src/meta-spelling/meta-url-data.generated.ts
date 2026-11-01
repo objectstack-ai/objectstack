@@ -48,6 +48,8 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "emailTemplates": "email_template",
   "docs": "doc",
   "books": "book",
+  "object_extensions": "object_extension",
+  "objectExtensions": "object_extension",
   "fields": "field",
   "seeds": "seed",
   "external_catalogs": "external_catalog",
@@ -64,6 +66,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
  */
 export const REGISTRY_DECLARED_META_TYPES: ReadonlyArray<string> = Object.freeze([
   "object",
+  "object_extension",
   "field",
   "hook",
   "seed",

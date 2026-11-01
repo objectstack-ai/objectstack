@@ -77,6 +77,7 @@ import { lazySchema } from '../shared/lazy-schema';
 export const MetadataTypeSchema = lazySchema(() => z.enum([
   // Data Protocol
   'object',      // Business entity definition (ObjectSchema)
+  'object_extension', // Fields and rules a package adds to an object another package defines (ObjectExtensionSchema; ADR-0146 D10)
   'field',       // Standalone field definition (FieldSchema)
   // ADR-0088: there is no `trigger` metadata type — sync data-layer logic is a
   // `hook`; async automation is a `record_change` flow.
@@ -803,6 +804,26 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // namespace and are free to evolve. (Mirrors Salesforce: standard objects
   // are not modifiable per-org beyond layout/label; custom objects are full).
   { type: 'object', label: 'Object', filePatterns: ['**/*.object.ts', '**/*.object.yml', '**/*.object.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 10, domain: 'data' },
+  // [ADR-0146 D10, #28574] `object_extension` — an extension of an object
+  // another package defines (`ObjectExtensionSchema`: fields, rules, indexes,
+  // labels, merged by the ObjectQL registry as an `'extend'` contributor) is
+  // an item of the package that writes it: a base's paired `.custom` (Studio's
+  // add-field, N-23c) or any writable package whose dependency closure holds
+  // the target. One item per package per target, stored under the target's
+  // name; its body carries `extend` and no `name`. Draft, publish, history,
+  // rollback and delete are the doors every item uses, and the package's
+  // export carries the item as an `objectExtensions` entry.
+  //
+  // `filePatterns: []`: no loader file holds one on its own. A code package
+  // declares its extensions in `objectExtensions`, which the artifact loader
+  // already stores under this type name. `supportsOverlay` /
+  // `allowEnvironmentOverlay: false`: an extension is never overlaid; a
+  // package changes its own item, and a second package writes a second item.
+  // The body is judged by the metadata-protocol doors with
+  // `ObjectExtensionSchema` itself; this type has no entry in
+  // `BUILTIN_METADATA_TYPE_SCHEMAS` (the ADR-0010 envelope there would change
+  // the schema a manifest's `objectExtensions` parses with).
+  { type: 'object_extension', label: 'Object Extension', description: 'Fields and rules a package adds to an object another package defines', filePatterns: [], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 11, domain: 'data' },
   // [#7893] `field` — the STANDALONE runtime-create door is RETIRED
   // (`allowRuntimeCreate: false`), maintainer ruling 2026-08-12.
   //

@@ -3211,11 +3211,20 @@ context: HttpProtocolContext,
     const exportPluralKeys = Object.keys(PLURAL_TO_SINGULAR).filter(
         (k) => k !== 'datasources' && k !== 'emailTemplates',
     );
+    // [#28574, ADR-0146 D2 / D10] A package's `object_extension` items travel
+    // as its `objectExtensions`, the collection the install door registers as
+    // `'extend'` contributors (`ObjectQL.registerApp`). `PLURAL_TO_SINGULAR`
+    // carries no such pair — an extension merges into its target rather than
+    // registering under a type of its own — so the pair is stated here, where
+    // the item is read back out as the collection entry it is.
+    const EXTENSIONS_KEY = 'objectExtensions';
+    const singularOf = (plural: string): string =>
+        plural === EXTENSIONS_KEY ? 'object_extension' : PLURAL_TO_SINGULAR[plural];
 
     const manifest: Record<string, any> = {};
     let total = 0;
-    for (const plural of exportPluralKeys) {
-        const singular = PLURAL_TO_SINGULAR[plural];
+    for (const plural of [...exportPluralKeys, EXTENSIONS_KEY]) {
+        const singular = singularOf(plural);
         let items: any[] = [];
         try {
             // getMetaItems applies the packageId filter at the
@@ -3249,6 +3258,20 @@ context: HttpProtocolContext,
             if (viewItems.length > 0) manifest[ASSEMBLED_VIEW_ITEMS_KEY] = viewItems;
             total += views.length + viewItems.length;
             continue;
+        }
+        // [#28574] A package's `objects` are the objects it OWNS. The registry
+        // lists an object under every package that contributes to it — the
+        // one that extends it too — served as its owner's merged object
+        // (`_packageId` the owner's). Exported, that would re-install as an
+        // `'own'` claim on another package's object, refused at install
+        // (`ObjectOwnershipConflictError`), and the extender's own fields
+        // travel as its `objectExtensions` entry instead.
+        if (plural === 'objects') {
+            items = items.filter((it) => {
+                const owner = (it as { _packageId?: unknown } | null)?._packageId;
+                return owner === undefined || owner === null || owner === packageId;
+            });
+            if (items.length === 0) continue;
         }
         manifest[plural] = items.map(clean);
         total += items.length;
