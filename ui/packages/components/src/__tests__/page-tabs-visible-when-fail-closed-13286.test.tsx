@@ -37,8 +37,8 @@ import {
   PageVariablesProvider,
   usePageVariables,
   UNRESOLVABLE_VISIBILITY_PREFIX,
-  __resetVisibilityPredicateWarnings,
 } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../react/src/utils/visibilityDiagnostic';
 // Module-scope import (not `beforeAll`) — objectui#3010/#3021.
 import '../renderers';
 

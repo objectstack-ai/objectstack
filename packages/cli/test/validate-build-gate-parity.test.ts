@@ -163,6 +163,12 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // reference tells. Not a registry rule: it reads the filesystem. `os build`
   // then writes the bytes it read into the artifact (`placeSeedFiles`, below).
   'collectSeedFiles',
+  // The OpenAPI document a `provider: 'openapi'` connector names by
+  // package-relative file must name a JSON object under the config's
+  // directory. Not a registry rule: it reads the filesystem. `os build` then
+  // writes the document it read into the entry's `providerConfig.spec`
+  // (`placeConnectorSpecFiles`, below).
+  'collectConnectorSpecFiles',
   // ADR-0141 D2, author side: every `manifest.dependencies` range of the
   // packages one install act delivers, judged by the install's own predicate
   // (`checkDeclaredDependencies`). Not a registry rule: an in-artifact range is
@@ -307,8 +313,12 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // a gate in SHARED_NON_REGISTRY_GATES above — already read and judged into
   // their datasets' `files` maps. It refuses nothing and reports nothing; with
   // no artifact, `os validate` has nowhere to put them.
+  // `placeConnectorSpecFiles` writes the OpenAPI documents
+  // `collectConnectorSpecFiles` — a gate in SHARED_NON_REGISTRY_GATES above —
+  // already read and judged into their entries' `providerConfig.spec`. Same
+  // classification, for the same reasons.
   'Artifact assembly — puts already-collected, already-linted content into the bundle `os build` writes; judges nothing':
-    ['placeCollectedDocs', 'placeSeedFiles'],
+    ['placeCollectedDocs', 'placeSeedFiles', 'placeConnectorSpecFiles'],
   'Presentation — renders, formats or serialises a verdict something else reached; judges nothing':
     [
       'printHeader',

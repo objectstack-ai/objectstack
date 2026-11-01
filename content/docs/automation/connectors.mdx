@@ -131,6 +131,10 @@ only the listed operations become actions). The `spec` takes any of three forms:
 - a **package-relative file path** like `'./specs/billing-openapi.json'`,
   resolved against the directory containing `objectstack.config.ts` and
   **confined to it** — absolute and `..`-escaping paths are rejected.
+  `os build` reads the file and writes its JSON into
+  `dist/objectstack.json` in place of the path, so an artifact installed into
+  another runtime carries the document; a path that names no file, or no JSON
+  object, fails the build.
 
 {/* os:check */}
 ```typescript
