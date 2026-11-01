@@ -86,7 +86,7 @@ function makeBundle(): Bundle {
   return bundle;
 }
 
-function makeAdapter(calls: string[], bundle: Bundle | null) {
+function makeAdapter(calls: string[], bundle: Bundle | null, viewsHeld?: Promise<void>) {
   return {
     clearCache: () => {},
     invalidateCache: () => {},
@@ -101,7 +101,8 @@ function makeAdapter(calls: string[], bundle: Bundle | null) {
         getItems: (type: string, options?: { packageId?: string }) => {
           calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'view' ? VIEWS : type === 'page' ? PAGES : [];
-          return Promise.resolve({ type, items: structuredClone(all) });
+          const answer = { type, items: structuredClone(all) };
+          return type === 'view' && viewsHeld ? viewsHeld.then(() => answer) : Promise.resolve(answer);
         },
         getItem: (type: string, name: string) => {
           calls.push(`${type}/${name}`);
@@ -112,7 +113,7 @@ function makeAdapter(calls: string[], bundle: Bundle | null) {
   } as unknown as Parameters<typeof MetadataProvider>[0]['adapter'];
 }
 
-function mount(opts: { bundle?: Bundle | null; enterInEffect?: Bundle } = {}) {
+function mount(opts: { bundle?: Bundle | null; enterInEffect?: Bundle; viewsHeld?: Promise<void> } = {}) {
   const calls: string[] = [];
   const bundle = opts.bundle === undefined ? makeBundle() : opts.bundle;
   let ctx: Ctx | null = null;
@@ -131,7 +132,7 @@ function mount(opts: { bundle?: Bundle | null; enterInEffect?: Bundle } = {}) {
     return null;
   }
   render(
-    <MetadataProvider adapter={makeAdapter(calls, bundle)}>
+    <MetadataProvider adapter={makeAdapter(calls, bundle, opts.viewsHeld)}>
       <Probe />
       <Enter />
     </MetadataProvider>,
@@ -259,7 +260,8 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
   });
 
   it('a bundled object keeps the bundle\'s views while a scope that asks an outside object reads the list', async () => {
-    const m = mount();
+    let release: () => void = () => {};
+    const m = mount({ viewsHeld: new Promise<void>((r) => { release = r; }) });
     act(() => m.bundle.enter());
     await act(async () => { await m.bundle.land(); });
     const asked = ['b28645_plan', 'b28645_outside'];
@@ -268,6 +270,8 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
     const loading = m.ctx().readObjectScope!({ packageId: PKG, names: asked });
     const planWhileLoading = (loading.objects as Doc[]).find((o) => o.name === 'b28645_plan') as { listViews?: Record<string, unknown> };
     expect(planWhileLoading.listViews?.['b28645_plan.all']).toBeDefined();
+    expect(loading.settled).toBe(false);
+    await act(async () => { release(); });
     await waitFor(() => expect(m.ctx().readObjectScope!({ packageId: PKG, names: asked }).settled).toBe(true));
   });
 
