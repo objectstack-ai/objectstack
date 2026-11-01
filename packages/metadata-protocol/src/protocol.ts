@@ -16509,7 +16509,7 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof refusePackagedBaseOverride> = {
             isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
             isWritablePackage: (...a) => this.isWritablePackage(...a),
-            lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
+            packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
         };
         return refusePackagedBaseOverride.call(host, request);
     }
@@ -16531,6 +16531,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private overrideWriteVerdict(request: OverrideWriteSubject): OverrideWriteVerdict {
         const host: ThisParameterType<typeof overrideWriteVerdict> = {
+            isWritablePackage: (...a) => this.isWritablePackage(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
@@ -20553,8 +20554,16 @@ export class ObjectStackProtocolImplementation implements
         // no override channel is refused. An admitted declaration is the
         // pair's own row: the sealed refusal does not apply to it, and the
         // store is told a runtime-only write (both below).
+        //
+        // A refused DECLARATION throws here. An undeclared same name throws
+        // just before the store is asked (below), after every refusal this
+        // door already answered for that write, so no existing refusal's code
+        // or status changes (a view container's name collision keeps its
+        // 400, a lock its ITEM_LOCKED).
         const overrideVerdict = this.overrideWriteVerdict(request);
-        if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
+        if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
+            throw overrideWriteRefusalError(overrideVerdict);
+        }
         const declaredOverride = overrideVerdict.verdict === 'admit';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
@@ -21719,6 +21728,9 @@ export class ObjectStackProtocolImplementation implements
         // Callers that pass an explicit `parentVersion` (e.g. Studio after
         // reading an item) get true optimistic-lock conflict detection
         // surfaced as a 409.
+        // [ADR-0146 D2] The override write gate's undeclared-same-name
+        // refusal (see the gate above): the last refusal before the store.
+        if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
         // [ADR-0146 D2] An admitted declared override writes the pair's own
@@ -23294,14 +23306,18 @@ export class ObjectStackProtocolImplementation implements
         // `repo.promoteDraft` writes, so a batch publish aborts on it as on the
         // refusals above. An admitted declaration is promoted as the pair's own
         // row (the runtime-only intent below).
-        let declaredOverride = false;
-        if (draftForGate) {
-            const overrideVerdict = this.overrideWriteVerdict({
+        // As at the save door, a refused declaration throws here and an
+        // undeclared same name just before the store promotes (below), so no
+        // refusal this door already answered changes its code.
+        const overrideVerdict: OverrideWriteVerdict = draftForGate
+            ? this.overrideWriteVerdict({
                 type: singularType, name: request.name, packageId: promoteInto, item: draftForGate.body,
-            });
-            if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
-            declaredOverride = overrideVerdict.verdict === 'admit';
+            })
+            : { verdict: 'not_concerned' };
+        if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
+            throw overrideWriteRefusalError(overrideVerdict);
         }
+        const declaredOverride = overrideVerdict.verdict === 'admit';
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet
         // one by the time it is published, since the save door judged only the
@@ -23413,6 +23429,8 @@ export class ObjectStackProtocolImplementation implements
             })
             : [];
 
+        // [ADR-0146 D2] The override write gate's undeclared-same-name refusal.
+        if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';

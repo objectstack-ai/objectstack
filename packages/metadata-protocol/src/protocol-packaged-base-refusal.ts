@@ -57,14 +57,14 @@ export interface PackagedBaseRefusalHost {
     isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
     isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
     packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
-    lookupArtifactItem: ObjectStackProtocolImplementation['lookupArtifactItem'];
+    packagedArtifactOwner: ObjectStackProtocolImplementation['packagedArtifactOwner'];
     resolveWritePackageScope: ObjectStackProtocolImplementation['resolveWritePackageScope'];
     shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#refusePackagedBaseOverride`; the method's docblock there is its contract. */
 export function refusePackagedBaseOverride(
-    this: Pick<PackagedBaseRefusalHost, 'isSealedManagedItem' | 'isWritablePackage' | 'lookupArtifactItem'>,
+    this: Pick<PackagedBaseRefusalHost, 'isSealedManagedItem' | 'isWritablePackage' | 'packagedArtifactOwner'>,
     request: { type: string; name: string; packageId?: string | null },
 ): void {
     if (this.isSealedManagedItem(request.type, request.name)) {
@@ -142,10 +142,7 @@ export function refusePackagedBaseOverride(
         // exactly that declaration, so the seal is no longer the whole story.
         const err = new Error(
             managedItemSealedSentence(request.type, request.name, 'save')
-            + sealedDeclareOrRenameTail(
-                request.type,
-                (this.lookupArtifactItem(request.type, request.name) as { _packageId?: unknown } | undefined)?._packageId,
-            ),
+            + sealedDeclareOrRenameTail(request.type, this.packagedArtifactOwner(request)),
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
@@ -366,7 +363,7 @@ export function overrideWriteRefusalError(
  * then asks {@link judgeOverrideWrite}.
  */
 export function overrideWriteVerdict(
-    this: Pick<PackagedBaseRefusalHost, 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
+    this: Pick<PackagedBaseRefusalHost, 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
     request: OverrideWriteSubject,
 ): OverrideWriteVerdict {
     const packageId = typeof request.packageId === 'string' && request.packageId.length > 0
@@ -386,7 +383,13 @@ export function overrideWriteVerdict(
         : Array.from(new Set(
             this.shippedArtifactsOf(request.type, request.name)
                 .map((a) => (a as { _packageId?: unknown } | null | undefined)?._packageId)
-                .filter((id): id is string => typeof id === 'string' && dependencies.includes(id)),
+                // An override replaces an item of an INSTALLED, read-only base
+                // (ADR-0146 D1): a writable package's item is edited in place
+                // (ADR-0070), so a writable shipper is no base this gate guards.
+                // Every artifact a kernel serves is registered read-only
+                // (`registerApp` → `manifests`), so this keeps no real base out.
+                .filter((id): id is string => typeof id === 'string' && dependencies.includes(id)
+                    && !this.isWritablePackage(id)),
         ));
     return judgeOverrideWrite(request, { dependencies, shippers });
 }
