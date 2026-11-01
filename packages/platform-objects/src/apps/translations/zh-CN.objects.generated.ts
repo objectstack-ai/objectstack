@@ -848,7 +848,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "重新发送邀请",
-        description: "要重新发送邀请给 {{ record.email }} 吗？邀请的有效期将重新计算。",
+        description: "要重新发送邀请给 {{ record.email }} 吗？有效期将重新计算；已过期的邀请会被一份新邀请取代。",
         successMessage: "邀请已重新发送",
         outcomeMessages: {
           sent: "已向 {{ result.email }} 重新发送邀请",
