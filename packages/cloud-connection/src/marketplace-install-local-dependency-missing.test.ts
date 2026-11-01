@@ -180,6 +180,29 @@ describe('POST install-local: ADR-0141 D2 refuses an unsatisfied dependency, and
     });
 });
 
+describe('[#28535] a compiled artifact as `os package install <file>` sends it: the check reads its nested manifest', () => {
+    /** The body `packages/cli/src/commands/package/install.ts` builds: the artifact, `id` and `version` lifted beside its nested manifest. */
+    const cliInstallBody = (manifest: Record<string, any>) => {
+        const artifact = { manifest, objects: [{ name: 'psa_task', label: 'Task', fields: { name: { type: 'text', label: 'Name' } } }] };
+        return { manifest: { ...artifact, id: artifact.manifest.id, version: artifact.manifest.version } };
+    };
+
+    it('refuses an absent dependency the compiled artifact declares, and installs nothing', async () => {
+        const h = await mount(dir);
+        expectDependencyRefusal(await h.install(cliInstallBody(PSA)), [
+            { packageId: 'com.example.psa', dependency: 'com.example.sales', range: '6.x', found: 'absent' },
+        ]);
+        expectNothingWritten(h);
+    });
+
+    it('lit control: installs once the dependency is installed inside the range', async () => {
+        const h = await mount(dir, { 'com.example.sales': '6.2.0' });
+        const res = await h.install(cliInstallBody(PSA));
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(h.installRegistrations()).toHaveLength(1);
+    });
+});
+
 describe('POST install-local: a multi-package artifact judges each entry, presence-only inside the artifact', () => {
     const artifact = (ordersDeps: Record<string, string>) => ({
         id: 'com.example.multi', name: 'Multi', version: '1.0.0', scope: 'project', type: 'app',

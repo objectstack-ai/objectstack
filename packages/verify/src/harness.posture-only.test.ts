@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three in-process bootStack boots, no two the same setup (posture-only with no posture in the environment, read by three cases; posture-only under an explicit group posture; the default single boot), the first paying the file's first-boot cost; slowest CI reading 13.8 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up; read before the three identical posture-only boots became one
 //
 // [#5261] `bootStack({ multiTenant: 'posture-only' })` — the stand-in that
 // activates the tenancy POSTURE without the enterprise runtime this package may
@@ -22,7 +23,7 @@
 // no enterprise package at all, and a mocked one standing by would make that
 // claim untestable: green whether or not the option actually stands alone.
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll } from 'vitest';
 import { bootStack } from './harness.js';
 
 const app = {
@@ -51,60 +52,66 @@ afterEach(() => {
 const BOOT_TIMEOUT = 120_000;
 
 describe("bootStack multiTenant: 'posture-only' (#5261)", () => {
-  it(
-    'resolves a real, NON-DEGRADED isolated posture with no enterprise package installed',
-    async () => {
+  // The first three cases read ONE boot (#23181): the same app, the same
+  // options and no posture in the environment, so three boots were the same
+  // setup three times. The boot runs in the hook and every reading is taken
+  // there, while the stack is up (and the posture after `stop()`); a case
+  // measures behaviour, never loading.
+  describe('one posture-only boot with no OS_TENANCY_POSTURE set', () => {
+    let envBeforeBoot: string | undefined;
+    let envWhileUp: string | undefined;
+    let envAfterStop: string | undefined;
+    let tenancy: TenancyShape;
+    let orgScoping: unknown;
+
+    beforeAll(async () => {
+      envBeforeBoot = process.env.OS_TENANCY_POSTURE;
       const stack = await bootStack(app, { multiTenant: 'posture-only' });
       try {
-        const tenancy = await stack.kernel.getServiceAsync<TenancyShape>('tenancy');
-        expect(tenancy.requestedPosture).toBe('isolated');
-        expect(tenancy.posture).toBe('isolated');
-        expect(tenancy.isolationActive).toBe(true);
-        // The load-bearing assertion. `degraded` is exactly "a wall was asked
-        // for and could not be stood up" — the ADR-0093 D5 state #5261 refuses
-        // to create organizations in. If the stand-in ever stopped registering
-        // `org-scoping`, the posture would fall back to `single` + degraded and
-        // every fixture booting this way would 403 with no explanation.
-        expect(tenancy.degraded).toBe(false);
+        envWhileUp = process.env.OS_TENANCY_POSTURE;
+        const live = await stack.kernel.getServiceAsync<TenancyShape>('tenancy');
+        tenancy = {
+          posture: live.posture,
+          requestedPosture: live.requestedPosture,
+          isolationActive: live.isolationActive,
+          degraded: live.degraded,
+        };
+        orgScoping = await stack.kernel.getServiceAsync('org-scoping');
       } finally {
         await stack.stop();
       }
-    },
-    BOOT_TIMEOUT,
-  );
+      envAfterStop = process.env.OS_TENANCY_POSTURE;
+    }, BOOT_TIMEOUT);
 
-  it(
-    'registers the `org-scoping` service — the one fact the open core probes',
-    async () => {
-      const stack = await bootStack(app, { multiTenant: 'posture-only' });
-      try {
-        // Named explicitly because it is a CONTRACT with the enterprise package,
-        // not an implementation detail: `TenancyService.probeIsolation`,
-        // SecurityPlugin's RLS-strip decision and `requiresService` nav gating
-        // all key on this exact service name. A stand-in registering it under
-        // any other name would satisfy none of them.
-        const orgScoping = await stack.kernel.getServiceAsync('org-scoping');
-        expect(orgScoping).toBeTruthy();
-      } finally {
-        await stack.stop();
-      }
-    },
-    BOOT_TIMEOUT,
-  );
+    it('resolves a real, NON-DEGRADED isolated posture with no enterprise package installed', () => {
+      expect(tenancy.requestedPosture).toBe('isolated');
+      expect(tenancy.posture).toBe('isolated');
+      expect(tenancy.isolationActive).toBe(true);
+      // The load-bearing assertion. `degraded` is exactly "a wall was asked
+      // for and could not be stood up" — the ADR-0093 D5 state #5261 refuses
+      // to create organizations in. If the stand-in ever stopped registering
+      // `org-scoping`, the posture would fall back to `single` + degraded and
+      // every fixture booting this way would 403 with no explanation.
+      expect(tenancy.degraded).toBe(false);
+    });
 
-  it(
-    'restores OS_TENANCY_POSTURE on stop(), like the real multiTenant path',
-    async () => {
-      expect(process.env.OS_TENANCY_POSTURE).toBeUndefined();
-      const stack = await bootStack(app, { multiTenant: 'posture-only' });
-      expect(process.env.OS_TENANCY_POSTURE).toBe('isolated');
-      await stack.stop();
+    it('registers the `org-scoping` service — the one fact the open core probes', () => {
+      // Named explicitly because it is a CONTRACT with the enterprise package,
+      // not an implementation detail: `TenancyService.probeIsolation`,
+      // SecurityPlugin's RLS-strip decision and `requiresService` nav gating
+      // all key on this exact service name. A stand-in registering it under
+      // any other name would satisfy none of them.
+      expect(orgScoping).toBeTruthy();
+    });
+
+    it('restores OS_TENANCY_POSTURE on stop(), like the real multiTenant path', () => {
+      expect(envBeforeBoot).toBeUndefined();
+      expect(envWhileUp).toBe('isolated');
       // A leaked posture would silently change the NEXT boot in this worker —
       // the failure mode that makes env-driven fixtures order-dependent.
-      expect(process.env.OS_TENANCY_POSTURE).toBeUndefined();
-    },
-    BOOT_TIMEOUT,
-  );
+      expect(envAfterStop).toBeUndefined();
+    });
+  });
 
   it(
     'never overrides an explicit caller-provided OS_TENANCY_POSTURE',

@@ -114,7 +114,7 @@ function nonEmptyString(value: unknown): string | undefined {
  * Anything that does not read as a date answers `false`, as the vendor's own
  * `new Date(expiresAt) > new Date()` check does.
  */
-function isBeforeExpiry(expiresAt: unknown): boolean {
+export function isBeforeExpiry(expiresAt: unknown): boolean {
   if (!(expiresAt instanceof Date) && typeof expiresAt !== 'string' && typeof expiresAt !== 'number') return false;
   const ms = new Date(expiresAt).getTime();
   return Number.isFinite(ms) && ms > Date.now();

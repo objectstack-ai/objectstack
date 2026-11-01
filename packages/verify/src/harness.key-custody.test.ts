@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: five in-process bootStack boots, each the subject of its cases and no two the same setup (an empty key home, a key file already in the home, an OS_SECRET_KEY in the environment, and a restart pair over one database file), every boot in a hook and none warmed up at module scope; slowest CI reading 14.2 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
 //
 // [#21499] `bootStack` never creates key material in the key home, and never
 // seals under a real key the host already holds.

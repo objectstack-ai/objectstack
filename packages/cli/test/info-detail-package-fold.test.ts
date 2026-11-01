@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: six source-CLI spawns in one beforeAll, one per distinct (project, face) pair (`os info --json` and `os info` on the option-B, top-level and two-package projects); slowest CI reading 14.8 s (run 41217827347) of the five scheduled ci.yml runs 41199450735 to 41271604267 (slice 23's offender table), x 1.25, rounded up
 
 /**
  * #17790 — `os info`'s four DETAIL reads went through the top level alone, so
@@ -64,9 +65,12 @@ import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
-/** The SOURCE entry — this suite must not depend on `packages/cli/dist`. */
+/**
+ * The SOURCE entry — this suite must not depend on `packages/cli/dist`. Spawned
+ * with this node binary rather than through the `tsx` wrapper, as
+ * `metadata-type-schema-gate.test.ts` does: same entry, same `src/`.
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const MANIFEST = {
   id: 'com.example.ob',
@@ -172,7 +176,7 @@ interface Run {
 function runInfo(cwd: string, argv: readonly string[]): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, 'info', ...argv],
       { cwd, maxBuffer: 32 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
