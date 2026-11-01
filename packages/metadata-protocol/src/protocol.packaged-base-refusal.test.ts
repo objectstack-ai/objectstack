@@ -27,6 +27,7 @@
  * this package.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
@@ -537,12 +538,14 @@ describe('the override write gate — only the base\'s paired .custom declares a
             // A booted code package is read-only (`isWritablePackage` reads `manifests` first).
             manifests: new Map([[BASE, {}]]),
             async findOne(table: string, opts: { where: Record<string, unknown> }) {
+                assertEngineFindOnePredicate(table, opts);
                 if (table !== 'sys_metadata') return null;
                 return findRow(opts.where)?.row ?? null;
             },
-            async find(table: string, opts?: { where?: Record<string, unknown> }) {
+            async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
                 if (table !== 'sys_metadata') return [];
-                return Array.from(rows.values()).filter((r) => matches(r, opts?.where ?? {}));
+                const hits = Array.from(rows.values()).filter((r) => matches(r, opts?.where ?? {}));
+                return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
             },
             async insert(table: string, data: Record<string, unknown>) {
                 if (table !== 'sys_metadata') return { id: 'side_effect_skip' };
@@ -552,6 +555,7 @@ describe('the override write gate — only the base\'s paired .custom declares a
                 return { id: row.id };
             },
             async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+                assertEngineUpdateDispatch(data, opts);
                 const found = findRow(opts.where);
                 if (!found) return { id: null };
                 const merged = { ...found.row, ...(data as unknown as GateRow) };
@@ -560,6 +564,7 @@ describe('the override write gate — only the base\'s paired .custom declares a
                 return { id: found.row.id };
             },
             async delete(_t: string, opts: { where: Record<string, unknown> }) {
+                assertEngineDeleteDispatch(opts);
                 const found = findRow(opts.where);
                 if (!found) return { deleted: 0 };
                 rows.delete(found.key);
