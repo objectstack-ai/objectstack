@@ -15,7 +15,9 @@
  * code and installed packages are listed last: they open for browsing, and each
  * card points at the routes that customize one (objectui#11808). Writability is
  * the server's verdict read by packages-io (`PkgEntry.writable`, ADR-0070 D2),
- * and the server's write gate stays the authority.
+ * and the server's write gate stays the authority. Each read-only base's card
+ * says what this deployment changed on it, "n customized, m switched off"
+ * (ADR-0146 D3), from the server's per-package customization read.
  */
 
 import * as React from 'react';
@@ -28,6 +30,8 @@ import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { PackageFormDialog } from '../metadata-admin/PackageFormDialog.js';
 import { isMarketplaceEnabled } from '../../runtime-config.js';
 import { fetchPackages, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
+import { fetchPackageCustomizationCounts, type PackageCustomizationCounts } from './packageCustomizations-io.js';
+import { customizationPackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
@@ -63,6 +67,18 @@ export const packagedAutomationPath = () =>
 
 /** objectui#11863 — how many recent packages the landing lists: one row of cards. */
 const RECENT_PACKAGES_SHOWN = 3;
+
+/**
+ * ADR-0146 D3 — one read-only base's customization line, by the state of its
+ * read. No entry means the read has not answered: the line shows no number.
+ */
+type CustomizationLine =
+  | { kind: 'read'; counts: PackageCustomizationCounts }
+  | { kind: 'failed'; message: string };
+
+/** A package's Studio address on one pillar, the way `open` below spells it. */
+const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
+  `/studio/${encodeURIComponent(packageId)}/${pillar}`;
 
 export function BuilderLanding(): React.ReactElement {
   const navigate = useNavigate();
@@ -122,6 +138,100 @@ export function BuilderLanding(): React.ReactElement {
 
   const writable = pkgs?.filter((p) => p.writable) ?? [];
   const readonly = pkgs?.filter((p) => !p.writable) ?? [];
+
+  // ADR-0146 D3 — each read-only BASE's card carries "n customized, m switched
+  // off", the server's counts (`GET /packages/:id/customizations`), one read
+  // per card drawn. A pair (`<base>.custom`) draws no line and is never sent:
+  // the route refuses its id. The page does not wait for these reads. The
+  // effect is keyed on the joined ids, the primitive it reads (ui/AGENTS.md #10).
+  const customizationTargetKey = readonly
+    .filter((p) => !isCustomizationPackage(p.id))
+    .map((p) => p.id)
+    .join('\n');
+  const [customizationLines, setCustomizationLines] = React.useState<Record<string, CustomizationLine>>({});
+  React.useEffect(() => {
+    if (!customizationTargetKey) return;
+    let cancelled = false;
+    for (const id of customizationTargetKey.split('\n')) {
+      fetchPackageCustomizationCounts(id).then(
+        (counts) => {
+          if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'read', counts } }));
+        },
+        (e: unknown) => {
+          const message = e instanceof Error ? e.message : String(e);
+          if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'failed', message } }));
+        },
+      );
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [customizationTargetKey]);
+  // The pair is linked only when the package list holds it: a base with no
+  // pair has nothing to open, and the read never creates one.
+  const listedIds = new Set(pkgs?.map((p) => p.id) ?? []);
+  const listedPairOf = (baseId: string): string | null => {
+    const pair = customizationPackageId(baseId);
+    return pair.ok && listedIds.has(pair.value) ? pair.value : null;
+  };
+
+  const renderCustomizationLine = (baseId: string): React.ReactNode => {
+    if (isCustomizationPackage(baseId)) return null;
+    const line = customizationLines[baseId];
+    const lineClass = 'text-[10px] leading-4 text-muted-foreground';
+    if (!line) {
+      return (
+        <p data-testid="studio-landing-customizations" data-state="loading" className={lineClass}>
+          {t('engine.studio.landing.customizations.loading', locale)}
+        </p>
+      );
+    }
+    if (line.kind === 'failed') {
+      // Never a "0": the read did not answer. The server's sentence is the title.
+      return (
+        <p
+          data-testid="studio-landing-customizations"
+          data-state="failed"
+          title={line.message}
+          className={`${lineClass} italic opacity-80`}
+        >
+          {t('engine.studio.landing.customizations.failed', locale)}
+        </p>
+      );
+    }
+    const pair = listedPairOf(baseId);
+    const customized = tFormat('engine.studio.landing.customizations.customized', locale, {
+      customized: line.counts.customized,
+    });
+    const linkClass = 'hover:text-foreground hover:underline';
+    return (
+      <p data-testid="studio-landing-customizations" data-state="read" className={lineClass}>
+        {pair ? (
+          <Link
+            to={studioPillarPath(pair, 'data')}
+            title={tFormat('engine.studio.landing.customizations.pairTitle', locale, { pair })}
+            data-testid="studio-landing-customizations-pair"
+            className={linkClass}
+          >
+            {customized}
+          </Link>
+        ) : (
+          <span>{customized}</span>
+        )}
+        {t('engine.studio.landing.customizations.separator', locale)}
+        <Link
+          to={studioPillarPath(baseId, 'automations')}
+          title={t('engine.studio.landing.customizations.switchedOffTitle', locale)}
+          data-testid="studio-landing-customizations-switched-off"
+          className={linkClass}
+        >
+          {tFormat('engine.studio.landing.customizations.switchedOff', locale, {
+            switchedOff: line.counts.switchedOff,
+          })}
+        </Link>
+      </p>
+    );
+  };
 
   // Duplicate (ADR-0070 D4) clones a writable BASE into a new writable package,
   // the "duplicate base" gesture, and drops the user straight into the copy's
@@ -384,12 +494,13 @@ export function BuilderLanding(): React.ReactElement {
                     <Lock className="h-2.5 w-2.5" /> {t('engine.studio.pkg.readonly', locale)}
                   </span>
                 </button>
-                <div className="border-t px-3 py-1.5">
+                <div className="flex flex-col gap-1 border-t px-3 py-1.5">
+                  {renderCustomizationLine(p.id)}
                   <Link
                     to={overlayPath(p.id)}
                     title={t('engine.studio.landing.overlayTitle', locale)}
                     data-testid="studio-landing-overlay"
-                    className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+                    className="inline-flex self-start items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground hover:underline"
                   >
                     {/* objectui#12513 — the link leaves Studio for Setup: its
                         name says where it goes, the arrow that it goes out. */}
