@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
-import { __resetVisibilityPredicateWarnings } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';
 import {
   createExpressionEvaluator,
   evaluateNavigationVisibility,

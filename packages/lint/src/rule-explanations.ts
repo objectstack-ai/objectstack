@@ -4710,8 +4710,10 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
       '`api-key` with `paramName`. The schema\'s other kinds also take their secret only as a ' +
       '`credentialRef`, but none is a home a literal moves into by shape: `oauth2` (grant ' +
       '`authorization_code` or `client_credentials`) and `app-credential` (vendor `feishu`, ' +
-      '`dingtalk` or `wecom`) carry a grant whose token the server obtains per dispatch, and until it ' +
-      'runs that grant such an instance is held degraded and calls no upstream; `signed` signs each ' +
+      '`dingtalk` or `wecom`) carry a grant whose token the server obtains per dispatch through the ' +
+      'built-in `rest`, `openapi` and `mcp` providers (an `authorization_code` instance once an ' +
+      'administrator connects it); on a provider that does not ask the credential handle such an ' +
+      'instance is held degraded and calls no upstream; `signed` signs each ' +
       'request with its key. A credential in `connectorConfig.input` is dropped instead, ' +
       'because the connector authenticates through its own `auth`. No variant carries a secret in a ' +
       'url path, so a url path is not judged and no fix line promises one.',

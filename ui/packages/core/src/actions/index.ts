@@ -8,7 +8,19 @@
 
 export * from './ActionRunner.js';
 export * from './ActionEngine.js';
-export * from './actionKeys.js';
+export {
+  ACTION_DEF_KEYS,
+  SPEC_ACTION_KEYS,
+  NAVIGATION_ALIAS_KEYS,
+  HOST_DISPATCH_ACTION_KEYS,
+  RETIRED_ACTION_KEYS,
+  KNOWN_ACTION_KEYS,
+  classifyActionKeys,
+  warnOnUnknownActionKeys,
+  hasDeprecatedObjectParams,
+  warnOnDeprecatedObjectParams,
+  // `resetActionKeyWarnings` is test-only and stays off the barrel
+} from './actionKeys.js';
 export * from './TransactionManager.js';
 export * from './UndoManager.js';
 export * from './bulkFastPath.js';

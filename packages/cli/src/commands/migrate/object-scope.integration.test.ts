@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 170 — spawns the real producer once per single-cause fixture: one seed child and 17 spawns of the source CLI (narrowed, full-scope and misspelled --object runs of four commands, the narrowed run over an earned flag, the human misspelled run, and the three repro runs), each over its own copy of the seeded database, every one a distinct triple; slowest CI reading 135.53 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21644] The `--object` scope of the `os migrate` data-migration family,
@@ -38,7 +39,9 @@
  *  - The measured repro leaves the flag unrecorded.
  *
  * Every spawn runs in the hook, each against its own copy of the seeded
- * database; a case only reads what a run printed and what the database holds.
+ * database (the narrowed run over an earned flag, against a copy of the
+ * full-scope run's); a case only reads what a run printed and what the
+ * database holds.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -287,8 +290,11 @@ beforeAll(async () => {
   }
 
   // A narrowed run over a deployment that already earned the flag leaves it as it was.
-  const earnedDb = freshDb();
-  await runCommand('value-shapes', ['--apply', '--yes', '--json'], earnedDb);
+  // The deployment that earned it is the full-scope `value-shapes --apply` above: the
+  // same command over the same seeded copy, so its database is copied rather than
+  // earned a second time by an identical spawn. That run's own database stays as it was.
+  const earnedDb = join(dir, 'data', 'earned.db');
+  copyFileSync(full.get('value-shapes')!.db, earnedDb);
   const verifiedBefore = flagRow(readState(earnedDb), VALUE_SHAPES_FLAG);
   const after = await runCommand('value-shapes', ['--object', 'os21644_site', '--apply', '--yes', '--json'], earnedDb);
   narrowedAfterFull = { db: earnedDb, run: after, state: readState(earnedDb), verifiedBefore };

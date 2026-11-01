@@ -82,16 +82,12 @@ export {
  * that needs a `FeedItem` from a `sys_activity` row calls
  * `activityRowToFeedItem`; there is no supported way to assemble one from the
  * table by hand, because that is precisely what drifted.
- *
- * `resetUnknownActivityTypeWarnings` comes with it: the warn-once bucket is
- * module state, so any surface that ASSERTS the diagnostic needs the same test
- * seam the block's own tests use.
  */
 export {
   ACTIVITY_TYPE_TO_FEED_TYPE,
   UNMAPPED_ACTIVITY_FEED_TYPE,
   activityRowToFeedItem,
-  resetUnknownActivityTypeWarnings,
+  // `resetUnknownActivityTypeWarnings` is test-only and stays off the barrel
   // objectui#11195: the refused-read verdict joins the reading for the same
   // reason. `RecordDetailView` reads the same two tables, and a refusal it
   // judged differently would show "no permission" on one surface and "no

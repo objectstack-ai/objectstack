@@ -1,30 +1,41 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Upstream-availability classification for connector provider factories
- * (ADR-0097 follow-up, #3017).
+ * Failure classification for connector provider factories (ADR-0097
+ * follow-ups: #3017, #27237, #27401).
  *
- * A {@link ConnectorProviderFactory} can fail for two very different reasons:
+ * A {@link ConnectorProviderFactory} can fail in four ways, and the
+ * materializer treats each differently:
  *
- * 1. **Configuration faults** — invalid `providerConfig`, an unresolvable
- *    `credentialRef`, a name conflict. These are authoring mistakes; the
- *    materializer keeps them **fatal at boot** (ADR-0097 "fail loudly").
- * 2. **Operational faults** — the upstream the factory must contact to
- *    materialize (an MCP server's `tools/list`, a remote spec endpoint) is
- *    *temporarily unreachable*. Aborting the whole app boot for a transient
- *    network blip turns one degraded integration into a total outage.
+ * 1. **Configuration faults** — invalid `providerConfig`, a name conflict, a
+ *    shape the provider refuses. These are authoring mistakes, thrown with no
+ *    marker; the materializer keeps them **fatal at boot** (ADR-0097 "fail
+ *    loudly"), a skipped entry on reload.
+ * 2. **The upstream is unreachable** — the upstream the factory must contact
+ *    to materialize (an MCP server's `tools/list`, a remote spec endpoint) is
+ *    *temporarily unreachable*: {@link CONNECTOR_UPSTREAM_UNAVAILABLE}, most
+ *    conveniently a {@link ConnectorUpstreamUnavailableError}.
+ * 3. **The upstream refused the credential** — it answered, and refused the
+ *    credential the instance sent (HTTP 401 / 403, or a tool list narrowed to
+ *    what that credential may use): {@link CONNECTOR_CREDENTIAL_REJECTED},
+ *    a {@link ConnectorCredentialRejectedError}.
+ * 4. **The upstream changed** — it answered, and serves a definition that
+ *    differs from a pin the instance declares:
+ *    {@link CONNECTOR_UPSTREAM_CHANGED}, a {@link ConnectorUpstreamChangedError}.
  *
- * A factory signals case 2 by throwing an error whose `code` is
- * {@link CONNECTOR_UPSTREAM_UNAVAILABLE} — most conveniently a
- * {@link ConnectorUpstreamUnavailableError}. The materializer then **degrades**
- * that one instance instead of failing boot: it is registered in a `degraded`
- * state (visible via `GET /connectors`, dispatch fails with a clear error) and
- * re-materialization is retried with backoff and on every reconcile. Errors
- * without the marker keep the fail-loud contract unchanged.
+ * Each of the three markers makes the materializer **degrade** that one
+ * instance instead of failing boot: it is registered in a `degraded` state
+ * (visible via `GET /connectors`, dispatch fails with the factory's message)
+ * with log records worded for its cause. An unreachable or changed upstream is
+ * re-materialized with backoff and on every reconcile; a refused credential is
+ * retried on that backoff only when its value can change where the process
+ * cannot see it (the marker's own TSDoc says when). Errors without a marker
+ * keep the fail-loud contract unchanged.
  *
- * The check is **structural** ({@link isConnectorUpstreamUnavailable} reads
- * `code`, never `instanceof`), so classification survives package-manager
- * module duplication across the plugin/host boundary.
+ * The checks are **structural** ({@link isConnectorUpstreamUnavailable},
+ * {@link isConnectorCredentialRejected} and {@link isConnectorUpstreamChanged}
+ * read `code`, never `instanceof`), so classification survives
+ * package-manager module duplication across the plugin/host boundary.
  */
 
 /** Marker `code` for an operational (retryable) provider-factory failure. */
@@ -81,8 +92,8 @@ export function isConnectorUpstreamUnavailable(err: unknown): boolean {
  *
  * An upstream that accepts the credential but answers it with less than the
  * instance declares is the same outcome: an MCP server that lists only the
- * tools a credential may use, and so leaves out a tool the instance's
- * `include` names, is answered with this marker by the `mcp` provider.
+ * tools the instance's `auth` credential may use, and so leaves out a tool
+ * the instance's `include` names, is answered with this marker by the `mcp` provider.
  */
 export const CONNECTOR_CREDENTIAL_REJECTED = 'CONNECTOR_CREDENTIAL_REJECTED' as const;
 
@@ -123,5 +134,55 @@ export function isConnectorCredentialRejected(err: unknown): boolean {
     typeof err === 'object' &&
     err !== null &&
     (err as { code?: unknown }).code === CONNECTOR_CREDENTIAL_REJECTED
+  );
+}
+
+/**
+ * Marker `code` for an upstream that serves a definition different from the
+ * one the instance pins — ruling on #27401 (comment 6545635244).
+ *
+ * A fourth outcome beside the three above: the upstream is reachable and
+ * accepted the credential, but what it serves no longer matches a pin the
+ * instance's declaration carries (today the `mcp` provider's
+ * `providerConfig.toolsSnapshot`: a tool whose description or input schema
+ * hashes differently, or a pinned tool no longer served). It is not an
+ * outage, so {@link CONNECTOR_UPSTREAM_UNAVAILABLE} would misdescribe it; and
+ * it is not an authoring fault the author alone can fix, because the server can
+ * serve the pinned definition again where this process cannot see it. The
+ * materializer therefore **degrades** the instance naming the change (the
+ * factory's message) and re-checks it on the same backoff as an outage: a
+ * server that restores the pinned definition recovers the instance, and an
+ * edited pin re-materializes it at once.
+ */
+export const CONNECTOR_UPSTREAM_CHANGED = 'CONNECTOR_UPSTREAM_CHANGED' as const;
+
+/**
+ * Thrown by a connector provider factory when the upstream it contacted to
+ * materialize an instance serves a definition that differs from a pin the
+ * instance declares. Carries {@link CONNECTOR_UPSTREAM_CHANGED} as its `code`;
+ * the message names what changed (each differing or missing item), since it
+ * becomes the degraded instance's reason.
+ */
+export class ConnectorUpstreamChangedError extends Error {
+  readonly code = CONNECTOR_UPSTREAM_CHANGED;
+  /** The underlying failure, if any, kept for diagnostics. */
+  readonly cause?: unknown;
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'ConnectorUpstreamChangedError';
+    if (options && 'cause' in options) this.cause = options.cause;
+  }
+}
+
+/**
+ * Structural check for the {@link CONNECTOR_UPSTREAM_CHANGED} marker — reads
+ * `code`, never `instanceof`, for the reason {@link isConnectorUpstreamUnavailable}
+ * gives.
+ */
+export function isConnectorUpstreamChanged(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === CONNECTOR_UPSTREAM_CHANGED
   );
 }

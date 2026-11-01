@@ -22,10 +22,12 @@ through the `{ success, data }` envelope (`http-dispatcher.ts`), so each
 schema declares the `data` payload, envelope-free — the same convention as
 `PublishPackageDraftsResponseSchema` and its ledger row.
 
-One pair is the exception: `ImportUnmanagedPackageRequestSchema` /
+Two pairs are the exception, each with a request half its producer PARSES
+rather than a transcription: `ImportUnmanagedPackageRequestSchema` /
 `ImportUnmanagedPackageResponseSchema` (ADR-0131 D6) declare a protocol verb
-no route serves yet, and the request half is parsed by its producer rather
-than transcribed — see their own docblocks.
+no route serves yet, and `EnsureCustomizationPackageRequestSchema` /
+`EnsureCustomizationPackageResponseSchema` (ADR-0146 D3) declare the ensure
+door of a base's paired `.custom` package — see their own docblocks.
 
 `packages.publish`'s contract is NOT here: its producer
 (`MetadataManager.publishPackage`) already has an exact published schema,
@@ -48,8 +50,8 @@ authored after that retirement per the ruling's sequencing (3A).
 ## TypeScript Usage
 
 ```typescript
-import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
-import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
+import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, EnsureCustomizationPackageRequestSchema, EnsureCustomizationPackageResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
+import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, EnsureCustomizationPackageRequest, EnsureCustomizationPackageResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = DiscardPackageDraftsResponseSchema.parse(data);
@@ -115,6 +117,33 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | **type** | `string` | ✅ | Metadata type of the failing item. |
 | **name** | `string` | ✅ | Name of the failing item. |
 | **error** | `string` | ✅ | Why copying it failed. |
+
+
+---
+
+## EnsureCustomizationPackageRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **basePackageId** | `string` | ✅ | Id of the installed base whose paired customization package is ensured (`com.acme.crm` → `com.acme.crm.custom`). The base must be installed and read-only — a writable base is customized directly — and must not itself be a customization package. |
+
+
+---
+
+## EnsureCustomizationPackageResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **basePackageId** | `string` | ✅ | The base the pair customizes. |
+| **packageId** | `string` | ✅ | The paired customization package: `<basePackageId>.custom`. |
+| **namespace** | `string` | ✅ | The pair's namespace: the base's namespace followed by `_custom` (`crm` → `crm_custom`), set explicitly and never derived from the pair's id. A new object authored into the pair is named `<namespace>_<short>`. |
+| **dependencyRange** | `string` | ✅ | The range the pair declares on its base in `manifest.dependencies`. A created pair declares `^<major>` of the base's version at creation; an existing pair answers the range it declares, unchanged. |
+| **created** | `boolean` | ✅ | True when this call created the pair; false when the pair was already installed and was returned unchanged. |
+| **writable** | `boolean` | ✅ | Whether the pair is a writable package — the verdict the package read doors serve as `writable`. A created pair is writable; an existing pair delivered by code or an installed artifact is not, and its items are authored where it is built. |
 
 
 ---

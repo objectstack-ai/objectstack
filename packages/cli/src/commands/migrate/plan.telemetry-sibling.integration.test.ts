@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 80 — spawns the real producer once per single-cause fixture: two serving boots (development, and the no-sibling control) and five spawns of the source CLI (plan and apply after the development boot; the control plan, and the plan with the sibling on, after the control boot), every one a distinct triple; slowest CI reading 62.26 s (run 41217827347) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';

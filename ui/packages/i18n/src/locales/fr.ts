@@ -3685,11 +3685,7 @@ const fr = {
     redirecting: "Redirection dans {{seconds}} seconde(s)…",
     redirectPending: "Redirection…",
     loading: "Chargement du formulaire…",
-    requiredHint: "* Champ obligatoire",
     requiredFields: "Champs obligatoires : {{fields}}",
-    consentRequired: "Veuillez accepter la politique de confidentialité pour continuer.",
-    rateLimited: "Prenez un moment pour vérifier vos réponses avant d'envoyer.",
-    redirectBlocked: "Soumission acceptée, mais l'URL de redirection a été bloquée pour des raisons de sécurité.",
   },
   connectAgent: {
     disabled: {

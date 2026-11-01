@@ -4371,14 +4371,10 @@ const en = {
     // countdown and carries a `{{seconds}}` hole this page has no value for.
     redirectPending: 'Redirecting…',
     loading: 'Loading form…',
-    requiredHint: '* Required field',
     // The console form page's client-side refusal when required rows are empty
     // (objectui#11071). `{{fields}}` is the empty rows' labels joined with a
     // comma; the colon, its spacing and the order are the pack's.
     requiredFields: 'Required: {{fields}}',
-    consentRequired: 'Please accept the privacy policy to continue.',
-    rateLimited: 'Please take a moment to review your answers before submitting.',
-    redirectBlocked: 'Submission accepted, but the redirect URL was blocked for security.',
   },
   connectAgent: {
     disabled: {

@@ -51,8 +51,8 @@ import type { PublicBlockNodeOf } from '@object-ui/types';
 import {
   SchemaRenderer,
   UNRESOLVABLE_VISIBILITY_PREFIX,
-  __resetVisibilityPredicateWarnings,
 } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../react/src/utils/visibilityDiagnostic';
 import '../renderers';
 
 const tabsSchema = (items: any[]): PublicBlockNodeOf<'page:tabs'> => ({ type: 'page:tabs', id: 'tabs', properties: { items } });

@@ -312,7 +312,10 @@ describe('ObjectGrid empty placeholders use the shared EmptyValue (objectui#8491
     expect(emptyIn(emptyCard), 'and no placeholder is drawn in its place').toBeNull();
     // CONTROL — without this, a run that rendered no cards at all passes above.
     const filledCard = cardFor('Beta');
-    expect(within(filledCard).queryByText('Note'), 'CONTROL: a populated field DOES get a label').not.toBeNull();
+    // objectstack#28484 — the card draws no per-column label lines, so the
+    // control reads the populated VALUE on the card's subtitle line instead.
+    expect(within(filledCard).queryByText('a real note'), 'CONTROL: a populated field IS drawn').not.toBeNull();
+    expect(within(filledCard).queryByText('Note'), 'and, populated or not, no label line is drawn').toBeNull();
   });
 
   it('NON-REGRESSION — a FILLED card field renders its value and NO placeholder', async () => {

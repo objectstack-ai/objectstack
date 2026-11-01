@@ -486,7 +486,11 @@ export const CEILINGS = new Map([
   // three pointer lines' "Moved to", and five clause-level trims. Arithmetic in
   // priced bytes: 25860 -> 25827 (-33 net) -> ceil(25827 / 4) = 6457; re-locked
   // AT the measurement, headroom 0 tokens.
-  ['skills/objectstack-automation/SKILL.md', 6457],
+  // 6457 -> 6450 (card #28299): the loader-gap line no longer names OAuth or
+  // request signing, which the built-in providers serve (recipe 6 and the
+  // `signed` kind in references/integration-recipes.md). Re-locked AT the
+  // measurement, headroom 0 tokens.
+  ['skills/objectstack-automation/SKILL.md', 6450],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -931,7 +935,29 @@ export const CEILINGS = new Map([
   // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
   // ruling record 6513306068 on #27847.
   //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(8942 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 2236],
+  // 8938 -> 10089 (card #28299; the file had shrunk 4 bytes under the row
+  // since, headroom 1 token): the "Not yet" OAuth bullet becomes recipe 6 —
+  // `oauth2` / `app-credential` are served on `rest`, `openapi` and `mcp` now
+  // that the built-in providers ask the credential handle: the three `auth`
+  // shapes, the per-organization connect (`POST …/connectors/:name/connection`,
+  // the callback, status, revoke) and the kept `bearer`-ref warning. Paid down
+  // first, two restatements each with a surviving home: recipe 3's agent
+  // exposure example (its pointer to objectstack-ai § Actions as AI Tools
+  // stays, and that skill teaches the shape), and recipe 5's "Each
+  // `operationId` is a named action in the flow palette and to agents" (the
+  // Holds bullet says actions come from the upstream's `operationId`s).
+  // Arithmetic after the contract-review patch round (the vendor token
+  // placements, the token lifecycle clause and the status triple restated
+  // the connectors page and are gone; the Holds `auth` bullet points at
+  // recipe 6; the delta round restored the three `vendor` values in the
+  // app-credential comment): 8938 -> 9949 (+1011 net: -308 cut, +1319 added) ->
+  // ceil(9949 / 4) = 2488; the ceiling moves +252, pinned AT the
+  // measurement. Maintainer ruling 2026-10-27 on the seat's decision card
+  // 「skills 修复卡的教学和 eval 都撞 token 天花板,怎么付?」, tap A verbatim
+  // and untranslated: 「A:先削重复,余额按实测提高」 — the standing path of
+  // ruling record 6513306068 on #27847.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(9949 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 2488],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching

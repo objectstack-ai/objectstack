@@ -508,20 +508,6 @@ export interface MentionNotification {
 }
 
 /**
- * Comment search result - returned when searching comments across records
- */
-export interface CommentSearchResult {
-  /** The matching comment */
-  comment: CommentEntry;
-  /** Object name the comment belongs to */
-  objectName: string;
-  /** Record ID the comment belongs to. A string, per the one record-id rule (objectui#9511, objectui#10078). */
-  recordId: string;
-  /** Highlighted text snippet with search term marked */
-  highlight?: string;
-}
-
-/**
  * Activity Entry - represents a single activity/field change on a record
  */
 export interface ActivityEntry {

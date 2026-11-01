@@ -23,8 +23,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
-import { isSystemManagedField } from '@object-ui/types';
-import { resolveFieldScale } from '@objectstack/spec/data';
+import { isSystemManagedField, detectStatusField } from '@object-ui/types';
 import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
@@ -33,8 +32,8 @@ import { SchemaRenderer, useDataScope, useNavigationOverlay, useAction, useSafeF
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering } from './cellRendererResolution';
 import { isMaskedGridColumn } from './maskedColumn';
-import { formatCurrency, formatCompactCurrency, formatDate, formatPercent, percentCellScale, humanizeLabel, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
-import { useLocalization, useDisplayLocale, resolveFieldCurrency } from '@object-ui/i18n';
+import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
 // `resolveI18nLabel`: it resolves the INLINE per-locale map
@@ -3281,52 +3280,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Owner above) reads as an ordinary body row.
     const bodyColumns = displayColumns.filter((c) => c !== titleCol);
 
-    // Identify special columns by inferred type for visual hierarchy
-    const amountKeys = ['amount', 'price', 'total', 'revenue', 'cost', 'value', 'budget', 'salary'];
-    const stageKeys = ['stage', 'status', 'priority', 'category', 'severity', 'level'];
-    const dateKeys = ['date', 'due', 'created', 'updated', 'deadline', 'start', 'end', 'expires'];
-    const percentKeys = ['probability', 'percent', 'rate', 'ratio', 'confidence', 'score'];
-
-    // Stage badge color mapping for common pipeline stages — soft pill style.
-    const stageBadgeColor = (value: string): string => {
-      const v = (value || '').toLowerCase();
-      if (v.includes('won') || v.includes('completed') || v.includes('done') || v.includes('active') || v === 'activated' || v === 'success' || v === 'approved' || v === 'paid')
-        return 'bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900/60';
-      if (v.includes('lost') || v.includes('cancelled') || v.includes('rejected') || v.includes('closed lost') || v === 'expired' || v === 'terminated' || v === 'failed' || v === 'overdue')
-        return 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/60';
-      if (v.includes('negotiation') || v.includes('review') || v.includes('in progress') || v.includes('approval') || v === 'in_approval' || v === 'pending_approval')
-        return 'bg-yellow-50 text-yellow-800 border-yellow-200 dark:bg-yellow-950/40 dark:text-yellow-300 dark:border-yellow-900/60';
-      if (v.includes('proposal') || v.includes('pending'))
-        return 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900/60';
-      if (v.includes('qualification') || v.includes('qualified'))
-        return 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-900/60';
-      if (v.includes('prospecting') || v.includes('new') || v.includes('open'))
-        return 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-900/60';
-      if (v === 'draft' || v.includes('draft'))
-        return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-950/40 dark:text-slate-300 dark:border-slate-900/60';
-      return 'bg-muted text-muted-foreground border-border';
-    };
-
-    // Left border color for card accent based on stage
-    const stageBorderLeft = (value: string): string => {
-      const v = (value || '').toLowerCase();
-      if (v.includes('won') || v.includes('completed') || v.includes('done') || v.includes('active') || v === 'activated')
-        return 'border-l-green-500';
-      if (v.includes('lost') || v.includes('cancelled') || v.includes('rejected') || v === 'expired' || v === 'terminated')
-        return 'border-l-red-500';
-      if (v.includes('negotiation') || v.includes('review') || v.includes('in progress') || v.includes('approval'))
-        return 'border-l-yellow-500';
-      if (v.includes('proposal') || v.includes('pending'))
-        return 'border-l-blue-500';
-      if (v.includes('qualification') || v.includes('qualified'))
-        return 'border-l-indigo-500';
-      if (v.includes('prospecting') || v.includes('new') || v.includes('open'))
-        return 'border-l-purple-500';
-      if (v === 'draft' || v.includes('draft'))
-        return 'border-l-slate-400';
-      return 'border-l-gray-300';
-    };
-
     // objectui#10583 — a MASKED column (the rule that stamps `TableColumn.masked`)
     // is drawn only through its own `cell`, which draws the mask. The branches
     // below pick amount / stage / date / percent by the field's NAME and print
@@ -3337,36 +3290,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // its `cell` draws the mask.
     const isMaskedCardColumn = (key: string) =>
       isMaskedGridColumn(colMap.get(key)?.type, objectFields?.[key]?.type, objectTypesPending);
-
-    const classify = (key: string): 'amount' | 'stage' | 'date' | 'percent' | 'other' => {
-      if (isMaskedCardColumn(key)) return 'other';
-      const k = key.toLowerCase();
-      if (amountKeys.some(p => k.includes(p))) return 'amount';
-      if (stageKeys.some(p => k.includes(p))) return 'stage';
-      if (dateKeys.some(p => k.includes(p))) return 'date';
-      if (percentKeys.some(p => k.includes(p))) return 'percent';
-      return 'other';
-    };
-
-    // Resolve a select-like value to its translated option label and
-    // explicit color so card badges match the desktop grid — the raw
-    // stored value (e.g. "in_review") must never reach the user.
-    const resolveOptionMeta = (fieldKey: string, value: any): { label: string; color?: string } => {
-      const rawOptions = objectSchema?.fields?.[fieldKey]?.options;
-      if (Array.isArray(rawOptions) && rawOptions.length > 0) {
-        const translated = schema.objectName
-          ? translateOptions(schema.objectName, fieldKey, rawOptions)
-          : rawOptions;
-        const opt = (translated as any[]).find(o => o && String(o.value) === String(value));
-        if (opt) {
-          return { label: opt.label != null ? String(opt.label) : String(value), color: (opt as any).color };
-        }
-      }
-      // Option-less enum-looking values still get humanized; free text is
-      // passed through untouched so we never rewrite user data.
-      const str = String(value);
-      return { label: /^[a-z0-9]+(_[a-z0-9]+)+$/.test(str) ? humanizeLabel(str) : str };
-    };
 
     // objectstack#27545 — the card row of a list a record pane narrowed below
     // its columns face: the name and two chips, the open record highlighted
@@ -3423,183 +3346,66 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       };
     }
 
-    return (row: any, idx: number) => {
-      // Collect secondary fields (skip the title column)
-      const secondaryCols = bodyColumns.slice(0, 4);
-      const amountCol = secondaryCols.find((c: any) => classify(c.accessorKey) === 'amount');
-      const stageCol = secondaryCols.find((c: any) => classify(c.accessorKey) === 'stage');
-      const dateCols = secondaryCols.filter((c: any) => classify(c.accessorKey) === 'date');
-      const percentCols = secondaryCols.filter((c: any) => classify(c.accessorKey) === 'percent');
-      const otherCols = secondaryCols.filter(
-        (c: any) => c !== amountCol && c !== stageCol && !dateCols.includes(c) && !percentCols.includes(c)
-      );
+    // objectstack#28484 — a phone's card row is the board's list row: the
+    // title, ONE subtitle line and ONE status chip at the right, with no
+    // per-column label lines. The chip is the object's status field, named by
+    // `detectStatusField` (the resolver the record path and the kanban lanes
+    // read), when a column shows it, drawn through that column's own cell as
+    // the desktop row draws it. The subtitle joins the first two other shown
+    // columns' display values, each through its own cell, and skips a masked
+    // or empty value rather than drawing it.
+    const statusKey = detectStatusField(objectSchema);
+    const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
+    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol).slice(0, 2);
+    const isEmptyCardValue = (value: unknown) => value == null || value === '';
+    const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
+      const value = row[col.accessorKey];
+      return col.cell ? col.cell(value, row) : String(coerceToSafeValue(value) ?? '');
+    };
 
-      // Determine left border accent color from stage value
-      const stageValue = stageCol ? String(row[stageCol.accessorKey] ?? '') : '';
-      const leftBorderClass = stageValue ? stageBorderLeft(stageValue) : '';
-      const cardClassName = [
-        'border rounded-lg p-2.5 bg-card hover:bg-accent/50 cursor-pointer transition-colors touch-manipulation',
-        leftBorderClass ? `border-l-[3px] ${leftBorderClass}` : '',
-      ].filter(Boolean).join(' ');
+    return (row: any, idx: number) => {
+      const subtitle = subtitleColumns.filter(
+        (col) => !isMaskedCardColumn(col.accessorKey) && !isEmptyCardValue(row[col.accessorKey]),
+      );
+      const showStatus = statusCol !== undefined && !isEmptyCardValue(row[statusCol.accessorKey]);
 
       return (
         <div
           key={row.id || row._id || idx}
-          className={cardClassName}
+          data-testid="grid-mobile-card"
+          className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors hover:bg-accent/50 touch-manipulation"
           onClick={() => navigation.handleClick(row)}
         >
-          {/* Title row - Name as bold prominent title */}
-          {titleKey !== undefined && (
-            <div data-testid="grid-card-title" className="font-semibold text-sm truncate mb-1">
-              {isMaskedCardColumn(titleKey)
-                ? (titleCol
-                    ? titleCol.cell?.(row[titleKey], row)
-                    // A masked name field no column shows has no `cell`
-                    // to draw its mask, so the mask is drawn here.
-                    : <MaskedCellRenderer value={row[titleKey]} />)
-                : (coerceToSafeValue(row[titleKey]) ?? '—')}
-              {/* objectui#13330 — the host's node beside the title. */}
-              {rowAdornment ? <span className="ml-1.5 inline-flex align-middle">{rowAdornment(row)}</span> : null}
-            </div>
-          )}
-
-          {/* Amount + Stage row - side by side for compact display */}
-          {(amountCol || stageCol) && (
-            <div className="flex items-center justify-between gap-2 mb-1">
-              {amountCol && (
-                <span className="text-sm tabular-nums font-medium">
-                  {/* objectui#10423 — the currency resolves from the FIELD
-                      def, as the desktop cell's does (objectui#10354);
-                      `amountCol` is a column draft and carries neither
-                      `currency` nor `currencyConfig`. */}
-                  {typeof row[amountCol.accessorKey] === 'number'
-                    ? formatCompactCurrency(row[amountCol.accessorKey], resolveFieldCurrency(objectSchema?.fields?.[amountCol.accessorKey], tenantCurrency, row), displayLocale)
-                    : (coerceToSafeValue(row[amountCol.accessorKey]) ?? '—')}
-                </span>
-              )}
-              {stageCol && row[stageCol.accessorKey] && (() => {
-                const rawValue = row[stageCol.accessorKey];
-                const optMeta = resolveOptionMeta(stageCol.accessorKey, rawValue);
-                // Explicit option color wins, resolved EXACTLY as the
-                // desktop cell resolves it (`SelectCellRenderer` in
-                // `@object-ui/fields`): a declared hex renders as
-                // declared via `getBadgeHexAppearance` (objectui#5141,
-                // adopted here by objectui#5183), a family name keeps
-                // going through `getBadgeColorClasses`. The `style` is
-                // load-bearing — the hex ships as CSS custom properties
-                // that the returned className reads, so dropping it
-                // yields a badge referencing undefined variables.
-                // With no declared colour at all we keep the
-                // pipeline-stage heuristic keyed on the raw value,
-                // which stays stable across locales.
-                const hexBadge = getBadgeHexAppearance(optMeta.color);
-                const badgeClasses = hexBadge
-                  ? hexBadge.className
-                  : optMeta.color
-                    ? getBadgeColorClasses(optMeta.color, rawValue)
-                    : stageBadgeColor(String(rawValue));
-                return (
-                  <Badge
-                    variant="outline"
-                    className={`text-xs shrink-0 max-w-[140px] truncate ${badgeClasses}`}
-                    style={hexBadge?.style}
-                  >
-                    {optMeta.label}
-                  </Badge>
-                );
-              })()}
-            </div>
-          )}
-
-          {/* Date + Percent combined row for density */}
-          {(dateCols.length > 0 || percentCols.length > 0) && (
-            <div className="flex items-center justify-between py-0.5 text-xs text-muted-foreground">
-              {dateCols[0] && (
-                <span className="tabular-nums">
-                  {row[dateCols[0].accessorKey]
-                    ? formatDate(row[dateCols[0].accessorKey], 'short', { locale: displayLocale })
-                    : '—'}
-                </span>
-              )}
-              {percentCols[0] && row[percentCols[0].accessorKey] != null && (() => {
-                // objectui#11254 — the width is the FIELD's, read through
-                // `resolveFieldScale` (ruling A′ on
-                // objectstack-ai/objectstack#19628) off the field def the
-                // amount cell above reads its currency from, so a percent
-                // declaring `scale: 2` reads two decimals here as it does
-                // in the desktop cell. This cell handed `formatPercent` an
-                // `undefined` width, so the function's own default decided.
-                //
-                // Only a `percent` field's width is a percent width. The
-                // column reached this slot by its NAME (`classify`), and a
-                // `number` named like a rate counts its `scale` in the
-                // stored value's decimals, not in the percentage points
-                // printed here, so its scale is not read.
-                //
-                // objectui#11475 — nor is a non-percent field printed as a
-                // percent at all. A percent face reads the field's declared
-                // STORAGE (`percentCellScale`, the spec's `percentScaleOf`),
-                // and a field that is not a `percent` declares none: the
-                // spec's words are "a plain `number` carries no percent
-                // semantics". Choosing a percent face by the column's NAME
-                // was a consumer-side guess (`lead_score` and `tax_rate`,
-                // both `Field.number` in the showcase, printed with a
-                // percent sign), so
-                // such a field prints through its own cell, as the desktop
-                // row prints it, with no percent affix.
-                const percentDef = objectSchema?.fields?.[percentCols[0].accessorKey];
-                if (percentDef?.type !== 'percent') {
-                  const { Renderer: SlotRenderer } = resolveGridCellRendering(percentDef);
-                  return (
-                    <span className="tabular-nums">
-                      <SlotRenderer
-                        value={row[percentCols[0].accessorKey]}
-                        field={percentDef ?? { name: percentCols[0].accessorKey }}
-                      />
-                    </span>
-                  );
-                }
-                const width = resolveFieldScale({ type: percentDef.type, scale: percentDef.scale });
-                return (
-                  <span className="tabular-nums">
-                    {/* objectui#4553: the mobile card's percent cell takes
-                        the same `displayLocale` its date sibling above
-                        already does (objectui#4272). */}
-                    {formatPercent(
-                      Number(row[percentCols[0].accessorKey]),
-                      percentCellScale(percentDef),
-                      width,
-                      displayLocale,
-                    )}
-                  </span>
-                );
-              })()}
-            </div>
-          )}
-
-          {/* Additional date fields beyond the first */}
-          {dateCols.slice(1).map((col: any) => (
-            <div key={col.accessorKey} className="flex justify-between items-center py-0.5">
-              <span className="text-xs text-muted-foreground">{col.header}</span>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {row[col.accessorKey] ? formatDate(row[col.accessorKey], 'short', { locale: displayLocale }) : '—'}
-              </span>
-            </div>
-          ))}
-
-          {/* Other fields - hide empty values on mobile */}
-          {otherCols.map((col: any) => {
-            const val = row[col.accessorKey];
-            if (val == null || val === '') return null;
-            return (
-              <div key={col.accessorKey} className="flex justify-between items-center py-0.5">
-                <span className="text-xs text-muted-foreground">{col.header}</span>
-                <span className="text-xs font-medium truncate ml-2 text-right">
-                  {col.cell ? col.cell(val, row) : String(coerceToSafeValue(val) ?? '')}
-                </span>
+          <div className="min-w-0 flex-1">
+            {titleKey !== undefined && (
+              <div data-testid="grid-card-title" className="truncate text-sm font-semibold">
+                {isMaskedCardColumn(titleKey)
+                  ? (titleCol
+                      ? titleCol.cell?.(row[titleKey], row)
+                      // A masked name field no column shows has no `cell`
+                      // to draw its mask, so the mask is drawn here.
+                      : <MaskedCellRenderer value={row[titleKey]} />)
+                  : (coerceToSafeValue(row[titleKey]) ?? '—')}
+                {/* objectui#13330 — the host's node beside the title. */}
+                {rowAdornment ? <span className="ml-1.5 inline-flex align-middle">{rowAdornment(row)}</span> : null}
               </div>
-            );
-          })}
+            )}
+            {subtitle.length > 0 && (
+              <div data-testid="grid-card-subtitle" className="mt-0.5 flex min-w-0 items-center text-xs text-muted-foreground">
+                {subtitle.map((col, i) => (
+                  <React.Fragment key={col.accessorKey}>
+                    {i > 0 && <span className="shrink-0 whitespace-pre"> · </span>}
+                    <span data-testid="grid-card-subtitle-part" className="min-w-0 truncate">{cardCell(col, row)}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
+          </div>
+          {showStatus && (
+            <div data-testid="grid-card-status" className="max-w-[45%] shrink-0 truncate text-xs">
+              {cardCell(statusCol, row)}
+            </div>
+          )}
         </div>
       );
     };
