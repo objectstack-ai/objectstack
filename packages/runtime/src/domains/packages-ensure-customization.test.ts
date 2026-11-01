@@ -415,6 +415,16 @@ for (const arm of ['composed', 'fallback'] as const) {
     });
 }
 
+describe('installPackage, the install primitive: an in-process caller is judged by the same predicate', () => {
+    it('refuses a pair-shaped manifest without the namespace and the dependency: 400 naming the door, nothing installed', async () => {
+        const d = withBase(door());
+        await expect(d.protocol!.installPackage({ manifest: { id: PAIR_ID, name: 'In-process pair', version: '1.0.0', type: 'module' } } as any))
+            .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(ENSURE_PATH.replace('POST ', '')) });
+        expect(d.registry.getPackage(PAIR_ID)).toBeUndefined();
+        expect(d.published).toHaveLength(0);
+    });
+});
+
 describe('POST /api/v1/packages: an exported pair whose base is absent is the dependency check\'s refusal', () => {
     it('422 DEPENDENCY_MISSING, not the pair refusal', async () => {
         const d = door();
