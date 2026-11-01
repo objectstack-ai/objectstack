@@ -17,8 +17,13 @@
 //   2. the bulk update doors (`updateMany`, `batch` with `operation: update`)
 //      answer the same per-row refusal for both ids;
 //   3. `DELETE` keeps the one answer it already gave for both;
-//   4. with a stale `If-Match`, PATCH and DELETE keep one status and code for
-//      both ids.
+//   4. ⭐ with a stale version token — `If-Match`, the PATCH body's
+//      `expectedVersion`, the DELETE's `?expectedVersion` — PATCH and DELETE
+//      answer the SAME status, code and sentence for both ids, and the answer
+//      the same request gets without a token. So do two rows the member's row
+//      scope hides on objects it reads (private OWD): an inquiry, which it may
+//      not update, and a note, which it may update but not delete. The version
+//      comparison answers only for a row the caller reads.
 //
 // Controls, so a green run is not "everything refuses":
 //
@@ -32,7 +37,13 @@
 //   - the administrator updates (200) and gets `404` for an id that names no
 //     row on an ordinary object; on a read-only federated object it gets the
 //     write guard's refusal for both ids, as its DELETE does;
+//   - with a stale token the edit-grant holder gets `409 CONCURRENT_UPDATE`
+//     carrying the row, and with the current token it updates (200); the plain
+//     member gets the same `409` on a row it reads but may not write;
 //   - a refused write leaves the row untouched.
+//
+// The organization wall's half of item 4 — a row in another organization — is
+// pinned in `occ-stale-token-organization-wall.dogfood.test.ts`.
 //
 // The engine-layer half of the order — the middleware chain's refusal comes
 // before the by-id not-found gate — is pinned in
@@ -61,6 +72,12 @@ const codeOf = (a: Answer): unknown => (a.body as any)?.code ?? (a.body as any)?
 const withoutId = (a: Answer, id: string): Answer =>
   JSON.parse(JSON.stringify(a).split(id).join('ID')) as Answer;
 
+/** A version token no row carries: one read before a write that moved the row on. */
+const STALE = '2001-01-01T00:00:00.000Z';
+
+/** Where a request carries its version token: nowhere, the `If-Match` header, or `expectedVersion`. */
+type Carrier = 'none' | 'If-Match' | 'expectedVersion';
+
 /** The id a create answered, wherever the envelope carries it. */
 const createdId = (a: Answer): string => {
   const b = a.body as any;
@@ -84,6 +101,8 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
   const existing = new Map<string, string>();
   let foreignNoteId = '';
   let ownNoteId = '';
+  let foreignInquiryId = '';
+  let accountId = '';
 
   const call = async (
     token: string,
@@ -103,6 +122,29 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
   };
 
   const stored = (object: string, id: string) => ql.findOne(object, { where: { id }, context: SYS });
+
+  /**
+   * A by-id PATCH or DELETE carrying `version` the way `carrier` names: the
+   * PATCH body's `expectedVersion`, the DELETE's `?expectedVersion`, or the
+   * `If-Match` header on either.
+   */
+  const versioned = (
+    token: string,
+    method: 'PATCH' | 'DELETE',
+    object: string,
+    id: string,
+    patch: Record<string, unknown>,
+    carrier: Carrier,
+    version = STALE,
+  ): Promise<Answer> => {
+    const headers: Record<string, string> = carrier === 'If-Match' ? { 'If-Match': version } : {};
+    if (method === 'PATCH') {
+      const body = carrier === 'expectedVersion' ? { ...patch, expectedVersion: version } : patch;
+      return call(token, 'PATCH', `/data/${object}/${id}`, body, headers);
+    }
+    const query = carrier === 'expectedVersion' ? `?expectedVersion=${encodeURIComponent(version)}` : '';
+    return call(token, 'DELETE', `/data/${object}/${id}${query}`, undefined, headers);
+  };
 
   beforeAll(async () => {
     // The federated objects' remote tables — the showcase's own fixture
@@ -133,6 +175,14 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
     expect(own.status, `member note created — ${JSON.stringify(own.body)}`).toBeLessThan(300);
     ownNoteId = createdId(own);
     expect(foreignNoteId && ownNoteId, 'both notes carry an id').toBeTruthy();
+
+    const inquiry = await call(adminTok, 'POST', '/data/showcase_inquiry', {
+      name: 'Admin inquiry', email: 'admin-inquiry@verify.test', message: 'owned by the administrator',
+    });
+    expect(inquiry.status, `admin inquiry created — ${JSON.stringify(inquiry.body)}`).toBeLessThan(300);
+    foreignInquiryId = createdId(inquiry);
+    accountId = String((await ql.find('showcase_account', { limit: 1, context: SYS }))?.[0]?.id ?? '');
+    expect(foreignInquiryId && accountId, 'an inquiry and an account to aim at').toBeTruthy();
   }, 300_000);
 
   afterAll(async () => {
@@ -177,18 +227,65 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
     });
   }
 
-  it('with a stale If-Match, PATCH and DELETE keep one status and code for a row and for no row', async () => {
-    const STALE = { 'If-Match': '2001-01-01T00:00:00.000Z' };
-    for (const object of ['showcase_project_membership', 'sys_user_permission_set']) {
-      const id = existing.get(object)!;
-      for (const method of ['PATCH', 'DELETE'] as const) {
-        const body = method === 'PATCH' ? PATCHES[object] : undefined;
-        const hit = await call(memberTok, method, `/data/${object}/${id}`, body, STALE);
-        const miss = await call(memberTok, method, `/data/${object}/${MISSING}`, body, STALE);
-        expect(hit.status, `${method} ${object} — ${JSON.stringify(hit.body)}`).toBe(403);
-        expect({ status: miss.status, code: codeOf(miss) }, `${method} ${object}`).toEqual({ status: hit.status, code: codeOf(hit) });
-      }
+  it('guard the guard: the member reads neither hidden row, and reads the account it may not write', async () => {
+    for (const [object, id] of [['showcase_inquiry', foreignInquiryId], ['showcase_private_note', foreignNoteId]]) {
+      const got = await call(memberTok, 'GET', `/data/${object}/${id}`);
+      expect(got.status, `${object} — ${JSON.stringify(got.body)}`).toBe(404);
+      expect(await stored(object, id), `${object}: the row is there`).toBeTruthy();
     }
+    const account = await call(memberTok, 'GET', `/data/showcase_account/${accountId}`);
+    expect(account.status, JSON.stringify(account.body)).toBe(200);
+  });
+
+  it('with a stale version token, PATCH and DELETE answer one status, code and sentence for a row and for no row — the answer without a token', async () => {
+    const families: Array<{ object: string; id: string; patch: Record<string, unknown>; status: { PATCH: number; DELETE: number } }> = [
+      { object: 'showcase_project_membership', id: existing.get('showcase_project_membership')!, patch: PATCHES.showcase_project_membership, status: { PATCH: 403, DELETE: 403 } },
+      { object: 'sys_user_permission_set', id: existing.get('sys_user_permission_set')!, patch: PATCHES.sys_user_permission_set, status: { PATCH: 403, DELETE: 403 } },
+      // Rows the member's row scope hides, on objects it reads: no update grant on
+      // the inquiry, and update without delete on the note.
+      { object: 'showcase_inquiry', id: foreignInquiryId, patch: { message: 'x' }, status: { PATCH: 403, DELETE: 403 } },
+      { object: 'showcase_private_note', id: foreignNoteId, patch: { title: 'x' }, status: { PATCH: 404, DELETE: 403 } },
+    ];
+    for (const { object, id, patch, status } of families) {
+      const before = await stored(object, id);
+      for (const method of ['PATCH', 'DELETE'] as const) {
+        const noToken = await versioned(memberTok, method, object, id, patch, 'none');
+        expect(noToken.status, `${method} ${object} without a token — ${JSON.stringify(noToken.body)}`).toBe(status[method]);
+        for (const carrier of ['If-Match', 'expectedVersion'] as const) {
+          const where = `${method} ${object} (${carrier})`;
+          const hit = await versioned(memberTok, method, object, id, patch, carrier);
+          const miss = await versioned(memberTok, method, object, MISSING, patch, carrier);
+          expect(withoutId(hit, id), `${where}: the answer without a token`).toEqual(withoutId(noToken, id));
+          expect(withoutId(miss, MISSING), `${where}: the answer for no row`).toEqual(withoutId(hit, id));
+        }
+      }
+      expect(await stored(object, id), `${object}: refused writes leave the row as it was`).toEqual(before);
+    }
+  });
+
+  it('control: a stale token on a row the caller reads still answers 409 carrying the row; the current token updates', async () => {
+    const id = existing.get('showcase_project_membership')!;
+    const read = await call(editorTok, 'GET', `/data/showcase_project_membership/${id}`);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const current = String((read.body as any)?.record?.updated_at ?? '');
+    expect(current, 'the row serves a version token').toBeTruthy();
+    for (const carrier of ['If-Match', 'expectedVersion'] as const) {
+      const stale = await versioned(editorTok, 'PATCH', 'showcase_project_membership', id, { engagement: 'reviewer' }, carrier);
+      expect({ status: stale.status, code: codeOf(stale) }, `${carrier} — ${JSON.stringify(stale.body)}`).toEqual({ status: 409, code: 'CONCURRENT_UPDATE' });
+      expect((stale.body as any)?.currentRecord?.id).toBe(id);
+    }
+    const fresh = await versioned(editorTok, 'PATCH', 'showcase_project_membership', id, { engagement: 'reviewer' }, 'If-Match', current);
+    expect(fresh.status, JSON.stringify(fresh.body)).toBe(200);
+
+    // The plain member reads the account and may not write it: the 409 stays, and
+    // the row it carries is one the member reads anyway.
+    const before = await stored('showcase_account', accountId);
+    for (const method of ['PATCH', 'DELETE'] as const) {
+      const stale = await versioned(memberTok, method, 'showcase_account', accountId, { name: 'x' }, 'If-Match');
+      expect({ status: stale.status, code: codeOf(stale) }, `${method} — ${JSON.stringify(stale.body)}`).toEqual({ status: 409, code: 'CONCURRENT_UPDATE' });
+      expect((stale.body as any)?.currentRecord?.id).toBe(accountId);
+    }
+    expect(await stored('showcase_account', accountId)).toEqual(before);
   });
 
   it('control: a caller holding the edit grant updates an in-scope row and gets 404 for no row', async () => {

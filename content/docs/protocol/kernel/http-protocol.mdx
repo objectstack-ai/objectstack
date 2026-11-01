@@ -721,6 +721,11 @@ each row of `updateMany` and of `batch` with `operation: "update"`. A caller who
 update the object gets `404 RECORD_NOT_FOUND` for an id that names no record, and for
 a record its row-level access hides.
 
+A version token (`If-Match`, or `expectedVersion`) changes none of these answers. An
+update or delete carrying a stale token is answered `409 CONCURRENT_UPDATE` only for a
+record the caller can read; for any other id it gets exactly what the same request
+without a token gets.
+
 ### Delete Record
 
 Delete a record by ID.

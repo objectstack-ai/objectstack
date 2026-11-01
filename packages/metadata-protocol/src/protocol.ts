@@ -3201,8 +3201,9 @@ function simpleHash(str: string): string {
  * and includes both the current server-side version and the current record
  * payload so the client can render an informed conflict-resolution UI
  * ("Reload latest" vs. "Overwrite anyway"). The record is the row as the
- * caller reads it, and a row the caller cannot read is never a conflict: it
- * answers not-found instead (#23586, see `assertVersionOf`).
+ * caller reads it, and a row the caller cannot read is never a conflict: the
+ * write door answers it, as it answers the same request without a token
+ * (#23586, see `assertVersionOf`).
  *
  * NOTE: This is an *application-level* compare-and-set — not an atomic
  * storage-layer CAS. There is a small TOCTOU window between the version
@@ -14446,8 +14447,10 @@ export class ObjectStackProtocolImplementation implements
         //
         // OCC is asked the way `deleteData` asks it — a probe only when the
         // caller sent a token ({@link assertVersionMatch}) — and a row that
-        // probe does not find is left to the engine's answer: OCC has never
-        // treated a missing record as a concurrency conflict.
+        // probe does not find, or that the caller's own read does not return,
+        // is left to the engine's answer: OCC has never treated a missing
+        // record as a concurrency conflict, and a row the caller cannot read
+        // answers what a missing one does ({@link assertVersionOf}).
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
@@ -14665,13 +14668,14 @@ export class ObjectStackProtocolImplementation implements
      * where it was. The one behaviour this adds is the 404 the issue asked for:
      * an id that names no row at all.
      *
-     * ⛔ And it is never asked IN FRONT of the write's authorization. Its
-     * readers are OCC's `updated_at` comparison, asked only when the caller sent
-     * a token ({@link assertVersionMatch}), and the by-id update's existence
-     * check, asked only after `engine.update` has judged and resolved the write
-     * (`updateData`, and the bulk faces through {@link assertRecordExists}) —
-     * so an update by id answers the same refusal whether or not the id
-     * exists, as delete does.
+     * ⛔ And what it finds never answers IN FRONT of the write's
+     * authorization. Its readers are OCC's `updated_at` comparison, asked only
+     * when the caller sent a token ({@link assertVersionMatch}) and answering
+     * only for a row the caller's own read returns ({@link assertVersionOf}),
+     * and the by-id update's existence check, asked only after `engine.update`
+     * has judged and resolved the write (`updateData`, and the bulk faces
+     * through {@link assertRecordExists}) — so an update by id answers the same
+     * refusal whether or not the id exists, as delete does, token or none.
      */
     private async probeRecord(object: string, id: string): Promise<any> {
         return this.engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
@@ -14774,18 +14778,36 @@ export class ObjectStackProtocolImplementation implements
      * from it. It re-reads the row under the caller's own `context`, the read
      * door's question (every RLS and FLS rule applies):
      *
-     *  - no row → `recordNotFoundError`, the producer the security layer's
-     *    by-id write gate answers a row the caller cannot read with. The stale
-     *    token then gets exactly the answer the same request without a token
-     *    gets: no `currentVersion`, no `currentRecord`, so the `409` no longer
-     *    tells a caller that a hidden row exists or when it was last written;
      *  - a row → the `409`, with THAT row as `currentRecord`, field-masked as
      *    the caller's own read is. `currentVersion` stays the token this
-     *    comparison ran on.
+     *    comparison ran on. A caller who reads the row but may not write it
+     *    gets this `409` too: the row it is shown is one it can GET anyway;
+     *  - no row, or a read that REFUSES (a declared `4xx`) → no answer from
+     *    this gate at all. The comparison is dropped and the request goes on
+     *    to the write, whose door answers it: the stale token then gets
+     *    exactly the answer the same request without a token gets — status,
+     *    code and sentence — and so does a token on an id that names no row
+     *    ("Record not found → no check" above), so the two cannot answer
+     *    apart. That is the governing text for the write doors (ruling of
+     *    record 5985885287): a row the caller cannot read answers what a
+     *    nonexistent id answers, on update and delete alike.
+     *
+     * Why the write door's answer and not one of this gate's own: this gate
+     * runs BEFORE the write is authorized, so any answer it gives for a row the
+     * caller cannot read — a `404`, or the read door's refusal rethrown —
+     * differs from the write door's for every caller the write door refuses
+     * first (no update or delete grant, the delegated-administration gate on
+     * the RBAC tables), and from what an id naming no row gets. Handing over
+     * loses no guard: the write door refuses a by-id write of a row the
+     * caller cannot read (the security layer asks the read question ahead of
+     * the write and answers `recordNotFoundError`), and a token that could not
+     * be compared never lets a write land that the same request without a
+     * token would not.
      *
      * The read is issued only on a mismatch: a request whose token agrees, or
-     * that sends none, reads exactly what it read before. A read that throws
-     * (the caller's read grant withheld, a store fault) propagates as raised.
+     * that sends none, reads exactly what it read before. A read that FAULTS —
+     * a server-band status, or none declared at all — propagates as raised: a
+     * store fault is no verdict about the caller.
      */
     private assertVersionOf(
         object: string,
