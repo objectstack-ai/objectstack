@@ -35,6 +35,12 @@ formViews: {
 
 The `submitBehavior` above sets the **copy**, not the behavior: `thank-you` is already the default on the public path, because an anonymous submitter may not read the record back. The internal path defaults the other way — a `type: 'form'` action lands the operator on the record it just created — so do not carry a public form's confirmation panel over to an internal one by habit. See [`submitBehavior` is mode-aware](/docs/ui/forms#the-default-is-mode-aware).
 
+The panel can also show the visitor a reference to the record they just created: name the field in `title` or `message` as `{{record.field_name}}`, and the Console fills it from the submit answer. Only an engine-generated field (an `autonumber` field, such as a case number) may be named; `os validate` and the publish gate refuse any other.
+
+```ts
+submitBehavior: { kind: 'thank-you', title: 'Thanks!', message: 'Your case number is {{record.case_number}}.' },
+```
+
 That `sharing` block wires the anonymous endpoints automatically:
 
 ```

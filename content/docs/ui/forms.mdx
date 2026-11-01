@@ -385,6 +385,12 @@ formViews: {
 | `continue` | Re-read prefill values and reset state — user can submit another response without reload. |
 | `next-record` | Stub for queue contexts; falls back to thank-you when no queue is wired. |
 
+On the public path, a `thank-you` panel's `title` and `message` may name the record just submitted as `{{record.field_name}}`, and the Console replaces each token with the value the submit answer carries for it, drawn as plain text; only an engine-generated field (an `autonumber` field, such as a case number) may be named, and a token with no value in the answer shows as empty:
+
+```ts
+submitBehavior: { kind: 'thank-you', title: 'Case opened', message: 'Your case number is {{record.case_number}}.' }
+```
+
 ### What a `redirect` `url` may be
 
 `url` is **not** a free-form address. It was ruled on 2026-08-11 ([#7496](https://github.com/objectstack-ai/objectstack/issues/7496)) and the schema enforces it, so a URL outside this shape is a parse error at authoring time rather than a surprise in the browser:
