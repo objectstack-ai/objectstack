@@ -75,7 +75,7 @@ describe('validateCustomizationNamespace', () => {
   });
 
   it('still judges the namespace when the manifest carries no id', () => {
-    const findings = validateCustomizationNamespace(single(PAST_LIMIT, undefined));
+    const findings = validateCustomizationNamespace({ manifest: { namespace: PAST_LIMIT } });
     expect(findings.map((f) => [f.where, f.path])).toEqual([['package manifest', 'manifest.namespace']]);
   });
 
