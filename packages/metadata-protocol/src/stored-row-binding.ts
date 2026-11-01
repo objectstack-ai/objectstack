@@ -5,13 +5,13 @@
  *
  * A stored `sys_metadata` row is bound to a package by its `package_id`
  * COLUMN. The body the protocol hydrates into the SchemaRegistry for it
- * (`hydrateOverlayIntoRegistry`) carries no trustworthy copy of that column:
- * `_packageId` on such a body is whatever the stored bytes said, or the column
- * when they said nothing (`withRowBinding` keeps a body's own stamp). A body
- * can carry a `_packageId` copied from a read of the base package, so a stamp
- * names the base while the row belongs to another package (the shape #28238
- * measured), and a package-less row can carry a stamp naming a package it is
- * not bound to.
+ * (`hydrateOverlayIntoRegistry`) states it as `_packageId` since #28594
+ * (`storedOverlayEntries` serves the column and drops a body's own stamp),
+ * but `_packageId` is still no proof of the column: it is an ordinary JSON
+ * key, so a stored body, a request body or an import can carry one copied
+ * from a read of the base package (the shape #28238 measured), and every
+ * writer that does not go through that reader keeps it (`withRowBinding`
+ * keeps a body's own stamp).
  *
  * ADR-0146 D9 item 1 arms a flow over the code package's name only when the
  * row that declares it is bound to the base's paired `<base>.custom` — by the

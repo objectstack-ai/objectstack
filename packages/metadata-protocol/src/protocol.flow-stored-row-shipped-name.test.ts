@@ -280,7 +280,10 @@ describe('[#28412] the flow view admits exactly the shipping package\'s declared
         await protocol.getMetaItemsForExecution({ type: 'flow' });
         const hydrated = registry.bare('flow', SHIPPED)!;
         expect(storedRowBindingOf(hydrated)).toBe(PAIR);
-        expect(hydrated._packageId).toBe(PACKAGE_ID); // the body's own stamp, kept and never read for the binding
+        // [#28594] The served stamp is the column too (`storedOverlayEntries`
+        // replaces the body's own `PACKAGE_ID` stamp); the binding above is
+        // still read from the symbol, never from this enumerable key.
+        expect(hydrated._packageId).toBe(PAIR);
         expect(JSON.parse(JSON.stringify(hydrated))).not.toHaveProperty('storedRowBinding');
 
         const packageless = harness([storedRow('flow', SHIPPED, flowBody(SHIPPED, 'STAMPED', { ...DECLARED, _packageId: PAIR }))]);
