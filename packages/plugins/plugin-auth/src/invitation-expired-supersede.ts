@@ -42,6 +42,23 @@ const INVITATION_MODEL = 'invitation';
 /** The status a retired row takes. */
 const RETIRED_STATUS = 'expired';
 
+/** One `where` clause of the better-auth adapter. */
+interface AdapterWhere {
+  field: string;
+  value: unknown;
+}
+
+/**
+ * The two better-auth adapter calls this reads and writes through
+ * (`ctx.context.adapter`): keyword-object calls on a vendor model name, the
+ * same ones the vendor's own invitation routes make, not the data engine's
+ * `(object, data, options)` door.
+ */
+interface InvitationRowAdapter {
+  findMany(args: { model: string; where: AdapterWhere[] }): Promise<any[]>;
+  update(args: { model: string; where: AdapterWhere[]; update: Record<string, unknown> }): Promise<unknown>;
+}
+
 /**
  * Retire the answered person's expired pending invitations after a successful
  * invite-member. A no-op on every other path, on a refusal, and on an answer
@@ -60,11 +77,11 @@ export async function retireExpiredInvitationsOnReissue(ctx: any): Promise<void>
   const answeredId = typeof returned.id === 'string' ? returned.id : undefined;
   const email = typeof returned.email === 'string' ? returned.email.toLowerCase() : undefined;
   const organizationId = typeof returned.organizationId === 'string' ? returned.organizationId : undefined;
-  const adapter = ctx?.context?.adapter;
+  const adapter: InvitationRowAdapter | undefined = ctx?.context?.adapter;
   if (!answeredId || !email || !organizationId || !adapter) return;
 
   try {
-    const pending: any[] = await adapter.findMany({
+    const pending = await adapter.findMany({
       model: INVITATION_MODEL,
       where: [
         { field: 'email', value: email },
