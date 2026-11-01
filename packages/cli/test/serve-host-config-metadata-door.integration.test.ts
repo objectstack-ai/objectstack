@@ -34,8 +34,9 @@
  *
  * ## Spawn shape, and the production posture it does not reach
  *
- * The tsx source entry (`bin/run-dev.js`), the harness the other boot-level
- * files here use. That entry runs under `NODE_ENV=development`, so both legs
+ * The source entry (`bin/run-dev.js`), the harness the other boot-level
+ * files here use, under this process's own `node` rather than the tsx binary.
+ * That entry runs under `NODE_ENV=development`, so both legs
  * boot the DEVELOPMENT posture. The host-config door is decided by the same
  * three facts on both postures (no artifact door, a host config, no
  * `MetadataPlugin` in the composition), and the source leg is the branch
@@ -61,7 +62,6 @@ import {
   KERNEL_ASSIGNED_PORT,
   probeThroughChild,
   readKernelAssignedPort,
-  TSX,
 } from './helpers/serve-process.js';
 import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
 
@@ -119,7 +119,7 @@ const readings: Partial<Record<'source' | 'artifact', Reading>> = {};
 
 function boot(argv: string[], env: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, ...argv, '-p', KERNEL_ASSIGNED_PORT], {
+    const child = spawn(process.execPath, [CLI, ...argv, '-p', KERNEL_ASSIGNED_PORT], {
       cwd: dir,
       // `childEnv`, never a bare `...process.env` — see its header. Neither
       // artifact variable leaks in from the runner: each leg states its own.

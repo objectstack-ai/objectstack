@@ -25,6 +25,7 @@
 // calls.
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { fileURLToPath } from 'node:url';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
@@ -297,12 +298,12 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 /**
- * [#23184] These ten cases also run inside every suite that imports
- * `createMemoryEngine` from this file (the import re-registers its `describe`s
- * there; `admin-impersonate-endpoint.test.ts` records that trade at its own
- * import), so their wall is paid once per importer, and in several importers
- * it was most of the wall. Three things keep it small, and none touches what a
- * case asserts:
+ * [#23184] These ten cases used to run inside every suite that imports
+ * `createMemoryEngine` from this file (the import re-registered its
+ * `describe`s there), so their wall was paid once per importer; since #23181
+ * slice 30 they are registered only when this file is the one run (`isEntry`
+ * below). Three things keep their wall small, and none touches what a case
+ * asserts:
  *
  *  - the two sign-ups `arrangeAdminAndTarget` starts from are made once per
  *    file (`signedUpOnce` above), and each case starts from its own deep copy;
@@ -320,199 +321,215 @@ afterEach(() => vi.restoreAllMocks());
 const scrypt = memoizeScrypt();
 afterAll(scrypt.restore);
 
-// ───────────────────────────────────────────────────────────────────────────
-describe.concurrent('#8243 pin 1 — a bearer client that impersonates STOPS resolving as the admin', () => {
-  it('the token the caller was holding no longer resolves to anyone', async () => {
-    const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
+/**
+ * [#23181 slice 30] The ten #8243 cases are registered only when THIS file is
+ * the one vitest is running. 32 sibling suites import `createMemoryEngine`
+ * from here (the double stays in a `*.test.ts` file so `check:engine-double-
+ * contract` and `check:objectql-double-limit` keep it in sight), and an
+ * import used to re-register these `describe`s in each of them: the same ten
+ * cases ran 33 times per battery. `expect.getState().testPath` names the file
+ * under collection (the precedent is `metadata-protocol/src/
+ * protocol.lock-one-resolution.kit.test.ts`). The module-scope hooks above
+ * (console stubs, `restoreAllMocks`, the scrypt memo) stay unguarded: the
+ * importers that rely on them still get them through the same import.
+ */
+const isEntry = expect.getState().testPath === fileURLToPath(import.meta.url);
 
-    const response = await impersonate(manager, adminBearer, targetId);
-    expect(response.status).toBe(200);
+if (isEntry) {
+  // ───────────────────────────────────────────────────────────────────────────
+  describe.concurrent('#8243 pin 1 — a bearer client that impersonates STOPS resolving as the admin', () => {
+    it('the token the caller was holding no longer resolves to anyone', async () => {
+      const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
 
-    // THE assertion. Against the unfixed vendor this came back as `adminId`:
-    // 200 from the endpoint, and every subsequent write still attributed to
-    // the admin. Asserting `!== adminId` alone would be satisfied by a broken
-    // pipeline that resolves nobody, so pin the exact value too.
-    expect(await principalFor(manager, adminBearer)).not.toBe(adminId);
-    expect(await principalFor(manager, adminBearer)).toBeNull();
-    void targetId;
+      const response = await impersonate(manager, adminBearer, targetId);
+      expect(response.status).toBe(200);
+
+      // THE assertion. Against the unfixed vendor this came back as `adminId`:
+      // 200 from the endpoint, and every subsequent write still attributed to
+      // the admin. Asserting `!== adminId` alone would be satisfied by a broken
+      // pipeline that resolves nobody, so pin the exact value too.
+      expect(await principalFor(manager, adminBearer)).not.toBe(adminId);
+      expect(await principalFor(manager, adminBearer)).toBeNull();
+      void targetId;
+    });
+
+    it('the rotated token from `set-auth-token` resolves to the IMPERSONATED user', async () => {
+      // The other half: rotation that only killed the old token would leave the
+      // caller unable to impersonate at all — which is the refusal-based
+      // hardening the maintainer rejected.
+      const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+      const response = await impersonate(manager, adminBearer, targetId);
+      expect(response.status).toBe(200);
+
+      const impersonatedBearer = bearerFrom(response);
+      expect(impersonatedBearer).not.toBe(adminBearer);
+      expect(await principalFor(manager, impersonatedBearer)).toBe(targetId);
+      expect(await principalFor(manager, impersonatedBearer)).not.toBe(adminId);
+    });
+
+    it('the admin session row the caller was holding is really gone', async () => {
+      // Corroborates the resolution assertions at the storage layer: this is an
+      // invalidation, not a client-side convention the next code path could
+      // quietly stop honouring.
+      const { engine, manager, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+      const adminSessionToken = adminBearer.split('.')[0];
+      expect(sessionRows(engine).some((r) => r.token === adminSessionToken)).toBe(true);
+
+      expect((await impersonate(manager, adminBearer, targetId)).status).toBe(200);
+
+      expect(sessionRows(engine).some((r) => r.token === adminSessionToken)).toBe(false);
+    });
+
+    it('the rotated admin session is a well-formed session row, not a smuggled copy', async () => {
+      // The in-memory engine below accepts any payload, so "rotation worked" in a
+      // test is not by itself evidence that the real ObjectQL insert would take
+      // it. This converts that permissiveness into a signal: the rotated row is
+      // compared, column for column, against a row a plain sign-in produced. A
+      // key the producer would refuse shows up here as an extra column.
+      const { engine, manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+      const signInShape = new Set(
+        Object.keys(sessionRows(engine).find((r) => r.user_id === adminId) ?? {}),
+      );
+      expect(signInShape.size).toBeGreaterThan(0);
+
+      expect((await impersonate(manager, adminBearer, targetId)).status).toBe(200);
+
+      const rotated = sessionRows(engine).find(
+        (r) => r.user_id === adminId && r.token !== adminBearer.split('.')[0],
+      );
+      expect(rotated).toBeTruthy();
+      expect(Object.keys(rotated!).filter((key) => !signInShape.has(key))).toEqual([]);
+
+      // …and the one field carried across on purpose really is carried across.
+      const adminRow = sessionRows(engine).find((r) => r.user_id === adminId);
+      expect(rotated!.active_organization_id).toBe(adminRow!.active_organization_id);
+    });
+
+    it('hands back a recovery credential, and exposes it to cross-origin readers', async () => {
+      const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+      const response = await impersonate(manager, adminBearer, targetId);
+      const recovery = response.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER);
+      expect(recovery).toBeTruthy();
+
+      // A console on another origin cannot read a header that is not exposed, so
+      // an unexposed recovery credential is the same as none at all. `bearer()`'s
+      // own after-hook runs behind ours and must not have dropped it.
+      const exposed = (response.headers.get('access-control-expose-headers') || '')
+        .split(',')
+        .map((entry) => entry.trim());
+      expect(exposed).toContain(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER);
+      expect(exposed).toContain('set-auth-token');
+
+      // The recovery credential is NOT a bearer-shaped admin credential: replayed
+      // as one it resolves to nobody. It only means anything to the exit route.
+      expect(await principalFor(manager, recovery!)).toBeNull();
+    });
   });
 
-  it('the rotated token from `set-auth-token` resolves to the IMPERSONATED user', async () => {
-    // The other half: rotation that only killed the old token would leave the
-    // caller unable to impersonate at all — which is the refusal-based
-    // hardening the maintainer rejected.
-    const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
+  // ───────────────────────────────────────────────────────────────────────────
+  describe.concurrent('#8243 pin 2 — `stop-impersonating` recovers the admin via bearer', () => {
+    it('the caller is the admin again, and the returned token proves it', async () => {
+      const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
 
-    const response = await impersonate(manager, adminBearer, targetId);
-    expect(response.status).toBe(200);
+      const entered = await impersonate(manager, adminBearer, targetId);
+      const impersonatedBearer = bearerFrom(entered);
+      const recovery = entered.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER)!;
+      expect(await principalFor(manager, impersonatedBearer)).toBe(targetId);
 
-    const impersonatedBearer = bearerFrom(response);
-    expect(impersonatedBearer).not.toBe(adminBearer);
-    expect(await principalFor(manager, impersonatedBearer)).toBe(targetId);
-    expect(await principalFor(manager, impersonatedBearer)).not.toBe(adminId);
+      const exited = await stopImpersonating(manager, impersonatedBearer, recovery);
+      expect(exited.status).toBe(200);
+      const body: any = await exited.json();
+      expect(body?.user?.id).toBe(adminId);
+
+      // …and the identity the NEXT request resolves to is the admin, not merely
+      // an admin-shaped response body.
+      const restoredBearer = bearerFrom(exited);
+      expect(await principalFor(manager, restoredBearer)).toBe(adminId);
+    });
+
+    it('the impersonation token dies on the way out', async () => {
+      const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+      const entered = await impersonate(manager, adminBearer, targetId);
+      const impersonatedBearer = bearerFrom(entered);
+      const recovery = entered.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER)!;
+
+      expect((await stopImpersonating(manager, impersonatedBearer, recovery)).status).toBe(200);
+
+      expect(await principalFor(manager, impersonatedBearer)).toBeNull();
+    });
+
+    it('WITHOUT the recovery credential the exit still refuses — this adds a lane, it does not open one', async () => {
+      // The negative control. If this went green on its own, the recovery header
+      // would be decorative and the tests above would prove nothing about it.
+      const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+      const entered = await impersonate(manager, adminBearer, targetId);
+      const impersonatedBearer = bearerFrom(entered);
+
+      const exited = await stopImpersonating(manager, impersonatedBearer);
+      expect(exited.status).not.toBe(200);
+    });
+
+    it('a forged recovery credential is refused', async () => {
+      const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+      const entered = await impersonate(manager, adminBearer, targetId);
+      const impersonatedBearer = bearerFrom(entered);
+
+      const exited = await stopImpersonating(
+        manager,
+        impersonatedBearer,
+        'not-a-real-admin-session:.0000000000000000000000000000000000000000000=',
+      );
+      expect(exited.status).not.toBe(200);
+      // And the forgery bought nothing: the caller is still the impersonated user.
+      expect(await principalFor(manager, impersonatedBearer)).toBe(targetId);
+    });
   });
 
-  it('the admin session row the caller was holding is really gone', async () => {
-    // Corroborates the resolution assertions at the storage layer: this is an
-    // invalidation, not a client-side convention the next code path could
-    // quietly stop honouring.
-    const { engine, manager, targetId, adminBearer } = await arrangeAdminAndTarget();
+  // ───────────────────────────────────────────────────────────────────────────
+  describe.concurrent('#8243 — the cookie lane is untouched', () => {
+    it('a cookie-authenticated impersonation does not rotate anything', async () => {
+      // Rotation is scoped to the caller's BEARER, because a cookie caller has no
+      // stale credential in hand — the route already replaced its session cookie.
+      // Widening it would change behaviour for every browser deployment for no
+      // reason, so pin the narrowness.
+      const engine = createMemoryEngine();
+      const manager = makeManager(engine);
 
-    const adminSessionToken = adminBearer.split('.')[0];
-    expect(sessionRows(engine).some((r) => r.token === adminSessionToken)).toBe(true);
+      await signUp(manager, 'cookie-admin@example.com', 'Cookie Admin');
+      await signUp(manager, 'cookie-target@example.com', 'Cookie Target');
+      makePlatformAdmin(engine, 'cookie-admin@example.com');
+      const targetId = userIdFor(engine, 'cookie-target@example.com');
 
-    expect((await impersonate(manager, adminBearer, targetId)).status).toBe(200);
+      const signedIn = await signIn(manager, 'cookie-admin@example.com');
+      const cookie = (signedIn.headers.getSetCookie?.() ?? [])
+        .map((c) => c.split(';')[0])
+        .filter(Boolean)
+        .join('; ');
+      expect(cookie).toBeTruthy();
 
-    expect(sessionRows(engine).some((r) => r.token === adminSessionToken)).toBe(false);
+      const adminSessionsBefore = sessionRows(engine).map((r) => r.token);
+
+      const response = await manager.handleRequest(
+        new Request(`${BASE}/admin/impersonate-user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', cookie },
+          body: JSON.stringify({ userId: targetId }),
+        }),
+      );
+      expect(response.status).toBe(200);
+
+      // No recovery header, and the admin's original session row survives —
+      // exactly the vendor's behaviour.
+      expect(response.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER)).toBeNull();
+      const tokensAfter = sessionRows(engine).map((r) => r.token);
+      for (const token of adminSessionsBefore) expect(tokensAfter).toContain(token);
+    });
   });
-
-  it('the rotated admin session is a well-formed session row, not a smuggled copy', async () => {
-    // The in-memory engine below accepts any payload, so "rotation worked" in a
-    // test is not by itself evidence that the real ObjectQL insert would take
-    // it. This converts that permissiveness into a signal: the rotated row is
-    // compared, column for column, against a row a plain sign-in produced. A
-    // key the producer would refuse shows up here as an extra column.
-    const { engine, manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
-
-    const signInShape = new Set(
-      Object.keys(sessionRows(engine).find((r) => r.user_id === adminId) ?? {}),
-    );
-    expect(signInShape.size).toBeGreaterThan(0);
-
-    expect((await impersonate(manager, adminBearer, targetId)).status).toBe(200);
-
-    const rotated = sessionRows(engine).find(
-      (r) => r.user_id === adminId && r.token !== adminBearer.split('.')[0],
-    );
-    expect(rotated).toBeTruthy();
-    expect(Object.keys(rotated!).filter((key) => !signInShape.has(key))).toEqual([]);
-
-    // …and the one field carried across on purpose really is carried across.
-    const adminRow = sessionRows(engine).find((r) => r.user_id === adminId);
-    expect(rotated!.active_organization_id).toBe(adminRow!.active_organization_id);
-  });
-
-  it('hands back a recovery credential, and exposes it to cross-origin readers', async () => {
-    const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
-
-    const response = await impersonate(manager, adminBearer, targetId);
-    const recovery = response.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER);
-    expect(recovery).toBeTruthy();
-
-    // A console on another origin cannot read a header that is not exposed, so
-    // an unexposed recovery credential is the same as none at all. `bearer()`'s
-    // own after-hook runs behind ours and must not have dropped it.
-    const exposed = (response.headers.get('access-control-expose-headers') || '')
-      .split(',')
-      .map((entry) => entry.trim());
-    expect(exposed).toContain(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER);
-    expect(exposed).toContain('set-auth-token');
-
-    // The recovery credential is NOT a bearer-shaped admin credential: replayed
-    // as one it resolves to nobody. It only means anything to the exit route.
-    expect(await principalFor(manager, recovery!)).toBeNull();
-  });
-});
-
-// ───────────────────────────────────────────────────────────────────────────
-describe.concurrent('#8243 pin 2 — `stop-impersonating` recovers the admin via bearer', () => {
-  it('the caller is the admin again, and the returned token proves it', async () => {
-    const { manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
-
-    const entered = await impersonate(manager, adminBearer, targetId);
-    const impersonatedBearer = bearerFrom(entered);
-    const recovery = entered.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER)!;
-    expect(await principalFor(manager, impersonatedBearer)).toBe(targetId);
-
-    const exited = await stopImpersonating(manager, impersonatedBearer, recovery);
-    expect(exited.status).toBe(200);
-    const body: any = await exited.json();
-    expect(body?.user?.id).toBe(adminId);
-
-    // …and the identity the NEXT request resolves to is the admin, not merely
-    // an admin-shaped response body.
-    const restoredBearer = bearerFrom(exited);
-    expect(await principalFor(manager, restoredBearer)).toBe(adminId);
-  });
-
-  it('the impersonation token dies on the way out', async () => {
-    const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
-
-    const entered = await impersonate(manager, adminBearer, targetId);
-    const impersonatedBearer = bearerFrom(entered);
-    const recovery = entered.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER)!;
-
-    expect((await stopImpersonating(manager, impersonatedBearer, recovery)).status).toBe(200);
-
-    expect(await principalFor(manager, impersonatedBearer)).toBeNull();
-  });
-
-  it('WITHOUT the recovery credential the exit still refuses — this adds a lane, it does not open one', async () => {
-    // The negative control. If this went green on its own, the recovery header
-    // would be decorative and the tests above would prove nothing about it.
-    const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
-
-    const entered = await impersonate(manager, adminBearer, targetId);
-    const impersonatedBearer = bearerFrom(entered);
-
-    const exited = await stopImpersonating(manager, impersonatedBearer);
-    expect(exited.status).not.toBe(200);
-  });
-
-  it('a forged recovery credential is refused', async () => {
-    const { manager, targetId, adminBearer } = await arrangeAdminAndTarget();
-
-    const entered = await impersonate(manager, adminBearer, targetId);
-    const impersonatedBearer = bearerFrom(entered);
-
-    const exited = await stopImpersonating(
-      manager,
-      impersonatedBearer,
-      'not-a-real-admin-session:.0000000000000000000000000000000000000000000=',
-    );
-    expect(exited.status).not.toBe(200);
-    // And the forgery bought nothing: the caller is still the impersonated user.
-    expect(await principalFor(manager, impersonatedBearer)).toBe(targetId);
-  });
-});
-
-// ───────────────────────────────────────────────────────────────────────────
-describe.concurrent('#8243 — the cookie lane is untouched', () => {
-  it('a cookie-authenticated impersonation does not rotate anything', async () => {
-    // Rotation is scoped to the caller's BEARER, because a cookie caller has no
-    // stale credential in hand — the route already replaced its session cookie.
-    // Widening it would change behaviour for every browser deployment for no
-    // reason, so pin the narrowness.
-    const engine = createMemoryEngine();
-    const manager = makeManager(engine);
-
-    await signUp(manager, 'cookie-admin@example.com', 'Cookie Admin');
-    await signUp(manager, 'cookie-target@example.com', 'Cookie Target');
-    makePlatformAdmin(engine, 'cookie-admin@example.com');
-    const targetId = userIdFor(engine, 'cookie-target@example.com');
-
-    const signedIn = await signIn(manager, 'cookie-admin@example.com');
-    const cookie = (signedIn.headers.getSetCookie?.() ?? [])
-      .map((c) => c.split(';')[0])
-      .filter(Boolean)
-      .join('; ');
-    expect(cookie).toBeTruthy();
-
-    const adminSessionsBefore = sessionRows(engine).map((r) => r.token);
-
-    const response = await manager.handleRequest(
-      new Request(`${BASE}/admin/impersonate-user`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', cookie },
-        body: JSON.stringify({ userId: targetId }),
-      }),
-    );
-    expect(response.status).toBe(200);
-
-    // No recovery header, and the admin's original session row survives —
-    // exactly the vendor's behaviour.
-    expect(response.headers.get(ADMIN_SESSION_RECOVERY_RESPONSE_HEADER)).toBeNull();
-    const tokensAfter = sessionRows(engine).map((r) => r.token);
-    for (const token of adminSessionsBefore) expect(tokensAfter).toContain(token);
-  });
-});
+}

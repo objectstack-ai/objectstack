@@ -19,7 +19,9 @@
  *  - AGREEMENT: every listed override is the item the layered read of the
  *    base's name reports as `overlay`, the `.custom` row that declares it;
  *  - CONTROLS: a declaration from a non-pair package is not listed; an
- *    undeclared pair row is not an override; another package's extension and
+ *    undeclared pair row is not an override (both rows are refused at the
+ *    save door since #28410, so the test asserts that refusal and lays them
+ *    down below the gate, as rows from before it); another package's extension and
  *    ledger rows are not the base's; a base with no pair answers empty lists
  *    and 200 and no pair is created; a `.custom` id is refused naming its base;
  *    an unknown id answers 404; a caller without the read capability is
@@ -271,6 +273,34 @@ async function saveView(
     await protocol.publishMetaItem({ type: 'view', name, packageId } as any);
 }
 
+/**
+ * [#28410, ADR-0146 D2, ruling A on #28390] A row the override write gate now
+ * refuses at the save door, laid down as it was before the gate: the door's
+ * refusal (`403 NOT_OVERRIDABLE`, its sentence matching `refused`) is asserted
+ * first, then the same draft save and publish run with the gate answering
+ * `not_concerned` for them alone. Such rows exist from before the gate, so
+ * the read below still has to treat them right; what is pinned is the read.
+ */
+async function saveViewBeforeTheGate(
+    protocol: ObjectStackProtocolImplementation,
+    packageId: string,
+    name: string,
+    columns: readonly string[],
+    refused: RegExp,
+    extra: Record<string, unknown> = {},
+): Promise<void> {
+    const body = { ...listBody(name, columns), ...extra };
+    await expect(protocol.saveMetaItem({ type: 'view', name, item: body, mode: 'draft', packageId } as any))
+        .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, message: expect.stringMatching(refused) });
+    const gated = protocol as any;
+    gated.overrideWriteVerdict = () => ({ verdict: 'not_concerned' });
+    try {
+        await saveView(protocol, packageId, name, columns, extra);
+    } finally {
+        delete gated.overrideWriteVerdict;
+    }
+}
+
 /** One `extend` contribution, as `registerApp` registers a manifest's `objectExtensions` entry. */
 const extend = (engine: ObjectQL, packageId: string, object: string, body: Record<string, unknown>) =>
     engine.registry.registerObject({ name: object, ...body } as any, packageId, undefined, 'extend');
@@ -335,7 +365,7 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
     it('a declaration from a package that is not the base\'s pair is not an override of the base', async () => {
         const { dispatcher, protocol } = await boot();
         await install(protocol, DEPENDENT);
-        await saveView(protocol, DEPENDENT, VIEW, ['title', 'status'], { overrides: { ...DECLARATION } });
+        await saveViewBeforeTheGate(protocol, DEPENDENT, VIEW, ['title', 'status'], /carries `overrides`/, { overrides: { ...DECLARATION } });
         const data = (await customizations(dispatcher, BASE)).response?.body?.data;
         expect(data.overrides).toEqual([]);
         expect(data.counts.overrides).toBe(0);
@@ -344,7 +374,7 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
     it('a pair row without the declaration is the pair\'s own item, not an override', async () => {
         const { dispatcher, protocol } = await boot();
         await install(protocol, PAIR);
-        await saveView(protocol, PAIR, VIEW, ['title']);
+        await saveViewBeforeTheGate(protocol, PAIR, VIEW, ['title'], /declares no override/);
         const data = (await customizations(dispatcher, BASE)).response?.body?.data;
         expect(data.overrides).toEqual([]);
         expect(data.counts.overrides).toBe(0);
