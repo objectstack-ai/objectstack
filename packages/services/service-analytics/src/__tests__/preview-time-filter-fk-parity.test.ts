@@ -30,6 +30,11 @@
  *   two buckets of it) under one name is refused by the draft preview with the
  *   live faces' refusal: `INVALID_QUERY` / 400, the same message, path, param,
  *   object and fields. Before, the preview served both columns.
+ * - #28799. Two `timeDimensions` entries spelling one dimension the same way
+ *   at two granularities are the same question, and every face refuses them
+ *   with that refusal. Before, all three faces kept the last granularity and
+ *   dropped the other entry silently (beside the raw dimension, the live faces
+ *   answered one `1970-01` bucket holding the whole total).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -417,6 +422,78 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
           ],
         },
         'groupBy.1.field',
+      );
+    });
+
+    it.each([
+      ['month then year', ['month', 'year']],
+      ['year then month', ['year', 'month']],
+    ])('[#28799] refuses one dimension spelled the same way at two granularities (%s), where every face kept the last', async (_label, [g1, g2]) => {
+      await refusedAsLive(
+        { measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: g1 }, { dimension: 'closed_at', granularity: g2 }] },
+        'groupBy.1.field',
+      );
+    });
+
+    it('[#28799] refuses the same pair spelled OBJECT.closed_at', async () => {
+      await refusedAsLive(
+        {
+          measures: ['total'],
+          timeDimensions: [
+            { dimension: `${OBJECT}.closed_at`, granularity: 'month' },
+            { dimension: `${OBJECT}.closed_at`, granularity: 'year' },
+          ],
+        },
+        'groupBy.1.field',
+      );
+    });
+
+    it('[#28799] refuses the pair beside the raw dimension, where the live faces answered one 1970-01 bucket', async () => {
+      await refusedAsLive(
+        {
+          dimensions: ['closed_at'],
+          measures: ['total'],
+          timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }],
+        },
+        'groupBy.1.field',
+      );
+    });
+
+    it('[#28799] refuses the pair beside another dimension, naming the later position', async () => {
+      await refusedAsLive(
+        {
+          dimensions: ['region'],
+          measures: ['total'],
+          timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }],
+        },
+        'groupBy.2.field',
+      );
+    });
+
+    it("[#28799] refuses the pair beside a cross-object 'account.name' dimension on both live faces", async () => {
+      const refusals: Array<Record<string, unknown>> = [];
+      for (const face of LIVE) {
+        const err = (await ask(face, BACKED, {
+          dimensions: ['account.name'],
+          measures: ['total'],
+          timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }],
+        }).then(
+          () => { throw new Error(`${face}: expected a refusal, but the query resolved`); },
+          (e: unknown) => e,
+        )) as Error & Record<string, unknown>;
+        expect(err.code, `${face}: ${err.message}`).toBe('INVALID_QUERY');
+        expect(err.status, face).toBe(400);
+        refusals.push({ message: err.message, path: err.path, fields: err.fields });
+      }
+      expect(refusals[1]).toEqual(refusals[0]);
+    });
+
+    it('[#28799] still serves one dimension asked twice at the same granularity, as one bucket', async () => {
+      await answeredAlike(
+        FACES,
+        UNBACKED,
+        { measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'month' }] },
+        { rows: [{ closed_at: '2026-03', total: 100 }, { closed_at: '2026-04', total: 80 }], fields: ['closed_at:time', 'total:number'] },
       );
     });
 
