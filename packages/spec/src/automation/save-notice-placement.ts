@@ -60,7 +60,18 @@ export function saveNoticePlacementRefusals(
   if (!hasNotice) return out;
   const trigger = startTriggerType(flow as { nodes?: unknown });
   if (typeof trigger === 'string' && SAVE_NOTICE_TRIGGER.test(trigger.trim())) return out;
-  const written = typeof trigger === 'string' ? `\`triggerType: '${trigger}'\`` : 'no record trigger';
+  // [#28786] The ARRAY form (`['record-after-create', 'record-after-update']`)
+  // is refused with the same verdict, but named as what it is: multi-event
+  // unions are unsupported and never bind (#3457), so "no record trigger"
+  // would misname the shape and leave the author guessing what to change.
+  const situation = Array.isArray(trigger)
+    ? `This flow's start writes \`triggerType\` as an array (\`[${trigger.map((t) => `'${String(t)}'`).join(', ')}]\`). `
+      + 'That form is not supported and never binds, so no write waits on the run and the notice would reach '
+      + "nobody. Give the start node ONE trigger type: `'record-after-write'` fires on both a create and an "
+      + 'update.'
+    : `This flow's start has ${typeof trigger === 'string' ? `\`triggerType: '${trigger}'\`` : 'no record trigger'}, `
+      + 'so no write waits on the run and the notice would reach nobody. Start the flow from the record write, '
+      + 'or tell the person another way (a `notify` node).';
   for (const graph of graphs) {
     graph.nodes.forEach((node, index) => {
       if ((node as { type?: unknown } | null)?.type !== 'save_notice') return;
@@ -70,9 +81,7 @@ export function saveNoticePlacementRefusals(
           'A `save_notice` node tells the person who made the write that fired this run what the save set in '
           + 'motion, so it runs only in a flow started by that write: a start node whose `config.triggerType` is '
           + "a create or update record trigger (`'record-after-update'`, `'record-before-create'`, "
-          + `\`'record-after-write'\`, …). This flow's start has ${written}, so no write waits on the run and `
-          + 'the notice would reach nobody. Start the flow from the record write, or tell the person another way '
-          + '(a `notify` node).',
+          + `\`'record-after-write'\`, …). ${situation}`,
       });
     });
   }
