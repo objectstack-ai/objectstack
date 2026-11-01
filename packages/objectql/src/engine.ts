@@ -4813,6 +4813,26 @@ export function permissionSetOwnerRegistrationRefusal(
 }
 
 /**
+ * [#28534] The `_packageId` each item object was stamped with BY A
+ * REGISTRATION of this process — written onto the caller's own object by
+ * `stampPackage` / `registerItem`, recorded by {@link noteRegistrationStamp}.
+ * Weakly held and process-wide: the earlier registration may have been
+ * another engine's. Read by {@link collectionItemOwnerStampRefusal} only.
+ */
+const REGISTRATION_WRITTEN_STAMPS = new WeakMap<object, unknown>();
+
+/**
+ * [#28534] Record that a registration just wrote `item`'s `_packageId`: it was
+ * unset before (`stampBefore`) and is set now. A stamp the object already
+ * carried is never recorded, so it stays a stamp the body arrived with.
+ */
+function noteRegistrationStamp(item: unknown, stampBefore: unknown): void {
+  if (stampBefore !== undefined || !item || typeof item !== 'object') return;
+  const written = (item as { _packageId?: unknown })._packageId;
+  if (written !== undefined) REGISTRATION_WRITTEN_STAMPS.set(item, written);
+}
+
+/**
  * [#28534] The registration door's refusal of a collection item whose body
  * already carries a `_packageId` other than the package it is registered under
  * (`ownerId`; none for a manifest that carries no id).
@@ -4844,6 +4864,19 @@ export function permissionSetOwnerRegistrationRefusal(
  * RESIDUAL registration (`registerUnclaimedTopLevelItems` in `plugin.ts`),
  * which files top-level items under the residual owner and refuses the same
  * stamp in this same envelope. ⛔ Never rebuild the envelope at a second door.
+ *
+ * ## A stamp a registration wrote is not a body's claim
+ *
+ * `stampPackage` and `registerItem` stamp the CALLER'S object in place, so an
+ * item object registered once keeps that registration's `_packageId` for as
+ * long as it lives — a module constant handed to a second registration (a
+ * fixture another test registered under its own package, measured in
+ * `engine-picklist.test.ts`) arrives wearing the first registration's stamp,
+ * which no body wrote. Those stamps are recorded where they are written
+ * ({@link noteRegistrationStamp}) and are not refused here: the item
+ * registers as it always has. Only a stamp the object ARRIVED with is judged —
+ * which every installed body's is, since an install door parses its body
+ * fresh, so no registration has touched it.
  */
 export function collectionItemOwnerStampRefusal(
   item: unknown,
@@ -4854,6 +4887,7 @@ export function collectionItemOwnerStampRefusal(
   if (!item || typeof item !== 'object') return undefined;
   const stamped = (item as { _packageId?: unknown })._packageId;
   if (stamped === undefined || stamped === ownerId) return undefined;
+  if (REGISTRATION_WRITTEN_STAMPS.get(item) === stamped) return undefined;
   const owner = ownerId === undefined ? 'no package' : `package '${ownerId}'`;
   const issueMessage = `carries _packageId ${JSON.stringify(stamped)}, but it is registered under ${owner}`;
   const err = new Error(
@@ -9016,7 +9050,9 @@ export class ObjectQL implements IObjectQLEngine {
                   // one collection filed outside it.
                   const ownerStamp = collectionItemOwnerStampRefusal(dataset, 'data', String(dataset.object), id);
                   if (ownerStamp) throw ownerStamp;
+                  const stampBefore = (dataset as { _packageId?: unknown })._packageId;
                   this._registry.registerItem('data', stampPackage(dataset, id, version), 'object' as any, id);
+                  noteRegistrationStamp(dataset, stampBefore);
               }
           }
       }
@@ -9236,7 +9272,9 @@ export class ObjectQL implements IObjectQLEngine {
               if (key === 'views' && !isViewContainerShaped(toRegister)) {
                   throw viewsEntryNotContainerRefusal(itemName, sourceLabel, ownerId);
               }
+              const stampBefore = (toRegister as { _packageId?: unknown })._packageId;
               this._registry.registerItem(pluralToSingular(key), stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
+              noteRegistrationStamp(toRegister, stampBefore);
               // "Object has-many View" (ADR-0017): a `defineView` document
               // aggregates an object's views. Register the container under the
               // bare <object> key (above, back-compat) AND expand it into

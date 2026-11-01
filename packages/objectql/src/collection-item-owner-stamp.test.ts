@@ -115,6 +115,27 @@ describe('[#28534] registerApp refuses a collection item whose body `_packageId`
     });
 });
 
+describe('[#28534] a stamp a REGISTRATION wrote onto the caller\'s object is not a body\'s claim', () => {
+    it('one item object, stamped in place by another engine\'s registration under A, registers under B as before; a fresh copy wearing the same stamp is refused', () => {
+        const shared = connector();
+        new ObjectQL().registerApp({ id: HOST, name: 'host', connectors: [shared] } as any);
+        expect((shared as { _packageId?: unknown })._packageId, 'the first registration stamped the caller\'s own object').toBe(HOST);
+
+        // The object a registration stamped — a module constant handed on, as a
+        // fixture shared by two tests is: no body wrote that stamp.
+        const reused = register({ id: PKG, name: 'probe', connectors: [shared] });
+        expect(reused.error).toBeUndefined();
+        expect(reused.filed).toBeDefined();
+
+        // The same bytes ARRIVING as a body (a parsed install body, never touched
+        // by a registration): the stamp is the body's own, and it is refused.
+        const arrived = register({ id: PKG, name: 'probe', connectors: [JSON.parse(JSON.stringify(shared))] });
+        expect(arrived.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(arrived.error.message).toContain(`"${HOST}"`);
+        expect(arrived.filed).toBeUndefined();
+    });
+});
+
 // ── the residual door and its owner record ─────────────────────────────────
 
 type ManifestService = { register(m: unknown, options?: { source?: 'code' | 'marketplace' }): void | Promise<void> };
