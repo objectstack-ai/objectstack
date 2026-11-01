@@ -1,7 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema, FieldType, VALUE_DOMAIN_FIELD_TYPES } from './field.zod';
+import { FieldSchema, FieldType, SelectOptionSchema, VALUE_DOMAIN_FIELD_TYPES } from './field.zod';
+import {
+  BASE_FIELD_DISPLAY_WHITELIST,
+  isExtensionFieldName,
+  type BaseFieldDisplayProperty,
+  type BaseFieldOptionDisplayProperty,
+} from './field-customization';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema, type ActionParam } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -4694,6 +4700,174 @@ function normalizeRowCrudOverride(
 export const ObjectOwnershipEnum = z.enum(['own', 'extend', 'overlay']);
 export type ObjectOwnership = z.input<typeof ObjectOwnershipEnum>;
 
+// =================================================================
+// Per-field display patch (ADR-0146 D10, second rule)
+// =================================================================
+
+/** The members of a key list, each in backticks, joined for a sentence. */
+function backtickList(keys: readonly string[]): string {
+  return keys.map((key) => `\`${key}\``).join(', ');
+}
+
+/**
+ * The prescription a refused key on a field patch carries — one sentence of
+ * D6, with the admitted keys READ FROM {@link BASE_FIELD_DISPLAY_WHITELIST}
+ * rather than written here, so a widened whitelist widens the sentence too.
+ */
+function fieldPatchStructuralPrescription(): string {
+  return (
+    'A field patch changes display properties only: ' +
+    `${backtickList(BASE_FIELD_DISPLAY_WHITELIST.field)} on the field, and ` +
+    `${backtickList(BASE_FIELD_DISPLAY_WHITELIST.option)} on an option under \`options\` ` +
+    '(`BASE_FIELD_DISPLAY_WHITELIST`). The type, requiredness, uniqueness, reference target, default, ' +
+    'formula, option membership and every other property of a base field stay the vendor\'s (ADR-0146 D6), ' +
+    'so the vendor\'s next version still applies. To hide the field, use views and permissions; for a field ' +
+    'that behaves differently, declare your own `__c` field in `fields`.'
+  );
+}
+
+/**
+ * The value schema of every whitelisted key, taken BY KEY from the shape that
+ * declares it (`FieldSchema`, or one entry of a field's `options`) and made
+ * optional — a patch names only what it changes.
+ *
+ * Throws at construction when the whitelist names a key the source shape no
+ * longer declares: a patch slot that silently lost a member would accept less
+ * than the whitelist promises. `field-customization.test.ts` pins the same
+ * membership from the constant's side.
+ */
+function whitelistedPatchShape(
+  source: z.ZodRawShape,
+  keys: readonly string[],
+  sourceName: string,
+): Record<string, z.ZodOptional<z.ZodTypeAny>> {
+  const shape: Record<string, z.ZodOptional<z.ZodTypeAny>> = {};
+  for (const key of keys) {
+    const declared = source[key] as z.ZodTypeAny | undefined;
+    if (!declared) {
+      throw new Error(
+        `BASE_FIELD_DISPLAY_WHITELIST names \`${key}\`, which ${sourceName} does not declare — ` +
+        'the field patch slot cannot carry it.',
+      );
+    }
+    shape[key] = declared.optional();
+  }
+  return shape;
+}
+
+/**
+ * The keys of `source` a patch refuses: everything the shape declares that the
+ * whitelist does not admit, minus the keys the patch answers some other way.
+ * Derived, never listed — a key the vendor's schema grows is refused with the
+ * D6 prescription the day it lands.
+ */
+function structuralKeysOf(
+  source: z.ZodRawShape,
+  admitted: readonly string[],
+  answeredElsewhere: readonly string[],
+): string[] {
+  return Object.keys(source).filter((key) => !admitted.includes(key) && !answeredElsewhere.includes(key));
+}
+
+/** The closed shape of one option patch: {@link BASE_FIELD_DISPLAY_WHITELIST}`.option`'s keys. */
+type FieldOptionDisplayPatchShape = {
+  [K in BaseFieldOptionDisplayProperty]: z.ZodOptional<(typeof SelectOptionSchema)['shape'][K]>;
+};
+
+/**
+ * One entry of a field patch's `options` map: the display properties of ONE
+ * base option, the option addressed by its stored `value` (the map key).
+ */
+const FieldOptionDisplayPatchSchema = lazySchema(() => {
+  const optionShape = SelectOptionSchema.shape as z.ZodRawShape;
+  const admitted = BASE_FIELD_DISPLAY_WHITELIST.option;
+  return strictObject({
+    surface: 'this option patch',
+    history:
+      'An option patch changes the display text of one vendor option; a key outside the whitelist ' +
+      'has nowhere to go, and dropping it would accept a change that is never made.',
+    guidance: {
+      value:
+        'An option is addressed by its stored value — the key it sits under in `options` — and that value ' +
+        'stays the vendor\'s (ADR-0146 D6): stored rows hold it, so an extension cannot rename it. Patch ' +
+        `the option's ${backtickList(admitted)} only.`,
+    },
+    guidanceSets: [{
+      name: 'STRUCTURAL_OPTION_KEYS',
+      keys: structuralKeysOf(optionShape, admitted, ['value']),
+      prescription: fieldPatchStructuralPrescription(),
+    }],
+  }, whitelistedPatchShape(optionShape, admitted, 'a select option') as unknown as FieldOptionDisplayPatchShape);
+});
+
+/** The closed shape of one field patch: {@link BASE_FIELD_DISPLAY_WHITELIST}`.field`'s keys, plus `options`. */
+type FieldDisplayPatchShape = {
+  [K in BaseFieldDisplayProperty]: z.ZodOptional<(typeof FieldSchema)['shape'][K]>;
+} & {
+  options: z.ZodOptional<z.ZodRecord<z.ZodString, typeof FieldOptionDisplayPatchSchema>>;
+};
+
+/**
+ * The patch of ONE base field: the display properties
+ * {@link BASE_FIELD_DISPLAY_WHITELIST} admits, plus `options`, a map from an
+ * option's stored `value` to that option's patch.
+ *
+ * Both key sets are DERIVED from the constant — widening the whitelist widens
+ * this shape, and `field-patches.test.ts` proves it — and every other
+ * `FieldSchema` key is refused by name with the D6 prescription.
+ */
+const FieldDisplayPatchSchema = lazySchema(() => {
+  const fieldShape = FieldSchema.shape as z.ZodRawShape;
+  const admitted = BASE_FIELD_DISPLAY_WHITELIST.field;
+  return strictObject({
+    surface: 'this field patch',
+    history:
+      'A field patch changes the display properties of one vendor field; a key outside the whitelist ' +
+      'has nowhere to go, and dropping it would accept a change that is never made.',
+    guidanceSets: [{
+      name: 'STRUCTURAL_FIELD_KEYS',
+      keys: structuralKeysOf(fieldShape, admitted, ['options']),
+      prescription: fieldPatchStructuralPrescription(),
+    }],
+  }, {
+    ...whitelistedPatchShape(fieldShape, admitted, 'FieldSchema'),
+    options: z.record(z.string(), FieldOptionDisplayPatchSchema, {
+      error: (issue) =>
+        issue.code === 'invalid_type' && Array.isArray(issue.input)
+          ? 'A field patch\'s `options` is a map keyed by each option\'s stored value — ' +
+            '`options: { tech: { label: \'Technology\' } }` — not the field\'s option list: which options ' +
+            'exist stays the vendor\'s (ADR-0146 D6).'
+          : undefined,
+    }).optional().describe(
+      'Display patches of the base field\'s options, keyed by each option\'s stored `value` (which stays ' +
+      'the vendor\'s); each entry takes the option display keys of BASE_FIELD_DISPLAY_WHITELIST.',
+    ),
+  } as unknown as FieldDisplayPatchShape);
+});
+
+/**
+ * Refuse a `fieldPatches` key spelled as a customer extension field.
+ *
+ * A name ending in `__c` is the customer's own field (ADR-0146 D10, first
+ * rule), declared whole in `fields`; there is no vendor field under it to
+ * patch. Located at the key (`fieldPatches.region__c`). Judged on the
+ * extension's root refinement, where `ObjectExtensionSchema` already carries
+ * one, so the published JSON Schema gains no dropped-refinement site.
+ */
+function refuseExtensionFieldPatchKeys(fieldPatches: unknown, ctx: z.RefinementCtx): void {
+  if (!fieldPatches || typeof fieldPatches !== 'object') return;
+  for (const name of Object.keys(fieldPatches)) {
+    if (!isExtensionFieldName(name)) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fieldPatches', name],
+      message:
+        `\`${name}\` is spelled as an extension field (\`__c\`), so there is no vendor field to patch: ` +
+        'declare it in `fields`; it is your own field, and its label and help text are yours to set there.',
+    });
+  }
+}
+
 /**
  * Object Extension Entry — used in `objectExtensions` array.
  * Declares fields/config to merge into an existing object owned by another package.
@@ -4703,6 +4877,9 @@ export type ObjectOwnership = z.input<typeof ObjectOwnershipEnum>;
  * objectExtensions: [{
  *   extend: 'contact',               // target object FQN
  *   fields: { sales_stage: Field.select([...]) },
+ *   // A base field's display properties only (ADR-0146 D10). Not applied
+ *   // until the registry merge carries the slot — see `fieldPatches`.
+ *   fieldPatches: { industry: { label: 'Sector', options: { tech: { label: 'Technology' } } } },
  * }]
  * ```
  */
@@ -4726,6 +4903,9 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
     // (extend / fields / label / pluralLabel / description / validations /
     // indexes / priority) onto the extension def. Anything else is not
     // "unsupported yet" — there is no slot for it to arrive through.
+    // `fieldPatches` is the one declared key that copy does not carry yet:
+    // it is parsed and marked not enforced until the merge card (N-23d,
+    // #28565) carries it through the engine into `mergeObjectDefinitions`.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
       '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes` only. ' +
@@ -4767,7 +4947,26 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   
   /** Fields to merge into the target object (additive) */
   fields: z.record(z.string(), FieldSchema).optional().describe('Fields to add/override'),
-  
+
+  /**
+   * [ADR-0146 D10, second rule] Per-field display patch of the target's own
+   * fields. Keys are DERIVED from `BASE_FIELD_DISPLAY_WHITELIST`; structural
+   * keys are refused by name with the D6 prescription; an `__c` key is refused
+   * by the root refinement below. Pure shape: whether the target has the field
+   * or the option, and who may patch, are the server's (N-23d, #28565), which
+   * also carries the slot through `engine.ts`'s extension copy — dropped there
+   * until then — and flips the marker below.
+   */
+  fieldPatches: z.record(z.string(), FieldDisplayPatchSchema).optional().describe(
+    '[EXPERIMENTAL — not enforced] Display patches of the target object\'s own fields, keyed by field ' +
+    'name: change a vendor field\'s display properties (BASE_FIELD_DISPLAY_WHITELIST: label, description, ' +
+    'help text, placeholder, option labels) without taking the field over, so its type, values and rules ' +
+    'stay the vendor\'s and its upgrades still apply (ADR-0146 D10). Nothing applies a patch yet: the ' +
+    'registry merge that does is rollout card N-23d, and until it lands the engine drops this slot at ' +
+    'registration. Example: `fieldPatches: { industry: { label: \'Sector\', inlineHelpText: \'The market ' +
+    'the account sells into\', options: { tech: { label: \'Technology\' } } } }`.',
+  ),
+
   /** Override label */
   label: z.string().optional().describe('Override label for the extended object'),
   
@@ -4789,6 +4988,8 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   // [#14892] The same rule as on `ObjectSchema`: the fields merge into
   // `extend`, so that is the object a `tree` field's `reference` must name.
   refuseForeignTreeReference(extension.extend, extension.fields, ctx);
+  // [ADR-0146 D10] A `__c` name is the customer's own field, not a patch target.
+  refuseExtensionFieldPatchKeys(extension.fieldPatches, ctx);
 }).overwrite((extension) => {
   // [#23065] …and the object a referenceless `tree` field references. See
   // {@link materializeTreeSelfReferences}.
