@@ -13436,6 +13436,16 @@ export class ObjectStackProtocolImplementation implements
      * ever returning the value — is untouched, exactly as #7823 kept the engine's
      * write results whole while the generic-data-path ingress stripped them.
      *
+     * PUBLIC, and asked by the generic data mouths that hand a caller's query
+     * to the engine without passing through {@link findData}: the MCP stdio
+     * transport's `query_records` / `aggregate_records` and the HTTP MCP
+     * bridge's `aggregate_records` arm (`callData`'s `aggregate`). Each asks
+     * this method on the `protocol` service it already resolves, before the
+     * engine, so a filter, sort, group key or aggregation over an `internal`
+     * field gets this door's refusal, word for word, on every transport —
+     * one definition, never a copy beside it (route-ownership rule 1). The
+     * engine's privileged consumers above still never reach it.
+     *
      * Positions, with the ONE flag reader ({@link collectInternalWriteResponseFields},
      * `@objectstack/core`'s cross-package twin of objectql's
      * `collectInternalReadFields` — identical rule, imported because this package
@@ -13475,7 +13485,7 @@ export class ObjectStackProtocolImplementation implements
      * door). A dotted sort inside an `expand` entry is admitted but orders a
      * batch the expansion re-keys by id with no `limit`, so it changes no answer.
      */
-    private assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
+    assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
         const host: ThisParameterType<typeof assertNoInternalFieldEvaluated> = {
             groupByFieldNames: (...a) => this.groupByFieldNames(...a),
