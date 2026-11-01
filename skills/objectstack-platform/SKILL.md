@@ -44,8 +44,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
 state machines are a `state_machine` validation rule on each object.
-A phantom key like `roles:` or `policies:` is **not** a silent
-no-op — the top level refuses it and the stack fails to load.
+A phantom key like `roles:` or `policies:` is refused at the top level.
 
 `queues` declares ownership queues (`defineQueue`, `@objectstack/spec/security`;
 objectstack-data): named sets of people a new record of an `ownership: 'user'`
@@ -65,9 +64,8 @@ Undeclared keys are handled per surface, in two postures:
   been closed yet (`connectors` is one). `defineStack()` prints the warning
   before the parse, and the value does not survive it:
   `defineStack: connectors.stripe.bogusKey: 'bogusKey' is not a declared connector key, so its value is dropped at load.`
-  Treat these as errors-in-waiting — closing the remaining shapes is a
-  scheduled migration, so a key that only warns today is expected to be
-  refused later.
+  Treat these as errors-in-waiting: a key that only warns today is expected
+  to be refused later.
 
 Exact shape: `ObjectStackDefinitionSchema` in
 `node_modules/@objectstack/spec/src/stack.zod.ts`; each collection's item
@@ -130,7 +128,7 @@ to a new protocol major — never to silence a mismatch.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
 
-**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow (the rest of `OVERRIDABLE_METADATA_TYPES` wait for their doors), never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. An undeclared pair row or a dependent's row is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
+**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow (the rest of `OVERRIDABLE_METADATA_TYPES` wait for their doors), never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. The base's address serves that added locale too (both lists, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. An undeclared pair row or a dependent's row is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
 
 ---
 
@@ -183,7 +181,7 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 ## Project Structure Conventions
 
-Every ObjectStack project follows this directory structure:
+Project layout:
 
 ```
 my-app/
@@ -242,7 +240,7 @@ Under `os dev` / `os serve` / `os start` the CLI **resolves the driver itself**
 from the database URL and registers `DriverPlugin` for you. Do **not** put a
 driver in your config's `plugins:` array: no example app does, and the
 `plugins:` key is for plugins the CLI cannot infer (connector executors, your
-own plugins). Pick a driver by setting the DB URL, not by writing code.
+own plugins).
 
 Construct `DriverPlugin` yourself only when **you** own the runtime — embedding
 via `Runtime` / `ObjectKernel`, or a test that boots a kernel directly:

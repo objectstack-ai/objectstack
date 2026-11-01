@@ -137,6 +137,14 @@ document **whole** for every read that serves the base's name
   `overrides`; declaring one there is refused (`403 NOT_OVERRIDABLE` at the save, publish
   and install doors, a row from `os validate`, the sentence naming the locale), because the
   base ships no such member to replace.
+- **The pair's added locale is served on the base's address; a dependent's is not.** The
+  member `hotcrm.custom` adds is listed by `GET /meta/email_template` with no `?package`
+  and with `?package=hotcrm`, is in the execution list the email service reads, and so is
+  what a send in that locale renders — stamped `_packageId: 'hotcrm.custom'`, as the
+  by-name read already served it. A locale another package that depends on `hotcrm`
+  adds under the base template's name is that package's own item, served only under
+  `?package=` naming it and in the list scoped to it: the read naming `hotcrm` and the read
+  naming no package answer `404`, and the base's lists leave it out.
 - **The environment-wide list** serves one item per name that exactly one code package
   ships. A dependent package's same-named item is not listed beside it and stays under
   its own `?package=` address. A package-unbound row — the overlay row of the table
