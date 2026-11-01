@@ -45,7 +45,7 @@ import {
     type MetaOverlayCacheKey,
 } from './meta-overlay-cache.js';
 import type { ObjectStackProtocolImplementation, StoredOverlayEntry } from './protocol.js';
-import { addressPackages } from './protocol.js';
+import { addressPackages, withRowBinding } from './protocol.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -171,13 +171,9 @@ export function storedOverlayEntries(
         // asks an item's owner of `_packageId` — the connector materializer
         // deciding whose root a file ref reads among them. A copy, so a cached
         // row's body is never written.
-        let data = parsed;
-        if (data && typeof data === 'object' && !Array.isArray(data) && (data as any)._packageId !== recPkg) {
-            const bound: Record<string, unknown> = { ...(data as Record<string, unknown>) };
-            if (recPkg) bound._packageId = recPkg;
-            else delete bound._packageId;
-            data = bound;
-        }
+        // [#28673] The one rule every read of a stored row states its package
+        // by: {@link withRowBinding}.
+        const data = withRowBinding(parsed, recPkg) as any;
         // [ADR-0131 D6/D7] Every row is the environment's: the family
         // declares no organization column, and the reads that feed this
         // ({@link readActiveOverlayRows}) leave a legacy organization's

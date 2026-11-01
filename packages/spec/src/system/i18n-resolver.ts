@@ -3904,6 +3904,25 @@ export function flowScreenCopyKey(flowName: string, nodeId: string, key: FlowScr
   return `flows.${flowName}.screens.${nodeId}.${key}`;
 }
 
+/**
+ * Dot-notation i18n key for a flow's terminal text —
+ * `flows.<flow>.successMessage` / `flows.<flow>.errorMessage` (#28054).
+ *
+ * The sibling of {@link flowScreenCopyKey}, for the same reason and with the
+ * same reader. Both are `{{ }}` templates the engine renders at the run's
+ * terminal exit (`FLOW_TEXT_SLOTS` in `automation/flow-text-slot-template.ts`),
+ * so it picks the translated TEMPLATE in the run's locale through the `i18n`
+ * service and only then fills the holes — the rule of the maintainer's ruling
+ * on #22507: a user-read flow string the server renders per run is translated
+ * where it is rendered, and a client overlay never touches a server-rendered
+ * slot.
+ *
+ * `flowName` is `Flow.name` and `key` one of {@link FLOW_TERMINAL_MESSAGE_KEYS}.
+ */
+export function flowTerminalMessageKey(flowName: string, key: FlowTerminalMessageKey): string {
+  return `flows.${flowName}.${key}`;
+}
+
 export function resolveObjectFieldLabels(
   data: TranslationData | undefined,
   objectName: string,
@@ -5262,9 +5281,9 @@ export interface FlowLike {
   /** `Flow.name` — the machine name the `flows` group is keyed by. */
   name: string;
   label?: string;
-  /** The completion toast (`Flow.successMessage`, served verbatim as `AutomationResult.successMessage`). */
+  /** The completion toast (`Flow.successMessage`, a `{{ }}` template the engine renders into `AutomationResult.successMessage`, #28054). */
   successMessage?: string;
-  /** The failure toast (`Flow.errorMessage`, served verbatim as `AutomationResult.errorMessage`). */
+  /** The failure toast (`Flow.errorMessage`, a `{{ }}` template the engine renders into `AutomationResult.errorMessage`, #28054). */
   errorMessage?: string;
   nodes?: FlowNodeLike[];
   [key: string]: any;
@@ -5357,12 +5376,17 @@ export type FlowScreenFieldCopyKey = typeof FLOW_SCREEN_FIELD_COPY_KEYS[number];
  * `flows.<flow>.successMessage` and `flows.<flow>.errorMessage`, each spelled
  * as `FlowSchema` spells the string it overlays.
  *
- * The engine carries both VERBATIM on the terminal `AutomationResult` (plain
- * strings, never interpolated), so a runner translates the served string by
- * handing it to {@link translateFlow} under its own key, the way it already
- * resolves the served `flowLabel`. Exported for the same one-list-both-sides
- * reason as {@link FLOW_SCREEN_COPY_KEYS}: the CLI's skeleton writer offers
- * exactly these keys, and `translation.test.ts` pins the schema to them.
+ * Since #28054 both are `{{ }}` templates the engine renders at the run's
+ * terminal exit, so the ENGINE picks each translation, in the run's locale,
+ * before it fills the holes ({@link flowTerminalMessageKey}), and the served
+ * `AutomationResult.successMessage` / `.errorMessage` arrive translated and
+ * filled: a runner draws them as served and overlays neither (maintainer
+ * ruling A on #22507, which moved a screen's heading and body text the same
+ * way). Until then the engine carried both verbatim and the runner handed the
+ * served string to {@link translateFlow}, which still applies these keys to a
+ * flow DOCUMENT. Exported for the same one-list-both-sides reason as
+ * {@link FLOW_SCREEN_COPY_KEYS}: the CLI's skeleton writer offers exactly these
+ * keys, and `translation.test.ts` pins the schema to them.
  */
 export const FLOW_TERMINAL_MESSAGE_KEYS = ['successMessage', 'errorMessage'] as const;
 
@@ -5622,16 +5646,16 @@ export function resolveFlowScreenTitle(
  * label the engine serves on every run result as `AutomationResult.flowLabel`,
  * and draws the answer (the API name when no label was served) in its header
  * and its completion toast. Both `flows` rows in the ledger are `live`, and
- * cite these reads. The terminal toasts and the option
- * labels (#22507) take the same client side — the runner hands the served
- * `successMessage` / `errorMessage` to this function as it does the label,
- * and overlays each served field's options through
- * {@link resolveFlowScreenFieldOptions} — in a downstream objectui change;
- * their ledger rows are `planned` until it lands. A screen's heading and body
- * text do NOT take the client side any more (maintainer ruling A on #22507):
- * the server renders both per run, so the engine picks their translated
- * templates in the run's locale ({@link flowScreenCopyKey}), and the runner
- * stops overlaying the served heading.
+ * cite these reads. The option labels (#22507) take the same client side —
+ * the runner overlays each served field's options through
+ * {@link resolveFlowScreenFieldOptions}. A screen's heading and body text do
+ * NOT take the client side any more (maintainer ruling A on #22507): the
+ * server renders both per run, so the engine picks their translated templates
+ * in the run's locale ({@link flowScreenCopyKey}), and the runner stops
+ * overlaying the served heading. The terminal toasts followed them (#28054):
+ * the engine renders `successMessage` / `errorMessage` as `{{ }}` templates,
+ * so it picks their translations ({@link flowTerminalMessageKey}) and the
+ * runner draws the served strings as they arrive.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,

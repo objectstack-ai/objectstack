@@ -9015,6 +9015,11 @@ export class ObjectQL implements IObjectQLEngine {
               const extDef = {
                   name: targetFqn, // Use the target FQN as name
                   fields: ext.fields,
+                  // [ADR-0146 D10, second rule] The per-field display patches,
+                  // the slot as `ObjectExtensionSchema.fieldPatches` declares
+                  // it — applied by the registry's `mergeObjectDefinitions`,
+                  // whose fold every object read shares.
+                  fieldPatches: ext.fieldPatches,
                   label: ext.label,
                   pluralLabel: ext.pluralLabel,
                   description: ext.description,

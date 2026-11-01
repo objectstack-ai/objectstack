@@ -2656,7 +2656,9 @@ export class AutomationServicePlugin implements Plugin {
      *    provider, invalid `providerConfig`, a host credential resolver that
      *    throws, name conflict, duplicate — **throws**, which is fatal to
      *    bootstrap under both LiteKernel and ObjectKernel (the ADR's "fail
-     *    loudly" contract).
+     *    loudly" contract). [#28698] Except a STORED entry's (a row of the
+     *    environment, not the host's declaration): that one is logged and
+     *    skipped exactly as on a reload, so a row at rest never stops a boot.
      *  - **Reload** (`fatal: false`, called from `metadata:reloaded`): the same
      *    problems are **logged and the offending entry is skipped**, so a bad
      *    Studio publish / dev reload never crashes a live server. A changed
@@ -2755,6 +2757,12 @@ export class AutomationServicePlugin implements Plugin {
         if (!declared) return; // no registry, no reloaded artifact — nothing declared
         this.reconciledDeclaration = declaredInstanceFingerprint(declared);
 
+        // [#28534] The engine's package rows and residual-owner record, read
+        // once per run (each lookup is live), answer which declaring packages
+        // are not the host's own ({@link nonHostDeclaringPackageOf}).
+        const declaringReaders = this.declaringPackageReadersOrNone(ctx);
+        const storedEntry = (entry: unknown): boolean => nonHostDeclaringPackageOf(entry, declaringReaders)?.why === 'stored';
+
         // Report a reconcile problem: fatal (boot) throws; soft (reload) logs.
         //
         // #5575 — `msg` MUST be a single-line, self-contained sentence, and an
@@ -2775,8 +2783,19 @@ export class AutomationServicePlugin implements Plugin {
         // A `fail(msg)` with no cause logs exactly what it always did: `cause`
         // is only described when it is present, so the causeless reports (dup
         // name, §4 conflict, unknown provider) gain no `"error":"undefined"`.
-        const fail = (msg: string, cause?: unknown): void => {
-            if (opts.fatal) {
+        //
+        // [#28594, #28698] `stored`: the fault is a STORED entry's (a row of
+        // the environment, {@link nonHostDeclaringPackageOf}), not one the
+        // host's stack declares. A row at rest is hydrated into the registry
+        // before this boot reconcile reads it, so failing the boot on it would
+        // let one stored definition (accepted when it was saved, and since
+        // made invalid: its provider no longer offered, a policy a newer
+        // runtime refuses) stop the platform starting, with no door left to
+        // fix it through. So a stored entry's fault takes the soft path in
+        // BOTH modes: the same record, the entry skipped, the boot carrying
+        // on. A host-declared entry's keeps the fail-loud contract at boot.
+        const fail = (msg: string, cause?: unknown, stored = false): void => {
+            if (opts.fatal && !stored) {
                 throw new Error(cause === undefined ? msg : `${msg} cause: ${thrownMessageText(cause)}`);
             }
             // Third argument, per the `Logger` contract's `error(message, error?,
@@ -2796,7 +2815,11 @@ export class AutomationServicePlugin implements Plugin {
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
             if (desired.has(bound.name)) {
-                fail(`[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`);
+                fail(
+                    `[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`,
+                    undefined,
+                    storedEntry(bound),
+                );
                 continue;
             }
             desired.set(bound.name, { entry: bound, signature: connectorInstanceSignature(bound) });
@@ -2905,11 +2928,6 @@ export class AutomationServicePlugin implements Plugin {
             if (!desired.has(name)) this.credentialRefusalAttempts.delete(name);
         }
 
-        // [#28534] The engine's package rows and residual-owner record, read
-        // once per run (each lookup is live), answer which declaring packages
-        // are not the host's own ({@link nonHostDeclaringPackageOf}).
-        const declaringReaders = this.declaringPackageReadersOrNone(ctx);
-
         // 2. Add new instances and re-materialize changed ones (signature diff).
         let changed = 0;
         for (const [name, { entry, signature }] of desired) {
@@ -2933,6 +2951,8 @@ export class AutomationServicePlugin implements Plugin {
             if (held?.held && held.signature === signature) continue;
 
             const provider = entry.provider;
+            const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
+            const stored = notHost?.why === 'stored';
 
             // §4 conflict: the name is held by a plugin-registered connector (not
             // one of ours). Never silently replace across origins.
@@ -2940,6 +2960,8 @@ export class AutomationServicePlugin implements Plugin {
                 fail(
                     `[Automation] connector name conflict: declarative provider-bound instance '${name}' collides with a ` +
                         `plugin-registered connector of the same name — there is no silent precedence (ADR-0097 §4). Rename one.`,
+                    undefined,
+                    stored,
                 );
                 continue;
             }
@@ -2952,6 +2974,8 @@ export class AutomationServicePlugin implements Plugin {
                         `Install the connector plugin that supplies it (openapi → @objectstack/connector-openapi, mcp → @objectstack/connector-mcp, ` +
                         `rest → @objectstack/connector-rest) in the stack's plugins: array. Installed providers: ` +
                         `[${installed.join(', ') || 'none'}] (ADR-0097).`,
+                    undefined,
+                    stored,
                 );
                 continue;
             }
@@ -2999,11 +3023,12 @@ export class AutomationServicePlugin implements Plugin {
                     // (`AutomationServicePluginOptions.credentialResolver` — a
                     // secrets service, or anything that validates with Zod), so
                     // what lands here is not ours to assume anything about, and its
-                    // contract is unchanged: fatal at boot, logged and skipped on
-                    // a reload.
+                    // contract is unchanged: fatal at boot for the host's own
+                    // entry, logged and skipped on a reload or for a stored one.
                     fail(
                         `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -3029,6 +3054,7 @@ export class AutomationServicePlugin implements Plugin {
                     fail(
                         `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -3064,6 +3090,7 @@ export class AutomationServicePlugin implements Plugin {
                         `[Automation] connector instance '${name}' (provider '${provider}'): a key it names cannot sign or ` +
                             `verify (ADR-0143 D2.3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -3140,26 +3167,13 @@ export class AutomationServicePlugin implements Plugin {
                         `[Automation] connector instance '${name}' (provider '${provider}'): retryConfig is not a valid ` +
                             `connector retry policy (integration/connector.zod.ts RetryConfigSchema).`,
                         parsed.error,
+                        stored,
                     );
                     continue;
                 }
                 retryConfig = parsed.data;
             }
 
-            const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
-            // [#28594] Set when this entry's factory met the refusal of a STORED
-            // entry's package ref, so the catch below can tell that fault apart
-            // from one the factory raised itself (a provider wraps the refusal
-            // in its own message, so the thrown value cannot say it).
-            let storedRefRefused = false;
-            const refuseRef = (member: 'reads' | 'paths'): ((relativePath: string) => Promise<never>) => {
-                const refusal = createInstalledPackageRefRefusal(name, notHost!, member);
-                if (notHost?.why !== 'stored') return refusal;
-                return async (relativePath: string) => {
-                    storedRefRefused = true;
-                    return refusal(relativePath);
-                };
-            };
             const providerCtx: ConnectorProviderContext = {
                 name,
                 label: entry.label ?? name,
@@ -3187,12 +3201,12 @@ export class AutomationServicePlugin implements Plugin {
                 // [#28594] So is a definition stored in this environment.
                 loadPackageFile: notHost === undefined
                     ? createPackageFileLoader(this.options.packageRoot)
-                    : refuseRef('reads'),
+                    : createInstalledPackageRefRefusal(name, notHost, 'reads'),
                 // #22434 — the same root as a location (e.g. a launched
                 // process's working directory), under the same confinement.
                 resolvePackagePath: notHost === undefined
                     ? createPackagePathResolver(this.options.packageRoot)
-                    : refuseRef('paths'),
+                    : createInstalledPackageRefRefusal(name, notHost, 'paths'),
             };
 
             let materialization;
@@ -3300,23 +3314,6 @@ export class AutomationServicePlugin implements Plugin {
                 // [#27992] A configuration fault met by an instance that is
                 // degraded — its backoff retry, or a reload — ends the retry:
                 // ADR-0097 does not retry a configuration fault.
-                // [#28594] A stored entry refused its package ref is the
-                // environment's row, not the host's declaration, and a row at
-                // rest is hydrated into the registry before this boot reconcile
-                // reads it. Failing the boot on it would let one stored
-                // definition (one that worked before this refusal existed) stop
-                // the platform starting, with no door left to fix it through.
-                // So it takes the soft path in BOTH modes: logged, the entry
-                // skipped, the boot carrying on. Every other configuration fault
-                // keeps the fail-loud contract.
-                if (storedRefRefused && opts.fatal) {
-                    ctx.logger.error(
-                        `[Automation] failed to materialize connector instance '${name}' via provider '${provider}' (ADR-0097).`,
-                        undefined,
-                        describeThrownForLog(thrown),
-                    );
-                    continue;
-                }
                 if (!opts.fatal && this.degradedInstances.has(name)) {
                     this.failDegradedConnectorInstance(engine, ctx, {
                         name,
@@ -3333,10 +3330,12 @@ export class AutomationServicePlugin implements Plugin {
                 // people to write, and the first one that validates its
                 // `providerConfig` with Zod throws a message whose first line is
                 // `[`. The cause goes to `meta` on the soft path, and is appended
-                // to the thrown message on the fatal one.
+                // to the thrown message on the fatal one. [#28594] A stored
+                // entry's (its refused package ref among them) is soft at boot.
                 fail(
                     `[Automation] failed to materialize connector instance '${name}' via provider '${provider}' (ADR-0097).`,
                     thrown,
+                    stored,
                 );
                 continue;
             }
@@ -4971,6 +4970,14 @@ export class AutomationServicePlugin implements Plugin {
      * the same winners by this same decision, so its receipt describes what is
      * armed after them too. The collision warning is logged by every step that
      * meets a contested name.
+     *
+     * [#28412, ADR-0146 D9 item 1] One stored row of a shipped name IS armed:
+     * the shipping package's declared `.custom` override. The protocol's view
+     * serves it in the package's slot (once, in place of the loader's body),
+     * and the boot pull ranks it above the loader's body by its stored
+     * binding (`flow-precedence.ts`), so every step arms it, with no receipt.
+     * Its removal puts the loader's body back in the view, and each step
+     * re-arms that body by one `registerFlow` — never a withdraw first.
      */
     private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
         const engine = this.engine;

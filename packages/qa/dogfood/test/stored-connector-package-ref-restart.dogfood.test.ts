@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // GOLDEN REGRESSION — a stored connector entry whose package-relative ref is
-// refused (#28594) never stops the platform from booting.
+// refused (#28594), or that carries any other configuration fault (#28698),
+// never stops the platform from booting.
 //
 // ## Why a restart
 //
@@ -20,11 +21,14 @@
 // metadata door, an environment-wide `openapi` entry naming a
 // package-relative file, the same entry in an `authored` package, an
 // environment-wide stdio `mcp` entry, and a control carrying its document
-// inline. The second boot:
+// inline. [#28698] It also saves an environment-wide entry naming a provider
+// no installed plugin offers (accepted at save, skipped after boot: the shape
+// a row takes when the plugin that offered its provider is removed). The
+// second boot:
 //
 //   1. starts (no throw);
-//   2. does not list either refused entry, and its boot record names each
-//      entry and its ref;
+//   2. does not list any refused entry, and its boot record names each entry
+//      and its ref (or, for the unknown provider, the provider);
 //   3. lists the stored inline control `ready` with its operation (the rows
 //      were hydrated, so the refusal above was read at boot, not skipped);
 //   4. lists the showcase's own file-ref and stdio entries `ready` (control).
@@ -47,6 +51,8 @@ const AUTHORED_FILE = 'srr_authored_file';
 /** An `authored` package created through the package door. */
 const AUTHORED_PACKAGE_ID = 'com.dogfood.storedrestart';
 const INLINE = 'srr_inline';
+/** [#28698] A stored entry whose provider no installed plugin offers. */
+const UNKNOWN_PROVIDER = 'srr_unknown_provider';
 const HOST_FILE_ENTRY = 'showcase_status_openapi';
 const HOST_STDIO_ENTRY = 'showcase_mcp_tools';
 
@@ -144,6 +150,10 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
       saves[AUTHORED_FILE] = await json(await first.apiAs(
         token, 'PUT', `/meta/connector/${AUTHORED_FILE}?package=${AUTHORED_PACKAGE_ID}`, openapi(AUTHORED_FILE, FILE_REF),
       ));
+      saves[UNKNOWN_PROVIDER] = await json(await first.apiAs(token, 'PUT', `/meta/connector/${UNKNOWN_PROVIDER}`, {
+        ...openapi(UNKNOWN_PROVIDER, DOCUMENT),
+        provider: 'no_such_provider',
+      }));
       saves[INLINE] = await json(await first.apiAs(token, 'PUT', `/meta/connector/${INLINE}`, openapi(INLINE, DOCUMENT)));
       before = await settle(first, token, [INLINE]);
     } finally {
@@ -175,6 +185,7 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
     }
     expect(entryOf(before, INLINE)?.state, shown(before, INLINE)).toBe('ready');
     expect(entryOf(before, ENV_FILE), shown(before, ENV_FILE)).toBeUndefined();
+    expect(entryOf(before, UNKNOWN_PROVIDER), shown(before, UNKNOWN_PROVIDER)).toBeUndefined();
   });
 
   it('the second boot over the same database starts', () => {
@@ -190,6 +201,13 @@ describe('dogfood: a stored connector entry refused its package-relative ref doe
     const record = bootLines.find((l) => l.includes(`connector instance '${name}'`) && l.includes('is refused'));
     expect(record, `no boot record refuses '${name}'`).toBeDefined();
     expect(record).toContain(ref);
+  });
+
+  it('[#28698] a stored entry naming a provider no plugin offers is not listed after the restart, and the boot record names it', () => {
+    expect(entryOf(after, UNKNOWN_PROVIDER), shown(after, UNKNOWN_PROVIDER)).toBeUndefined();
+    const record = bootLines.find((l) => l.includes(`connector instance '${UNKNOWN_PROVIDER}' declares provider 'no_such_provider'`));
+    expect(record, `no boot record names '${UNKNOWN_PROVIDER}'`).toBeDefined();
+    expect(record).toContain('no provider factory is registered');
   });
 
   it('controls: the stored inline entry, and the showcase\'s own file-ref and stdio entries, list ready after the restart', () => {

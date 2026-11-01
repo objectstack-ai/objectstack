@@ -188,6 +188,12 @@
         "content/docs/automation/flows.mdx"
       ],
       "note": "The automation engine's verdict the flow meta read serves beside a stored flow (#23316). Not authored — the engine answers it — but GOVERNED rather than exempt: a reader acts on each state differently, and automation/flows.mdx ('Discovery & Registration') names all three in its state table."
+    },
+    {
+      "key": "authenticated:false|true",
+      "label": "/auth/me/permissions response body",
+      "exempt": "not-authorable",
+      "reason": "Wire response of GET /auth/me/permissions (#28508): the server answers the anonymous or the authenticated body from the session, and nobody writes either into metadata. content/docs/references/api/auth.mdx is generated from MePermissionsResponseSchema."
     }
   ]
 }

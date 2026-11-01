@@ -57,7 +57,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const navigateMock = vi.fn();
 
@@ -248,17 +248,18 @@ async function bootOnNoConfig() {
  * open and only the DEPLOYMENT flag can move the verdict. Without
  * `manage_metadata` here, every denial below would pass for the wrong reason.
  */
-const permissions = (): MePermissionsResponse =>
+const permissions = (): MePermissionsAuthenticatedResponse =>
   ({
     authenticated: true,
     userId: 'u1',
     tenantId: 'acme',
-    roles: ['org_owner', 'everyone'],
+    positions: ['org_owner', 'everyone'],
+    hasAnyQueue: false,
     permissionSets: ['organization_admin', 'member_default'],
     systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_metadata'],
     objects: {},
     fields: {},
-  }) as MePermissionsResponse;
+  }) as MePermissionsAuthenticatedResponse;
 
 function renderHome() {
   return render(

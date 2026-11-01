@@ -94,6 +94,7 @@ import {
   SCOPE_ROOTS,
   analyzeRelationshipTraversals,
   buildScope,
+  declaresOptionsOnceServed,
 } from '@objectstack/formula';
 import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
@@ -103,6 +104,7 @@ import {
   resolveFlowNodeExpressions,
   flowNodeValueTemplateRefusals,
   flowNodeTextSlotSources,
+  flowTextSlotSources,
   textSlotTemplateRefusal,
   structuralConditionRefusal,
   closedScopeTemplateRefusal,
@@ -147,7 +149,7 @@ import {
   unboundFlowCelRootMessage,
 } from './flow-cel-root-scope.js';
 import type { FlowCelEntrance } from './flow-cel-root-scope.js';
-import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
+import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
 import { recordsOf } from './object-graph.js';
@@ -2715,6 +2717,25 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       return { refused: false };
     };
 
+    // [#28054] The flow's OWN text slots — `successMessage` / `errorMessage`,
+    // which the engine renders at the run's terminal exit — judged by the same
+    // two checks `registerFlow` runs on them, the node text slots' pair below:
+    // the spec's one single-brace judge, then the `template` compile. A
+    // finding carries the flow key's path (`flows[0].successMessage`).
+    for (const slot of flowTextSlotSources(flow)) {
+      // `flow 'NAME' successMessage` — the key, not the label, so the word `flow` is said once.
+      const slotWhere = `flow '${flowName}' ${slot.path}`;
+      const path = flowIndex >= 0 ? { path: `flows[${flowIndex}].${slot.path}` } : {};
+      const tokenRefusal = textSlotTemplateRefusal(slot.source);
+      if (tokenRefusal !== undefined) {
+        issues.push({ where: slotWhere, message: tokenRefusal, source: slot.source, severity: 'error', ...path });
+        continue;
+      }
+      for (const e of validateExpression('template', slot.source).errors) {
+        issues.push({ where: slotWhere, message: e.message, source: e.source, severity: 'error', ...path });
+      }
+    }
+
     for (const graph of graphs) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
       // `recordsOf`, not `as unknown as AnyRec[]` (#15793). A NESTED region's
@@ -3106,6 +3127,23 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
               .map(([n, def]) => [n, def as AnyRec] as [string, AnyRec])
           : []);
 
+    // [#28659] The fields of this object a formula's `label()` can answer on:
+    // each declared field, and each column the registry injects beside them
+    // (the field index lists those too), read through
+    // `declaresOptionsOnceServed`. This walk reads the AUTHORED body, where a
+    // picklist-bound field names its list instead of declaring `options`; the
+    // registry writes the list onto the served field, which is the form the
+    // engine builds `label()`'s map from (`declaresOptions`). So inline
+    // `options` or a `picklist` name both answer. A declared field wins over
+    // an injected one of the same name, as it does at registration.
+    const declaredNames = new Set(fieldList.map(([n]) => n));
+    const optionFieldNames = [
+      ...fieldList.filter(([, f]) => declaresOptionsOnceServed(f)).map(([n]) => n),
+      ...[...injectedColumnDefsFor(obj)]
+        .filter(([n, def]) => !declaredNames.has(n) && declaresOptionsOnceServed(def))
+        .map(([n]) => n),
+    ];
+
     // (ADR-0062 D7's `field.columnName`-on-external-objects rejection was removed
     // with `field.columnName` itself in #2377: the field no longer exists, so there
     // is no dual-source ambiguity to guard — external column mapping is `external.columnMap`.)
@@ -3204,6 +3242,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // read. So one hop passes here, and the two shapes that path cannot
         // serve — a second hop, and a reference read both through and as a
         // value — are refused with the formula-worded prescription.
+        //
+        // [#28659] `optionFields`: the object's fields that declare options
+        // once served (inline `options` or a `picklist` name, see
+        // `optionFieldNames` above). A `label(record.<field>)` naming any other
+        // declared field faults on every row and reads null, so it is refused
+        // here, in the evaluator's own words.
         const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
           objectName
             ? {
@@ -3212,6 +3256,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                 fieldTypes: fieldTypeIndex.get(objectName),
                 scope: 'record',
                 traversalHydration: true,
+                optionFields: optionFieldNames,
               }
             : { scope: 'record' });
         // Names the KEY the author edits, not the field type. Saying "formula"

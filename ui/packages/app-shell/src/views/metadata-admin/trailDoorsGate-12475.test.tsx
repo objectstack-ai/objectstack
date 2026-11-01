@@ -20,7 +20,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const POSITION = { name: 'env_position', label: 'Environment Position' };
 const SET = { name: 'sales_perms', label: 'Sales', objects: {}, fields: {} };
@@ -62,12 +62,13 @@ import { MetadataResourceEditPage } from './ResourceEditPage';
 import { PermissionMatrixEditPage } from './PermissionMatrixEditor';
 
 /** `/me/permissions` for a persona; `undefined` = a backend that reports none. */
-function mePermissions(systemPermissions: string[] | undefined): MePermissionsResponse {
+function mePermissions(systemPermissions: string[] | undefined): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 'org_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},

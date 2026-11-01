@@ -27,17 +27,18 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import React from 'react';
 import { resolveAffordance, type ConsoleAffordance } from '@object-ui/core';
-import { MePermissionsProvider, usePermissions, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, usePermissions, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 afterEach(cleanup);
 
 const OBJECT = 'invoice';
 
-const envelope = (objects: MePermissionsResponse['objects']): MePermissionsResponse => ({
+const envelope = (objects: MePermissionsAuthenticatedResponse['objects']): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-auditor',
   tenantId: null,
-  roles: ['auditor'],
+  hasAnyQueue: false,
+  positions: ['auditor'],
   permissionSets: ['auditor'],
   objects,
   fields: {},

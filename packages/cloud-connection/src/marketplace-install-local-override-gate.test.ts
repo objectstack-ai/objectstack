@@ -110,6 +110,8 @@ const BASE_HOLDINGS: Holdings = {
     [BASE]: {
         dashboard: [{ name: 'crm_board', label: 'Board' }],
         object: [{ name: 'crm_account' }],
+        flow: [{ name: 'crm_followup', label: 'Follow up' }],
+        action: [{ name: 'crm_call', label: 'Call' }],
     },
 };
 
@@ -177,6 +179,23 @@ describe('install-local 2d — the override write gate at the managed install (A
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(registered).toEqual([PAIR]);
         expect(res.payload.data).not.toHaveProperty('overrideCollisions');
+    });
+
+    it('[#28412] the paired .custom installs its declared FLOW override; a declared action override still waits', async () => {
+        // ADR-0146 D9: flow's conditions are delivered, so the gate admits it.
+        const flow = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            flows: [{ name: 'crm_followup', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
+        });
+        expect(flow.res.status, JSON.stringify(flow.res.payload)).toBe(200);
+        expect(flow.registered).toEqual([PAIR]);
+
+        const action = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            actions: [{ name: 'crm_call', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
+        });
+        expect(action.res.status).toBe(403);
+        expect(refusedOf(action.res)).toEqual([['action', 'crm_call', 'declared_type_not_yet_available']]);
     });
 
     it('CONTROL: a dependent shipping its own names installs, and its answer carries no collision key', async () => {
