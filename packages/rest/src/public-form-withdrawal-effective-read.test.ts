@@ -20,7 +20,8 @@
  * draft save and the per-item publish.
  *
  *  - a dependent package's row of the base's form view that withdraws the
- *    form closes it on both doors, although the effective list no longer
+ *    form (a row stored before #28410's write gate, which now refuses that
+ *    save) closes it on both doors, although the effective list no longer
  *    holds that row (the pin the card names; its ablation reads only the
  *    effective list and re-opens the form);
  *  - CONTROL: with no withdrawing row the base's form is served;
@@ -155,7 +156,23 @@ async function boot(baseAllowsAnonymous = true) {
     await protocol.saveMetaItem({ type: 'view', name: VIEW, item, mode: 'draft', packageId });
     await protocol.publishMetaItem({ type: 'view', name: VIEW, packageId });
   };
-  return { engine, protocol, get, post, install, saveInto };
+  // [#28410, ADR-0146 D2, ruling A on #28390] A dependent package's row under
+  // a name the base ships is refused at the save door now (rename is its one
+  // fix), so the withdrawing row this file pins is one stored BEFORE that gate:
+  // the door's refusal is asserted first, then the same body goes through the
+  // same draft save and per-item publish with the gate's verdict held at
+  // `not_concerned` for that one write, the row a pre-gate save left.
+  const saveIntoBeforeTheGate = async (packageId: string, item: Record<string, unknown>) => {
+    await expect(protocol.saveMetaItem({ type: 'view', name: VIEW, item, mode: 'draft', packageId }))
+      .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    protocol.overrideWriteVerdict = () => ({ verdict: 'not_concerned' });
+    try {
+      await saveInto(packageId, item);
+    } finally {
+      delete protocol.overrideWriteVerdict;
+    }
+  };
+  return { engine, protocol, get, post, install, saveInto, saveIntoBeforeTheGate };
 }
 
 type Booted = Awaited<ReturnType<typeof boot>>;
@@ -193,9 +210,9 @@ describe('[#28409] the form doors judge withdrawal against the effective read, n
   });
 
   it('a dependent package\'s row that withdraws the base\'s form closes it on both doors, though the effective list no longer holds it', async () => {
-    const { protocol, get, post, install, saveInto } = await booted();
+    const { protocol, get, post, install, saveIntoBeforeTheGate } = await booted();
     await install(DEPENDENT);
-    await saveInto(DEPENDENT, formView(false));
+    await saveIntoBeforeTheGate(DEPENDENT, formView(false));
 
     // The premise: the effective list serves the base's (public) document
     // alone under the name, and the withdrawing row is the dependent's own

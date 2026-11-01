@@ -226,7 +226,17 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * ledger stays, empty, because it is the only honest place the closed roster
  * has for the next validate-only gate.
  */
-const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
+  // [#28410] A real gap in the build's direction, reported and not closed:
+  // card #28410 (ADR-0146 D2, ruling A on #28390) named three gate points for
+  // the override write gate — the publish doors, `os validate` and the
+  // install door — and `os build` is not one of them. The artifact a build
+  // emits is still judged where it lands: the marketplace managed install
+  // and the publish doors refuse the same items with the same judge. Whether
+  // the build refuses too is a separate decision, raised on the card.
+  findOverrideDeclarationRefusals:
+    'card #28410 placed the override write gate at publish, os validate and install; os build is a fourth point it did not name (open question on #28410). The install and publish doors refuse the same items with the same judge.',
+};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an

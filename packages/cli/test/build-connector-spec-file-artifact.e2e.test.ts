@@ -10,7 +10,7 @@
  * are kept. The control for the refusal is the same stack with the file
  * present, which both commands accept.
  *
- * Runs the CLI from source (`bin/run-dev.js` through tsx), as the other build
+ * Runs the CLI from source (`bin/run-dev.js` under `node`), as the other build
  * suites do, so `compile.ts` and `validate.ts` are measured without a rebuild.
  */
 
@@ -25,7 +25,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 const DOCUMENT = {
   openapi: '3.0.3',
@@ -72,7 +71,7 @@ afterAll(() => {
 function run(command: 'build' | 'validate', cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((done) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, command, '--json'],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) =>

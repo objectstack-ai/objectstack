@@ -966,6 +966,10 @@ export class DatasourceAdminServicePlugin implements Plugin {
         config: input.config,
         secret: input.secret,
         external: input.external,
+        // [#28633] The draft's TLS block, as the saved datasource's connect
+        // hands it over (`toSpec`): a probe without it tested a plain-text
+        // connection to a server the save would reach over TLS.
+        ...(input.ssl !== undefined ? { ssl: input.ssl } : {}),
         ...(credential?.ok ? { credential: credential.handle } : {}),
       });
     } catch (err) {

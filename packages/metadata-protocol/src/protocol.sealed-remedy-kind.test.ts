@@ -12,7 +12,9 @@
  * The sentence states what the door knows and where the names are listed:
  * "'TYPE/NAME' is provided by a managed package and is sealed: it cannot be
  * written here. GET /api/v1/meta/TYPE lists the names in use." The wording is
- * the ruled text, so it is pinned whole for a type with no regime row. A type
+ * the ruled text, so it is pinned whole for a type with no regime row; on a
+ * type a declared override can replace it gains the declare-or-rename sentence
+ * (ADR-0146 D2, #28410). A type
  * with a regime row keeps its regime sentence (ADR-0126 §2: a Regime C refusal
  * names its sanctioned path; the origin-gated row names the source a
  * code-defined datasource is declared in).
@@ -29,7 +31,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getOverrideTypeClassification } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { PACKAGED_BASE_REGIME } from './packaged-base-regime.js';
 
@@ -64,10 +66,23 @@ const TYPES = [...DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type), PLUGIN_TYPE
 /** The type's listing route — where the names in use are read. */
 const listingOf = (type: string) => `GET /api/v1/meta/${type}`;
 
+/**
+ * [ADR-0146 D2, #28410] The sealed write's declare-or-rename sentence, on a
+ * type whose override channel is open (overridable, waiting for no D9
+ * condition), read from the closed list, never transcribed.
+ */
+const declareOrRename = (type: string) => {
+    const row = getOverrideTypeClassification(type);
+    return row?.disposition === 'overridable' && (row.conditions?.length ?? 0) === 0
+        ? ` To change it, declare an override from '${PACKAGE_ID}.custom' `
+            + `(overrides: { package: '${PACKAGE_ID}', basedOn }), or rename the item.`
+        : '';
+};
+
 /** The ruled sentence, for a type with no regime row. */
 const oneSentence = (type: string, name: string) =>
     `'${type}/${name}' is provided by a managed package and is sealed: it cannot be written here. `
-    + `${listingOf(type)} lists the names in use.`;
+    + `${listingOf(type)} lists the names in use.${declareOrRename(type)}`;
 
 /** Advice the door cannot give truthfully: a create's, and the source artifact's. */
 const CREATE_ADVICE = /choose a name|name no package|author your own/i;

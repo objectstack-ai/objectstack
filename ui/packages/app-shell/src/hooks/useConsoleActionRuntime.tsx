@@ -52,7 +52,7 @@ import { EnvironmentEntitlementDialog, type EntitlementDialogState } from '../en
 import { entitlementDialogFromError, type EntitlementDialogSpec } from '../environment/entitlements.js';
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
-import { apiActionFailureMessage } from '../utils/flowResponse.js';
+import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import {
   findDeclaredApiAction,
   isSameOriginApiTarget,
@@ -463,8 +463,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
             return { success: false };
           }
           // A flow-backed endpoint's refused run reads its inner refusal, not
-          // the node chain (objectstack#27487).
-          return { success: false, error: apiActionFailureMessage(res, body, `HTTP ${res.status}`, language) };
+          // the node chain (objectstack#27487); a refusal naming fields carries
+          // them for the param dialog to mark (objectstack#28289).
+          return apiActionRefusalResult(res, body, `HTTP ${res.status}`, language);
         };
 
         // The action door (objectstack#27611). The server assembles the

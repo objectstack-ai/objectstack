@@ -23,7 +23,7 @@
  * `functions` entry runs, so a green here is "this one key was left out", not
  * "the build wrote nothing".
  *
- * Runs the CLI from source (`bin/run-dev.js` through tsx), as the other build
+ * Runs the CLI from source (`bin/run-dev.js` under `node`), as the other build
  * suites do, so `compile.ts` is measured without a rebuild.
  */
 
@@ -39,7 +39,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const RUNTIME_MODULE = /^objectstack-runtime\.[a-f0-9]+\.mjs$/;
 
 const STAFF_EMAIL = 'counsel1@legal.example';
@@ -79,7 +78,7 @@ afterAll(() => {
 function build(cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((done) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, 'build', '--json'],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) =>

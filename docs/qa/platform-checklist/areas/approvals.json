@@ -1119,7 +1119,7 @@
       "title": "A non-admin reaches the full Approvals Inbox from the account app's Approvals entry",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "browser",
       "personas": ["a NON-ADMIN business user who is a pending approver and has no Setup access"],
@@ -1132,10 +1132,10 @@
         ]
       },
       "steps": [
-        "build the console from this checkout (`pnpm console:build`) and keep its ready line; boot the showcase on its own port and DB (dogfood §0)",
+        "build the console from this checkout (`pnpm console:build`), or take the build the dispatcher made of this checkout at the run SHA, and keep its ready line; boot the showcase on its own port and DB (dogfood §0); then compare the entry chunk the served /_console/ page loads with packages/console/dist's (acceptance[0])",
         "grep the BUILT bundle for the registration key: `grep -o 'approvals:inbox' packages/console/dist/assets/index-*.js` — the entry chunk must carry the register call, because the unit pin (#7231) stubs the page at its module boundary and does not assert main.tsx performs the side-effect import",
         "sign in as the non-admin persona; GET /api/v1/meta/app and record which apps the server returns for this session",
-        "open the account app and click the Approvals entry in the Inbox group; screenshot",
+        "open the account app from the avatar (user) menu's Profile item — it opens /apps/account/component/account/profile_card, which QA run #28545 read as /apps/com.objectstack.account/component/account/profile_card. Not from the app switcher: the account app declares hidden: true (packages/platform-objects/src/apps/account.app.ts), so for this persona the switcher offers only Showcase, Back to home and All apps. Then click the Approvals entry in the Inbox group; screenshot",
         "read the resulting URL and the rendered surface (tabs, list rows, keyboard hint bar)",
         "open a request from its inbox row — it navigates to the request's served record page, /apps/APP/sys_approval_request/record/ID — and read the rendered action set; execute one decision and re-read the request",
         "cold-load the same request via ?request= on this component route and read the URL it lands on",
@@ -1145,8 +1145,8 @@
         {
           "clause": "the registration survives BUNDLING — the built dist, not just source, contains the approvals:inbox component registration",
           "oracle": "build",
-          "verify": "`pnpm console:build` ran in this checkout at the run's framework SHA and printed its ready line (`✓ @objectstack/console dist ready (… KB) from ui/apps/console`) AND the built entry chunk contains the `approvals:inbox` register call; a source-only grep does not satisfy this clause",
-          "evidence": "the framework SHA + the console:build ready line + the grep hit with surrounding bundle context"
+          "verify": "`pnpm console:build` ran in this checkout at the run's framework SHA and printed its ready line (`✓ @objectstack/console dist ready (… KB) from ui/apps/console`) — run by the runner, or by the dispatcher that prepared the checkout (RUNNER.md: one container builds one tree at a time), whose ready line the run record then cites — AND the server serves that build: the entry chunk the served /_console/ page loads (index-HASH.js) is the one in packages/console/dist, same name and same bytes (QA run #28545 compared index-RFCp05oY.js) — AND that built entry chunk contains the `approvals:inbox` register call; a source-only grep does not satisfy this clause",
+          "evidence": "the framework SHA + the console:build ready line (and who ran it) + the served-entry comparison + the grep hit with surrounding bundle context"
         },
         {
           "clause": "the entry renders the FULL inbox — tabs (en: My Pending / Submitted by me / All; zh-CN: 待我审批 / 我发起的 / 全部) and the request list — not a component-not-found empty state",
@@ -1228,6 +1228,12 @@
           "date": "2026-10-29",
           "change": "fixtures.requires[2] no longer says a persona-created invoice without `owner` lands and reads 404 to its creator: the showcase contributor set now carries the ownership check on insert as well as update (invoice_owner_on_create beside invoice_owner_immutable, examples/app-showcase/src/security/permission-sets.ts), so such a create is refused 403 PERMISSION_DENIED with nothing written. The requirement that the persona own the invoice is unchanged",
           "ref": "claude/harden-invoice-owner-check-on-create"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-01",
+          "change": "Two QA run #28545 (W3-C1R) findings. steps[3] did not say how to reach the account app: it is hidden from the app switcher (account.app.ts hidden: true), which offered the persona only Showcase / Back to home / All apps, and is entered from the avatar menu's Profile item (AppHeader.tsx, /apps/account/component/account/profile_card, which #28545 read under the com.objectstack.account segment). acceptance[0] asked the runner to run pnpm console:build itself; it now also accepts the dispatcher's build of the same checkout at the run SHA, and adds a served-entry check (the chunk /_console/ loads is the dist's), so the clause still proves the bundle under test is this checkout's. steps[0] and the evidence follow. No clause weakened: the build, SHA and grep requirements stand, and one check is added. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
+          "ref": "#28545"
         }
       ]
     },

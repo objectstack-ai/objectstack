@@ -8,6 +8,15 @@
  * admin who cannot edit a packaged flow in place gets an ordinary,
  * org-authored sibling to edit instead.
  *
+ * [#28149, ADR-0146 D4] The clone survives only as "new similar": the copy
+ * lands in a writable PACKAGE — by default the source's paired customization
+ * package `<base>.custom`, ensured through the protocol's ensure door — and is
+ * written switched off ({@link FLOW_CLONE_STATUS}). Choosing the package is
+ * the door's (`resolveCloneTarget`, `domains/automation.ts`); this module
+ * builds the copy, and the copy itself still carries no package envelope: the
+ * save into the target binds the row (`sys_metadata.package_id`), exactly as
+ * any save naming a package does.
+ *
  * Three properties of that ADR are load-bearing here, and each one is a rule
  * this module exists to make mechanical rather than remembered.
  *
@@ -70,8 +79,8 @@
  * (`tenantAuthoredWriteRefusal` in `@objectstack/metadata-protocol`) refuses a
  * definition whose stamps claim a package for a name no package ships — so a
  * copy that carried the base's envelope would be refused, not saved. The clone
- * door asks that rule of the copy this module builds and then saves it as an
- * ordinary tenant row. Pinned in `domains/automation-flow-clone.test.ts` (the
+ * door asks that rule of the copy this module builds and then saves it — since
+ * #28149 into its target package, never package-less. Pinned in `domains/automation-flow-clone.test.ts` (the
  * envelope drop) and `domains/automation-tenant-authored-write.test.ts` (the
  * rule and the save).
  *
@@ -88,28 +97,29 @@
 import { getMetadataTypeRedactor, METADATA_READ_DECORATIONS, MetadataProtectionFields } from '@objectstack/spec/kernel';
 
 /**
- * The deployment status a clone is created with.
+ * The deployment status a clone is created with: switched OFF.
  *
- * `'draft'` is `FlowSchema`'s own default for a flow that has not been
- * deployed, and it is the honest value for something that was created a
- * moment ago and has never been reviewed.
+ * [#28149, ADR-0146 D4] "The copy is written **inactive**, so a 'new similar'
+ * never double-runs beside its original (Context §4)". The engine disables a
+ * flow on `status` `'obsolete'` or `'invalid'` only (`engine.ts`
+ * `registerFlow`); `'draft'`, the value a clone carried before, is a
+ * lifecycle label the engine arms exactly like `'active'`, so a clone of a
+ * record-change flow fired on the same writes as its base — measured on
+ * showcase at `d6c0a75f1a` (`showcase_urgent_task_alert` and its `_copy`
+ * both ran on one record change). `'obsolete'` is the one inactive value an
+ * author can flip back: it is what Studio's Enabled switch writes for Off on a
+ * writable package's flow, and what Studio's own new-flow skeleton starts
+ * with ("Off by default · review before enabling", `StudioDesignSurface`), so
+ * the copy opens in its package reading Disabled, and switching it on is the
+ * author's own flip and publish. `'invalid'` would claim a verdict nobody
+ * made.
  *
- * ⚠️ It does NOT make the clone inert, and nothing here should be read as
- * claiming it does. The engine disables a flow on `status` `'obsolete'` or
- * `'invalid'` only (`engine.ts` `registerFlow`); `'draft'` and `'active'` both
- * stay enabled and both get their trigger bound, so a clone of a record-change
- * flow starts firing on the same writes as its base. That is stated plainly in
- * {@link FLOW_CLONE_NOTICE} instead of being papered over.
- *
- * ⛔ Deliberately not `'obsolete'`, tempting as an auto-off clone is: ADR-0126
- * §7.2 rules that clone and disable are INDEPENDENT primitives —
- * "cloned-without-disabled and disabled-without-clone are both ordinary states
- * the surface shows plainly, not halves of an unfinished ceremony". Folding a
- * disable into the clone would be inventing the ceremony the ADR declined, and
- * would also mean this action silently retires a flow the admin asked it to
- * create.
+ * This supersedes ADR-0126 §7.2's reading that clone and disable stay
+ * independent primitives: ADR-0146 D4 re-homes the clone as "new similar"
+ * and rules the copy inactive. The ORIGINAL is still never touched — the copy
+ * is what starts switched off.
  */
-export const FLOW_CLONE_STATUS = 'draft' as const;
+export const FLOW_CLONE_STATUS = 'obsolete' as const;
 
 /**
  * The three fields a clone mutates — ADR-0126 §7.1, "mutates only
@@ -158,36 +168,27 @@ export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
  *
  * Two facts, both required to be stated rather than discovered:
  *
- *  1. The clone is armed. `status: 'draft'` is a lifecycle label, not an
- *     off-switch — see {@link FLOW_CLONE_STATUS}. An admin who clones a
- *     record-change or schedule flow and walks away has two flows running on
- *     one trigger, and the only thing standing between them and that surprise
- *     is this line.
+ *  1. [#28149, ADR-0146 D4] The copy is switched OFF ({@link FLOW_CLONE_STATUS})
+ *     and stays off until someone switches it on — "the response says so",
+ *     in the server's words, so no console has to restate it. Before this, the
+ *     same line warned that the copy ran alongside the original; the copy no
+ *     longer does.
  *  2. References are not re-pointed (ADR-0126 §9 — "the surface tells the
  *     admin so"). A cloned flow's subflow nodes, action calls and object
  *     references point exactly where the original's did.
  *
  * [#27886] The notice is ONE line in business words, because the console
- * shows it verbatim beside a "Switch the original off" button: a paragraph
- * that named `status`, lifecycle labels and both switches repeated what the
- * screen already offers. Engine words (`draft`, `status`, off-switch) and
- * the switch locations live here, not in the notice:
- *
- *  - [#20726, ADR-0126 §7.2] The clone's own off-switch is its `status`
- *    (`obsolete`). In the console that is Studio's Enabled switch set to
- *    Disabled, then a publish. A clone carries no package envelope (see
- *    {@link FLOW_CLONE_DROPPED_KEYS}), so it is a flow authored in this
- *    deployment, and the activation toggle — which switches packaged flows
- *    only — refuses it. That holds whatever the clone was copied from: the
- *    clone door takes any registered flow as its source, packaged or not.
- *  - A packaged original is switched off on the Packaged automation page,
- *    with its `Switch "…" off` action; that switch does not reach the clone.
+ * shows it verbatim: engine words (`obsolete`, `status`) and the switch
+ * locations live here, not in the notice. The copy's switch is the Enabled
+ * switch on the flow in its package in Studio, then a publish: the copy is a
+ * writable package's flow (ADR-0146 D4's "definition switch"), never the
+ * activation ledger's, which switches read-only packages' flows.
  *
  * The notice names no endpoint or request body. The REST recipe is developer
- * copy and lives in the client SDK's `automation.toggle` TSDoc.
+ * copy and lives in the client SDK's `automation.clone` TSDoc.
  */
 export const FLOW_CLONE_NOTICE =
-    'The copy runs alongside the original until you switch one of them off, '
+    'The copy is switched off and does not run until you switch it on, '
     + 'and it still uses the same subflows, actions and objects as the original.';
 
 /** ADR-0112 envelope for the same-name refusal: a status AND a code. */

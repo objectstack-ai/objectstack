@@ -72,6 +72,8 @@
     "api/CheckPermissionRequest",
     "api/CheckPermissionResponse",
     "api/CloneDataResponse",
+    "api/CloneFlowRequest",
+    "api/CloneFlowResponse",
     "api/CodeGenerationTemplate",
     "api/CompleteChunkedUploadRequest",
     "api/CompleteChunkedUploadResponse",

@@ -52,7 +52,7 @@
  * stay exactly equal.
  *
  * Spawns the real CLI (the `validate-top-level-strict.e2e.test.ts` pattern:
- * `bin/run-dev.js` + tsx, no dependency on `packages/cli/dist`) because the
+ * `bin/run-dev.js` + `node`, no dependency on `packages/cli/dist`) because the
  * divergence being pinned is between two real invocations, not two functions.
  */
 
@@ -67,7 +67,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 interface Fixture {
   /** Directory name / test label. */
@@ -158,7 +157,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

@@ -396,7 +396,7 @@
       "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -478,7 +478,8 @@
         }
       ],
       "negative": [
-        "silent WIDENING is the catastrophic failure mode (#3899): a malformed query body must never degrade into an unfiltered 200 full read. A mistyped clause (e.g. {\"limit\": \"ten\"}) answers 400 VALIDATION_FAILED at the request schema; an UNDECLARED top-level key (e.g. {\"not_a_query_key\": {…}}) is lowered as an implicit field filter and answers 400 INVALID_FIELD. ⛔ Do not probe with {\"filter\": {…}}: `filter` is a DECLARED transport spelling of `where` and is served. Verify by asserting each probe's status and code AND that no response carries the full table"
+        "silent WIDENING is the catastrophic failure mode (#3899): a malformed query body must never degrade into an unfiltered 200 full read. A mistyped clause (e.g. {\"limit\": \"ten\"}) answers 400 VALIDATION_FAILED at the request schema; an UNDECLARED top-level key (e.g. {\"not_a_query_key\": {…}}) is lowered as an implicit field filter and answers 400 INVALID_FIELD. ⛔ Do not probe with {\"filter\": {…}}: `filter` is a DECLARED transport spelling of `where` and is served. Verify by asserting each probe's status and code AND that no response carries the full table",
+        "#26644 — an empty projection or a count flag that is neither true nor false is refused, never read as the absent default (every column, or a reported total). GET /api/v1/data/showcase_account?$select= (and ?$select=%20, ?$select=, with a lone comma, ?select= and ?fields=) answers 400 VALIDATION_ERROR, \"Query parameter '$select' names no field\" naming the spelling sent; GET ?$top=2&$count=maybe (and ?$count=1, ?count=) answers 400 VALIDATION_ERROR, \"Query parameter '$count' must be true or false\"; POST /api/v1/data/showcase_account/query {\"fields\": []} (and {\"select\": \"\"}) answers 400 VALIDATION_FAILED at the body schema, with fields[0] on the key, and {\"limit\": 2, \"count\": \"maybe\"} answers 400 VALIDATION_FAILED; GET /api/v1/data/showcase_account/ID?select= answers 400 VALIDATION_ERROR naming select. No probe returns rows: a 200 carrying every column or a total is the widening this contract closed (packages/metadata-protocol/src/protocol.ts projectionFieldsValue and countFlagValue; door pins packages/rest/src/data-empty-projection-count-door.test.ts and packages/runtime/src/domains/data-empty-projection-count.test.ts)"
       ],
       "variants": [
         "op:eq",
@@ -579,7 +580,8 @@
           "change": "automated.ref names the HTTP pin for acceptance[4] and says what two named pins do and do not reach; the variants gain the six AST_OPERATOR_MAP operators the list omitted; steps[1] names the comparand-less null spellings. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26468, release-18.2.0-w2-tier1-a, at 756220c4; wave anchor #25807, slice A): showcase-expand-crud-gate.dogfood.test.ts drives acceptance[4] over HTTP and was missing (so 'no clause has a pin at its oracle's layer' was false); request-schema-gate.conformance.test.ts has no collection-operator case; engine-filter-array-lowering asserts the engine's INVALID_FILTER, not the POST door's code; and AST_OPERATOR_MAP serves icontains, ilike, is_empty/is_not_empty and before/after beyond the list. Re-read at base e4ba846f (packages/spec/src/data/filter.zod.ts AST_OPERATOR_MAP). acceptance[8] now asks a verdict of six more rows",
           "ref": "#25807"
         },
-        { "revision": 8, "date": "2026-10-31", "change": "steps[1] names the prefix-form compound AST and steps[2] the case contract of the substring operators. Checklist-accuracy findings of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the infix compound [cond, 'and', cond] answered 400 while the step showed only the single-condition form, and the substring operators matched case-exactly on the SQL driver while the step gave no case note. Re-read at base 488b3ed0: packages/spec/src/data/filter.zod.ts lowerFilterAST and the CONTAINS / NOT_CONTAINS / STARTS_WITH / ENDS_WITH / ICONTAINS descriptions. No clause changed", "ref": "#27409" }
+        { "revision": 8, "date": "2026-10-31", "change": "steps[1] names the prefix-form compound AST and steps[2] the case contract of the substring operators. Checklist-accuracy findings of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the infix compound [cond, 'and', cond] answered 400 while the step showed only the single-condition form, and the substring operators matched case-exactly on the SQL driver while the step gave no case note. Re-read at base 488b3ed0: packages/spec/src/data/filter.zod.ts lowerFilterAST and the CONTAINS / NOT_CONTAINS / STARTS_WITH / ENDS_WITH / ICONTAINS descriptions. No clause changed", "ref": "#27409" },
+        { "revision": 9, "date": "2026-11-01", "change": "QA run #28545 (W3-C1R) finding: the #26644 contract (an empty projection or an unrecognised $count answers 400) had no acceptance or negative row, so its recheck rested on a dispatcher note. negative[1] adds it, spelled from source: protocol.ts projectionFieldsValue / countFlagValue (400 VALIDATION_ERROR naming the spelling) and the body schema's 400 VALIDATION_FAILED, with the probe set of data-empty-projection-count-door.test.ts. #28545 observed the #26644 fix holding. A negative is added; nothing is removed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054", "ref": "#28545" }
       ]
     },
     {
@@ -1676,7 +1678,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1744,9 +1746,9 @@
           "evidence": "post-restart traces + the row read"
         },
         {
-          "clause": "a disabled `type: flow` action is refused by its OWN switch, ahead of the type branch — the refusal is ACTION_DISABLED for the action's name, independent of anything the target flow's own ledger row says",
+          "clause": "a disabled `type: flow` action is refused by its OWN switch, ahead of the type branch — the refusal is 409 ACTION_DISABLED on the action's own route (POST /api/v1/actions/showcase_task/showcase_bulk_reassign) with the turned-off sentence of acceptance[0], which names no action (describeDisabled ignores the name, packages/objectql/src/action-activation.ts), independent of anything the target flow's own ledger row says, and the target flow is left untouched",
           "oracle": "api",
-          "verify": "step-8: 409 ACTION_DISABLED naming showcase_bulk_reassign; the automation service is never consulted for the run",
+          "verify": "step-8 on /actions/showcase_task/showcase_bulk_reassign: status 409, body.error.code ACTION_DISABLED and body.error.message the turned-off sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged automation remedy). Do not look for the action's name in it: the sentence names none, and the live pin's expectDisabledSentence ignores the name too. The automation service is never consulted for the run, so showcase_reassign_wizard records no run from it",
           "evidence": "the trace"
         }
       ],
@@ -1841,6 +1843,12 @@
           "date": "2026-10-30",
           "change": "acceptance[0]'s clause and verify respelled for #27842: the disabled-action sentence is now written for the end user who clicked (what happened, that an administrator can turn the action on again under Setup › Packaged automation, or use another action) and names no system table and no ADR; the engine's describeDisabledAction writes the ledger table, ADR-0126 §8 and the ACTION_DISABLED code to its log line instead. The code and the 409 are unchanged, so every other clause stands; the clause's 'naming the ledger' was the only text that turned false. The dogfood pin's sentence helper and packaged-activation-ledger-reach.dogfood.test.ts's /ACTION_DISABLED|is disabled/ are flipped in the same change (the latter now reads the code alone)",
           "ref": "#27842"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-01",
+          "change": "QA run #28545 (W3-C1R) finding: acceptance[6] (clause and verify) expected ACTION_DISABLED 'naming showcase_bulk_reassign', but since #27842 the sentence names no action (action-activation.ts describeDisabled returns describeTurnedOffPackagedItem('action'), and packaged-action-disabled-dispatch-live.dogfood.test.ts expectDisabledSentence ignores its action argument). The clause now asks 409 ACTION_DISABLED with the turned-off sentence on the /actions/showcase_task/showcase_bulk_reassign route, and the target flow untouched. The status, the code and the own-switch ordering are kept; only the expectation that could never hold is replaced. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
+          "ref": "#28545"
         }
       ]
     },
