@@ -30,18 +30,22 @@
  *
  * Matched by `code`, never `instanceof`: the class lives in objectql, which
  * depends on this package, so importing it back would cycle (the seed
- * loader's reason too).
+ * loader's reason too). The code is READ here, compared inline the way the
+ * import runner and the seed loader read it, never re-declared: objectql
+ * stamps it and owns its ledger row (`check:error-code-provenance`).
  */
-
-/** objectql's `SUMMARY_RECOMPUTE_CODE`, re-spelled for the reason in the module header. */
-const SUMMARY_RECOMPUTE_CODE = 'ERR_SUMMARY_RECOMPUTE';
 
 /** Where the earned answer rides on the refusal — a symbol, so it never serializes. */
 const EARNED_ANSWER = Symbol.for('@objectstack/types:summary-recompute-earned-answer');
 
 /** Structural view of objectql's `SummaryRecomputeError`: what a write's caller reads off it. */
 export interface SummaryRecomputeRefusal extends Error {
-  readonly code: typeof SUMMARY_RECOMPUTE_CODE;
+  /**
+   * Always `'ERR_SUMMARY_RECOMPUTE'` (what `isSummaryRecomputeRefusal` checks). Typed
+   * `string`: a literal member here reads as a second stamp of objectql's code
+   * (`check:error-code-provenance`, objlit).
+   */
+  readonly code: string;
   /** The write's result — what the engine call returns when every roll-up recomputes. */
   readonly written: unknown;
   readonly failures?: ReadonlyArray<{ childObject?: string; parentObject?: string; parentId?: string; field?: string }>;
@@ -49,7 +53,7 @@ export interface SummaryRecomputeRefusal extends Error {
 
 /** Is `e` the engine's stale-roll-up refusal — a write that landed? */
 export function isSummaryRecomputeRefusal(e: unknown): e is SummaryRecomputeRefusal {
-  return e instanceof Error && (e as { code?: unknown }).code === SUMMARY_RECOMPUTE_CODE;
+  return e instanceof Error && (e as { code?: unknown }).code === 'ERR_SUMMARY_RECOMPUTE';
 }
 
 /**
@@ -83,12 +87,14 @@ export function earnedAnswerOf(e: unknown): Record<string, unknown> | undefined 
   return answer !== null && typeof answer === 'object' ? (answer as Record<string, unknown>) : undefined;
 }
 
+/** Per process: never cleared, so a restart reports each field again (not a republish). */
 const reportedStaleSummaries = new Set<string>();
 
 /**
  * The operator lines a door logs, at `error`, when it answers a write's success
  * over a stale-roll-up refusal — one per child object and summary field not yet
- * reported in this process; `[]` once each has been said.
+ * reported in this process; `[]` once each has been said. The memory lives as
+ * long as the process and is never cleared — a republish does not re-arm it.
  *
  * `error` because the database is now internally inconsistent while every
  * answer looks normal: the parent's summary column disagrees with its detail
@@ -109,7 +115,7 @@ export function staleSummaryAnswerLines(error: SummaryRecomputeRefusal, object: 
       `A write to "${child}" landed and was answered as a success, but the roll-up summary "${summary}" ` +
         'could not be recomputed: that column now disagrees with its detail rows, and nothing looks wrong. ' +
         "Fix the summary field's `summaryOperations` (the engine's warning names why the recompute was " +
-        'refused) and republish; the next write to a child recomputes it. Reported once per field.',
+        'refused) and republish; the next write to a child recomputes it. Reported once per field per process.',
     );
   }
   return lines;

@@ -58,10 +58,10 @@ import { earnedAnswerOf, staleSummaryAnswerLines } from '@objectstack/types';
  * recomputed after it (objectql's `ERR_SUMMARY_RECOMPUTE`, carrying the answer
  * `ObjectStackProtocolImplementation` built). That refusal answered `500`, so
  * a client was told a landed write failed and a retried create duplicated
- * it. The stale column is logged at `error`, once per field
+ * it. The stale column is logged at `error`, once per field per process
  * (`staleSummaryAnswerLines`). Every other error, and the refusal when no
  * answer rides on it (the ObjectQL fallback, which builds none), propagates
- * unchanged. `RestServer`'s twin is `answerEarnedWriteDespiteStaleSummary`.
+ * unchanged. `RestServer`'s twin is `earnedWriteDespiteStaleSummary`.
  */
 async function callDataWrite(
     deps: DomainHandlerDeps,
