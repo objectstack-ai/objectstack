@@ -3448,6 +3448,7 @@ const ru = {
     bulkDeleteConfirmTitle_many: "Удалить {{count}} записей {{label}}?",
     bulkDeleteConfirmTitle_other: "Удалить {{count}} записи {{label}}?",
     deleteConfirmButton: "Удалить",
+    deleteCascade: "Также будут удалены связанные записи в: {{objects}}.",
     bulkDeleteSuccess: "{{count}} записей {{label}} удалено",
     bulkDeleteSuccess_one: "Удалена {{count}} запись {{label}}",
     bulkDeleteSuccess_few: "Удалено {{count}} записи {{label}}",

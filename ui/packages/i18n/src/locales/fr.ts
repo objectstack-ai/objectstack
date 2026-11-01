@@ -3367,6 +3367,7 @@ const fr = {
     bulkDeleteConfirmTitle_many: "Supprimer {{count}} d'enregistrements {{label}} ?",
     bulkDeleteConfirmTitle_other: "Supprimer {{count}} enregistrements {{label}} ?",
     deleteConfirmButton: "Supprimer",
+    deleteCascade: "Cela supprime aussi les enregistrements liés dans : {{objects}}.",
     bulkDeleteSuccess: "{{count}} enregistrement(s) {{label}} supprimé(s)",
     bulkDeleteSuccess_one: "{{count}} enregistrement {{label}} supprimé",
     bulkDeleteSuccess_many: "{{count}} d'enregistrements {{label}} supprimés",

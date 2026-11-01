@@ -3366,6 +3366,7 @@ const pt = {
     bulkDeleteConfirmTitle_many: "Excluir {{count}} de registros de {{label}}?",
     bulkDeleteConfirmTitle_other: "Excluir {{count}} registros de {{label}}?",
     deleteConfirmButton: "Excluir",
+    deleteCascade: "Isso também exclui os registros relacionados em: {{objects}}.",
     bulkDeleteSuccess: "{{count}} registros de {{label}} excluídos",
     bulkDeleteSuccess_one: "{{count}} registro de {{label}} excluído",
     bulkDeleteSuccess_many: "{{count}} de registros de {{label}} excluídos",

@@ -305,6 +305,12 @@ export const SPEC_ACTION_KEYS = [
   // runner reads it as the success toast's first rung, ahead of
   // `successMessage`.
   'outcomeMessages',
+  // Added to `ActionSchema` by objectstack#28467 (ADR-0146): the override
+  // declaration `{ package, basedOn }` every overridable metadata type carries.
+  // Listed for the reason `description` is — this array restates the spec's
+  // declared keys, so an action carrying it is not reported as having an
+  // unknown key. `ActionDef` does NOT declare it and the runner does not read it.
+  'overrides',
   'params',
   'patch',
   // Added to `ActionSchema` by objectstack#27946: the pressed-state predicate a

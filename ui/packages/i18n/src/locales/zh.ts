@@ -3519,6 +3519,7 @@ const zh = {
     bulkDeleteConfirmTitle_one: '删除 {{count}} 条 {{label}} 记录？',
     bulkDeleteConfirmTitle_other: '删除 {{count}} 条 {{label}} 记录？',
     deleteConfirmButton: '删除',
+    deleteCascade: '同时会删除以下对象中的相关记录：{{objects}}。',
     bulkDeleteSuccess: '已删除 {{count}} 条 {{label}} 记录',
     bulkDeleteSuccess_one: '已删除 {{count}} 条 {{label}} 记录',
     bulkDeleteSuccess_other: '已删除 {{count}} 条 {{label}} 记录',
