@@ -1271,7 +1271,7 @@
       "title": "Studio Automations pillar on a read-only package: a packaged flow is NOT editable in place — New-flow and autosave honor the courtesy gate, the enable/disable switch produces no metadata write, and inspector edits are inert or announced, never silently discarded",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin (opens Studio on the read-only package)"],
@@ -1324,8 +1324,7 @@
       ],
       "negative": [
         "a 2xx on ANY flow write into the read-only package is the hard FAIL — the server gate is the authority (ADR-0124 D1), and its fall here is the same class access-security.packaged-flow-write-door-parity hunts at the /meta and /automation doors",
-        "an inspector edit that visibly takes and silently vanishes on reload is a FAIL of the inert-or-announced clause even though nothing persisted — 'no server write happened' is clause 2's business, not an announcement",
-        "SCOPE: do not re-prove or widen access-security.readonly-package-locks-studio — its steps own the object designer + permission matrix surfaces; this item owns the Automations pillar. And do not conflate this switch with the packaged-flow activation ledger: the Studio pillar switch flips the flow's deployment `status` field via a draft save (a metadata write, refused on a read-only package), while the LEDGERED enable/disable (sys_metadata_activation) lives on the Setup packaged-automation board — automation.setup-packaged-automation-board / automation.packaged-flow-disable-durable own that surface"
+        "an inspector edit that visibly takes and silently vanishes on reload is a FAIL of the inert-or-announced clause even though nothing persisted — 'no server write happened' is clause 2's business, not an announcement"
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
       "source": [
@@ -1334,14 +1333,16 @@
         "docs/adr/0126-packaged-metadata-customization-model.md §2/§3 (flow = Regime C: locked base, in-place edit refused loudly at the write door — card F2)",
         "packages/metadata-protocol/src/sys-metadata-repository.ts#readOnlyBaseOverrideError (the 403 ITEM_LOCKED a write naming a read-only base answers) + packages/metadata-protocol/src/protocol.ts (the 403 NOT_OVERRIDABLE an overlay write on a non-overlayable type answers when no package is named)",
         "#12438 (the ADR-0126 packaged flow/action sweep this item lands from)",
-        "access-security.readonly-package-locks-studio (object designer + permission matrix — cross-referenced, not widened), access-security.packaged-flow-write-door-parity (the API-side door parity for the same packaged flow), automation.setup-packaged-automation-board (the ledgered enable/disable surface — a different mechanism from this pillar's status flip)"
+        "access-security.readonly-package-locks-studio (object designer + permission matrix — cross-referenced, not widened), access-security.packaged-flow-write-door-parity (the API-side door parity for the same packaged flow), automation.setup-packaged-automation-board (the ledgered enable/disable surface — a different mechanism from this pillar's status flip)",
+        "cross-ref: do not re-prove or widen access-security.readonly-package-locks-studio — its steps own the object designer + permission matrix surfaces; this item owns the Automations pillar. And do not conflate this switch with the packaged-flow activation ledger: the Studio pillar switch flips the flow's deployment `status` field via a draft save (a metadata write, refused on a read-only package), while the LEDGERED enable/disable (sys_metadata_activation) lives on the Setup packaged-automation board — automation.setup-packaged-automation-board / automation.packaged-flow-disable-durable own that surface"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-26", "change": "new item (#12438 card F2, UI half): the Studio Automations pillar's read-only package lock — the promise (no in-place edit, switch produces no metadata write, inspector edits inert or announced) asserted with the current source shape recorded as the expected finding: the switch is clickable with only the server-side 422 behind it (disabled expression omits readOnly, StudioDesignSurface.tsx) and the inspector hardcodes readOnly:false so edits take locally and silently vanish on reload; New-flow and autosave honor the gate. Grounded in objectui f7c52e2 + the framework's writable_package_required door; owns the Automations pillar only, cross-referencing readonly-package-locks-studio for the surfaces it already owns", "ref": "#12438" },
         { "revision": 2, "date": "2026-10-13", "change": "acceptance[2] and [3] (verify; evidence for [2]) drop the expected-fail wording, with knownGaps[0] and [1], steps[4] and source[0] (stale spec, #23163 A2 / A3; parked on #23121, carried by #23169). objectui#11124 disabled the pillar's switch on a read-only package (with the read-only hint as its title, and a guarded toggleEnabled) and threaded the real readOnly flag into the flow node inspector, pinned by StudioDesignSurface.automationsReadOnly-11124.test.tsx. QA run #23163 measured the switch disabled, a forced click sending nothing, the inspector inputs disabled and the flow byte-identical. Re-read from objectui source at 1fb1ced36243, still this repo's .objectui-sha. The clauses' promises are unchanged; only the recorded finding flips to the fixed shape", "ref": "#23169" },
         { "revision": 3, "date": "2026-10-16", "change": "acceptance[1] (clause, verify), acceptance[2] (verify, evidence), steps[4] and [7], knownGaps[0] and source re-pointed (checklist-accuracy finding 5 of QA run #23942, wave #23878). Clause 1 named the server refusal as 422 [writable_package_required]; the forged flow write is refused 403 — ITEM_LOCKED when it names com.example.showcase, NOT_OVERRIDABLE when it names no package (sys-metadata-repository.package-writability.test.ts pins the pair) — so step 7 now forges both spellings and the clause scores status and code. The switch's reason is an aria-describedby plus tooltip since objectui#12303, not a `title`. Not loosened: a 2xx on any flow write is still the hard FAIL, and a 403 with any other code fails the clause", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-26", "change": "fixtures.requires[1] and fixtures.knownGaps[1] drop the retired objectui-pin wording (a vendored console matching .objectui-sha; a pin runnable only from an objectui checkout), which #26035 left to this file's card: the console builds from this tree with pnpm console:build and the pin resolves under ui/. Wording only; the clauses are unchanged", "ref": "#25848" },
-        { "revision": 5, "date": "2026-10-27", "change": "fixtures.knownGaps[1], steps[7] and acceptance[1] (clause, verify) corrected from the Automations card of QA run #26715 (at 3fcafcd3, all four clauses pass; re-read at 43731031). (1) The pin runs only from ui/ against the ui/ workspace config (`pnpm exec vitest run --root . FILE`): app-shell has no vitest config of its own, so the filtered spelling from the package misses the setup. (2) The forged write's 403 is the flat { error, code } body, so the code is read at the top level, not as error.code. Not loosened: the status must be 403 and the code ITEM_LOCKED or NOT_OVERRIDABLE", "ref": "#26715" }
+        { "revision": 5, "date": "2026-10-27", "change": "fixtures.knownGaps[1], steps[7] and acceptance[1] (clause, verify) corrected from the Automations card of QA run #26715 (at 3fcafcd3, all four clauses pass; re-read at 43731031). (1) The pin runs only from ui/ against the ui/ workspace config (`pnpm exec vitest run --root . FILE`): app-shell has no vitest config of its own, so the filtered spelling from the package misses the setup. (2) The forged write's 403 is the flat { error, code } body, so the code is read at the top level, not as error.code. Not loosened: the status must be 403 and the code ITEM_LOCKED or NOT_OVERRIDABLE", "ref": "#26715" },
+        { "revision": 6, "date": "2026-11-01", "change": "negative[2] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" }
       ]
     },
     {
@@ -1349,7 +1350,7 @@
       "title": "Packaged views and dashboards are 'yours to edit directly' (ADR-0126 Regime O): the designer live-edits the PACKAGED artifact, publish reaches the end user, reset-overlay returns the shipped base — while a Regime-C flow in the same surface stays locked",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin (authors the overlay in the designer)", "end user (renders the published change)"],
@@ -1412,8 +1413,7 @@
       "negative": [
         "a packaged view or dashboard opening behind the installed-package lock is the FAIL of the shipped tier-1 claim (content/docs/capabilities/integrations.mdx, content/docs/build-without-code.mdx) — but before filing it as a registry defect, forge the raw PUT: if the server ACCEPTS while the UI locks, it is the objectui#4308 client mis-tiering class, filed against objectui, not the registry",
         "a reset that answers 200 while the read or render still serves the overlay is a FAIL — the restore must flip the served body",
-        "leaving the system_overview overlay behind after the run corrupts dashboards.system-overview-live-counts' stock fixture — the reset step is part of the item, not cleanup courtesy",
-        "SCOPE: the raw-PUT registry gate in both directions (403 NOT_OVERRIDABLE on locked kinds, accepted overlay + DELETE reset semantics at API grain) is studio-authoring.org-override-registry-gate — cite it, never duplicate it; studio-authoring.view-authoring-live deliberately avoids packaged views, and this item is its packaged complement"
+        "leaving the system_overview overlay behind after the run corrupts dashboards.system-overview-live-counts' stock fixture — the reset step is part of the item, not cleanup courtesy"
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input", "cache-staleness"],
       "source": [
@@ -1423,13 +1423,15 @@
         "packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts (the code-shipped built-in board the dashboard leg edits)",
         "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx (isArtifactItem tiering), (artifact-backed canWrite = allowEnvironmentOverlay — why the view/dashboard open editable and the flow does not), (resettable → the Reset-overlay verb), (the installed-package lock banner) — objectui owns the designer and end-user markup, so locator fixes land there (ADR-0054); the framework owns the registry flags and the overlay/reset doors",
         "#12438 (the ADR-0126 sweep this item lands from)",
-        "studio-authoring.org-override-registry-gate (the raw-PUT registry-gate half — cross-referenced, not duplicated), studio-authoring.view-authoring-live (the non-packaged authoring loop this item complements), dashboards.system-overview-live-counts (the same board's live-count semantics — and the reason the overlay must be reset)"
+        "studio-authoring.org-override-registry-gate (the raw-PUT registry-gate half — cross-referenced, not duplicated), studio-authoring.view-authoring-live (the non-packaged authoring loop this item complements), dashboards.system-overview-live-counts (the same board's live-count semantics — and the reason the overlay must be reset)",
+        "cross-ref: the raw-PUT registry gate in both directions (403 NOT_OVERRIDABLE on locked kinds, accepted overlay + DELETE reset semantics at API grain) is studio-authoring.org-override-registry-gate — cite it, never duplicate it; studio-authoring.view-authoring-live deliberately avoids packaged views, and this item is its packaged complement"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-26", "change": "new item (#12438, E1 tier-1 claim / ADR-0126 §3 Regime O): 'views and dashboards are yours to edit directly' proven on PACKAGED artifacts through the designer — live edit, publish, end-user render, reset-overlay back to the shipped base — with a built-in dashboard leg (system_overview; the dashboard kind's allowOrgOverride:true overlay door verified in the registry at metadata-plugin.zod.ts before asserting, per the register's instruction) and a same-surface Regime-C flow negative. Complements org-override-registry-gate (raw-PUT half) and view-authoring-live (which deliberately avoids packaged views)", "ref": "#12438" },
         { "revision": 2, "date": "2026-10-16", "change": "fixtures.requires[0] and [1], steps[0], [1] and [7] and acceptance[2] (clause) and [4] (clause, verify) corrected (checklist-accuracy finding 6 of QA run #23942, wave #23878). The showcase ships individual views, not a container, so the 'discover the container name' instruction pointed at nothing — the item now picks a packaged view from the list and reads its /layers. The flow's banner is the lock banner ('This item is locked and cannot be edited or deleted.' plus the owning package), not an 'installed-package' banner; its wording is recognised, not scored. system_overview is defined in platform-objects but registered by plugin-auth, which is why its /layers reports com.objectstack.plugin-auth. Not loosened: the flow must still open locked with no operating save path", "ref": "#24036" },
         { "revision": 3, "date": "2026-10-26", "change": "fixtures.requires[3] names a console built from this tree with pnpm console:build instead of a vendored console matching the retired .objectui-sha pin (#26035 left this file to its card). Wording only; the clauses are unchanged", "ref": "#25848" },
-        { "revision": 4, "date": "2026-10-27", "change": "steps[2] and steps[5] say to blur the edited input before Save (checklist-accuracy finding of the Interfaces card of QA run #26715, at 3fcafcd3, where every clause passed): the designer form takes a value on blur, so Save does not see an edit whose input still holds focus. negative[3] spells the cross-referenced code NOT_OVERRIDABLE, as org-override-registry-gate now does. No clause changed", "ref": "#26715" }
+        { "revision": 4, "date": "2026-10-27", "change": "steps[2] and steps[5] say to blur the edited input before Save (checklist-accuracy finding of the Interfaces card of QA run #26715, at 3fcafcd3, where every clause passed): the designer form takes a value on blur, so Save does not see an edit whose input still holds focus. negative[3] spells the cross-referenced code NOT_OVERRIDABLE, as org-override-registry-gate now does. No clause changed", "ref": "#26715" },
+        { "revision": 5, "date": "2026-11-01", "change": "negative[3] moved to source[7]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" }
       ]
     },
     {
@@ -1437,7 +1439,7 @@
       "title": "The metadata governance sweep: GET /meta/diagnostics reports every STORED item failing spec validation with located errors, refuses outages and bad spellings loudly instead of answering '0 problems', and the Studio diagnostics page + directory tile badges paint the same numbers",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the governance surface is Studio's)"],
@@ -1518,8 +1520,7 @@
         "a 200 {\"scannedTypes\":1,\"stats\":{}} for a misspelled declared type is the #8924 silence regressed — the page would paint it 'All clear' — FAIL",
         "an outage answered as a clean sweep (total 0 from a store nobody could read) is the #8855 / ADR-0110 D3 FAIL shape — a diagnostics endpoint whose job is reporting problems must not answer '0 problems' precisely when it cannot read anything",
         "a blank diagnostics region on a clean store (instead of the designed empty state) is a FAIL of the page, not proof of health — and conversely, do NOT read the clean answer itself as 'the feature is missing': a store with no invalid rows is the healthy norm the save gates enforce (absence-inference)",
-        "consulting the dispatcher for this route is a recording error — the ledger marks GET /meta/diagnostics REST-server-only, so a simulated dispatch 404 says nothing about the live server (dispatcher-vs-hono-route)",
-        "SCOPE: per-item _diagnostics badges on list rows and the editor banner are the item-grain surfaces (ResourceListPage/ResourceEditPage) — this item owns only the cross-type sweep + directory/diagnostics pages; the save-time 422 gate is studio-authoring.authoring-validation-not-persisted — cite, don't duplicate"
+        "consulting the dispatcher for this route is a recording error — the ledger marks GET /meta/diagnostics REST-server-only, so a simulated dispatch 404 says nothing about the live server (dispatcher-vs-hono-route)"
       ],
       "traps": ["dispatcher-vs-hono-route", "hydration-race", "absence-inference", "stale-console-bundle"],
       "automated": {
@@ -1533,7 +1534,8 @@
         "packages/metadata-protocol/src/metadata-diagnostics.ts#computeMetadataDiagnostics (computeMetadataDiagnostics — errors only, undefined = no opinion for schema-less types; zodIssuesToMetadataIssues names union branches #5598 so Studio has a path to highlight)",
         "packages/spec/src/api/protocol.zod.ts#GetMetaDiagnosticsResponseSchema (GetMetaDiagnosticsResponseSchema — entries[].diagnostics is the canonical MetadataValidationResultSchema the save path's 422 also speaks)",
         "objectui packages/app-shell/src/views/metadata-admin/DiagnosticsPage.tsx (groups by type descending, per-row deep link../<type>/<name>, severity tabs, the summary badge, the clean Empty state, the loadFailed banner) + useMetadata.ts (useGlobalDiagnostics: strict error count vs warn-only count, counts/locked/packages from stats, older-server catch degrades to empty-not-fatal) + DirectoryPage.tsx (MetadataDirectoryPage: the package-scoped useGlobalDiagnostics sweep drives tile badges; the diagnostics link renders only when diagSummary.total > 0) + console/AppContent.tsx (the AppContent component's metadata/_diagnostics route)",
-        "studio-authoring.authoring-validation-not-persisted (why stock stores are clean — the save-time gate; also the known spurious _diagnostics banner on the DESIGNER, which is that item's business, not this sweep's)"
+        "studio-authoring.authoring-validation-not-persisted (why stock stores are clean — the save-time gate; also the known spurious _diagnostics banner on the DESIGNER, which is that item's business, not this sweep's)",
+        "cross-ref: per-item _diagnostics badges on list rows and the editor banner are the item-grain surfaces (ResourceListPage/ResourceEditPage) — this item owns only the cross-type sweep + directory/diagnostics pages; the save-time 422 gate is studio-authoring.authoring-validation-not-persisted — cite, don't duplicate"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (2026-08-30 sweep, angle 4): the governance sweep GET /meta/diagnostics + its two Studio surfaces had no coverage — nothing asserted the stats/tile parity seam, the #8924 spelling refusal (whose regression the page paints as 'All clear'), the #8855 outage honesty, or the clean-store empty state. Grounded against source with two corrections to the register hypothesis: the scoping query param is ?package= (not ?packageId= — that is the protocol-layer argument name), and severity=warning cannot 'add warning-only entries' on stock because no producer emits warnings at head (reserved for a future lint layer) — authored as a mechanism clause with the lint-layer tripwire recorded. The invalid-stored-row positive is blocked(fixture) by construction (save doors validate; sys_metadata is not a data-plane object), with the stale-row snapshot named as the honest fixture candidate", "ref": "#sweep-2026-08-30" },
@@ -1544,7 +1546,8 @@
         { "revision": 6, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). source[5] cited lines 242-254 of objectui DirectoryPage.tsx and line 982 of app-shell's console AppContent.tsx in the comma-range spelling (authored in 45397edf53 as the lists 133-158 and 242-254, and 882 and 982). At the objectui pin that commit shipped, 9602dc820450, 242-254 was the diagnostics link that renders only when diagSummary.total is above 0, 133-158 the package-scoped useGlobalDiagnostics sweep, and 982 the nested metadata route block that holds _diagnostics; at the shipped pin 12dc7b47c340 all have moved. source[5] now names the MetadataDirectoryPage component's sweep and link, and the AppContent component's metadata/_diagnostics route. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
         { "revision": 7, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
         { "revision": 8, "date": "2026-10-21", "change": "Respelled — fixtures.knownGaps[0]: 'ON AN ISOLATED SCRATCH FILE DB' → 'ON THE RUN'S OWN SCRATCH FILE DB'. PR #25003's out-of-scope finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): 22 non-history texts in 17 items named the own-port boot or its DB with 'isolated' in other words, the phrasing round 12 found a runner reading as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names the boot or the DB by what it is, the run's own port and DB (RUNNER.md's trap-table counter: own port/DB, skill §0), and names no posture. Read at base 93e6c1a5f8. No clause changed", "ref": "#25018" },
-        { "revision": 9, "date": "2026-10-26", "change": "automated.ref names the protocol-layer evidence its pin carries for acceptance[3] and negative[0] (checklist-accuracy finding a3/n0 of QA run #25815, release-18.2.0-tier1 at 6679644a, objectui pin b41ed7f68956; wave anchor #25807): the ref said the pin covered the outage clause ONLY, but its [#8924] describe asserts the ?type= misspelling refusal at the protocol layer; the api-oracle clauses still need the REST door. fixtures.requires[0] names a console built from this tree. The retired objectui-pin wording is replaced on the way (#26035 left this file to its card): objectui is imported under ui/, so the pins resolve in this checkout and the console builds from this tree with pnpm console:build. No clause is loosened", "ref": "#25848" }
+        { "revision": 9, "date": "2026-10-26", "change": "automated.ref names the protocol-layer evidence its pin carries for acceptance[3] and negative[0] (checklist-accuracy finding a3/n0 of QA run #25815, release-18.2.0-tier1 at 6679644a, objectui pin b41ed7f68956; wave anchor #25807): the ref said the pin covered the outage clause ONLY, but its [#8924] describe asserts the ?type= misspelling refusal at the protocol layer; the api-oracle clauses still need the REST door. fixtures.requires[0] names a console built from this tree. The retired objectui-pin wording is replaced on the way (#26035 left this file to its card): objectui is imported under ui/, so the pins resolve in this checkout and the console builds from this tree with pnpm console:build. No clause is loosened", "ref": "#25848" },
+        { "revision": 10, "date": "2026-11-01", "change": "negative[4] moved to source[7]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" }
       ]
     },
     {
@@ -1552,7 +1555,7 @@
       "title": "A doc on the app menu follows the reader's audience: an admin authors a doc and puts it (or its book) on an app menu; a member who may read it sees it and opens it in its book; a member outside its audience does not see the entry and gets a refusal — never \"not found\", never a blank page — on the direct route",
       "since": "v17.5",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1615,8 +1618,7 @@
         "a doc entry drawn for the outsider is an audience leak — cross-file to platform-core.docs-audience-gate and access-security",
         "\"Documentation not found\" where the server answers 401 / 403 — the UI half of platform-core.docs-audience-gate's \"a 404 where a 401/403 is due\" negative",
         "a blank region or a crash on any direct route — FAIL",
-        "a page entry that opens in a book that does not claim the page — the addendum's \"in its book's context\" fails",
-        "SCOPE: the book/doc audience semantics at API grain are platform-core.docs-audience-gate, and the portal's own rendering is platform-core.docs-portal-render — cite them, never duplicate them; this item owns the app-menu entry, its UI mirror and the direct-route refusal"
+        "a page entry that opens in a book that does not claim the page — the addendum's \"in its book's context\" fails"
       ],
       "traps": ["auth-state-leak", "hydration-race", "wrong-persona", "stale-console-bundle", "cache-staleness"],
       "source": [
@@ -1627,7 +1629,8 @@
         "packages/rest/src/meta-item-read-gate.ts#filterAppForUser (/meta/app pruning), (NavDocAudienceGate — fails CLOSED: an absent gate prunes every doc entry)",
         "objectui PR 11258: packages/layout NavigationRenderer passesNavItemGuards (checkDocTarget), packages/app-shell hooks/useNavDocTargetCheck, apps/console pages DocsSlug / DocPage / BookPage (DocRefusal) / book-nav homeBook",
         "objectui PR 11241 (the doc editor the admin authors with)",
-        "platform-core.docs-audience-gate, platform-core.docs-portal-render (the neighbours — cross-referenced, not merged)"
+        "platform-core.docs-audience-gate, platform-core.docs-portal-render (the neighbours — cross-referenced, not merged)",
+        "cross-ref: the book/doc audience semantics at API grain are platform-core.docs-audience-gate, and the portal's own rendering is platform-core.docs-portal-render — cite them, never duplicate them; this item owns the app-menu entry, its UI mirror and the direct-route refusal"
       ],
       "history": [
         { "revision": 1, "date": "2026-09-30", "change": "new — the 清单项待写 row of docs/NORTH-STAR.md beside platform-core.docs-audience-gate and platform-core.docs-portal-render; drafted with objectui#10188 and corrected by the at-tier review of objectui PR 11258 (the UI-mirror clause scoped to entries naming an installed doc or book; no signed-out persona — /docs sits behind ProtectedRoute)", "ref": "#20939" },
@@ -1637,7 +1640,8 @@
         { "revision": 5, "date": "2026-10-20", "change": "steps[0] respelled: 'boot the showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
         { "revision": 6, "date": "2026-10-26", "change": "fixtures.knownGaps[1] drops the retired .objectui-sha wording (#26035 left this file to its card): the console builds from this tree with pnpm console:build, and the objectui code under ui/ carries PR 11241 and PR 11258 (the documentation refusal page is in ui/apps/console). Wording only; the clauses are unchanged", "ref": "#25848" },
         { "revision": 7, "date": "2026-10-27", "change": "fixtures.knownGaps[1]: 'objectui pin' reads 'objectui revision'; the historical objectui PR numbers and revisions are kept (#26626, maintainer-directed). No clause changed, no status changed", "ref": "#26626" },
-        { "revision": 8, "date": "2026-10-27", "change": "steps[1] and fixtures.knownGaps[2] corrected from the Interfaces card of QA run #26715 (at 3fcafcd3, where every clause passed; re-read at 43731031). (1) The Studio nav editor cannot place the gated entries: its doc and book pickers offer only what the author may read, and the seeded admin reads no gated doc, so the step writes the navigation through PUT /meta/app. (2) admin create-user defaults mustChangePassword to true (runAdminCreateUser), so the recipe sends false explicitly; the old '(mustChangePassword false)' read like the door's answer. No clause changed", "ref": "#26715" }
+        { "revision": 8, "date": "2026-10-27", "change": "steps[1] and fixtures.knownGaps[2] corrected from the Interfaces card of QA run #26715 (at 3fcafcd3, where every clause passed; re-read at 43731031). (1) The Studio nav editor cannot place the gated entries: its doc and book pickers offer only what the author may read, and the seeded admin reads no gated doc, so the step writes the navigation through PUT /meta/app. (2) admin create-user defaults mustChangePassword to true (runAdminCreateUser), so the recipe sends false explicitly; the old '(mustChangePassword false)' read like the door's answer. No clause changed", "ref": "#26715" },
+        { "revision": 9, "date": "2026-11-01", "change": "negative[4] moved to source[8]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377", "ref": "#28345" }
       ]
     },
     {
@@ -2020,7 +2024,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2071,8 +2075,7 @@
       ],
       "negative": [
         "a departure that drops a held edit with no prompt is the FAIL: the strip had told the author 'Your changes are kept here' (the #26705 shape, fixed by PR #26839 and PR #26927)",
-        "a prompt on a CLEAN pillar is also a FAIL — a guard that always asks teaches authors to click through it",
-        "SCOPE: Publish while an edit is held is studio-authoring.held-edit-publish-refusal; this item owns departure only"
+        "a prompt on a CLEAN pillar is also a FAIL — a guard that always asks teaches authors to click through it"
       ],
       "traps": [
         "automation-input",
@@ -2083,7 +2086,8 @@
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (unsavedPillarWork — pillarDirty or a held edit — feeding confirmLeavePillar, the beforeunload effect and useRegisterUnsavedEdits; confirmDropUnsavedWork, which the Data, Automations and Interfaces rails also ask before opening another item; onDirtyChange from the Access pillar and the Interfaces navigation editor, onHeldEditChange / useHeldEditReport from the Data, Automations and Interfaces leaf editors)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.edit.unsavedLeaveConfirm; engine.studio.held.needsOptions / needsTarget / needsInput / widgetNeedsInput / line)",
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.pillarNavGuard.test.tsx (jsdom pin of the dirty half on the Access stack — corroboration only, it scores no browser clause here)",
-        "#26705 (family card: held edits discarded silently on departure in Data, Automations and Interfaces; fixed by PR #26839 and PR #26927 — jsdom pins StudioDesignSurface.heldDataLeave-26705 / heldFlowLeave-26705 / heldWidgetLeave-26705 .test.tsx, corroboration only)"
+        "#26705 (family card: held edits discarded silently on departure in Data, Automations and Interfaces; fixed by PR #26839 and PR #26927 — jsdom pins StudioDesignSurface.heldDataLeave-26705 / heldFlowLeave-26705 / heldWidgetLeave-26705 .test.tsx, corroboration only)",
+        "cross-ref: Publish while an edit is held is studio-authoring.held-edit-publish-refusal; this item owns departure only"
       ],
       "history": [
         {
@@ -2103,6 +2107,12 @@
           "date": "2026-10-31",
           "change": "steps[6] says when a dirty control must be left for the departure to test anything. The Access matrix tick and the navigation rename are dirty only until Studio's shared draft autosave lands, 1.5 s after the last edit (ui/packages/app-shell/src/views/studio-design/useDraftAutoSave.ts, the same at the run subject c4c515ad), so a departure after that leaves a clean pillar. The finding's text put the window at about 150 ms; the source says 1.5 s, and the step uses the source. Accuracy finding of QA run #27441. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[2] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2111,7 +2121,7 @@
       "title": "Publish refuses while an edit is held: the refusal names what the held edit needs, nothing is published and no draft changes — and once the edit is finished, Publish goes",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2153,8 +2163,7 @@
         }
       ],
       "negative": [
-        "a Publish that goes around a held edit — the batch publishes the server's drafts while the screen still shows an unsent change — is the FAIL this refusal exists for: the author believes the change is live",
-        "SCOPE: leaving the pillar with the edit held is studio-authoring.held-edit-leave-guard; a draft the server holds that publish refuses (an invalid one) is studio-authoring.draft-publish-lifecycle"
+        "a Publish that goes around a held edit — the batch publishes the server's drafts while the screen still shows an unsent change — is the FAIL this refusal exists for: the author believes the change is live"
       ],
       "traps": [
         "automation-input",
@@ -2167,7 +2176,8 @@
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (heldEdit state; doPublish refuses with engine.studio.held.publish while one is held, objectui#11786)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.held.publish and the needs* clauses)",
-        "QA run #26715: the coordinator's C4 (Data) and the Automations card measured the refusal; held-widget refusal per objectui#11910"
+        "QA run #26715: the coordinator's C4 (Data) and the Automations card measured the refusal; held-widget refusal per objectui#11910",
+        "cross-ref: leaving the pillar with the edit held is studio-authoring.held-edit-leave-guard; a draft the server holds that publish refuses (an invalid one) is studio-authoring.draft-publish-lifecycle"
       ],
       "history": [
         {
@@ -2181,6 +2191,12 @@
           "date": "2026-10-28",
           "change": "source[1] follows engine.studio.held.publish and the needs* clauses from metadata-admin/i18n.ts to the studio i18n namespace (ui/packages/i18n/src/namespaces/studio/en.ts, #25922 slices). Re-read at 3230bdbf. No clause changed",
           "ref": "#26848"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2272,7 +2288,7 @@
       "title": "Flow edges are authored in Studio as the spec types them — Normal, Fault, Conditional and Back-edge write default / fault / conditional / back with their label, condition and default-branch flag — and an invalid edge condition is flagged before publish, not only by it",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2328,8 +2344,7 @@
         }
       ],
       "negative": [
-        "an edge type written outside the spec's four members, or an inspector choice that writes nothing, is a FAIL",
-        "SCOPE: how the RUNTIME routes a fault path is automation.flow-error-handling, and node-by-node execution is automation.flow-node-type-matrix — this item owns what Studio writes and what it says before publish"
+        "an edge type written outside the spec's four members, or an inspector choice that writes nothing, is a FAIL"
       ],
       "traps": [
         "automation-input",
@@ -2338,7 +2353,8 @@
       "source": [
         "packages/spec/src/automation/flow.zod.ts#FlowEdgeSchema (type: default | fault | conditional | back; label; condition; isDefault — the BPMN default flow)",
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the flow canvas and Edge inspector — Type Normal / Fault / Conditional / Back-edge, Branch label, Condition, Default branch)",
-        "#26707 (family card: the draft and editor verdicts said valid while publish refused; closed by PR #26856, which fixed the draft read's _diagnostics and the metadata edit page — the invalid edge condition is one instance)"
+        "#26707 (family card: the draft and editor verdicts said valid while publish refused; closed by PR #26856, which fixed the draft read's _diagnostics and the metadata edit page — the invalid edge condition is one instance)",
+        "cross-ref: how the RUNTIME routes a fault path is automation.flow-error-handling, and node-by-node execution is automation.flow-node-type-matrix — this item owns what Studio writes and what it says before publish"
       ],
       "history": [
         {
@@ -2358,6 +2374,12 @@
           "date": "2026-10-31",
           "change": "fixtures.knownGaps[0] and acceptance[0] follow the edge inspector as it is. Since #26999 (card #26858) the edge inspector shows the draft's server verdict at the condition (FlowEdgeInspector.tsx, data-testid flow-edge-server-error), so the inspector half of acceptance[3] holds; QA run #27441 measured it at c4c515ad, with only the Problems tab silent. acceptance[0] now says that Normal is stored as no type key (FlowEdgeSchema's default is 'default', and the inspector deletes it) and uses the option labels the picker shows, 'Fault (error path)' and 'Back-edge (revise loop)' (ui/packages/i18n/src/namespaces/studio/en.ts). Accuracy findings of QA run #27441. The member each choice must write is unchanged. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2366,7 +2388,7 @@
       "title": "Flows outside any package have their own Studio scope: /studio/~org offers only the Automations pillar, lists only package-less flows, opens them editable, saves drafts bound to no package and publishes each by reference",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2408,8 +2430,7 @@
         }
       ],
       "negative": [
-        "a packaged flow editable in this scope, or a package-less draft pushed through the package batch door, is a FAIL — the two scopes must not leak into each other",
-        "SCOPE: the clone door itself (refusals, the notice, base and clone both bound) is automation.packaged-flow-clone-contract"
+        "a packaged flow editable in this scope, or a package-less draft pushed through the package batch door, is a FAIL — the two scopes must not leak into each other"
       ],
       "traps": [
         "hydration-race",
@@ -2422,7 +2443,8 @@
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly is false for the package-less scope, objectui#11553; doPublish promotes package-less flow drafts one by one through publishDraft)",
         "ADR-0126 §7.1 (a clone of a packaged flow is an ordinary org-owned flow)",
-        "automation.packaged-flow-clone-contract (the clone door — cross-referenced)"
+        "automation.packaged-flow-clone-contract (the clone door — cross-referenced)",
+        "cross-ref: the clone door itself (refusals, the notice, base and clone both bound) is automation.packaged-flow-clone-contract"
       ],
       "history": [
         {
@@ -2430,6 +2452,12 @@
           "date": "2026-10-27",
           "change": "new — the package-less (~org) Studio scope, from QA run #26715 (Automations card E6 passed: no New by design, a clone created through the API was edited and published there; 'org flows publish outside a package' was listed as uncovered)",
           "ref": "#26715"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2438,7 +2466,7 @@
       "title": "The flow state Studio shows is the state the deployment runs: the rail dot and the header read what GET /api/v1/automation/_status reports — On, Off, Not running here with the platform's reason — and an enabled record-triggered flow actually runs",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2487,8 +2515,7 @@
         }
       ],
       "negative": [
-        "a green On for a flow _status reports unbound, or a schedule flow read as a defect on a default boot, is a FAIL of this item — the deployment policy is not a fault, and Studio must not paint it as either health or error",
-        "SCOPE: the API kill switch ({enabled} at the automation door) is automation.flow-toggle-kill-switch; scheduled-work policy itself is the RUNNER.md fact, not a defect"
+        "a green On for a flow _status reports unbound, or a schedule flow read as a defect on a default boot, is a FAIL of this item — the deployment policy is not a fault, and Studio must not paint it as either health or error"
       ],
       "traps": [
         "hydration-race",
@@ -2502,7 +2529,8 @@
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (FlowStatusDot and flowRailStatus: green On, grey Not running here titled with the reason, amber Refused, hollow Off; objectui#11779, #11281, #12454)",
         "packages/services/service-automation/src/engine.ts (getFlowRuntimeStates — the rows GET /automation/_status passes through)",
-        "RUNNER.md environment facts (package-authored scheduled work is OFF unless OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1)"
+        "RUNNER.md environment facts (package-authored scheduled work is OFF unless OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1)",
+        "cross-ref: the API kill switch ({enabled} at the automation door) is automation.flow-toggle-kill-switch; scheduled-work policy itself is the RUNNER.md fact, not a defect"
       ],
       "history": [
         {
@@ -2510,6 +2538,12 @@
           "date": "2026-10-27",
           "change": "new — Studio's flow status against the runtime, from QA run #26715 (Automations card E4 passed on two boots: default off, toasts, status matching _status, a record create producing a completed run, the schedule flow Not running here on the default boot and bound on the second). The card listed 'Studio status vs _status' as uncovered",
           "ref": "#26715"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2518,7 +2552,7 @@
       "title": "Validation rules authored in Studio's Validations tab — the presets and all six rule types — save spec-valid, hold until their condition is given, and enforce on the write path once published, severity and the active switch included",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2529,12 +2563,15 @@
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
           "a writable package with one published object carrying two date fields, a number field, a text field, a status picklist (with option values) and a long-text field for JSON — the fields the presets and the six types bind to"
+        ],
+        "knownGaps": [
+          "Studio's Validations tab has no initialStates input: a state_machine rule authored there carries its field and transitions only (ui/packages/app-shell/src/views/studio-design/ObjectValidationsPanel.tsx; the metadata previews only display initialStates, ValidationPreview.tsx). initialStates is written through the API only (packages/spec/src/data/validation.zod.ts, the state_machine rule's initialStates), so the insert-time invalid_initial_state refusal is not part of this item: acceptance[3] does not name it, and its runtime code is records-forms.validation-rule-type-matrix's (variants[0], showcase_project's project_status_flow)"
         ]
       },
       "steps": [
         "open /_console/studio/PKG/data → the object → Validations → New: read the menu — a few presets in plain words first, the six rule types folded under Advanced",
         "presets: pick 'End date on or after start date' and 'Number can't be negative' (each written at once on the author's own fields, as editable rows); pick 'Reject the save when…' — it is held, not written, and opens with the condition focused; type a condition and watch it save",
-        "Advanced: author one rule of each remaining type with real settings — state_machine on the status field (initial state plus one allowed transition), format on the text field, json_schema on the long-text field, cross_field on the two dates, conditional wrapping a script rule — each with a message; set one rule's severity to warning and switch another rule off (active false)",
+        "Advanced: author one rule of each remaining type with real settings — state_machine on the status field (one allowed transition; the tab has no initial-state input, fixtures.knownGaps[0]), format on the text field, json_schema on the long-text field, cross_field on the two dates, conditional wrapping a script rule — each with a message; set one rule's severity to warning and switch another rule off (active false)",
         "CEL: type an invalid condition into one rule and read the live verdict, then fix it",
         "let the autosave land, publish, and GET /api/v1/meta/object/OBJ: validations[] holds every rule as authored",
         "write path: for each rule POST or PATCH /api/v1/data/OBJ with the violating payload, then its happy-path twin; for the warning rule send a matching payload; for the inactive rule send the payload it would reject"
@@ -2559,7 +2596,7 @@
           "evidence": "the live object read"
         },
         {
-          "clause": "each published rule enforces with its per-type code: invalid_initial_state / invalid_transition (state_machine), invalid_format, json_schema_violation, rule_violation (script, cross_field) and the wrapped rule under conditional — 400 VALIDATION_FAILED, nothing stored — while every happy-path twin lands",
+          "clause": "each published rule enforces with its per-type code: invalid_transition (state_machine), invalid_format, json_schema_violation, rule_violation (script, cross_field) and the wrapped rule under conditional — 400 VALIDATION_FAILED, nothing stored — while every happy-path twin lands",
           "oracle": "api",
           "verify": "status, code and targeted field per violating write; a read-back shows nothing persisted; each twin answers 2xx",
           "evidence": "one line per write"
@@ -2572,8 +2609,7 @@
         }
       ],
       "negative": [
-        "a rule that saves in Studio but does not enforce once published is a FAIL — the authored rule must be the enforced rule",
-        "SCOPE: the per-type code matrix on stock showcase objects is records-forms.validation-rule-type-matrix; this item proves the Studio-authored rule reaches it"
+        "a rule that saves in Studio but does not enforce once published is a FAIL — the authored rule must be the enforced rule"
       ],
       "traps": [
         "automation-input",
@@ -2586,7 +2622,8 @@
       "source": [
         "packages/spec/src/data/validation.zod.ts#ValidationRuleSchema (the six types; active, events, severity, message on every rule)",
         "ui/packages/app-shell/src/views/studio-design/ObjectValidationsPanel.tsx (the New menu, presets, Advanced types, the CEL gate; objectui#11861, #11820)",
-        "records-forms.validation-rule-type-matrix (the runtime code matrix — cross-referenced, not duplicated)"
+        "records-forms.validation-rule-type-matrix (the runtime code matrix — cross-referenced, not duplicated)",
+        "cross-ref: the per-type code matrix on stock showcase objects is records-forms.validation-rule-type-matrix; this item proves the Studio-authored rule reaches it"
       ],
       "history": [
         {
@@ -2600,6 +2637,12 @@
           "date": "2026-10-28",
           "change": "fixtures.knownGaps[0] removed: both Validations-tab sightings of QA run #26715 are fixed on main by c4a4aefc (#26731). A new state_machine / format / json_schema rule is held until it has a field and a message, an empty transition row is not stored, and a conditional's `when` carries its own Guard caption. Re-read at 3230bdbf. No clause changed",
           "ref": "#26848"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). Also acceptance[3] no longer names invalid_initial_state, and steps[2] no longer asks for an initial state: Studio's Validations tab has no initialStates input, so the state is API-only (new fixtures.knownGaps[0]; measured at base 37184244, ObjectValidationsPanel.tsx carries no initialStates). The insert-time code stays covered by records-forms.validation-rule-type-matrix. invalid_transition and every other per-type code are unchanged. Ruling 6545938831 item ③ on #28345 (no product card for a Studio input). Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2608,7 +2651,7 @@
       "title": "Hooks authored in Studio's Hooks tab save pinned and keep their name — a rename is held with the way back named — and their options take effect at runtime: the Run-only-when condition, the retry policy and On Error",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2660,8 +2703,7 @@
         }
       ],
       "negative": [
-        "a rename that stages a second hook per pause while typing is the FAIL the hold exists for (two partial-name drafts beside the original, as measured before objectui#11787)",
-        "SCOPE: hook timing and the stock hooks on the write path are records-forms.object-hook-lifecycle"
+        "a rename that stages a second hook per pause while typing is the FAIL the hold exists for (two partial-name drafts beside the original, as measured before objectui#11787)"
       ],
       "traps": [
         "automation-input",
@@ -2674,7 +2716,8 @@
       "source": [
         "ui/packages/app-shell/src/views/studio-design/ObjectHooksPanel.tsx (renamedFrom holds a renamed buffer, engine.studio.hooks.renameHeld; the CEL gate; the first-save pin, objectui#11773 / #11787)",
         "packages/spec/src/data/hook.zod.ts (condition, retryPolicy, onError, runAs)",
-        "records-forms.object-hook-lifecycle (stock hooks on the write path — cross-referenced)"
+        "records-forms.object-hook-lifecycle (stock hooks on the write path — cross-referenced)",
+        "cross-ref: hook timing and the stock hooks on the write path are records-forms.object-hook-lifecycle"
       ],
       "history": [
         {
@@ -2688,6 +2731,12 @@
           "date": "2026-10-28",
           "change": "fixtures.knownGaps[0] rewritten: the two defects QA run #26715 recorded there are fixed on main — the Hooks tab grants body.capabilities (fc92c62a, #26726) and a missing capability answers a coded 403 rather than 500 (e46e25c0). The entry now only states what this item does not judge. Re-read at 3230bdbf. No clause changed",
           "ref": "#26848"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2696,7 +2745,7 @@
       "title": "Actions authored in Studio's Actions tab work on the record: the four presets are written at once or held until their target is given, a held one is dropped unsent by Delete, and each published preset does its job in the app — while the advanced editor writes actions the console can run",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2758,8 +2807,7 @@
         }
       ],
       "negative": [
-        "a held preset written to the server before its target is given, or a published preset that does nothing when clicked, is a FAIL",
-        "SCOPE: where an action renders (toolbar, record header, row menu) is records-forms.action-location-matrix; a refused script hook's toast is records-forms.script-action-hook-refusal-toast"
+        "a held preset written to the server before its target is given, or a published preset that does nothing when clicked, is a FAIL"
       ],
       "traps": [
         "automation-input",
@@ -2773,7 +2821,8 @@
       "source": [
         "ui/packages/app-shell/src/views/studio-design/ObjectActionsPanel.tsx (the New menu and the presets, objectui#11861; engine.studio.actions.heldNeeds)",
         "packages/spec/src/ui/action.zod.ts#ActionType (script | url | modal | flow | api | form) and the action's ai block (ai.exposed, ai.description)",
-        "records-forms.action-location-matrix (placement — cross-referenced)"
+        "records-forms.action-location-matrix (placement — cross-referenced)",
+        "cross-ref: where an action renders (toolbar, record header, row menu) is records-forms.action-location-matrix; a refused script hook's toast is records-forms.script-action-hook-refusal-toast"
       ],
       "history": [
         {
@@ -2787,6 +2836,12 @@
           "date": "2026-10-28",
           "change": "fixtures.knownGaps[0] removed: the four Actions-tab defects QA run #26715 recorded are fixed on main — Expose to AI agents writes ai.exposed and switching Type clears the keys the new type refuses (e9e344a9), Add field value keeps its row and a script action stores type script (2720874a), and the console runs an untyped stored action as a script (27e4d656). acceptance[4] and [5] are now scored as written. Re-read at 3230bdbf. No clause changed",
           "ref": "#26848"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -2870,7 +2925,7 @@
       "title": "A summary (roll-up) field authored in Studio is held until it names its child object and function, offers only numeric child fields for sum and avg, and once published computes and recomputes from the children",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2919,8 +2974,7 @@
         }
       ],
       "negative": [
-        "a summary saved unconfigured instead of held — refused only at publish, rolling back the rest of the package release with it — is the shape this item fails today (its draft verdict now reports it, #26707; the hold is still missing)",
-        "SCOPE: filtered roll-ups (summaryOperations.filter) at runtime are automation.rollup-summary-filter"
+        "a summary saved unconfigured instead of held — refused only at publish, rolling back the rest of the package release with it — is the shape this item fails today (its draft verdict now reports it, #26707; the hold is still missing)"
       ],
       "traps": [
         "automation-input",
@@ -2930,7 +2984,8 @@
         "packages/spec/src/data/field.zod.ts (summaryOperations: object, field, function count | sum | min | max | avg, relationshipField, filter)",
         "ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx (the summary options editor)",
         "#26707 (closed by 57820085: the draft verdict now reports the publish refusal; the unconfigured summary was one instance)",
-        "automation.rollup-summary-filter (filtered roll-ups — cross-referenced)"
+        "automation.rollup-summary-filter (filtered roll-ups — cross-referenced)",
+        "cross-ref: filtered roll-ups (summaryOperations.filter) at runtime are automation.rollup-summary-filter"
       ],
       "history": [
         {
@@ -2950,6 +3005,12 @@
           "date": "2026-10-30",
           "change": "acceptance[2] re-pointed after #27533 (fbb8bec3e7), which lets a count roll-up save without summaryOperations.field and stops Studio offering the field control for count: the count summary now carries object and function with no field, the sum summary still carries object, field and function. The old clause and verify (both summaries carry \"the authored object, field and function\") would score a correct run as a failure",
           "ref": "#27608"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3044,7 +3105,7 @@
       "title": "The Interfaces create dialogs work end to end: Create app derives its identifier and scaffolds one menu entry per package object (none when the box is cleared), New dashboard / report / page write spec-valid drafts linked from the menu, a report without a dataset or a measure and an identifier already taken are refused in the dialog, and everything opens in the published app",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3103,8 +3164,7 @@
         }
       ],
       "negative": [
-        "a create that writes the item but not the menu entry (or the reverse) is a FAIL — the dialog promises both",
-        "SCOPE: the first-run loop through Create app is studio-authoring.first-run-loop; this item owns the dialogs' own contract (scaffold off, refusals, the other kinds)"
+        "a create that writes the item but not the menu entry (or the reverse) is a FAIL — the dialog promises both"
       ],
       "traps": [
         "automation-input",
@@ -3117,7 +3177,8 @@
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (doCreateApp, doCreateSurface; the scaffold checkbox appAddObjects; objectui#11823, #11794, #2262)",
-        "ui/packages/app-shell/src/views/studio-design/CreateItemDialog.tsx (the one create form; identifier derivation)"
+        "ui/packages/app-shell/src/views/studio-design/CreateItemDialog.tsx (the one create form; identifier derivation)",
+        "cross-ref: the first-run loop through Create app is studio-authoring.first-run-loop; this item owns the dialogs' own contract (scaffold off, refusals, the other kinds)"
       ],
       "history": [
         {
@@ -3125,6 +3186,12 @@
           "date": "2026-10-27",
           "change": "new — the Interfaces create dialogs, from QA run #26715 (Interfaces card F1 and F5 passed: create app, dashboard, report with its refusals, HTML and React pages, identifier-taken refusals; the coordinator's H1 read the scaffold). Create-app scaffold, identifier refusals and report refusals were listed as uncovered",
           "ref": "#26715"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[2]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3133,7 +3200,7 @@
       "title": "A package dashboard renders every widget type the spec declares — those Studio offers and those written through the API — and every global-filter type renders its control and re-scopes the widgets bound to it; Studio's two widget-type entries offer the same set",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3191,8 +3258,7 @@
         }
       ],
       "negative": [
-        "a type that renders an empty or zero-height frame over multi-bucket data is a FAIL (single-datapoint)",
-        "SCOPE: the chart-type matrix on the stock showcase gallery is dashboards.chart-type-matrix, and the stock Revenue Pulse re-scoping is dashboards.global-filters-rescope — this item proves a package-authored board reaches the same renderer"
+        "a type that renders an empty or zero-height frame over multi-bucket data is a FAIL (single-datapoint)"
       ],
       "variants": [
         "widget types (ChartTypeSchema, 20): bar, horizontal-bar, column, line, area, pie, donut, funnel, scatter, treemap, sankey, combo, gauge, solid-gauge, metric, kpi, bullet, radar, table, pivot — the Studio-less nine at 3fcafcd3: column, treemap, sankey, combo, gauge, solid-gauge, kpi, bullet, radar",
@@ -3212,7 +3278,8 @@
       "source": [
         "packages/spec/src/ui/chart.zod.ts#ChartTypeSchema (the 20 widget types)",
         "packages/spec/src/ui/dashboard.zod.ts#GlobalFilterSchema (type: text | select | date | number | lookup; optionsFrom; targetWidgets)",
-        "dashboards.chart-type-matrix, dashboards.global-filters-rescope (the stock-fixture twins — cross-referenced)"
+        "dashboards.chart-type-matrix, dashboards.global-filters-rescope (the stock-fixture twins — cross-referenced)",
+        "cross-ref: the chart-type matrix on the stock showcase gallery is dashboards.chart-type-matrix, and the stock Revenue Pulse re-scoping is dashboards.global-filters-rescope — this item proves a package-authored board reaches the same renderer"
       ],
       "history": [
         {
@@ -3232,6 +3299,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[2] says how sankey binds, and steps[2] says a lookup filter needs optionsFrom. The sankey renderer flows from one root to each category of its first dimension, and a pivoted second dimension adds a second column (ui/packages/plugin-charts/src/AdvancedChartImpl.tsx, buildSankeyCellFlows), so the 'source/target pair for sankey' the dataset recipe asked for is not a shape it reads. A lookup global filter renders through the same select control as select (ui/packages/plugin-dashboard/src/DashboardFilterBar.tsx), whose choices come from options or optionsFrom, so one written without optionsFrom offers nothing to pick. Accuracy finding of QA run #27441. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3240,7 +3313,7 @@
       "title": "Reports authored in Studio render every report type from the same dataset — tabular, summary, matrix and joined — and their runtimeFilter, order and chart take effect in the published app, while a joined report refuses a chart and a block with no dataset",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3282,8 +3355,7 @@
         }
       ],
       "negative": [
-        "a type that renders as a different type (a matrix drawn as a flat table), or a runtimeFilter that is stored but not applied, is a FAIL",
-        "SCOPE: every ReportType on stock datasets is dashboards.dataset-report-authoring; drill-through clicks are dashboards.drill-through-range"
+        "a type that renders as a different type (a matrix drawn as a flat table), or a runtimeFilter that is stored but not applied, is a FAIL"
       ],
       "variants": [
         "tabular",
@@ -3303,7 +3375,8 @@
       ],
       "source": [
         "packages/spec/src/ui/report.zod.ts#ReportType (tabular | summary | matrix | joined); ReportSchema runtimeFilter, order, drilldown, chart (refused on joined), blocks (each needs a dataset)",
-        "dashboards.dataset-report-authoring, dashboards.drill-through-range (stock-fixture twins — cross-referenced)"
+        "dashboards.dataset-report-authoring, dashboards.drill-through-range (stock-fixture twins — cross-referenced)",
+        "cross-ref: every ReportType on stock datasets is dashboards.dataset-report-authoring; drill-through clicks are dashboards.drill-through-range"
       ],
       "history": [
         {
@@ -3317,6 +3390,12 @@
           "date": "2026-10-31",
           "change": "steps[4] names the door and body for the comparison query: POST /api/v1/analytics/dataset/query with datasetName beside a selection carrying the row dimension, the measure, the summary's runtimeFilter and order {MEASURE: 'desc'} (DatasetSelectionSchema in packages/spec/src/api/analytics.zod.ts; the selection spells sorting `order`, and orderBy is its alias). Accuracy finding of QA run #27441. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[2]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3325,7 +3404,7 @@
       "title": "App and menu-entry keys reach the running app: branding, areas and context selectors render; an entry's viewName, recordId / recordMode, filters, badge, requiresObject and visible each change what the entry does or who sees it; hidden takes an app off the switcher and nothing else — and Studio's menu-entry inspector edits them",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3389,8 +3468,7 @@
         }
       ],
       "negative": [
-        "an app whose hidden flag hides it from users who may use it — or shows it on the switcher — is a FAIL (the shape QA run #26715 recorded as #26712, at 3fcafcd3, before dbf7e04a retired the conversion)",
-        "SCOPE: the doc-type menu entry is studio-authoring.doc-on-app-menu; nav rendering on the stock showcase is platform-core.nav-surfaces-render"
+        "an app whose hidden flag hides it from users who may use it — or shows it on the switcher — is a FAIL (the shape QA run #26715 recorded as #26712, at 3fcafcd3, before dbf7e04a retired the conversion)"
       ],
       "traps": [
         "auth-state-leak",
@@ -3401,7 +3479,8 @@
       "source": [
         "packages/spec/src/ui/app.zod.ts (branding: primaryColor / accentColor / logo / favicon; areas; contextSelectors; hidden — 'navigation only, never an access gate'; the nav item keys viewName, recordId, recordMode, filters, badge, badgeVariant, requiresObject, visible, order)",
         "packages/metadata-core/src/artifact-forward-conversion.ts (where the retired app-hidden-to-unpublished conversion stood; dbf7e04a removed it from packages/spec/src/conversions/registry.ts, so a stored hidden: true round-trips — #26712, closed as fixed)",
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Studio menu-entry inspector)"
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Studio menu-entry inspector)",
+        "cross-ref: the doc-type menu entry is studio-authoring.doc-on-app-menu; nav rendering on the stock showcase is platform-core.nav-surfaces-render"
       ],
       "history": [
         {
@@ -3421,6 +3500,12 @@
           "date": "2026-10-31",
           "change": "steps[0]'s example visible predicate names org_owner, and steps[4] says which app and entries Studio's Interfaces pillar can show. QA run #27441 found the seeded admin holds org_owner, not org_admin: an organization's owner membership maps to org_owner alone (packages/spec/src/identity/eval-user.zod.ts), so the old 'org_admin' predicate was false for both personas and acceptance[3] could not tell them apart. The pillar loads only the package's first app and draws only its top-level navigation (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx), so entries written only inside areas never reach acceptance[5]'s inspector. Accuracy finding of QA run #27441. The clauses are unchanged. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3429,7 +3514,7 @@
       "title": "Pages authored in a package take the page model's full shape: a slotted record page renders its slot overrides on the object's records, and page variables of all six types drive visibleWhen on the rendered page — at first render and live as a writer changes them",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3468,8 +3553,7 @@
         }
       ],
       "negative": [
-        "a slot override saved but not rendered, or a variable whose block ignores its predicate, is a FAIL",
-        "SCOPE: the shipped showcase variable pages and their submit action are studio-authoring.page-variables-and-actions; the save door's slot-pair refusal is studio-authoring.save-door-runs-authoring-rules"
+        "a slot override saved but not rendered, or a variable whose block ignores its predicate, is a FAIL"
       ],
       "variants": [
         "string",
@@ -3487,7 +3571,8 @@
       "source": [
         "packages/spec/src/ui/page.zod.ts#PageVariableSchema (type: string | number | boolean | object | array | record_id; source = the writer component)",
         "packages/spec/src/ui/page.zod.ts (kind full | slotted | html | react; slots header / actions / alerts / highlights / details / tabs / discussion, honoured only when kind is slotted)",
-        "studio-authoring.page-variables-and-actions, studio-authoring.save-door-runs-authoring-rules (cross-referenced)"
+        "studio-authoring.page-variables-and-actions, studio-authoring.save-door-runs-authoring-rules (cross-referenced)",
+        "cross-ref: the shipped showcase variable pages and their submit action are studio-authoring.page-variables-and-actions; the save door's slot-pair refusal is studio-authoring.save-door-runs-authoring-rules"
       ],
       "history": [
         {
@@ -3501,6 +3586,12 @@
           "date": "2026-10-31",
           "change": "steps[0] stops offering slots.tabs as an alternative to details. #27053 retired `page.slots.tabs` (ADR-0085): the slot map now refuses it with a retiredKey tombstone, and the authorable slots are header, actions, alerts, highlights, details and discussion (packages/spec/src/ui/page.zod.ts). The old parenthetical, 'details OR tabs, never both — the save door refuses the pair', named a pairing rule that no longer exists. Accuracy finding of QA run #27441. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3509,7 +3600,7 @@
       "title": "Permission sets are created, found and locked honestly in Studio's Access pillar: the New dialog derives the identifier and refuses one already taken — published or draft — the rail searches and shows its empty states, and a read-only package offers no edit while the server refuses the forged write",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3564,8 +3655,7 @@
         }
       ],
       "negative": [
-        "a create that silently overwrites a published set with an empty one is the FAIL acceptance[1] exists for — every member of that set would lose its grants on the next publish",
-        "SCOPE: the object designer and matrix locks on a read-only package are access-security.readonly-package-locks-studio; the matrix editor's own UX is studio-authoring.permission-matrix-editor-ux"
+        "a create that silently overwrites a published set with an empty one is the FAIL acceptance[1] exists for — every member of that set would lose its grants on the next publish"
       ],
       "traps": [
         "automation-input",
@@ -3574,7 +3664,8 @@
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check findTakenIdentifier and CreateTakenNotice before the create's If-None-Match: *, discardDraft, the rail search and empty states)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.access.created / createTaken / createTakenElsewhere / emptyMain / search / bannerTitleReadOnly)",
-        "access-security.readonly-package-locks-studio (the sibling read-only surfaces — cross-referenced)"
+        "access-security.readonly-package-locks-studio (the sibling read-only surfaces — cross-referenced)",
+        "cross-ref: the object designer and matrix locks on a read-only package are access-security.readonly-package-locks-studio; the matrix editor's own UX is studio-authoring.permission-matrix-editor-ux"
       ],
       "history": [
         {
@@ -3594,6 +3685,12 @@
           "date": "2026-10-31",
           "change": "steps[1] names the New permission set dialog's confirm button: 'Save as draft', not 'Create'. Every Studio create dialog, the Access pillar's included, takes its submit label from engine.studio.createDraft (ui/packages/i18n/src/namespaces/studio/en.ts, 'Save as draft'; ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx, the engine.studio.access.new dialog). Accuracy finding of QA run #27441. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3602,7 +3699,7 @@
       "title": "The Access pillar's facet tabs author what the runtime enforces: System capabilities chips grant a capability a gated action checks, a Row-level security policy (with its Test dry-run) scopes a member's reads and writes, and Tab visibility hides an app — from the member's app list and from the launcher alike",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3662,8 +3759,7 @@
         }
       ],
       "negative": [
-        "a facet that saves but changes nothing at runtime is a FAIL — every clause pairs the authored value with its effect on M",
-        "SCOPE: the CEL editor's lint and the test-run engine parity are studio-authoring.expression-editors; RLS semantics on stock objects are access-security.rls-both-sides; capability declaration and resolution are access-security.capability-declaration-lifecycle"
+        "a facet that saves but changes nothing at runtime is a FAIL — every clause pairs the authored value with its effect on M"
       ],
       "traps": [
         "auth-state-leak",
@@ -3674,7 +3770,8 @@
       "source": [
         "packages/spec/src/security/permission.zod.ts#tabPermissions (visible | hidden | default_on | default_off per app name); systemPermissions; rowLevelSecurity",
         "ui/packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx (the System capabilities, Row-level security and Tab visibility tabs; CelTestRunDialog)",
-        "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.access.tab.capabilities / rls / tabs)"
+        "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.access.tab.capabilities / rls / tabs)",
+        "cross-ref: the CEL editor's lint and the test-run engine parity are studio-authoring.expression-editors; RLS semantics on stock objects are access-security.rls-both-sides; capability declaration and resolution are access-security.capability-declaration-lifecycle"
       ],
       "history": [
         {
@@ -3694,6 +3791,12 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[2], steps[0], [1], [4], [5] and acceptance[0].verify name a declared, ungranted capability CAP instead of qa_cap, requires[2] says where the gated action must live, and knownGaps[0] is closed. QA run #27441 (at c4c515ad) met three things. qa_cap cannot exist at runtime: a capability is code-only, so its runtime create answers 403 NOT_CREATABLE, and the run used showcase.restricted_ops, which the showcase declares and grants to no set (examples/app-showcase/src/security/capabilities.ts). A standalone runtime action item rendered nowhere, so the action is authored inline on OBJ's actions[] (Studio Data › Actions). The launcher half the knownGap called failing held: since #27021 Home, the switcher and the launcher blocks are narrowed by /me/apps (ui/packages/app-shell/src/hooks/useLauncherApps.tsx). acceptance[4] is now scored on both halves with no known failure; no clause is weakened. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3702,7 +3805,7 @@
       "title": "The Access pillar's org-wide defaults panel and sharing suggestions do what they say: the OWD panel lists every package object, saves only the changed one and offers controlled-by-parent only with a master; a package's suggested set is granted to Everyone, revoked or dismissed from the pillar, with immediate effect",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3757,8 +3860,7 @@
         }
       ],
       "negative": [
-        "a Grant that toasts success while M is still refused, or a Revoke that leaves M reading, is a FAIL — the suggestion's whole value is its runtime effect",
-        "SCOPE: OWD semantics at runtime are access-security.owd-sharing-matrix; the OWD save gate at the door is access-security.owd-save-gate; the suggestion door's API contract is access-security.suggested-binding-loop — this item owns the Studio panels"
+        "a Grant that toasts success while M is still refused, or a Revoke that leaves M reading, is a FAIL — the suggestion's whole value is its runtime effect"
       ],
       "traps": [
         "auth-state-leak",
@@ -3769,7 +3871,8 @@
         "ui/packages/app-shell/src/views/studio-design/PackageOwdOverviewPanel.tsx (every package object with its OWD, draft-only included; saves only the changed object; the master link; objectui#12326 controlled-by-parent with a required master)",
         "ui/packages/i18n/src/namespaces/studio/en.ts (engine.studio.access.suggestPromptEveryone / suggestConfirm / suggestDismiss / suggestRevoke / suggestGuestUnsupported)",
         "packages/spec/src/security/permission.zod.ts (isDefault — ADR-0090 D5: package-level sets become install-time suggestions)",
-        "access-security.owd-sharing-matrix, access-security.owd-save-gate, access-security.suggested-binding-loop (cross-referenced)"
+        "access-security.owd-sharing-matrix, access-security.owd-save-gate, access-security.suggested-binding-loop (cross-referenced)",
+        "cross-ref: OWD semantics at runtime are access-security.owd-sharing-matrix; the OWD save gate at the door is access-security.owd-save-gate; the suggestion door's API contract is access-security.suggested-binding-loop — this item owns the Studio panels"
       ],
       "history": [
         {
@@ -3789,6 +3892,12 @@
           "date": "2026-10-31",
           "change": "acceptance[2].verify spells the suggestion statuses as the server writes them: pending → confirmed → dismissed, not pending → accepted → revoked. The status vocabulary is 'pending' | 'confirmed' | 'dismissed' (packages/plugins/plugin-security/src/suggested-audience-bindings.ts, packages/spec/src/contracts/security-service.ts), and the sys_audience_binding_suggestion object defines confirmed as the everyone definition carrying the set and dismissed as declined or revoked. Accuracy finding of QA run #27441. The clause is unchanged. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3797,7 +3906,7 @@
       "title": "Authorable keys Studio has no control for still work when another door writes them: per metadata type, each key written into a package draft through the metadata API is stored, served after publish and takes its runtime effect",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3845,8 +3954,7 @@
         }
       ],
       "negative": [
-        "a key the draft door stores, publish serves and the runtime ignores is the PD#10 class (declared, not enforced) — a FAIL of acceptance[1] or [2], filed, never ticked on the stored value",
-        "SCOPE: preservation of these keys across a Studio save is studio-authoring.api-written-keys-survive-studio-save"
+        "a key the draft door stores, publish serves and the runtime ignores is the PD#10 class (declared, not enforced) — a FAIL of acceptance[1] or [2], filed, never ticked on the stored value"
       ],
       "variants": [
         "object.managedBy 'append-only' → POST to the data API refused 403 (engine-owned), DELETE refused",
@@ -3897,7 +4005,8 @@
       "source": [
         "QA run #26715 — the property-matrix pass of the Data, Automations, Interfaces and Access cards and the two gap-fill cards (object / field / hook / action and view): every top-level authorable key of Studio's metadata types, classed L1 (Studio control) / L2 (stored) / L3 (runtime effect)",
         "packages/spec/src/data/object.zod.ts, packages/spec/src/data/field.zod.ts, packages/spec/src/automation/flow.zod.ts, packages/spec/src/ui/view.zod.ts, packages/spec/src/ui/dataset.zod.ts, packages/spec/src/security/permission.zod.ts (the keys)",
-        "packages/spec/liveness/*.json (each key's liveness grade — a key graded live with no effect here is a finding)"
+        "packages/spec/liveness/*.json (each key's liveness grade — a key graded live with no effect here is a finding)",
+        "cross-ref: preservation of these keys across a Studio save is studio-authoring.api-written-keys-survive-studio-save"
       ],
       "history": [
         {
@@ -3917,6 +4026,12 @@
           "date": "2026-10-31",
           "change": "fixtures.knownGaps[0] moves the form-view `buttons` key off the failing rows. QA run #27441 measured it rendering at c4c515ad (the authored submit label shown, cancel hidden), and ObjectForm folds buttons.submit and buttons.cancel onto its flat renderer props (ui/packages/plugin-form/src/ObjectForm.tsx). The other gap-view rows are not re-measured and stay as recorded. The run reached 15 of about 45 rows; the not-run handover is a re-run, not a ledger edit. Accuracy finding of QA run #27441. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3925,7 +4040,7 @@
       "title": "A removed metadata key is refused at the save door at its real location, with a prescription, and nothing is stored — for the 33 keys QA run #26715 drove across nine types — whether the key still carries its tombstone or its retirement kit has aged out",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3968,8 +4083,7 @@
         }
       ],
       "negative": [
-        "a 200 for a removed key — stored, or silently stripped — is the FAIL: the author (or an AI) reads success while the key is discarded",
-        "SCOPE: retired keys at parse and build (query and error-envelope tombstones, the retired filter operators) are api-backend.enforce-or-remove-authoring-gates; the save door's authoring LINT rules are studio-authoring.save-door-runs-authoring-rules"
+        "a 200 for a removed key — stored, or silently stripped — is the FAIL: the author (or an AI) reads success while the key is discarded"
       ],
       "variants": [
         "object.externalSharingModel — tombstone at HEAD",
@@ -4014,7 +4128,8 @@
         "packages/spec/src/shared/retired-key.ts#retiredKey (the tombstone and its per-key prescription)",
         "packages/spec/src/shared/protocol-upgrade-guide.ts#RETIRED_KEY_UPGRADE_GUIDE_SENTENCE (the sentence the strict unknown-key refusal carries once a kit ages out, #26599 / ADR-0087 amendment 2026-10-26)",
         "packages/spec/src/data/object.zod.ts, packages/spec/src/data/hook.zod.ts, packages/spec/src/ui/action.zod.ts, packages/spec/src/ui/view.zod.ts, packages/spec/src/ui/page.zod.ts, packages/spec/src/ui/dashboard.zod.ts, packages/spec/src/security/permission.zod.ts (the 11 tombstones still present at 43731031)",
-        "#26711 (the view envelope stripped unknown top-level keys instead of refusing; fixed by #26851, which closed the view item record and the inline list and form members)"
+        "#26711 (the view envelope stripped unknown top-level keys instead of refusing; fixed by #26851, which closed the view item record and the inline list and form members)",
+        "cross-ref: retired keys at parse and build (query and error-envelope tombstones, the retired filter operators) are api-backend.enforce-or-remove-authoring-gates; the save door's authoring LINT rules are studio-authoring.save-door-runs-authoring-rules"
       ],
       "history": [
         {
@@ -4034,6 +4149,12 @@
           "date": "2026-10-31",
           "change": "acceptance[0]'s clause and verify state both refusal shapes as the save door writes them. A rename tombstone reads 'was renamed to `refreshIntervalSeconds` in @objectstack/spec 17 … Rename the key' (dashboard.refreshInterval, packages/spec/src/ui/dashboard.zod.ts), which the old verify's 'was removed in' did not admit; an aged-out key is reported by unrecognized_keys at its PARENT's path, with the key named in the message (packages/spec/src/shared/suggestions.zod.ts), not at the key's own path. Accuracy finding of QA run #27392 (33 of 33 keys refused, 11 tombstones at the key path and 22 aged-out keys as unrecognized_keys). The clause still asks for the same refusal, stated per shape; no verdict moves. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d",
           "ref": "#27392"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -4042,7 +4163,7 @@
       "title": "A write that names a package nobody installed is refused, for every metadata type as it already is for flows: the save door answers WRITABLE_PACKAGE_REQUIRED and stores nothing, publish-drafts on that id promotes nothing, and Studio opened on it says the package does not exist instead of rendering a writable builder",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4090,8 +4211,7 @@
         }
       ],
       "negative": [
-        "a 200 for a write bound to a package that does not exist is the FAIL: the row is invisible to the package doors that would govern it, and it skips the namespace gate on the way in",
-        "SCOPE: the read-only package refusals (WRITABLE_PACKAGE_REQUIRED and ITEM_LOCKED on com.example.showcase) are studio-authoring.first-run-loop's negative probe and access-security.readonly-package-locks-studio; multi-package row addressing is studio-authoring.multi-package-item-rows"
+        "a 200 for a write bound to a package that does not exist is the FAIL: the row is invisible to the package doors that would govern it, and it skips the namespace gate on the way in"
       ],
       "traps": [
         "silent-coercion",
@@ -4101,7 +4221,8 @@
       "source": [
         "packages/metadata-protocol/src/protocol.ts (uninstalledNamedBaseRefusal: the named-base rule — a base the write names must be a package the registry holds as installed — asked by saveMetaItem for every type since #26920; tenantAuthoredWriteRefusal, the flow arm of the 2026-09-30 ruling on #20863, calls the same helper)",
         "docs/adr/0070-package-first-authoring.md (the docs link the refusal carries)",
-        "#26708 (the save and publish doors accepted an uninstalled package id for every type but flow, and Studio rendered a builder for it; fixed by #26920, which also answers publish-drafts on an unknown id 404 RESOURCE_NOT_FOUND)"
+        "#26708 (the save and publish doors accepted an uninstalled package id for every type but flow, and Studio rendered a builder for it; fixed by #26920, which also answers publish-drafts on an unknown id 404 RESOURCE_NOT_FOUND)",
+        "cross-ref: the read-only package refusals (WRITABLE_PACKAGE_REQUIRED and ITEM_LOCKED on com.example.showcase) are studio-authoring.first-run-loop's negative probe and access-security.readonly-package-locks-studio; multi-package row addressing is studio-authoring.multi-package-item-rows"
       ],
       "history": [
         {
@@ -4115,6 +4236,12 @@
           "date": "2026-10-28",
           "change": "fixtures.knownGaps removed and source[0], source[2] re-pointed: card #26708 is fixed on main by #26920 (re-read at 3230bdbf). Every type's named-package save now asks uninstalledNamedBaseRefusal and answers 422 WRITABLE_PACKAGE_REQUIRED with nothing written, publish-drafts on an unknown id answers 404 RESOURCE_NOT_FOUND, and Studio renders 'Package not found' and a not-found state for an unknown pillar. The clauses already stated this behaviour and are unchanged",
           "ref": "#26848"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-01",
+          "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     }
