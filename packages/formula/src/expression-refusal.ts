@@ -33,6 +33,12 @@
  *  - `detail` is a diagnostic the CEL or template engine wrote — English, and
  *    for CEL with an excerpt of the source. It is passed through as it is;
  *    this package does not own its wording.
+ *  - A LOCATOR param is the one exception to "params are the interpolated
+ *    values": a structured reading of the fault `detail` renders, taken off
+ *    the engine's error object rather than out of the text. `invalid-cel`'s
+ *    `celCode` (what `detail` names in prose) and `pos` (where its `^` points)
+ *    are the two (#27904). Like every optional param they are present exactly
+ *    when the engine reported them, and never guessed.
  *
  * ⛔ Not an ADR-0112 error code. These are authoring diagnostics delivered as a
  * function's return value, never a failing request's `error.code`, which is
@@ -63,8 +69,35 @@ export interface ExpressionRefusalParams {
   'template-single-brace': { readonly ref: string };
   /** A CEL slot holding an envelope of another dialect. */
   'cel-dialect-mismatch': { readonly dialect: string };
-  /** The CEL engine refused the source; the prescription is "write bare CEL". */
-  'invalid-cel': { readonly role: CelFieldRole; readonly detail: string };
+  /**
+   * The CEL engine refused the source; the prescription is "write bare CEL".
+   * `celCode` and `pos` are LOCATOR params (see the contract above) — read for
+   * an editor that says what is wrong, and where, in its own words.
+   */
+  'invalid-cel': {
+    readonly role: CelFieldRole;
+    readonly detail: string;
+    /**
+     * cel-js's own structured code for the fault, as cel-js spells it: the
+     * parser's for a syntax fault (`unexpected_token` — an operand or the
+     * expression's end is missing; `expected_token` — a closing `)` / `]` /
+     * `}` or `:` is missing; `unexpected_character`; `unterminated_string`;
+     * `invalid_number`, …) or the checker's for a type fault
+     * (`no_such_overload`, …). An open vocabulary: an editor maps the codes it
+     * knows and falls back to `detail` for the rest. Absent when the engine
+     * named none.
+     */
+    readonly celCode?: string;
+    /**
+     * Where in `source` the fault is: UTF-16 offsets as JavaScript indexes a
+     * string, `end` exclusive, so `source.slice(start, end)` is the text the
+     * engine points at — empty, with `start === source.length`, for a fault at
+     * the end such as a missing `)`. Absent when the engine reported no range,
+     * or read a source the platform rewrote before parsing (a range into that
+     * text would point at characters the author never wrote).
+     */
+    readonly pos?: { readonly start: number; readonly end: number };
+  };
   /**
    * Valid CEL over one of the platform's parse budgets. `limit` and
    * `limitValue` are present together when the bound is known, and absent

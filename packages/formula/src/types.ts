@@ -232,7 +232,13 @@ export interface EvalError {
    */
   kind: 'parse' | 'type' | 'runtime' | 'bounds' | 'dialect';
   message: string;
-  /** Source position when known. */
+  /**
+   * Source position when known: the range cel-js reports for the fault, as
+   * UTF-16 offsets into the expression's `source` (`end` exclusive). Filled
+   * for a cel-js parse, check or evaluation fault that carries a range, over
+   * the author's text as written (#27904); absent for a fault with no range,
+   * a non-CEL throw, or a source the engine rewrote before reading it.
+   */
   pos?: { start: number; end: number };
 }
 
