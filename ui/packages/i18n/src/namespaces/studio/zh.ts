@@ -2185,6 +2185,24 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.heading': '自动化',
   'engine.studio.auto.deleteFlow': '删除流程',
   'engine.studio.auto.flowDeleted': '已删除流程「{item}」',
+  // objectstack#28567 (ADR-0146 D4) — 流程的「新建类似」：克隆门以新的机器名与标签复制，
+  // 副本为关闭状态，落在承载改动的软件包中；服务器的回答与拒绝原样显示。
+  'engine.studio.auto.newSimilar.action': '新建类似',
+  'engine.studio.auto.newSimilar.hint': '以新名称复制此流程。副本处于关闭状态，开启后才会运行。',
+  'engine.studio.auto.newSimilar.title': '新建类似流程',
+  'engine.studio.auto.newSimilar.bodyPair':
+    '以新的机器名和标签复制「{item}」。此软件包为只读，服务器会把副本以关闭状态保存到承载你对它所做改动的软件包中，并告诉你副本所在位置。',
+  'engine.studio.auto.newSimilar.bodyHere':
+    '以新的机器名和标签把「{item}」复制到此软件包中，副本为关闭状态。副本取自当前运行的流程：未发布的改动不会被复制。',
+  'engine.studio.auto.newSimilar.copyLabel': '{label}（副本）',
+  'engine.studio.auto.newSimilar.name': '新的机器名',
+  'engine.studio.auto.newSimilar.label': '新的标签',
+  'engine.studio.auto.newSimilar.submit': '创建副本',
+  'engine.studio.auto.newSimilar.failedHttp': '无法创建副本（HTTP {status}）。',
+  'engine.studio.auto.newSimilar.failed': '无法创建副本。',
+  'engine.studio.auto.newSimilar.done': '已在软件包 {package} 中保存副本 {name}。',
+  'engine.studio.auto.newSimilar.noPackage': '服务器已保存副本 {name}，但回答中没有说明它所在的软件包，因此未打开任何内容。',
+  'engine.studio.auto.newSimilar.dismiss': '关闭',
   // ADR-0146 D4 — 只读软件包的流程：启用账本开关（仅本部署，不改定义）。
   'engine.studio.auto.ledger.on': '本部署中已开启',
   'engine.studio.auto.ledger.off': '本部署中已关闭',
