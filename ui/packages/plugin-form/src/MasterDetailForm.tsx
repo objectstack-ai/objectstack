@@ -30,7 +30,7 @@
  * `lookup`) FK on the child object.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
 import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
@@ -924,7 +924,20 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
       try { key = JSON.stringify(next); } catch { key = String(Math.random()); }
       if (key === editedKeyRef.current) return; // value-identical → no re-render
       editedKeyRef.current = key;
-      setEditedRecord(next);
+      // A TRANSITION, never a plain update (objectstack#28471). This listener
+      // sits on the host, INSIDE the React root, so a keystroke reaches it
+      // before React's own root listener has handed the value to the
+      // header's react-hook-form. A plain update here is sync priority (the
+      // event is `input`), and the browser's microtask checkpoint between
+      // two listeners flushes it right there, together with whatever
+      // default-priority work the page has pending (a fetch that just
+      // landed): that render repaints the header input with its old
+      // controlled value, React's value tracker then sees no change, and the
+      // keystroke is dropped without a word — measured on the showcase
+      // master-detail page, where a Create then failed "Project Name is
+      // required" with the name visibly typed. A transition is not flushed
+      // in that checkpoint, so React reads the keystroke first.
+      startTransition(() => setEditedRecord(next));
     };
     host.addEventListener('input', onEvt);
     host.addEventListener('change', onEvt);
