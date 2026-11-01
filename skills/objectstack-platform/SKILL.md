@@ -55,8 +55,7 @@ ownerless row into a queue — parked, `round_robin` or `least_loaded` — or to
 user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers
 (`sharing` in `requires`): a stack declaring either without it is refused at boot.
 
-Undeclared keys are handled per surface, and the two postures are worth
-keeping straight:
+Undeclared keys are handled per surface, in two postures:
 
 - **Refused** — `defineStack()`'s top level, each `objects[]` entry
   (`ObjectSchema`), and each field (`FieldSchema`). The parse throws, naming
@@ -108,7 +107,7 @@ OS_ARTIFACT_PATH=./dist/objectstack.json objectstack dev
 
 ## Manifest Reference
 
-Every stack needs a `manifest` to identify itself in the ecosystem:
+Every stack needs a `manifest`:
 
 ```typescript
 manifest: {
@@ -131,7 +130,7 @@ to a new protocol major — never to silence a mismatch.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
 
-**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template or translation (page, app, dataset, doc, book, mapping, flow and action wait for their doors), never judges `basedOn` and ignores any other package's declaration. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. An undeclared pair row or a dependent's row is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
+**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template or translation (the rest of `OVERRIDABLE_METADATA_TYPES` wait for their doors), never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. An undeclared pair row or a dependent's row is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
 
 ---
 
@@ -227,7 +226,7 @@ my-app/
 
 ## Driver Selection Guide
 
-Drivers are the storage layer. Pick based on your environment:
+Drivers are the storage layer:
 
 | Driver | Package | Best For | Notes |
 |:-------|:--------|:---------|:------|
@@ -290,8 +289,6 @@ routes added to HttpDispatcher work automatically**.
 ---
 
 ## Runtime Boot Sequence
-
-Understanding how ObjectStack starts helps debug and customize:
 
 ```
 objectstack.config.ts

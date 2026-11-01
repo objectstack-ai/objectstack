@@ -115,7 +115,8 @@ later ships. See [ADR-0070](https://github.com/objectstack-ai/objectstack/blob/m
 
 A customer's change to an installed base package — HotCRM, id `hotcrm` — is an item of
 the base's paired writable package **`hotcrm.custom`**, which depends on the base; the
-base's own items stay read-only. An item of the pair that bears a base item's name and
+base's own items stay read-only. An item of the pair that bears a base item's name — for an
+`email_template`, one item per `(name, locale)`, the name **and** a locale the base ships — and
 declares in its body `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (the base's
 `manifest.id` and `manifest.version`; `basedOn` is recorded and never judged; schema:
 [Override Declaration](/docs/references/kernel/override-declaration)) replaces the base's
@@ -131,6 +132,11 @@ document **whole** for every read that serves the base's name
   or `translation`: the rest of `OVERRIDABLE_METADATA_TYPES` (`@objectstack/spec/kernel`)
   — `page`, `app`, `dataset`, `doc`, `book`, `mapping`, `flow` and `action` — waits for
   its doors and is not served yet. A declaration from any other package is ignored.
+- **A new locale is not an override.** An `email_template` the pair saves at a locale the
+  base does not ship is the pair's own member, served under `hotcrm.custom`, and carries no
+  `overrides`; declaring one there is refused (`403 NOT_OVERRIDABLE` at the save, publish
+  and install doors, a row from `os validate`, the sentence naming the locale), because the
+  base ships no such member to replace.
 - **The environment-wide list** serves one item per name that exactly one code package
   ships. A dependent package's same-named item is not listed beside it and stays under
   its own `?package=` address. A package-unbound row — the overlay row of the table
