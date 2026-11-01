@@ -207,6 +207,11 @@ import {
     // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: the
     // same sentence, the same rung, as every environment-metadata write door.
     walledCatalogWriteVerdict,
+    // [ADR-0146 D10, second rule] The field-patch target check — the judge
+    // `os validate` asks and the registry fold names its misses by.
+    fieldPatchTargetRefusals,
+    fieldPatchTargetRefusalMessage,
+    type FieldPatchTargetRefusal,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
@@ -241,6 +246,8 @@ import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureT
 // [ADR-0146 D2, #28410] The override write gate's one rule and its item walk,
 // asked at the managed install exactly as the publish doors ask them.
 import { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
+// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
+import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 // [#25366] The code the registry's security-catalog refusal carries, compared
 // rather than `instanceof`-tested: the engine keeps the class unexported so a
@@ -1808,6 +1815,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
         }
 
+        // 1c''. [ADR-0146 D10, #28564] ⭐ THE `__c` EXTENSION-FIELD RESERVATION,
+        //     at the dependency check's position and for the same reason: before
+        //     the manifest service sees the artifact, so a refused install
+        //     registers, writes and ledgers nothing, on the managed and the
+        //     unmanaged branch alike. Every package this act delivers (each
+        //     `packages[]` entry under its own id, the body itself otherwise) is
+        //     judged by the save door's judge (`judgeExtensionFieldSuffix`): a
+        //     field spelled `__c` only in a base's paired `.custom`, and every
+        //     `objectExtensions[].fields` key of a `.custom` pair suffixed. The
+        //     answer is this door's own body refusal, `VALIDATION_ERROR` / 422
+        //     (the unrunnable-code refusal's code and status), one row per field
+        //     in `details.refusals`. No code is minted.
+        {
+            const bodies: Array<{ id: unknown; body: Record<string, any> }> = Array.isArray(manifest.packages)
+                ? manifest.packages
+                    .filter((entry: unknown) => isPlainObject(entry) && isPlainObject((entry as any).manifest))
+                    .map((entry: any) => ({ id: manifestIdOf(entry.manifest), body: flattenPackageBody(entry.manifest) }))
+                : [{ id: manifestId, body: flattenPackageBody(manifest) }];
+            const refusals = bodies.flatMap(({ id, body }) => judgeExtensionFieldSuffix({
+                packageId: typeof id === 'string' ? id : undefined,
+                objects: body.objects,
+                objectExtensions: body.objectExtensions,
+            }));
+            if (refusals.length > 0) {
+                const n = refusals.length;
+                return c.json({
+                    success: false,
+                    error: {
+                        code: UNRUNNABLE_REFUSAL_CODE,
+                        message: `Package '${manifestId}' cannot be installed: ${refusals[0].message}`
+                            + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
+                            + ' Nothing was installed or written.',
+                        details: { refusals },
+                    },
+                }, UNRUNNABLE_REFUSAL_STATUS);
+            }
+        }
+
         // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — after the payload, id, D3
         //     walled-catalog and handshake checks and before every other
         //     judgement of the package and any write, because nothing an
@@ -2078,6 +2123,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     details: { refusals: overrideGate.refusals },
                 },
             }, 403);
+        }
+
+        // 2e. [ADR-0146 D10, second rule] ⭐ THE FIELD-PATCH TARGET CHECK,
+        //     beside the override gate and before any write: a patch naming a
+        //     field its target does not have, or an option value its field does
+        //     not have, would change nothing and say nothing. Refused `400
+        //     VALIDATION_ERROR` on both branches, every refusal located in
+        //     `details.refusals`. The target is the registry's resolved object
+        //     (ADR-0141 D2 admitted the base first) or one this artifact
+        //     delivers.
+        const patchTargetRefusals = this.fieldPatchTargetRefusalsOf(ctx, converted);
+        if (patchTargetRefusals.length > 0) {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals),
+                    details: { refusals: patchTargetRefusals },
+                },
+            }, 400);
         }
 
         // 3. Hot-register FIRST so a malformed inline manifest fails the
@@ -3220,6 +3285,37 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
         }
         return null;
+    };
+
+    /**
+     * [ADR-0146 D10, second rule] Step 2e of {@link handleInstall}: every
+     * `objectExtensions[].fieldPatches` entry the converted body carries —
+     * each `packages[]` entry's, or the body's own — judged against its target
+     * by `@objectstack/metadata-core`'s `fieldPatchTargetRefusals`. A target
+     * this artifact delivers is read off its body; any other is the registry's
+     * resolved object. A target neither knows is not judged here: the
+     * extension then registers against an owner that is not loaded, which the
+     * registry already reports.
+     */
+    private fieldPatchTargetRefusalsOf = (ctx: PluginContext, converted: Record<string, any>): FieldPatchTargetRefusal[] => {
+        const multi = Array.isArray(converted.packages);
+        const bodies: Array<{ body: Record<string, any>; prefix: string }> = multi
+            ? converted.packages.flatMap((entry: unknown, index: number) =>
+                isPlainObject(entry) && isPlainObject(entry.manifest)
+                    ? [{ body: entry.manifest as Record<string, any>, prefix: `packages[${index}].manifest.` }]
+                    : [])
+            : [{ body: flattenPackageBody(converted), prefix: '' }];
+        if (!bodies.some(({ body }) => Array.isArray(body.objectExtensions))) return [];
+        const delivered = new Map<string, unknown>();
+        for (const { body } of bodies) {
+            const objects = body.objects;
+            const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
+            for (const object of list) if (isPlainObject(object) && typeof object.name === 'string') delivered.set(object.name, object);
+        }
+        let registry: { getObject?(name: string): unknown } | undefined;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered targets are known */ }
+        const getTarget = (name: string): unknown => delivered.get(name) ?? registry?.getObject?.(name);
+        return bodies.flatMap(({ body, prefix }) => fieldPatchTargetRefusals(body.objectExtensions, getTarget, prefix));
     };
 
     /**

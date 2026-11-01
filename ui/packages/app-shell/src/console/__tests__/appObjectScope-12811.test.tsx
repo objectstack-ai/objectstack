@@ -20,8 +20,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { AdapterCtx } from '@object-ui/react';
 import { MetadataProvider } from '../../providers/MetadataProvider';
-import { useAppObjectScopePrefetch } from '../appObjectScope';
+import { enterAppBundle, useAppObjectScopePrefetch } from '../appObjectScope';
 
 const CRM = 'app.crm';
 const OBJECTS = [
@@ -96,12 +97,45 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
   });
 
+  it('objectstack#28645 — enters the app\'s metadata bundle as it starts the scope, once the app list names the app', async () => {
+    sessionStorage.clear();
+    const calls: string[] = [];
+    const entered: string[] = [];
+    const adapter = Object.assign(makeAdapter(calls, APPS) as object, {
+      loadAppBundle: (app: string) => { entered.push(app); return Promise.resolve(); },
+    }) as Parameters<typeof MetadataProvider>[0]['adapter'];
+    render(
+      <AdapterCtx.Provider value={adapter as any}>
+        <MetadataProvider adapter={adapter}>
+          <MemoryRouter initialEntries={['/apps/crm/crm_account']}>
+            <Prefetch />
+          </MemoryRouter>
+        </MetadataProvider>
+      </AdapterCtx.Provider>,
+    );
+    await waitFor(() => expect(entered).toEqual(['crm']));
+    expect(calls).toContain(`object?package=${CRM}`);
+    // `AppContent` reuses the root's entry rather than asking the bundle again;
+    // another app, or the app after the root has left it, is entered.
+    enterAppBundle(adapter, 'crm');
+    // The console hands `AppContent` a wrapper of the same adapter.
+    const wrapper = { loadAppBundle: (app: string) => (adapter as any).loadAppBundle(app) };
+    enterAppBundle(wrapper, 'crm');
+    expect(entered).toEqual(['crm']);
+    enterAppBundle(adapter, 'hr');
+    expect(entered).toEqual(['crm', 'hr']);
+    cleanup();
+    enterAppBundle(adapter, 'crm');
+    expect(entered).toEqual(['crm', 'hr', 'crm']);
+  });
+
   it('CONTROL: outside an app, on a record form overlay, or for an app without a package id, it asks nothing', async () => {
     const outside = mount('/home', APPS);
     const overlay = mount('/apps/crm/crm_account?form=new', APPS);
     const noPackage = mount('/apps/crm/crm_account', [{ name: 'crm', navigation: [] }]);
-    await waitFor(() => expect(overlay).toContain('view'));
-    await waitFor(() => expect(noPackage).toContain('view'));
+    // objectstack#28645 — the provider's one eager read is the app list.
+    await waitFor(() => expect(overlay).toContain('app'));
+    await waitFor(() => expect(noPackage).toContain('app'));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(objectCalls(outside)).toEqual([]);
     expect(objectCalls(overlay)).toEqual([]);

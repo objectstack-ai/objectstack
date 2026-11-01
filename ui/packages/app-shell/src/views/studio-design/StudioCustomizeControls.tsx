@@ -56,8 +56,9 @@ import { t, tFormat } from '../metadata-admin/i18n.js';
 /**
  * The types Studio's Customize door covers: the Interfaces pillar's view,
  * dashboard and report (an `object` leaf's list view is a `view`). Each is an
- * `overridable` type of the spec's classification; translations and email
- * templates are too, but no pillar designs them here.
+ * `overridable` type of the spec's classification. Translations and email
+ * templates are too: no pillar designs them, and the All metadata area's form
+ * editor customizes them (`StudioBundleItemEditor`, objectstack#28569).
  */
 export const STUDIO_CUSTOMIZE_TYPES: readonly string[] = ['view', 'dashboard', 'report'];
 
@@ -144,30 +145,40 @@ const NO_OVERRIDE: ServedOverride = { declaration: null, state: null };
  * layered read's `overlay` at `base`, which is the pair's row the read serves
  * over the base's item. Read again whenever `nonce` moves (a publish, a
  * restore, the item's first save into the pair). `item: null` reads nothing.
+ * `item.member` names one bundle member (an email template's locale,
+ * objectstack#28569): both reads address that member alone, so the override
+ * of one locale is never read as the template's.
  *
  * A failed read is no declaration, as an absent one: no fact, no badge.
  */
 export function useServedOverride(
   client: Pick<MetadataClient, 'getDraft' | 'layered'>,
-  item: { type: string; name: string } | null,
+  item: { type: string; name: string; member?: string } | null,
   base: string | null,
   pair: string | null,
   nonce: string | number,
 ): ServedOverride {
   const itemType = item?.type ?? '';
   const itemName = item?.name ?? '';
-  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, base]) : '';
+  const itemMember = item?.member ?? '';
+  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, itemMember, base]) : '';
   const [answer, setAnswer] = React.useState<{ key: string; served: ServedOverride }>({ key: '', served: NO_OVERRIDE });
   React.useEffect(() => {
     if (!key || !base) return;
     let cancelled = false;
+    // Omitted, never sent empty, for the canonical member and a type with none.
+    const memberScope = itemMember ? { member: itemMember } : {};
     (async (): Promise<ServedOverride> => {
       if (pair) {
-        const draft = await client.getDraft(itemType, itemName, { packageId: pair }).catch(() => null);
+        const draft = await client
+          .getDraft(itemType, itemName, { packageId: pair, ...memberScope })
+          .catch(() => null);
         const declared = declaredOverrideOf(extractDraftBody(draft), base);
         if (declared) return { declaration: declared, state: 'draft' };
       }
-      const layered = await client.layered(itemType, itemName, { packageId: base }).catch(() => null);
+      const layered = await client
+        .layered(itemType, itemName, { packageId: base, ...memberScope })
+        .catch(() => null);
       const declared = declaredOverrideOf(layered?.overlay, base);
       return declared ? { declaration: declared, state: 'active' } : NO_OVERRIDE;
     })().then((served) => {
@@ -176,7 +187,7 @@ export function useServedOverride(
     return () => {
       cancelled = true;
     };
-  }, [client, key, itemType, itemName, base, pair, nonce]);
+  }, [client, key, itemType, itemName, itemMember, base, pair, nonce]);
   // A re-read of the same item keeps the last answer until it lands, so the
   // badge does not blink off and on after a save.
   return key && answer.key === key ? answer.served : NO_OVERRIDE;

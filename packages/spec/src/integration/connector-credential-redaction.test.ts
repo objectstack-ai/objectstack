@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CONNECTOR_CREDENTIAL_MAP_PATHS,
+  CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES,
   declaredConnectorAuthKeys,
   redactConnectorItem,
 } from './connector-credential-redaction';
@@ -139,6 +140,110 @@ describe('the connector redactor — runtime `authentication` and provider maps'
       'providerConfig.transport.headers',
       'providerConfig.transport.env',
     ]);
+  });
+});
+
+describe('the connector redactor — `auth` / `authentication` that is not an object', () => {
+  it.each([
+    ['auth', 'a string', P(20)],
+    ['auth', 'a number', 4242],
+    ['auth', 'an array', [P(21)]],
+    ['authentication', 'a string', P(22)],
+  ] as const)('`%s` holding %s is withheld whole', (position, _what, value) => {
+    const { item: served, redactedKeys } = redactConnectorItem({ ...base, [position]: value });
+    expect(redactedKeys).toEqual([position]);
+    expect(served).not.toHaveProperty(position);
+    expect(holds(served, P(20), P(21), P(22))).toBe(false);
+    expect(served.name).toBe('vendor');
+  });
+
+  it.each([
+    ['an empty string', ''],
+    ['a null', null],
+  ] as const)('a cleared form (%s) is served as written and not reported', (_what, value) => {
+    const item = { ...base, auth: value, authentication: value };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+});
+
+describe('the connector redactor — credentials inside a URL under `providerConfig`', () => {
+  const at = (providerConfig: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    redactConnectorItem({ ...base, providerConfig, ...extra });
+
+  it('rewrites the userinfo out of `baseUrl`, keeping the rest of the URL byte for byte', () => {
+    const { item: served, redactedKeys } = at({ baseUrl: `https://svc:${P(30)}@api.vendor.example:8443/v2/?region=eu#top` });
+    expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example:8443/v2/?region=eu#top');
+  });
+
+  it('a bare token in the user part goes too', () => {
+    const { item: served } = at({ baseUrl: `https://${P(31)}@api.vendor.example/v1` });
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example/v1');
+  });
+
+  it('strips each credential query parameter, case-insensitively, and keeps the others in order', () => {
+    const { item: served, redactedKeys } = at({
+      baseUrl: `https://api.vendor.example/v1?region=eu&API_KEY=${P(32)}&page=2&access_token=${P(33)}`,
+    });
+    expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example/v1?region=eu&page=2');
+  });
+
+  it('covers `transport.url` and a URL `spec`, and leaves a package-relative `spec` path alone', () => {
+    const { item: served, redactedKeys } = at({
+      spec: `https://u:${P(34)}@spec.vendor.example/openapi.json?token=${P(35)}`,
+      transport: { kind: 'http', url: `https://mcp.vendor.example/mcp?sig=${P(36)}` },
+    });
+    expect(redactedKeys).toEqual(['providerConfig.spec', 'providerConfig.transport.url']);
+    expect(served.providerConfig).toEqual({
+      spec: 'https://spec.vendor.example/openapi.json',
+      transport: { kind: 'http', url: 'https://mcp.vendor.example/mcp' },
+    });
+    const relative = { ...base, providerConfig: { spec: './vendor-openapi.json' } };
+    expect(redactConnectorItem(relative)).toEqual({ item: relative, redactedKeys: [] });
+  });
+
+  it('strips the query parameter an `api-key` instance itself names with `paramName`', () => {
+    const { item: served } = at(
+      { baseUrl: `https://api.vendor.example/v1?appid=${P(37)}&units=metric` },
+      { auth: { type: 'api-key', credentialRef: 'VENDOR_KEY', paramName: 'appid' } },
+    );
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example/v1?units=metric');
+    expect(served.auth).toEqual({ type: 'api-key', credentialRef: 'VENDOR_KEY', paramName: 'appid' });
+  });
+
+  it('a URL with no credential part, and a string that is not a URL, are untouched', () => {
+    const item = {
+      ...base,
+      providerConfig: {
+        baseUrl: 'https://api.vendor.example/v1?region=eu',
+        note: `call ?token=${P(38)} by hand`,
+        include: ['search'],
+      },
+    };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('arrays and dot-spelled keys are off the walk (the carry-forward cannot address them)', () => {
+    const item = {
+      ...base,
+      providerConfig: {
+        servers: [`https://u:${P(39)}@a.example`],
+        'v1.url': `https://u:${P(40)}@b.example`,
+      },
+    };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('a map withheld whole is not walked for URLs: it is reported once, as the map', () => {
+    const { redactedKeys } = at({ headers: { Referer: `https://u:${P(41)}@c.example` } });
+    expect(redactedKeys).toEqual(['providerConfig.headers']);
+  });
+
+  it('the query names include the datasource set and the HTTP conventions', () => {
+    for (const name of ['password', 'authToken', 'api_key', 'apikey', 'access_token', 'token', 'key', 'sig', 'client_secret']) {
+      expect(CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES).toContain(name);
+    }
   });
 });
 

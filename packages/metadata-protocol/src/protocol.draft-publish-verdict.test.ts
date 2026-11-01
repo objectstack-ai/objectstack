@@ -313,6 +313,62 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#28663] Not one of #26707's six: an app navigation entry whose
+        // `visible` does not parse (the card's `'org_owner' in`). It saved, read
+        // valid:true and PUBLISHED, and the console then hid the entry from
+        // everyone; the same fault in a page `visibleWhen` was refused.
+        rule: 'visibility-predicate-syntax',
+        type: 'app',
+        item: {
+            name: 'qa_nav_app',
+            label: 'QA Nav App',
+            navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: "'org_owner' in" }],
+        },
+    },
+    {
+        // [#28663] The same fault inside an area's navigation.
+        rule: 'visibility-predicate-syntax',
+        type: 'app',
+        item: {
+            name: 'qa_area_app',
+            label: 'QA Area App',
+            areas: [{
+                id: 'area_ops', label: 'Ops',
+                navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: "'org_owner' in" }],
+            }],
+        },
+    },
+    {
+        // [#28663] Page variables: a duplicate name.
+        rule: 'page-variable-name-duplicate',
+        type: 'page',
+        item: {
+            name: 'qa_vars_dup', label: 'Vars', type: 'app',
+            variables: [{ name: 'count', type: 'number' }, { name: 'count', type: 'string' }],
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+        },
+    },
+    {
+        // [#28663] Page variables: an empty name.
+        rule: 'page-variable-name-empty',
+        type: 'page',
+        item: {
+            name: 'qa_vars_empty', label: 'Vars', type: 'app',
+            variables: [{ name: '', type: 'string' }],
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+        },
+    },
+    {
+        // [#28663] Page variables: a `number` seeded with "abc" (the card's shape).
+        rule: 'page-variable-default-type',
+        type: 'page',
+        item: {
+            name: 'qa_vars_type', label: 'Vars', type: 'app',
+            variables: [{ name: 'count', type: 'number', defaultValue: 'abc' }],
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+        },
+    },
+    {
         // Reproduction 6: a dataset whose include names no relationship.
         rule: 'dataset-include-unknown',
         type: 'dataset',
@@ -404,6 +460,38 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
         const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
         expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#28663] a clean nav predicate and clean page variables still read valid:true and publish', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const app = structuredClone(CASES.find((c) => c.item.name === 'qa_nav_app')!.item) as any;
+        app.navigation[0].visible = "'org_owner' in current_user.positions";
+        const page = structuredClone(CASES.find((c) => c.item.name === 'qa_vars_type')!.item) as any;
+        page.variables = [{ name: 'count', type: 'number', defaultValue: 0 }, { name: 'label', type: 'string' }];
+        await stageDraft(protocol, 'app', app);
+        await stageDraft(protocol, 'page', page);
+
+        expect(await draftDiagnostics(protocol, 'app', app.name)).toEqual({ valid: true });
+        expect(await draftDiagnostics(protocol, 'page', page.name)).toEqual({ valid: true });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#28663] the nav and variable verdicts are located at the key on the draft read', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        for (const name of ['qa_area_app', 'qa_vars_type']) {
+            const c = CASES.find((x) => x.item.name === name)!;
+            await stageDraft(protocol, c.type, c.item);
+        }
+
+        expect((await draftDiagnostics(protocol, 'app', 'qa_area_app')).errors).toContainEqual(
+            expect.objectContaining({ path: 'areas.0.navigation.0.visible', code: 'visibility-predicate-syntax' }),
+        );
+        expect((await draftDiagnostics(protocol, 'page', 'qa_vars_type')).errors).toContainEqual(
+            expect.objectContaining({ path: 'variables.0.defaultValue', code: 'page-variable-default-type' }),
+        );
     });
 
     it('a reference that resolves inside its own package is judged as "Publish all" judges it — not reported', async () => {

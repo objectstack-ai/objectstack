@@ -106,14 +106,22 @@ function payloadOf(items: unknown): readonly unknown[] {
   return Array.isArray(items) && items.length > 0 ? items : NONE_SERVED;
 }
 
+/** What a caller that reads no views holds: one identity, both reads empty. */
+const NOTHING_READ: ServedViewReads = Object.freeze({ views: NONE_SERVED, objects: NONE_SERVED });
+
 /**
  * The documents the `/meta/view` and `/meta/object` reads served, as the
  * metadata cache holds them.
  *
  * Keyed on the cache's own arrays, so it keeps one identity until either read
  * is refetched, and a consumer may key a memo on it (AGENTS.md #10).
+ *
+ * `read: false` reads nothing and answers both empty (objectstack#28645): a
+ * caller that labels views only on some routes (the app bar's phone title, on
+ * an object's view route) passes it everywhere else, so those routes start no
+ * view or object read for it.
  */
-export function useServedViewItems(): ServedViewReads {
+export function useServedViewItems(read = true): ServedViewReads {
   const metadata = useMetadata();
   // objectui#12811 — inside an app whose served item names its package, and
   // while nothing has asked for the whole registry, the served object
@@ -132,18 +140,34 @@ export function useServedViewItems(): ServedViewReads {
   // object route anyway (`appObjectScope.ts`), so the condition is false
   // there and the label sites keep the whole list.
   const { app } = useExpressionContext();
+  if (!read) return NOTHING_READ;
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   const scoped = !!metadata.readObjectScope && metadata.getTypeStatus?.('object') === 'idle';
+  //
+  // objectstack#28645 — a scope's view documents are the ones it composed its
+  // objects with: the app bundle's when it holds every object in the scope,
+  // else the `/meta/view` list (`views`, beside the scope's published shape).
   let objects: unknown;
+  let views: unknown;
   if (scoped && packageId) {
-    objects = metadata.readObjectScope!({ packageId }).served;
+    const scope = metadata.readObjectScope!({ packageId }) as { served: unknown; views?: unknown };
+    objects = scope.served;
+    views = scope.views;
   } else if (scoped && isPackagelessApp(app)) {
     const names = navigationNames(app.navigation, (item) => item.requiresObject);
-    objects = names.length > 0 ? metadata.readObjectScope!({ names }).served : NONE_SERVED;
+    if (names.length > 0) {
+      const scope = metadata.readObjectScope!({ names }) as { served: unknown; views?: unknown };
+      objects = scope.served;
+      views = scope.views;
+    } else {
+      objects = NONE_SERVED;
+      views = NONE_SERVED;
+    }
   } else {
     objects = metadata.getItemsByType('object');
   }
-  return servedViewReads(payloadOf(metadata.getItemsByType('view')), payloadOf(objects));
+  if (views === undefined) views = metadata.getItemsByType('view');
+  return servedViewReads(payloadOf(views), payloadOf(objects));
 }
 
 /**

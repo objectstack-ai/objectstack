@@ -70,6 +70,7 @@ import { resolveViewId } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { NavLabelTarget, NavTargetLabelResolver } from '@object-ui/layout';
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
 
 /**
  * A metadata label (plain string or inline locale map) as display text, or
@@ -139,6 +140,7 @@ function listViewsOf(def: LabelledRecord | undefined): Record<string, LabelledRe
 
 export function useNavTargetLabel(): NavTargetLabelResolver {
   const metadata = useMetadata();
+  const bundledReads = useBundledReads();
   const { objectLabel, viewLabel, dashboardLabel } = useObjectLabel();
   const { language, t } = useObjectTranslation();
   const drafts = useContext(DraftTargetLabels);
@@ -159,7 +161,9 @@ export function useNavTargetLabel(): NavTargetLabelResolver {
           return nonEmpty(viewLabel(target.objectName, target.viewName, text ?? ''));
         }
         case 'dashboard': {
-          const def = findByName(metadata.dashboards, target.dashboardName);
+          // objectstack#28645 — the app bundle holds every dashboard its
+          // navigation names; the list is read only for one it does not hold.
+          const def = bundledFirst(bundledReads, 'dashboard', target.dashboardName, () => metadata.dashboards);
           const text =
             metadataText(def?.label, language) ?? draftText(drafts, 'dashboard', target.dashboardName, language);
           return nonEmpty(dashboardLabel({ name: target.dashboardName, label: text ?? '' }));
@@ -170,6 +174,6 @@ export function useNavTargetLabel(): NavTargetLabelResolver {
           return undefined;
       }
     },
-    [metadata, objectLabel, viewLabel, dashboardLabel, language, t, drafts],
+    [metadata, bundledReads, objectLabel, viewLabel, dashboardLabel, language, t, drafts],
   );
 }

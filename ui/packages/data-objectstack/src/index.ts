@@ -91,7 +91,7 @@ import {
   type DatasetDrillRange,
 } from '@object-ui/core';
 import { MetadataCache } from './cache/MetadataCache';
-import { AppBundleStore, indexAppBundle, type AppBundleAnswer } from './app-bundle';
+import { AppBundleStore, indexAppBundle, type AppBundleAnswer, type AppBundlePeek } from './app-bundle';
 import { MetadataClient } from './metadata-client';
 import { formatMetadataError } from './metadata-error';
 import {
@@ -4584,6 +4584,19 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     return this.appBundles.enter(appId);
   }
 
+  /**
+   * The active app bundle as it stands, without waiting for it
+   * (objectstack#28645): `none` before any app is entered, `pending` while its
+   * first answer is on the wire, else `ready` with the items it holds (empty
+   * for an app with no bundle). A stale bundle is asked again, and answers
+   * from what it holds until that lands. A metadata reader that must answer
+   * in render (a list a route looks a name up in) reads the bundle here, and
+   * reads its own route for anything the bundle does not hold.
+   */
+  peekAppBundle(): AppBundlePeek {
+    return this.appBundles.peek();
+  }
+
   /** The one round trip behind {@link loadAppBundle}. */
   private async requestAppBundle(appId: string, etag: string | undefined): Promise<AppBundleAnswer> {
     await this.connect();
@@ -7752,6 +7765,8 @@ export {
 
 // Export cache types
 export type { MetadataCacheStats } from './cache/MetadataCache';
+// objectstack#28645 — what `ObjectStackAdapter.peekAppBundle` answers.
+export type { AppBundlePeek, AppBundleItems, AppBundleEntry } from './app-bundle';
 
 // User-scoped persistence adapter (favorites / recent items / …)
 export {
