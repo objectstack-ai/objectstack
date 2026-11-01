@@ -185,6 +185,7 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { bindStoredRow } from './stored-row-binding.js';
+import { incomingTakesStoredFlowSlot } from './stored-flow-slot.js';
 import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#28413, ADR-0146 D11] The package-less overlay migration (`os migrate
 // packageless-overlays`), and the save's landing on a migrated row.
@@ -18657,10 +18658,12 @@ export class ObjectStackProtocolImplementation implements
      * suggestion of an `isDefault` set) saw the item as unowned: on a host
      * kernel until the next list read, and on an environment kernel that
      * hydrates its own store until never. ⛔ No owner is derived: the binding is
-     * only read, a body that already names a `_packageId` keeps it, a row with
-     * no binding stays unowned, and an artifact's envelope still wins over the
-     * stamp ({@link mergeArtifactProtection}). The expansions of a view
-     * container are registered from the unstamped row, as before.
+     * only read, and since #28673 the column wins over the body — a body that
+     * names a different `_packageId` has it replaced by the row's binding, and
+     * a row with no binding has a body stamp dropped, so it stays unowned. An
+     * artifact's envelope still wins over the stamp
+     * ({@link mergeArtifactProtection}). The expansions of a view container are
+     * registered from the stamped row too ({@link hydrateExpandedViewItems}).
      *
      * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
      *
@@ -18815,7 +18818,20 @@ export class ObjectStackProtocolImplementation implements
         // ({@link bindStoredRow}): the pull arms the shipping package's
         // declared override over the loader's body only when the column, not
         // a stamp in the body, binds the row to that package's `.custom` pair.
-        if (canonicalType === 'flow') bindStoredRow(registered, options.packageId ?? null);
+        if (canonicalType === 'flow') {
+            bindStoredRow(registered, options.packageId ?? null);
+            // [#28717] …and the shipping package's declared override keeps the
+            // name's one bare slot over any other stored row of the name, in
+            // whatever order the store reads them, so the boot pull arms it
+            // from the first pull. The row that loses stays stored and is
+            // carried on the override's body for the boot pull to name
+            // ({@link incomingTakesStoredFlowSlot}).
+            const held = typeof registry.getItem === 'function'
+                ? registry.getItem(type, String((data as any).name))
+                : undefined;
+            const owner = this.packagedArtifactOwner({ type, name: String((data as any).name) });
+            if (!incomingTakesStoredFlowSlot(held, registered, owner)) return true;
+        }
         registry.registerItem(type, registered, 'name' as any);
         await this.hydrateExpandedViewItems(type, data, options);
         return true;
@@ -28908,8 +28924,10 @@ export class ObjectStackProtocolImplementation implements
                     // #5927 — was an inline `this.isArtifactBacked(...)` call
                     // with these exact arguments; now reads the method-scoped
                     // binding the receipts share. Same fact, one call fewer.
-                    // [#28412] The pair's row of an open-override type is
-                    // removed as the declared save wrote it: runtime-only.
+                    // [#28412] The pair's row of a type whose D9 conditions
+                    // are delivered (`flow` only, {@link isPairRowRemoval})
+                    // is removed as the declared save wrote it: runtime-only.
+                    // Every other type keeps the intent main gave it.
                     intent: artifactBacked && !pairRowRemoval
                         ? 'override-artifact'
                         : 'runtime-only',

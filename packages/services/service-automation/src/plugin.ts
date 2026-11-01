@@ -18,7 +18,7 @@ import { isConnectorCredentialRejected, isConnectorUpstreamChanged, isConnectorU
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
-import { SysMetadataRepository } from '@objectstack/metadata-protocol';
+import { SysMetadataRepository, shadowedStoredRowsOf } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
 import type { AutomationEngineOptions, FlowHistorySource, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
@@ -2148,7 +2148,13 @@ export class AutomationServicePlugin implements Plugin {
             } else if (typeof ql.registry.listItems !== 'function') {
                 ctx.logger.debug('[Automation] objectql.registry.listItems is not a function');
             }
-            const flows = ql?.registry?.listItems?.('flow') ?? [];
+            // [#28717] …plus the stored rows a declared override holds the
+            // bare slot over: the hydration keeps the override in the slot
+            // and carries each displaced row on its body
+            // (`shadowedStoredRowsOf`), so the precedence below shadows it
+            // and the warning names it beside the override that wins.
+            const flows = (ql?.registry?.listItems?.('flow') ?? [])
+                .flatMap((item) => [item, ...shadowedStoredRowsOf(item)]);
             ctx.logger.debug(`[Automation] flow pull: registry returned ${flows.length} flow(s)`);
             // [#11997] Collapse same-named contenders BEFORE anything is armed.
             // `listItems` returns a packaged flow and a same-named stored row
