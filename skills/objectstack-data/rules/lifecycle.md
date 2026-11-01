@@ -1,10 +1,10 @@
 # Data Lifecycle & Retention
 
 Guide for declaring how long an object's data lives and how its space is
-reclaimed (ADR-0057 — system data lifecycle & retention). Not to be
-confused with **lifecycle hooks** (`beforeInsert` / `afterUpdate` …): *this*
-page is the rows' retention, rotation and archival, plus the save notice a
-hook hands the saver.
+reclaimed (ADR-0057 — system data lifecycle & retention). Distinct from
+**lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
+writes: this page covers the rows' retention, rotation and archival
+— and, at its end, the save notice a hook hands the saver.
 
 ## Why This Exists
 
@@ -141,14 +141,14 @@ lifecycle: {
 | `growth_alert_rows` | settings | Per-sweep growth spike alert |
 | `OS_LIFECYCLE_DISABLED=1` | env | Disables sweeping entirely |
 
-## Save Notice — what the save set in motion
+## Save Notice
 
 A create/update hook calls `ctx.notice('Sent to your manager for approval')`
-— inline `handler` and sandboxed `body` alike, no capability. The answer
-carries it as `notice`; the console shows it on the save toast. **Info
+— a sandboxed `body` or the deprecated inline `handler`, no capability. The
+answer carries it as `notice`; the console shows it on the save toast. **Info
 severity**: an outcome, never a problem — distinct from validation
-`warnings`. A `record:alert` banner is page metadata shown by the record's
-state on every visit; the notice is for what *this* save started.
+`warnings`. A `record:alert` banner is page metadata shown whenever the
+record's state says so; the notice is for what *this* save started.
 
 - One message per write, **the last call wins**; never stored.
 - Insert/update dispatches only. A write nobody waits on (batch, seed,
