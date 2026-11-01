@@ -2222,6 +2222,16 @@ function flowPackageRefusalMessage(verb: 'save' | 'delete', name: string, packag
 }
 
 /**
+ * [#28149] Whether a store refusal is the ADR-0008 first-write pin's: a save
+ * that asserted "no current row" (`parentVersion: null`) met one. Read from
+ * the ADR-0112 envelope (`409 METADATA_CONFLICT`), never from the sentence.
+ */
+function isFirstWriteConflict(refusal: unknown): boolean {
+    const envelope = refusal as { code?: unknown; status?: unknown; statusCode?: unknown } | null | undefined;
+    return envelope?.code === 'METADATA_CONFLICT' && (envelope.status ?? envelope.statusCode) === 409;
+}
+
+/**
  * [#23501] The refusal a definition door answers for a write the store refused:
  * the store's own, as it was thrown, unless {@link flowPackagesRefusingWrite}
  * reads it as a name two or more packages hold — then this door's own
@@ -2245,6 +2255,14 @@ async function flowWriteRefusal(
     name: string,
     door: 'definition' | 'clone' | 'delete',
 ): Promise<unknown> {
+    // [#28149] The clone's first-write pin met a row the target package
+    // already holds under the new name: the name is taken, so the clone door's
+    // own taken-name refusal, with its remedy (a name no flow uses).
+    if (door === 'clone' && isFirstWriteConflict(refusal)) {
+        return Object.assign(new Error(flowCloneNameTakenMessage(name)), {
+            code: 'RESOURCE_CONFLICT', status: FLOW_CLONE_NAME_TAKEN_STATUS,
+        });
+    }
     const packageIds = await flowPackagesRefusingWrite(store, refusal, name);
     if (!packageIds) return refusal;
     const [message, status] = door === 'clone'
@@ -2351,6 +2369,14 @@ async function registerAndSaveFlow(
                 type: FLOW_METADATA_TYPE,
                 name,
                 item: definition,
+                // [#28149] The clone CREATES: its save carries the first-write
+                // pin (`parentVersion: null`, "no current row"), so a row the
+                // target package already holds under the new name — one the
+                // engine's collision probe cannot see (a row that failed to
+                // register, or one stored and never bound) — is refused, never
+                // overwritten by the copy. Answered as the taken-name refusal
+                // ({@link flowWriteRefusal}).
+                ...(door === 'clone' ? { parentVersion: null } : {}),
                 ...(packageId !== undefined ? { packageId } : {}),
                 ...(actor ? { actor } : {}),
             });
