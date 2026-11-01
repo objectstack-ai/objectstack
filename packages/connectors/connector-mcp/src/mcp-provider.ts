@@ -457,6 +457,15 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
     // [#27237] The handshake carried the instance's credential only over
     // http, and only as a header (an api-key `paramName` is not sent): then
     // the server's answer was given to that credential.
+    //
+    // A grant-bearing instance's borrowed token (`ctx.credentialHandle`)
+    // reaches the server too, and is deliberately not counted here: the
+    // credential path a refusal below takes holds and marks the instance's
+    // `credentialRef` row, which for such an instance is its client secret —
+    // a value the listing never depended on — while the token that was sent
+    // belongs to an organization's connection, which that path neither marks
+    // nor re-attempts on a reconnect. Until the materializer has a route for
+    // it, such an instance keeps the plain fault.
     const credentialSent = transport.kind === 'http' && sendsInstanceAuth(ctx.auth);
     if (includeList) {
       // An entry naming a tool the server does not list is refused after the

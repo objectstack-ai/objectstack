@@ -27,7 +27,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SysSecret } from '@objectstack/platform-objects';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import type { CryptoContext, CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
-import type { ConnectorProviderContext } from '@objectstack/spec/integration';
+import type { ConnectorCredentialHandle, ConnectorProviderContext } from '@objectstack/spec/integration';
 import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
 import type { McpClientLike, McpToolDescriptor, McpTransport } from './mcp-connector.js';
 import { ConnectorMcpPlugin } from './connector-mcp-plugin.js';
@@ -165,6 +165,31 @@ describe('mcp provider: an include the server does not list for the credential i
         );
         expect(isConnectorCredentialRejected(err)).toBe(false);
         expect((err as Error).message).toContain("providerConfig.include names 'nope', which the MCP server does not list.");
+    });
+
+    it('an oauth2 instance (a credential handle) keeps the plain fault: its token is borrowed per request, not the instance auth', async () => {
+        // The listing is answered for the borrowed token, but the credential
+        // path's hold and mark are keyed to the instance's credentialRef row
+        // (an oauth2 instance's client secret), so the provider does not
+        // route this case there. See the comment on `credentialSent`.
+        const server = scopedServer({}, ['whoami']);
+        const handle: ConnectorCredentialHandle = {
+            connector: 'vendor_mcp',
+            async get() { return { auth: { type: 'bearer', token: NARROW_TOKEN } }; },
+            async refresh() { return { auth: { type: 'bearer', token: NARROW_TOKEN } }; },
+        };
+        const factory = createMcpProviderFactory({ clientFactory: server.clientFactory });
+        const err = await thrownBy(() => factory(ctx({ credentialHandle: handle })));
+        expect(isConnectorCredentialRejected(err)).toBe(false);
+        expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+        expect((err as Error).message).toMatch(
+            /^connector-mcp provider: connector 'vendor_mcp' providerConfig\.include names 'search_invoices', 'read_invoice', which the MCP server does not list\. Each entry/,
+        );
+        // The discovery session was opened through the borrowing fetch, with no static header.
+        const [discovery] = server.state.connects;
+        expect(discovery.kind === 'http' && typeof discovery.fetch).toBe('function');
+        expect(discovery.kind === 'http' && discovery.headers?.Authorization).toBeFalsy();
+        expect(server.state.closed).toBe(1);
     });
 
     it('control: a credential whose listing carries every entry materializes exactly those tools, proven', async () => {
