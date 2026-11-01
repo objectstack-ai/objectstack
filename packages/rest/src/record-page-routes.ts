@@ -255,7 +255,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 // the read's own, carried as the part's answer.
                 const readStream = async (
                     name: string,
-                    query: Record<string, unknown>,
+                    read: Record<string, unknown>,
                 ): Promise<{ records: any[]; total: number } | { error: PartRefusal }> => {
                     const item = streamItems.get(name);
                     const denial = item ? apiAccessDenialFromEnable(item.enable, name, 'list') : null;
@@ -266,7 +266,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     try {
                         const found: any = await p.findData({
                             object: name,
-                            query: { object: name, ...query },
+                            query: { object: name, ...read },
                             ...scope,
                         } satisfies ServerScopedDataRequest<FindDataRequest>);
                         const records = Array.isArray(found?.records) ? found.records : [];
